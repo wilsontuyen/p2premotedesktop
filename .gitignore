@@ -1,0 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+dist_nuitka/
+dist_service/
+dist_standalone/
+*.egg-info/
+*.egg
+
+# PyInstaller / Nuitka build artifacts
+*.manifest
+*.spec
+*.build/
+*.onefile-build/
+*.dist/
+
+# Unit test / coverage reports
+.cache/
+
+# Environments
+.env
+.venv/
+env/
+venv/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Project-specific logs and scratch text files
+*.log
+grep_results*.txt
+signaling_log.txt
+test_clipboard_copy.txt
+*.txt
+!requirements.txt
+
+# Project-specific zip files & executables
+*.zip
+*.exe
+
+# VS Code settings
+.vscode/
+
+# Agent folder
+.agents/
+
+# Window configs
+window_config.json
