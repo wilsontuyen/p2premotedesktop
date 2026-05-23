@@ -21,6 +21,16 @@ def log(msg):
     except:
         pass
 
+def is_logon_ui_running(session_id):
+    try:
+        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        for p in procs:
+            if p[0] == session_id and p[2].lower() == "logonui.exe":
+                return True
+    except Exception as e:
+        log(f"Error checking LogonUI: {e}")
+    return False
+
 def find_winlogon_pid(session_id):
     try:
         procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
@@ -34,6 +44,8 @@ def find_winlogon_pid(session_id):
 def get_executable_to_run():
     # Prefer compiled standalone Nuitka binary
     candidates = [
+        os.path.join(app_dir, "dist_nuitka", "app.dist", "RemoteDesktopP2P.exe"),
+        os.path.join(app_dir, "dist", "RemoteDesktopP2P.exe"),
         os.path.join(app_dir, "dist_standalone", "app.dist", "RemoteDesktopP2P.exe"),
         os.path.join(app_dir, "dist", "RemoteDesktopP2P", "RemoteDesktopP2P.exe"),
         os.path.join(app_dir, "dist", "app.exe"),
@@ -55,7 +67,7 @@ def get_executable_to_run():
     log("Error: No executable or source app.py found!")
     return None, None
 
-def spawn_agent(session_id, is_logged_in):
+def spawn_agent(session_id, is_logged_in, is_screen_locked):
     exe_path, cmd_line = get_executable_to_run()
     if not exe_path:
         return None
@@ -63,7 +75,8 @@ def spawn_agent(session_id, is_logged_in):
     h_token = None
     desktop = "winsta0\\default"
 
-    if is_logged_in:
+    # If logged in and NOT locked, target user session
+    if is_logged_in and not is_screen_locked:
         try:
             h_token = win32ts.WTSQueryUserToken(session_id)
             desktop = "winsta0\\default"
@@ -115,7 +128,7 @@ def spawn_agent(session_id, is_logged_in):
             startup_info = win32process.STARTUPINFO()
             startup_info.lpDesktop = desktop
 
-            # Run process in active user session context
+            # Run process in active user session context with correct working directory
             h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
                 h_token_dup,
                 exe_path,
@@ -125,7 +138,7 @@ def spawn_agent(session_id, is_logged_in):
                 False,
                 win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
                 None,
-                None,
+                os.path.dirname(exe_path),
                 startup_info
             )
             win32api.CloseHandle(h_process)
@@ -143,6 +156,7 @@ def main():
     current_agent_pid = None
     last_session_id = None
     last_was_logged_in = None
+    last_was_screen_locked = None
 
     while True:
         try:
@@ -161,11 +175,15 @@ def main():
             except Exception:
                 pass
 
+            # Check if screen is locked (LogonUI is running)
+            is_screen_locked = is_logon_ui_running(active_session_id)
+
             state_changed = (last_session_id != active_session_id or 
-                             last_was_logged_in != is_logged_in)
+                             last_was_logged_in != is_logged_in or
+                             last_was_screen_locked != is_screen_locked)
 
             if state_changed:
-                log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}")
+                log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked}")
                 
                 # Kill current agent
                 if current_agent_pid:
@@ -180,6 +198,7 @@ def main():
 
                 last_session_id = active_session_id
                 last_was_logged_in = is_logged_in
+                last_was_screen_locked = is_screen_locked
 
             # Check if agent is running
             agent_running = False
@@ -193,7 +212,7 @@ def main():
                     pass
 
             if not agent_running:
-                pid = spawn_agent(active_session_id, is_logged_in)
+                pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
                 if pid:
                     current_agent_pid = pid
 

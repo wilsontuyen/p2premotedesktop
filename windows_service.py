@@ -6,6 +6,7 @@ import win32api
 import win32con
 import win32process
 import win32security
+import win32timezone
 import sys
 import os
 import time
@@ -13,7 +14,15 @@ import traceback
 import subprocess
 
 # Setup logging
-app_dir = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    app_dir = os.path.dirname(sys.executable)
+    if os.path.basename(app_dir).lower() == "dist":
+        root_dir = os.path.dirname(app_dir)
+    else:
+        root_dir = app_dir
+else:
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = app_dir
 log_file = os.path.join(app_dir, "service.log")
 
 def log(msg):
@@ -38,6 +47,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         self.current_agent_pid = None
         self.last_session_id = None
         self.last_was_logged_in = None
+        self.last_was_screen_locked = None
 
     def SvcStop(self):
         log("Stop signal received. Stopping service...")
@@ -77,6 +87,16 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         except Exception:
             return False
 
+    def is_logon_ui_running(self, session_id):
+        try:
+            procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+            for p in procs:
+                if p[0] == session_id and p[2].lower() == "logonui.exe":
+                    return True
+        except Exception as e:
+            log(f"Error checking LogonUI: {e}")
+        return False
+
     def find_winlogon_pid(self, session_id):
         try:
             procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
@@ -90,11 +110,13 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
     def get_executable_to_run(self):
         # Look for executable builds in the dist or workspace folder
         candidates = [
-            os.path.join(app_dir, "dist", "RemoteDesktopP2P", "RemoteDesktopP2P.exe"),
-            os.path.join(app_dir, "dist_standalone", "app.dist", "RemoteDesktopP2P.exe"),
-            os.path.join(app_dir, "dist", "app.exe"),
-            os.path.join(app_dir, "RemoteDesktopP2P.exe"),
-            os.path.join(app_dir, "app.exe"),
+            os.path.join(root_dir, "dist_nuitka", "app.dist", "RemoteDesktopP2P.exe"),
+            os.path.join(root_dir, "dist", "RemoteDesktopP2P.exe"),
+            os.path.join(root_dir, "dist", "RemoteDesktopP2P", "RemoteDesktopP2P.exe"),
+            os.path.join(root_dir, "dist_standalone", "app.dist", "RemoteDesktopP2P.exe"),
+            os.path.join(root_dir, "dist", "app.exe"),
+            os.path.join(root_dir, "RemoteDesktopP2P.exe"),
+            os.path.join(root_dir, "app.exe"),
         ]
         for c in candidates:
             if os.path.exists(c):
@@ -102,8 +124,8 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 return c, f'"{c}" --headless'
 
         # Fallback to python source code run
-        python_exe = os.path.join(app_dir, ".venv", "Scripts", "python.exe")
-        app_py = os.path.join(app_dir, "app.py")
+        python_exe = os.path.join(root_dir, ".venv", "Scripts", "python.exe")
+        app_py = os.path.join(root_dir, "app.py")
         if os.path.exists(python_exe) and os.path.exists(app_py):
             log(f"Fallback to Python source execution using: {python_exe}")
             return python_exe, f'"{python_exe}" "{app_py}" --headless'
@@ -134,24 +156,29 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 except Exception:
                     pass
 
+                # Check if screen is locked (LogonUI is running)
+                is_screen_locked = self.is_logon_ui_running(active_session_id)
+
                 # Check if state has changed
                 state_changed = (self.last_session_id != active_session_id or 
-                                 self.last_was_logged_in != is_logged_in)
+                                 self.last_was_logged_in != is_logged_in or
+                                 self.last_was_screen_locked != is_screen_locked)
 
                 if state_changed:
-                    log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}")
+                    log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked}")
                     self.kill_current_agent()
                     self.last_session_id = active_session_id
                     self.last_was_logged_in = is_logged_in
+                    self.last_was_screen_locked = is_screen_locked
 
                 # Start agent if it's not running
                 if not self.is_agent_running():
-                    self.spawn_agent(active_session_id, is_logged_in)
+                    self.spawn_agent(active_session_id, is_logged_in, is_screen_locked)
 
             except Exception as e:
                 log(f"Error in checking session: {e}")
 
-    def spawn_agent(self, session_id, is_logged_in):
+    def spawn_agent(self, session_id, is_logged_in, is_screen_locked):
         exe_path, cmd_line = self.get_executable_to_run()
         if not exe_path:
             return
@@ -159,7 +186,8 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         h_token = None
         desktop = "winsta0\\default"
 
-        if is_logged_in:
+        # If logged in and NOT locked, target user session
+        if is_logged_in and not is_screen_locked:
             try:
                 h_token = win32ts.WTSQueryUserToken(session_id)
                 desktop = "winsta0\\default"
@@ -211,7 +239,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 startup_info = win32process.STARTUPINFO()
                 startup_info.lpDesktop = desktop
 
-                # Run process in active user session context
+                # Run process in active user session context with correct working directory
                 h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
                     h_token_dup,
                     exe_path,
@@ -221,7 +249,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                     False,
                     win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
                     None,
-                    None,
+                    os.path.dirname(exe_path),
                     startup_info
                 )
                 win32api.CloseHandle(h_process)
@@ -237,5 +265,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] in ['install', 'update', 'remove', 'start', 'stop']:
         win32serviceutil.HandleCommandLine(EasyRemoteDesktopService)
     else:
-        # If not called by service controller installation args, default to running the service
-        win32serviceutil.HandleCommandLine(EasyRemoteDesktopService)
+        import servicemanager
+        servicemanager.Initialize()
+        servicemanager.PrepareToHostSingle(EasyRemoteDesktopService)
+        servicemanager.StartServiceCtrlDispatcher()

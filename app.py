@@ -567,6 +567,79 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
     except Exception as e:
         print(f"[Clipboard] Lỗi ghi clipboard Win32: {e}")
 
+def get_clipboard_text(owner_hwnd=None):
+    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return None
+    text = None
+    try:
+        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+        opened = False
+        for _ in range(10):
+            if fn_OpenClipboard(hwnd_arg):
+                opened = True
+                break
+            time.sleep(0.05)
+            
+        if opened:
+            try:
+                if fn_IsClipboardFormatAvailable(13): # CF_UNICODETEXT = 13
+                    hGlobal = fn_GetClipboardData(13)
+                    if hGlobal:
+                        pMem = fn_GlobalLock(hGlobal)
+                        if pMem:
+                            try:
+                                text = ctypes.wstring_at(pMem)
+                            finally:
+                                fn_GlobalUnlock(hGlobal)
+            finally:
+                fn_CloseClipboard()
+    except Exception as e:
+        print(f"[Clipboard] Lỗi đọc text clipboard Win32: {e}")
+    return text
+
+def set_clipboard_text(text, owner_hwnd=None):
+    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return False
+    if text is None: return False
+    try:
+        text_bytes = (text + "\x00").encode('utf-16le')
+        total_size = len(text_bytes)
+        
+        hGlobal = fn_GlobalAlloc(GHND, total_size)
+        if not hGlobal: return False
+            
+        pMem = fn_GlobalLock(hGlobal)
+        if not pMem:
+            fn_GlobalFree(hGlobal)
+            return False
+            
+        ctypes.memmove(pMem, text_bytes, total_size)
+        fn_GlobalUnlock(hGlobal)
+        
+        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+        opened = False
+        for _ in range(10):
+            if fn_OpenClipboard(hwnd_arg):
+                opened = True
+                break
+            time.sleep(0.05)
+            
+        if opened:
+            try:
+                fn_EmptyClipboard()
+                res = fn_SetClipboardData(13, hGlobal)
+                if not res:
+                    fn_GlobalFree(hGlobal)
+                    return False
+                return True
+            finally:
+                fn_CloseClipboard()
+        else:
+            fn_GlobalFree(hGlobal)
+            print("[Clipboard] Lỗi: OpenClipboard thất bại khi ghi dữ liệu text.")
+    except Exception as e:
+        print(f"[Clipboard] Lỗi ghi text clipboard Win32: {e}")
+    return False
+
+
 class PremiumProgressBar(tk.Canvas):
     def __init__(self, parent, width=320, height=12, bg="#15151B", fg="#00ADB5", **kwargs):
         super().__init__(parent, width=width, height=height, bg=parent["bg"], highlightthickness=0, bd=0, **kwargs)
@@ -606,86 +679,251 @@ class PremiumProgressBar(tk.Canvas):
             elif fill_width > 0:
                 self.fill_id = self.create_rectangle(0, 0, fill_width, self.height, fill=self.fg, width=0)
 
-class OverwriteDialog(tk.Toplevel):
+def get_file_icon_as_image(file_name, size="large"):
+    try:
+        import win32ui
+        import win32gui
+        import win32con
+        import win32api
+        from win32com.shell import shell, shellcon
+        from PIL import Image
+
+        flags = shellcon.SHGFI_ICON | shellcon.SHGFI_USEFILEATTRIBUTES
+        if size == "small":
+            flags |= shellcon.SHGFI_SMALLICON
+        else:
+            flags |= shellcon.SHGFI_LARGEICON
+
+        ret, info = shell.SHGetFileInfo(file_name, 0x80, flags)
+        hIcon, iIcon, dwAttr, name, typeName = info
+
+        ico_x = win32api.GetSystemMetrics(win32con.SM_CXICON if size != "small" else win32con.SM_CXSMICON)
+        
+        hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+        hbmp = win32ui.CreateBitmap()
+        hbmp.CreateCompatibleBitmap(hdc, ico_x, ico_x)
+        
+        mem_dc = hdc.CreateCompatibleDC()
+        mem_dc.SelectObject(hbmp)
+        
+        mem_dc.DrawIcon((0, 0), hIcon)
+        win32gui.DestroyIcon(hIcon)
+        
+        bmpstr = hbmp.GetBitmapBits(True)
+        img = Image.frombuffer("RGBA", (ico_x, ico_x), bmpstr, "raw", "BGRA", 0, 1)
+        
+        mem_dc.DeleteDC()
+        win32gui.ReleaseDC(0, hdc.GetSafeHdc())
+        return img
+    except Exception as e:
+        log_debug(f"[get_file_icon_as_image] Lỗi trích xuất icon: {e}")
+        return None
+
+class ClassicCopyDialog(tk.Toplevel):
     def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
         super().__init__(parent)
-        self.title("Xác nhận thay thế")
+        self.title("Copy File")
+        self.geometry("520x420")
         self.resizable(False, False)
-        self.configure(bg="#1E1E24")
-        
-        self.attributes("-topmost", True)
-        self.lift()
+        self.configure(bg="#FFFFFF")
         
         self.choice = None
+        self.has_multiple = has_multiple
         
-        dialog_w = 420
-        dialog_h = 160
+        self.attributes("-topmost", True)
+        self.focus_force()
         
-        is_parent_minimized = False
-        try:
-            if parent.state() == "iconic" or parent.winfo_viewable() == 0 or parent.winfo_x() < -10000:
-                is_parent_minimized = True
-        except:
-            pass
+        self.update_idletasks()
+        w = 520
+        h = 420
+        ws = self.winfo_screenwidth()
+        hs = self.winfo_screenheight()
+        x = (ws - w) // 2
+        y = (hs - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        
+        self.grab_set()
+        
+        lbl_title = tk.Label(
+            self, text="There is already a file with the same name in this location.",
+            font=("Segoe UI", 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
+        )
+        lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
+        
+        lbl_sub = tk.Label(
+            self, text="Click the file you want to keep",
+            font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w"
+        )
+        lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
+        
+        def format_size(bytes_size):
+            if bytes_size < 1024:
+                return f"{bytes_size} bytes"
+            elif bytes_size < 1024 * 1024:
+                return f"{bytes_size / 1024:.1f} KB"
+            else:
+                return f"{bytes_size / (1024 * 1024):.1f} MB"
 
-        if is_parent_minimized:
-            screen_w = self.winfo_screenwidth()
-            screen_h = self.winfo_screenheight()
-            x = (screen_w - dialog_w) // 2
-            y = (screen_h - dialog_h) // 2
-        else:
-            parent_x = parent.winfo_x()
-            parent_y = parent.winfo_y()
-            parent_w = parent.winfo_width()
-            parent_h = parent.winfo_height()
-            x = parent_x + (parent_w - dialog_w) // 2
-            y = parent_y + (parent_h - dialog_h) // 2
+        def format_time(timestamp):
+            try:
+                import datetime
+                dt = datetime.datetime.fromtimestamp(timestamp)
+                return dt.strftime("%m/%d/%Y %I:%M %p")
+            except:
+                return "Unknown"
+                
+        def format_location_info(file_path):
+            if not file_path:
+                return "Unknown location"
+            parent_dir = os.path.dirname(file_path)
+            parent_folder_name = os.path.basename(parent_dir)
+            if not parent_folder_name:
+                parent_folder_name = parent_dir
+            return f"{parent_folder_name} ({parent_dir})"
             
-        self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
-        self.protocol("WM_DELETE_WINDOW", lambda: self.set_choice("cancel"))
+        src_icon_img = get_file_icon_as_image(filename)
+        dest_icon_img = get_file_icon_as_image(dest_info.get("path", filename))
         
-        display_name = filename
-        if len(display_name) > 35:
-            display_name = display_name[:15] + "..." + display_name[-17:]
+        self.src_icon = ImageTk.PhotoImage(src_icon_img) if src_icon_img else None
+        self.dest_icon = ImageTk.PhotoImage(dest_icon_img) if dest_icon_img else None
+        
+        def get_all_children(w):
+            children = [w]
+            for child in w.winfo_children():
+                children.extend(get_all_children(child))
+            return children
             
-        lbl_msg = tk.Label(
-            self, text=f"File {display_name} đã tồn tại!\nBạn có muốn thay thế không?",
-            font=("Segoe UI", 11), fg="#FFFFFF", bg="#1E1E24", justify=tk.CENTER
-        )
-        lbl_msg.pack(pady=30, padx=20)
+        def setup_command_link(frame, action_val):
+            normal_bg = "#FFFFFF"
+            hover_bg = "#E5F1FB"
+            normal_border = "#FFFFFF"
+            hover_border = "#B8D6F3"
+            
+            frame.configure(background=normal_bg, highlightbackground=normal_border, highlightthickness=1, bd=0)
+            
+            def on_enter(event):
+                frame.configure(background=hover_bg, highlightbackground=hover_border)
+                for child in get_all_children(frame):
+                    try: child.configure(background=hover_bg)
+                    except: pass
+                    
+            def on_leave(event):
+                x, y = frame.winfo_pointerx() - frame.winfo_rootx(), frame.winfo_pointery() - frame.winfo_rooty()
+                if x < 0 or x >= frame.winfo_width() or y < 0 or y >= frame.winfo_height():
+                    frame.configure(background=normal_bg, highlightbackground=normal_border)
+                    for child in get_all_children(frame):
+                        try: child.configure(background=normal_bg)
+                        except: pass
+                        
+            def on_click(event):
+                self.choice = action_val
+                self.destroy()
+                
+            for w in get_all_children(frame):
+                w.bind("<Enter>", on_enter)
+                w.bind("<Leave>", on_leave)
+                w.bind("<Button-1>", on_click)
+                w.configure(cursor="hand2")
+                
+        # Link 1: Copy and Replace
+        link1 = tk.Frame(self, bg="#FFFFFF")
+        link1.pack(fill=tk.X, padx=24, pady=5)
         
-        btn_frame = tk.Frame(self, bg="#1E1E24")
-        btn_frame.pack(fill=tk.X, pady=(0, 20))
+        lbl_arrow1 = tk.Label(link1, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
         
-        btn_inner = tk.Frame(btn_frame, bg="#1E1E24")
-        btn_inner.pack(expand=True)
+        right_content1 = tk.Frame(link1, bg="#FFFFFF")
+        right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        btn_yes = tk.Button(
-            btn_inner, text="Có", font=("Segoe UI", 9, "bold"),
-            fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B92",
-            relief=tk.FLAT, bd=0, width=8, pady=5, cursor="hand2",
-            command=lambda: self.set_choice("replace")
-        )
-        btn_yes.pack(side=tk.LEFT, padx=10)
+        lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=("Segoe UI", 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title1.pack(fill=tk.X)
         
-        btn_no = tk.Button(
-            btn_inner, text="Không", font=("Segoe UI", 9, "bold"),
-            fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
-            relief=tk.FLAT, bd=0, width=8, pady=5, cursor="hand2",
-            command=lambda: self.set_choice("skip")
-        )
-        btn_no.pack(side=tk.LEFT, padx=10)
+        lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc1.pack(fill=tk.X, pady=(0, 5))
         
+        info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
+        info_frame1.pack(fill=tk.X, padx=(10, 0))
+        
+        if self.src_icon:
+            lbl_icon1 = tk.Label(info_frame1, image=self.src_icon, bg="#FFFFFF")
+            lbl_icon1.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+            
+        info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
+        info_text1.pack(side=tk.LEFT, fill=tk.X)
+        
+        tk.Label(info_text1, text=filename, font=("Segoe UI", 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        
+        setup_command_link(link1, "replace")
+        
+        # Link 2: Don't Copy
+        link2 = tk.Frame(self, bg="#FFFFFF")
+        link2.pack(fill=tk.X, padx=24, pady=5)
+        
+        lbl_arrow2 = tk.Label(link2, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+        
+        right_content2 = tk.Frame(link2, bg="#FFFFFF")
+        right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        lbl_title2 = tk.Label(right_content2, text="Don't copy", font=("Segoe UI", 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title2.pack(fill=tk.X)
+        
+        lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc2.pack(fill=tk.X, pady=(0, 5))
+        
+        info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
+        info_frame2.pack(fill=tk.X, padx=(10, 0))
+        
+        if self.dest_icon:
+            lbl_icon2 = tk.Label(info_frame2, image=self.dest_icon, bg="#FFFFFF")
+            lbl_icon2.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+            
+        info_text2 = tk.Frame(info_frame2, bg="#FFFFFF")
+        info_text2.pack(side=tk.LEFT, fill=tk.X)
+        
+        tk.Label(info_text2, text=filename, font=("Segoe UI", 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        
+        setup_command_link(link2, "skip")
+        
+        sep = tk.Frame(self, height=1, bg="#D0D0D0", bd=0)
+        sep.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 0))
+        
+        bottom_bar = tk.Frame(self, bg="#F0F0F0", height=48)
+        bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        bottom_bar.pack_propagate(False)
+        
+        self.var_all = tk.BooleanVar()
+        if has_multiple:
+            chk = tk.Checkbutton(
+                bottom_bar, text="Do this for all conflicts", font=("Segoe UI", 9),
+                variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
+            )
+            chk.pack(side=tk.LEFT, padx=24, pady=10)
+            
         btn_cancel = tk.Button(
-            btn_inner, text="Hủy", font=("Segoe UI", 9),
-            fg="#FFFFFF", bg="#E94560", activeforeground="#FFFFFF", activebackground="#C3374E",
-            relief=tk.FLAT, bd=0, width=8, pady=5, cursor="hand2",
-            command=lambda: self.set_choice("cancel")
+            bottom_bar, text="Cancel", font=("Segoe UI", 9), width=10,
+            bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
+            command=self.on_cancel
         )
-        btn_cancel.pack(side=tk.LEFT, padx=10)
-
-    def set_choice(self, val):
-        self.choice = val
+        btn_cancel.pack(side=tk.RIGHT, padx=24, pady=10)
+        
+        def btn_enter(event):
+            btn_cancel.configure(bg="#E5F1FB", bd=1)
+        def btn_leave(event):
+            btn_cancel.configure(bg="#E1E1E1", bd=1)
+        btn_cancel.bind("<Enter>", btn_enter)
+        btn_cancel.bind("<Leave>", btn_leave)
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+        
+    def on_cancel(self):
+        self.choice = "cancel"
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
@@ -944,6 +1182,7 @@ class ClipboardEventListener:
         WM_CLIPBOARDUPDATE = 0x031D
         WM_RENDERFORMAT = 0x0305
         WM_DESTROYCLIPBOARD = 0x0307
+        WM_SETUP_DELAYED_RENDERING = 0x0400 + 101
         
         if msg == WM_CLIPBOARDUPDATE:
             log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
@@ -959,6 +1198,11 @@ class ClipboardEventListener:
             log_debug(f"[WndProc] Nhận WM_DESTROYCLIPBOARD")
             if self.manager:
                 self.manager.lost_ownership()
+            return 0
+        elif msg == WM_SETUP_DELAYED_RENDERING:
+            log_debug(f"[WndProc] Nhận WM_SETUP_DELAYED_RENDERING. Đang tiến hành thiết lập delayed rendering...")
+            if self.manager:
+                self.manager._execute_setup_delayed_rendering()
             return 0
             
         try:
@@ -1076,6 +1320,8 @@ class ClipboardSyncManager:
         self.target_save_dir = ""
         self.is_paste_triggered = False
         self.meta_arrival_time = 0
+        self.last_sent_text = ""
+        self.last_received_text = ""
         
         # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
 
@@ -1092,6 +1338,12 @@ class ClipboardSyncManager:
             pass
 
     def process_gui_queue(self):
+        if self.app and getattr(self.app, 'is_headless', False):
+            import queue
+            while not self.gui_queue.empty():
+                try: self.gui_queue.get_nowait()
+                except queue.Empty: break
+            return
         import queue
         while not self.gui_queue.empty():
             try:
@@ -1120,13 +1372,13 @@ class ClipboardSyncManager:
                                 except: pass
                                 self.active_dialog = None
                         self.app.after(500, _do_destroy)
-                elif action == "overwrite_dialog":
+                elif action == "classic_overwrite_dialog":
                     filename, source_info, dest_info, has_multiple = args
-                    dialog = OverwriteDialog(self.app, filename, source_info, dest_info, has_multiple)
+                    dialog = ClassicCopyDialog(self.app, filename, source_info, dest_info, has_multiple)
                     def _on_destroy(event):
                         if event.widget == dialog:
-                            choice = dialog.choice if dialog.choice else "cancel"
-                            self.overwrite_choice = choice
+                            self.overwrite_choice = dialog.choice if dialog.choice else "cancel"
+                            self.overwrite_all = dialog.var_all.get() if hasattr(dialog, 'var_all') else False
                             self.overwrite_event.set()
                     dialog.bind("<Destroy>", _on_destroy)
             except queue.Empty:
@@ -1252,80 +1504,127 @@ class ClipboardSyncManager:
                 except: pass
                 
             current_files = get_clipboard_files(owner_hwnd)
-            if not current_files: return
-            
-            valid_files = [f for f in current_files if os.path.isfile(f)]
-            if not valid_files: return
-            
-            # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
-            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
-            temp_dir_abs = os.path.abspath(temp_dir).lower()
-            if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in valid_files):
-                log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
-                return
+            if current_files:
+                valid_files = [f for f in current_files if os.path.isfile(f)]
+                if not valid_files: return
                 
-            with self.lock:
-                if valid_files == self.last_files and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
+                # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
+                temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+                temp_dir_abs = os.path.abspath(temp_dir).lower()
+                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in valid_files):
+                    log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
                     return
-                self.last_files = valid_files
-                self.last_files_time = time.time()
-                
-            metadata = [{"name": os.path.basename(f), "size": os.path.getsize(f), "mtime": os.path.getmtime(f), "path": f} for f in valid_files]
-            if metadata and self.active_sockets:
-                print(f"[Clipboard] Đã gửi tín hiệu files_copied_meta cho {len(metadata)} file qua EventListener.")
-                pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
+                    
                 with self.lock:
-                    sockets_to_remove = []
-                    for s in list(self.active_sockets):
-                        try:
-                            send_msg(s, pkt)
-                        except Exception:
-                            sockets_to_remove.append(s)
-                    for s in sockets_to_remove:
-                        if s in self.active_sockets: self.active_sockets.remove(s)
+                    if valid_files == self.last_files and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
+                        return
+                    self.last_files = valid_files
+                    self.last_files_time = time.time()
+                    
+                metadata = [{"name": os.path.basename(f), "size": os.path.getsize(f), "mtime": os.path.getmtime(f), "path": f} for f in valid_files]
+                if metadata and self.active_sockets:
+                    print(f"[Clipboard] Đã gửi tín hiệu files_copied_meta cho {len(metadata)} file qua EventListener.")
+                    pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
+                    with self.lock:
+                        sockets_to_remove = []
+                        for s in list(self.active_sockets):
+                            try:
+                                send_msg(s, pkt)
+                            except Exception:
+                                sockets_to_remove.append(s)
+                        for s in sockets_to_remove:
+                            if s in self.active_sockets: self.active_sockets.remove(s)
+            else:
+                # Nếu không phải copy file, kiểm tra xem có phải copy text không
+                current_text = get_clipboard_text(owner_hwnd)
+                if current_text is not None:
+                    # Bỏ qua nếu trùng với text vừa nhận hoặc vừa gửi để tránh lặp vô tận
+                    if current_text == getattr(self, 'last_received_text', '') or current_text == getattr(self, 'last_sent_text', ''):
+                        return
+                        
+                    self.last_sent_text = current_text
+                    if self.active_sockets:
+                        log_debug(f"[Clipboard] Phát hiện text clipboard mới locally: {current_text[:50]}...")
+                        print(f"[Clipboard] Đang gửi text clipboard sang đối tác...")
+                        pkt = json.dumps({"type": "clipboard_text", "text": current_text}).encode('utf-8')
+                        with self.lock:
+                            sockets_to_remove = []
+                            for s in list(self.active_sockets):
+                                try:
+                                    send_msg(s, pkt)
+                                except Exception:
+                                    sockets_to_remove.append(s)
+                            for s in sockets_to_remove:
+                                if s in self.active_sockets: self.active_sockets.remove(s)
         except Exception as e:
             print(f"[FileTransfer] Monitor Error: {e}")
 
     def setup_delayed_rendering(self):
         log_debug(f"[setup_delayed_rendering] Bắt đầu. self.listener={self.listener}")
-        def _setup():
-            # Chờ hwnd sẵn sàng (tối đa 2 giây)
-            for _ in range(100):
-                if self.listener and self.listener.hwnd:
-                    break
-                time.sleep(0.02)
-                
-            if not self.listener or not self.listener.hwnd:
-                log_debug("[setup_delayed_rendering thread] Lỗi: listener.hwnd không sẵn sàng sau thời gian chờ.")
-                return
+        if self.listener and self.listener.hwnd:
+            ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.listener.hwnd), 0x0400 + 101, 0, 0)
+            log_debug("[setup_delayed_rendering] Đã PostMessageW WM_SETUP_DELAYED_RENDERING")
+        else:
+            log_debug("[setup_delayed_rendering] Lỗi: listener hoặc hwnd chưa sẵn sàng.")
 
-            user32 = ctypes.windll.user32
-            opened = False
-            log_debug(f"[setup_delayed_rendering thread] Đang cố gắng OpenClipboard với HWND: {self.listener.hwnd}")
-            for _ in range(10):
-                if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
-                    opened = True
-                    break
-                time.sleep(0.05)
-            if opened:
-                log_debug("[setup_delayed_rendering thread] OpenClipboard thành công. Đang EmptyClipboard...")
-                self.ignore_destroy_clipboard = True
-                try:
-                    user32.EmptyClipboard()
-                finally:
-                    self.ignore_destroy_clipboard = False
-                log_debug("[setup_delayed_rendering thread] Đang SetClipboardData(15, None)...")
-                res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
-                err = ctypes.GetLastError()
-                log_debug(f"[setup_delayed_rendering thread] SetClipboardData trả về: {res}, GetLastError: {err}")
-                user32.CloseClipboard()
-                print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard.")
-            else:
-                err = ctypes.GetLastError()
-                log_debug(f"[setup_delayed_rendering thread] OpenClipboard THẤT BẠI. GetLastError: {err}")
-                print("[Clipboard] Không thể OpenClipboard để thiết lập delayed rendering.")
-        
-        threading.Thread(target=_setup, daemon=True).start()
+    def _execute_setup_delayed_rendering(self):
+        if not self.listener or not self.listener.hwnd:
+            log_debug("[_execute_setup_delayed_rendering] Lỗi: hwnd chưa sẵn sàng.")
+            return
+            
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        opened = False
+        log_debug(f"[_execute_setup_delayed_rendering] Đang cố gắng OpenClipboard với HWND: {self.listener.hwnd}")
+        for _ in range(10):
+            if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
+                opened = True
+                break
+            time.sleep(0.05)
+            
+        if opened:
+            log_debug("[_execute_setup_delayed_rendering] OpenClipboard thành công. Đang EmptyClipboard...")
+            self.ignore_destroy_clipboard = True
+            try:
+                user32.EmptyClipboard()
+            finally:
+                self.ignore_destroy_clipboard = False
+                
+            # Đăng ký các format để tránh Clipboard History / Cloud Clipboard tự động quét gây mất delayed rendering
+            cf_exclude = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
+            cf_history = user32.RegisterClipboardFormatW("CanIncludeInClipboardHistory")
+            cf_cloud = user32.RegisterClipboardFormatW("CanUploadToCloudClipboard")
+            
+            def set_dword_data(cf_format, value):
+                hMem = kernel32.GlobalAlloc(0x0002, 4) # GMEM_MOVEABLE = 0x0002
+                if hMem:
+                    ptr = kernel32.GlobalLock(hMem)
+                    if ptr:
+                        ctypes.memmove(ptr, ctypes.byref(wintypes.DWORD(value)), 4)
+                        kernel32.GlobalUnlock(hMem)
+                        if not user32.SetClipboardData(cf_format, hMem):
+                            kernel32.GlobalFree(hMem)
+                            log_debug(f"[set_dword_data] Thất bại SetClipboardData cho format {cf_format}")
+                        else:
+                            log_debug(f"[set_dword_data] Đã thiết lập format {cf_format} = {value}")
+                    else:
+                        kernel32.GlobalFree(hMem)
+                else:
+                    log_debug("[set_dword_data] GlobalAlloc thất bại")
+                            
+            if cf_exclude: set_dword_data(cf_exclude, 1)
+            if cf_history: set_dword_data(cf_history, 0)
+            if cf_cloud: set_dword_data(cf_cloud, 0)
+            
+            res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
+            err = ctypes.GetLastError()
+            log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
+            user32.CloseClipboard()
+            print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard và loại trừ Clipboard History.")
+        else:
+            err = ctypes.GetLastError()
+            log_debug(f"[_execute_setup_delayed_rendering] OpenClipboard THẤT BẠI. GetLastError: {err}")
+            print("[Clipboard] Không thể OpenClipboard để thiết lập delayed rendering.")
 
     def lost_ownership(self):
         if getattr(self, 'ignore_destroy_clipboard', False):
@@ -1343,16 +1642,30 @@ class ClipboardSyncManager:
             
             hwnds_to_check = []
             
+            def get_root_hwnd(h):
+                if not h: return None
+                try:
+                    root = ctypes.windll.user32.GetAncestor(h, 2) # GA_ROOT = 2
+                    return root if root else h
+                except:
+                    return h
+            
             # 1. Cửa sổ đang mở Clipboard (chính xác nhất cho thao tác Paste)
             try:
                 hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
-                if hwnd_clip: hwnds_to_check.append(hwnd_clip)
+                if hwnd_clip:
+                    root_clip = get_root_hwnd(hwnd_clip)
+                    if root_clip and root_clip not in hwnds_to_check:
+                        hwnds_to_check.append(root_clip)
             except: pass
                 
             # 2. Cửa sổ Foreground hiện tại
             try:
                 hwnd_fg = win32gui.GetForegroundWindow()
-                if hwnd_fg: hwnds_to_check.append(hwnd_fg)
+                if hwnd_fg:
+                    root_fg = get_root_hwnd(hwnd_fg)
+                    if root_fg and root_fg not in hwnds_to_check:
+                        hwnds_to_check.append(root_fg)
             except: pass
                 
             # 3. Cửa sổ nằm dưới con trỏ chuột (phòng trường hợp mất focus vào menu)
@@ -1361,8 +1674,9 @@ class ClipboardSyncManager:
                 if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
                     hwnd_mouse = ctypes.windll.user32.WindowFromPoint(pt)
                     if hwnd_mouse:
-                        hwnd_mouse_root = ctypes.windll.user32.GetAncestor(hwnd_mouse, 2) # GA_ROOT
-                        if hwnd_mouse_root: hwnds_to_check.append(hwnd_mouse_root)
+                        root_mouse = get_root_hwnd(hwnd_mouse)
+                        if root_mouse and root_mouse not in hwnds_to_check:
+                            hwnds_to_check.append(root_mouse)
             except: pass
             
             shell = win32com.client.Dispatch("Shell.Application")
@@ -1392,6 +1706,32 @@ class ClipboardSyncManager:
         except Exception as e:
             log_debug(f"[get_active_explorer_path] Lỗi COM: {e}")
         return None
+
+    def show_classic_conflict_dialog(self, filename, source_info, dest_info, has_multiple=False):
+        if self.app and getattr(self.app, 'is_headless', False):
+            return "replace_all" if has_multiple else "replace"
+        self.overwrite_event.clear()
+        self.overwrite_choice = None
+        self.overwrite_all = False
+        
+        self.gui_queue.put(("classic_overwrite_dialog", (filename, source_info, dest_info, has_multiple)))
+        
+        # Chờ luồng GUI xử lý và người dùng phản hồi (bơm tin nhắn)
+        start_wait = time.time()
+        msg = wintypes.MSG()
+        while time.time() - start_wait < 300.0:
+            if self.overwrite_event.is_set():
+                break
+            if ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):
+                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+            else:
+                time.sleep(0.01)
+                
+        choice = self.overwrite_choice if self.overwrite_choice else "cancel"
+        if choice in ("replace", "skip") and self.overwrite_all:
+            choice = choice + "_all"
+        return choice
 
     def render_format(self, fmt_id):
         if fmt_id != 15: # CF_HDROP
@@ -1535,25 +1875,8 @@ class ClipboardSyncManager:
                             except:
                                 dest_info = {"size": 0, "mtime": 0}
                                 
-                            self.overwrite_event.clear()
-                            self.overwrite_choice = None
-                            
                             has_multiple = len(self.pending_remote_files) > 1
-                            self.gui_queue.put(("overwrite_dialog", (filename, source_info, dest_info, has_multiple)))
-                            
-                            # Chờ luồng GUI xử lý và người dùng phản hồi (bơm tin nhắn)
-                            start_wait = time.time()
-                            msg = wintypes.MSG()
-                            while time.time() - start_wait < 300.0:
-                                if self.overwrite_event.is_set():
-                                    break
-                                if ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):
-                                    ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-                                    ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-                                else:
-                                    time.sleep(0.01)
-                                    
-                            choice = self.overwrite_choice if self.overwrite_choice else "cancel"
+                            choice = self.show_classic_conflict_dialog(filename, source_info, dest_info, has_multiple)
                             log_debug(f"[render_format] Kết quả lựa chọn ghi đè cho {filename}: {choice}")
                             
                             if choice == "replace":
@@ -1716,6 +2039,22 @@ class ClipboardSyncManager:
             self.cancel_active_transfer(remote_triggered=True)
             return
             
+        elif ptype == "clipboard_text":
+            text = packet.get("text", "")
+            log_debug(f"[handle_received_packet] Nhận clipboard_text: {text[:50]}...")
+            print(f"[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
+            self.last_received_text = text
+            self.ignore_destroy_clipboard = True
+            try:
+                owner_hwnd = None
+                if self.app:
+                    try: owner_hwnd = self.app.winfo_id()
+                    except: pass
+                set_clipboard_text(text, owner_hwnd)
+            finally:
+                self.ignore_destroy_clipboard = False
+            return
+            
         elif ptype == "files_copied_meta":
             self.pending_remote_files = packet.get("files", [])
             self.meta_arrival_time = time.time()
@@ -1835,7 +2174,7 @@ def client_receiver_thread(sock):
                 try:
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
-                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer"):
+                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                         clipboard_sync_manager.handle_received_packet(event)
                         continue
                 except Exception as je:
@@ -2012,6 +2351,18 @@ def decrypt_text(encrypted_text, key="AntigravityP2P"):
 class UnifiedApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        
+        # Check headless flag (run in Session 0 / background service mode)
+        self.is_headless = "--headless" in sys.argv
+        if self.is_headless:
+            self.withdraw()
+            try:
+                log_path = os.path.join(app_dir, "agent.log")
+                sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+                sys.stderr = sys.stdout
+                print(f"\n--- Agent started in headless mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+            except Exception as e:
+                pass
         
         # Thiết lập icon cho cửa sổ chính
         try:
@@ -2315,7 +2666,8 @@ class UnifiedApp(tk.Tk):
         self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
         
         # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
-        self.setup_tray_icon()
+        if not self.is_headless:
+            self.setup_tray_icon()
         
     # Auto formatting spaces inside ID: "123 456 789 012"
     def format_partner_id(self, *args):
@@ -3662,6 +4014,9 @@ class UnifiedApp(tk.Tk):
                 except Exception:
                     pass
     def show_custom_info(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Info] {title}: {message}")
+            return
         import tkinter as tk
         p = parent if parent else self
         
@@ -3708,6 +4063,9 @@ class UnifiedApp(tk.Tk):
         self.wait_window(dialog)
 
     def show_custom_error(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Error] {title}: {message}", file=sys.stderr)
+            return
         import tkinter as tk
         p = parent if parent else self
         
@@ -3754,6 +4112,9 @@ class UnifiedApp(tk.Tk):
         self.wait_window(dialog)
 
     def show_custom_question(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Question] {title}: {message} -> Auto-confirmed (Yes)")
+            return True
         import tkinter as tk
         p = parent if parent else self
         
@@ -4097,6 +4458,21 @@ class UnifiedApp(tk.Tk):
             except Exception:
                 break
                 
+    def wake_display(self):
+        try:
+            import ctypes
+            # WM_SYSCOMMAND = 0x0112, SC_MONITORPOWER = 0xF170, -1 = power on
+            ctypes.windll.user32.SendMessageW(0xFFFF, 0x0112, 0xF170, -1)
+            # Prevent sleep
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000002)
+            # Simulate a harmless VK_F15 keypress to wake display/lockscreen
+            import win32api, win32con
+            win32api.keybd_event(win32con.VK_F15, 0, 0, 0)
+            win32api.keybd_event(win32con.VK_F15, 0, win32con.KEYEVENTF_KEYUP, 0)
+            print("[Host] Wake display signal sent.")
+        except Exception as e:
+            print(f"[Host] Failed to wake display: {e}")
+
     def handle_host_handshake(self, conn, addr):
         # We now support multiple clients, so we don't block new connections if active_clients is non-empty.
             
@@ -4118,6 +4494,7 @@ class UnifiedApp(tk.Tk):
                 
             if password_valid:
                 print("[Host] Password matches! Accepting connection.")
+                self.wake_display()
                 
                 # Cấu hình TCP Keep-Alive bảo vệ kết nối đục lỗ khỏi bị đóng bởi Firewall/Router
                 try:
@@ -4166,6 +4543,7 @@ class UnifiedApp(tk.Tk):
                 finally:
                     client_state["running"] = False
                     t_sender.join()
+                    clipboard_sync_manager.remove_socket(conn)
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
                     
@@ -4255,7 +4633,7 @@ class UnifiedApp(tk.Tk):
                     break
                 event = json.loads(msg.decode('utf-8'))
                 evt_type = event.get("type", "")
-                if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer"):
+                if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                     clipboard_sync_manager.handle_received_packet(event)
                 else:
                     self.host_handle_event(event)
@@ -4269,17 +4647,55 @@ class UnifiedApp(tk.Tk):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
             x, y = event['x'], event['y']
-            mouse.position = (x, y)
+            try:
+                mouse.position = (x, y)
+            except:
+                pass
+            try:
+                import win32api
+                win32api.SetCursorPos((x, y))
+            except Exception as e:
+                print(f"[Host] SetCursorPos fallback failed: {e}")
+                
         elif ev_type == 'mouse_click':
-            btn = button_map.get(event['button'])
+            button_name = event.get('button')
+            pressed = event.get('pressed')
+            btn = button_map.get(button_name)
             if btn:
-                if event['pressed']:
-                    mouse.press(btn)
-                else:
-                    mouse.release(btn)
+                try:
+                    if pressed:
+                        mouse.press(btn)
+                    else:
+                        mouse.release(btn)
+                except:
+                    pass
+            try:
+                import win32api, win32con
+                flags = 0
+                if button_name == 'left':
+                    flags = win32con.MOUSEEVENTF_LEFTDOWN if pressed else win32con.MOUSEEVENTF_LEFTUP
+                elif button_name == 'right':
+                    flags = win32con.MOUSEEVENTF_RIGHTDOWN if pressed else win32con.MOUSEEVENTF_RIGHTUP
+                elif button_name == 'middle':
+                    flags = win32con.MOUSEEVENTF_MIDDLEDOWN if pressed else win32con.MOUSEEVENTF_MIDDLEUP
+                if flags:
+                    win32api.mouse_event(flags, 0, 0, 0, 0)
+            except Exception as e:
+                print(f"[Host] mouse_event click fallback failed: {e}")
+                
         elif ev_type == 'mouse_scroll':
             dx, dy = event['dx'], event['dy']
-            mouse.scroll(dx, dy)
+            try:
+                mouse.scroll(dx, dy)
+            except:
+                pass
+            try:
+                import win32api, win32con
+                if dy != 0:
+                    win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, int(dy * 120), 0)
+            except Exception as e:
+                print(f"[Host] mouse_event scroll fallback failed: {e}")
+                
         elif ev_type == 'key_event':
             key_name = event['key']
             pressed = event['pressed']
@@ -4298,18 +4714,72 @@ class UnifiedApp(tk.Tk):
                         keyboard.release(target_key)
                 except Exception:
                     pass
+            try:
+                import win32api, win32con
+                vk_map = {
+                    'space': win32con.VK_SPACE,
+                    'enter': win32con.VK_RETURN,
+                    'return': win32con.VK_RETURN,
+                    'escape': win32con.VK_ESCAPE,
+                    'backspace': win32con.VK_BACK,
+                    'tab': win32con.VK_TAB,
+                    'left shift': win32con.VK_LSHIFT,
+                    'right shift': win32con.VK_RSHIFT,
+                    'left ctrl': win32con.VK_LCONTROL,
+                    'right ctrl': win32con.VK_RCONTROL,
+                    'left alt': win32con.VK_LMENU,
+                    'right alt': win32con.VK_RMENU,
+                    'up': win32con.VK_UP,
+                    'down': win32con.VK_DOWN,
+                    'left': win32con.VK_LEFT,
+                    'right': win32con.VK_RIGHT,
+                    'caps lock': win32con.VK_CAPITAL,
+                    'capslock': win32con.VK_CAPITAL,
+                    'delete': win32con.VK_DELETE,
+                    'home': win32con.VK_HOME,
+                    'end': win32con.VK_END,
+                    'page up': win32con.VK_PRIOR,
+                    'page down': win32con.VK_NEXT,
+                    'f1': win32con.VK_F1,
+                    'f2': win32con.VK_F2,
+                    'f3': win32con.VK_F3,
+                    'f4': win32con.VK_F4,
+                    'f5': win32con.VK_F5,
+                    'f6': win32con.VK_F6,
+                    'f7': win32con.VK_F7,
+                    'f8': win32con.VK_F8,
+                    'f9': win32con.VK_F9,
+                    'f10': win32con.VK_F10,
+                    'f11': win32con.VK_F11,
+                    'f12': win32con.VK_F12,
+                }
+                vk = None
+                if key_name in vk_map:
+                    vk = vk_map[key_name]
+                elif len(key_name) == 1:
+                    vk = win32api.VkKeyScan(key_name) & 0xFF
+                if vk is not None:
+                    flags = 0 if pressed else win32con.KEYEVENTF_KEYUP
+                    win32api.keybd_event(vk, 0, flags, 0)
+            except Exception as e:
+                print(f"[Host] keybd_event fallback failed: {e}")
+                
         elif ev_type == 'resize_viewer':
             self.client_viewer_w = event.get('w', 1280)
             self.client_viewer_h = event.get('h', 720)
-            
 
-                    
     def host_release_all_modifiers(self):
         for mod_key in [Key.shift, Key.ctrl, Key.alt]:
             try:
                 keyboard.release(mod_key)
             except:
                 pass
+        try:
+            import win32api, win32con
+            for vk in [win32con.VK_LSHIFT, win32con.VK_RSHIFT, win32con.VK_LCONTROL, win32con.VK_RCONTROL, win32con.VK_LMENU, win32con.VK_RMENU]:
+                win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+        except:
+            pass
                 
     # CLIENT (Controller) functions
     def click_connect(self):
