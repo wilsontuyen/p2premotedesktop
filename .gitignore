@@ -55,3 +55,9 @@ test_clipboard_copy.txt
 
 # Window configs
 window_config.json
+
+# Allow conversations directory and its txt files
+!/conversations/
+!/conversations/**/*.txt
+!/conversations/*.txt
+!/conversations/README.md
