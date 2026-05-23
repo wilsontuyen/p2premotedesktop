@@ -151,8 +151,170 @@ key_map = {
     'f9': Key.f9,
     'f10': Key.f10,
     'f11': Key.f11,
-    'f12': Key.f12,
 }
+
+# Ctypes definitions for SendInput API (standard modern input simulation)
+import ctypes
+from ctypes import wintypes
+
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+INPUT_HARDWARE = 2
+
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_ABSOLUTE = 0x8000
+
+KEYEVENTF_EXTENDEDKEY = 0x0001
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
+KEYEVENTF_UNICODE = 0x0004
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_void_p)
+    ]
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_void_p)
+    ]
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", ctypes.c_ulong),
+        ("wParamL", ctypes.c_ushort),
+        ("wParamH", ctypes.c_ushort)
+    ]
+
+class INPUT_union(ctypes.Union):
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+        ("hi", HARDWAREINPUT)
+    ]
+
+class INPUT(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_ulong),
+        ("union", INPUT_union)
+    ]
+
+# Map Pygame/common key names to Windows Virtual Key (VK) codes
+vk_map = {
+    'space': 0x20,      # VK_SPACE
+    'enter': 0x0D,      # VK_RETURN
+    'return': 0x0D,     # VK_RETURN
+    'escape': 0x1B,     # VK_ESCAPE
+    'backspace': 0x08,  # VK_BACK
+    'tab': 0x09,        # VK_TAB
+    'left shift': 0xA0, # VK_LSHIFT
+    'right shift': 0xA1,# VK_RSHIFT
+    'left ctrl': 0xA2,  # VK_LCONTROL
+    'right ctrl': 0xA3, # VK_RCONTROL
+    'left alt': 0xA4,   # VK_LMENU
+    'right alt': 0xA5,  # VK_RMENU
+    'up': 0x26,         # VK_UP
+    'down': 0x28,       # VK_DOWN
+    'left': 0x25,       # VK_LEFT
+    'right': 0x27,      # VK_RIGHT
+    'caps lock': 0x14,  # VK_CAPITAL
+    'capslock': 0x14,   # VK_CAPITAL
+    'delete': 0x2E,     # VK_DELETE
+    'home': 0x24,       # VK_HOME
+    'end': 0x23,        # VK_END
+    'page up': 0x21,    # VK_PRIOR
+    'page down': 0x22,  # VK_NEXT
+    'f1': 0x70,         # VK_F1
+    'f2': 0x71,         # VK_F2
+    'f3': 0x72,         # VK_F3
+    'f4': 0x73,         # VK_F4
+    'f5': 0x74,         # VK_F5
+    'f6': 0x75,         # VK_F6
+    'f7': 0x76,         # VK_F7
+    'f8': 0x77,         # VK_F8
+    'f9': 0x78,         # VK_F9
+    'f10': 0x79,        # VK_F10
+    'f11': 0x7A,        # VK_F11
+    'f12': 0x7B,        # VK_F12
+}
+
+def send_input_keyboard_event(key_name, pressed):
+    try:
+        vk = None
+        if key_name in vk_map:
+            vk = vk_map[key_name]
+        elif len(key_name) == 1:
+            vk = ctypes.windll.user32.VkKeyScanW(ord(key_name)) & 0xFF
+            
+        if vk is not None:
+            inp = INPUT()
+            inp.type = INPUT_KEYBOARD
+            flags = 0
+            if not pressed:
+                flags |= KEYEVENTF_KEYUP
+                
+            # Check for extended keys
+            extended_vks = [
+                0x25, 0x26, 0x27, 0x28, # Arrows
+                0x2D, 0x2E,             # Insert, Delete
+                0x24, 0x23,             # Home, End
+                0x21, 0x22,             # PageUp, PageDown
+                0x90,                   # Numlock
+                0x2F,                   # Print screen
+                0x12, 0xA1,             # Alt_R
+                0x11, 0xA3              # Ctrl_R
+            ]
+            if vk in extended_vks:
+                flags |= KEYEVENTF_EXTENDEDKEY
+                
+            inp.union.ki = KEYBDINPUT(vk, 0, flags, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception as e:
+        print(f"[SendInput] Keyboard injection failed: {e}")
+
+def send_input_mouse_click(button_name, pressed):
+    try:
+        flags = 0
+        if button_name == 'left':
+            flags = MOUSEEVENTF_LEFTDOWN if pressed else MOUSEEVENTF_LEFTUP
+        elif button_name == 'right':
+            flags = MOUSEEVENTF_RIGHTDOWN if pressed else MOUSEEVENTF_RIGHTUP
+        elif button_name == 'middle':
+            flags = MOUSEEVENTF_MIDDLEDOWN if pressed else MOUSEEVENTF_MIDDLEUP
+            
+        if flags:
+            inp = INPUT()
+            inp.type = INPUT_MOUSE
+            inp.union.mi = MOUSEINPUT(0, 0, 0, flags, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception as e:
+        print(f"[SendInput] Mouse click injection failed: {e}")
+
+def send_input_mouse_scroll(dx, dy):
+    try:
+        if dy != 0:
+            inp = INPUT()
+            inp.type = INPUT_MOUSE
+            inp.union.mi = MOUSEINPUT(0, 0, int(dy * 120), MOUSEEVENTF_WHEEL, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception as e:
+        print(f"[SendInput] Mouse scroll injection failed: {e}")
 
 # TCP Frame Helper Functions
 socket_send_lock = threading.Lock()
@@ -4462,7 +4624,8 @@ class UnifiedApp(tk.Tk):
         try:
             import ctypes
             # WM_SYSCOMMAND = 0x0112, SC_MONITORPOWER = 0xF170, -1 = power on
-            ctypes.windll.user32.SendMessageW(0xFFFF, 0x0112, 0xF170, -1)
+            # Use SendNotifyMessageW to avoid blocking if a window is non-responsive
+            ctypes.windll.user32.SendNotifyMessageW(0xFFFF, 0x0112, 0xF170, -1)
             # Prevent sleep
             ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000002)
             # Simulate a harmless VK_F15 keypress to wake display/lockscreen
@@ -4669,19 +4832,8 @@ class UnifiedApp(tk.Tk):
                         mouse.release(btn)
                 except:
                     pass
-            try:
-                import win32api, win32con
-                flags = 0
-                if button_name == 'left':
-                    flags = win32con.MOUSEEVENTF_LEFTDOWN if pressed else win32con.MOUSEEVENTF_LEFTUP
-                elif button_name == 'right':
-                    flags = win32con.MOUSEEVENTF_RIGHTDOWN if pressed else win32con.MOUSEEVENTF_RIGHTUP
-                elif button_name == 'middle':
-                    flags = win32con.MOUSEEVENTF_MIDDLEDOWN if pressed else win32con.MOUSEEVENTF_MIDDLEUP
-                if flags:
-                    win32api.mouse_event(flags, 0, 0, 0, 0)
-            except Exception as e:
-                print(f"[Host] mouse_event click fallback failed: {e}")
+            # Primary simulation using standard SendInput API
+            send_input_mouse_click(button_name, pressed)
                 
         elif ev_type == 'mouse_scroll':
             dx, dy = event['dx'], event['dy']
@@ -4689,12 +4841,8 @@ class UnifiedApp(tk.Tk):
                 mouse.scroll(dx, dy)
             except:
                 pass
-            try:
-                import win32api, win32con
-                if dy != 0:
-                    win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, int(dy * 120), 0)
-            except Exception as e:
-                print(f"[Host] mouse_event scroll fallback failed: {e}")
+            # Primary simulation using standard SendInput API
+            send_input_mouse_scroll(dx, dy)
                 
         elif ev_type == 'key_event':
             key_name = event['key']
@@ -4714,55 +4862,8 @@ class UnifiedApp(tk.Tk):
                         keyboard.release(target_key)
                 except Exception:
                     pass
-            try:
-                import win32api, win32con
-                vk_map = {
-                    'space': win32con.VK_SPACE,
-                    'enter': win32con.VK_RETURN,
-                    'return': win32con.VK_RETURN,
-                    'escape': win32con.VK_ESCAPE,
-                    'backspace': win32con.VK_BACK,
-                    'tab': win32con.VK_TAB,
-                    'left shift': win32con.VK_LSHIFT,
-                    'right shift': win32con.VK_RSHIFT,
-                    'left ctrl': win32con.VK_LCONTROL,
-                    'right ctrl': win32con.VK_RCONTROL,
-                    'left alt': win32con.VK_LMENU,
-                    'right alt': win32con.VK_RMENU,
-                    'up': win32con.VK_UP,
-                    'down': win32con.VK_DOWN,
-                    'left': win32con.VK_LEFT,
-                    'right': win32con.VK_RIGHT,
-                    'caps lock': win32con.VK_CAPITAL,
-                    'capslock': win32con.VK_CAPITAL,
-                    'delete': win32con.VK_DELETE,
-                    'home': win32con.VK_HOME,
-                    'end': win32con.VK_END,
-                    'page up': win32con.VK_PRIOR,
-                    'page down': win32con.VK_NEXT,
-                    'f1': win32con.VK_F1,
-                    'f2': win32con.VK_F2,
-                    'f3': win32con.VK_F3,
-                    'f4': win32con.VK_F4,
-                    'f5': win32con.VK_F5,
-                    'f6': win32con.VK_F6,
-                    'f7': win32con.VK_F7,
-                    'f8': win32con.VK_F8,
-                    'f9': win32con.VK_F9,
-                    'f10': win32con.VK_F10,
-                    'f11': win32con.VK_F11,
-                    'f12': win32con.VK_F12,
-                }
-                vk = None
-                if key_name in vk_map:
-                    vk = vk_map[key_name]
-                elif len(key_name) == 1:
-                    vk = win32api.VkKeyScan(key_name) & 0xFF
-                if vk is not None:
-                    flags = 0 if pressed else win32con.KEYEVENTF_KEYUP
-                    win32api.keybd_event(vk, 0, flags, 0)
-            except Exception as e:
-                print(f"[Host] keybd_event fallback failed: {e}")
+            # Primary simulation using standard SendInput API
+            send_input_keyboard_event(key_name, pressed)
                 
         elif ev_type == 'resize_viewer':
             self.client_viewer_w = event.get('w', 1280)
@@ -4775,9 +4876,9 @@ class UnifiedApp(tk.Tk):
             except:
                 pass
         try:
-            import win32api, win32con
-            for vk in [win32con.VK_LSHIFT, win32con.VK_RSHIFT, win32con.VK_LCONTROL, win32con.VK_RCONTROL, win32con.VK_LMENU, win32con.VK_RMENU]:
-                win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+            # Release via SendInput
+            for key_name in ['left shift', 'right shift', 'left ctrl', 'right ctrl', 'left alt', 'right alt']:
+                send_input_keyboard_event(key_name, False)
         except:
             pass
                 
