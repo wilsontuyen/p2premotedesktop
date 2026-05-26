@@ -3,19 +3,30 @@ import win32api
 import win32con
 import win32process
 import win32security
+import win32event
 import sys
 import os
 import time
 import traceback
 
-app_dir = os.path.dirname(os.path.abspath(__file__))
+# Determine the application directory robustly across source execution, Nuitka standalone, and Nuitka onefile.
+app_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+if not app_dir:
+    if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__'):
+        exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
+        app_dir = os.path.dirname(os.path.abspath(exe_path))
+    else:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
 log_file = os.path.join(app_dir, "service.log")
 
 def log(msg):
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    log_line = f"[{timestamp}] {msg}\n"
-    print(log_line, end="")
     try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_line = f"[{timestamp}] {msg}\n"
+        try:
+            print(log_line, end="")
+        except:
+            pass
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(log_line)
     except:
@@ -75,45 +86,43 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
     h_token = None
     desktop = "winsta0\\default"
 
-    # If logged in and NOT locked, target user session
-    if is_logged_in and not is_screen_locked:
-        try:
-            h_token = win32ts.WTSQueryUserToken(session_id)
-            desktop = "winsta0\\default"
-            log(f"Targeting active user desktop for session {session_id}")
-        except Exception as e:
-            log(f"Failed to query user token: {e}")
+    # We ALWAYS use the winlogon token to run the agent as SYSTEM in the user session.
+    # This allows the agent to dynamically switch between desktops (winsta0\default and winsta0\winlogon)
+    # and control administrative apps / UAC prompts without permission blocks.
+    winlogon_pid = find_winlogon_pid(session_id)
+    if not winlogon_pid:
+        log(f"winlogon.exe not found in session {session_id}. Cannot run agent.")
+        return None
 
-    if not h_token:
-        # Duplicate winlogon token (lock screen)
-        winlogon_pid = find_winlogon_pid(session_id)
-        if not winlogon_pid:
-            log(f"winlogon.exe not found in session {session_id}. Cannot run agent.")
-            return None
+    try:
+        # Enable SeDebugPrivilege
+        h_process_self = win32api.GetCurrentProcess()
+        h_token_self = win32security.OpenProcessToken(
+            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+        )
+        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
+        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
+        win32api.CloseHandle(h_token_self)
 
-        try:
-            # Enable SeDebugPrivilege
-            h_process_self = win32api.GetCurrentProcess()
-            h_token_self = win32security.OpenProcessToken(
-                h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-            )
-            privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
-            win32security.AdjustTokenPrivileges(h_token_self, False, privs)
-            win32api.CloseHandle(h_token_self)
-
-            # Open winlogon and its token
-            h_winlogon = win32api.OpenProcess(
-                win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, winlogon_pid
-            )
-            h_token = win32security.OpenProcessToken(
-                h_winlogon, win32con.TOKEN_DUPLICATE | win32con.TOKEN_QUERY | win32con.TOKEN_ASSIGN_PRIMARY
-            )
-            win32api.CloseHandle(h_winlogon)
+        # Open winlogon and its token
+        h_winlogon = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, winlogon_pid
+        )
+        h_token = win32security.OpenProcessToken(
+            h_winlogon, win32con.TOKEN_DUPLICATE | win32con.TOKEN_QUERY | win32con.TOKEN_ASSIGN_PRIMARY
+        )
+        win32api.CloseHandle(h_winlogon)
+        
+        # Target appropriate initial desktop based on active state
+        if is_screen_locked:
             desktop = "winsta0\\winlogon"
-            log(f"Targeting lock screen desktop (Winlogon) for session {session_id}")
-        except Exception as e:
-            log(f"Failed to acquire Winlogon token: {e}")
-            return None
+            log(f"Targeting lock screen desktop (Winlogon) for session {session_id} using SYSTEM token")
+        else:
+            desktop = "winsta0\\default"
+            log(f"Targeting default user desktop for session {session_id} using SYSTEM token")
+    except Exception as e:
+        log(f"Failed to acquire Winlogon token: {e}")
+        return None
 
     if h_token:
         try:
@@ -151,8 +160,102 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
             log(f"CreateProcessAsUser failed: {e}")
     return None
 
+def trigger_sas_system():
+    try:
+        import winreg
+        import ctypes
+        
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_ALL_ACCESS)
+        except WindowsError:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+        winreg.CloseKey(key)
+        log("Configured SoftwareSASGeneration = 3 in registry.")
+    except Exception as e:
+        log(f"Error configuring SoftwareSASGeneration in service: {e}")
+
+    try:
+        sas_dll = ctypes.windll.LoadLibrary("sas.dll")
+        sas_dll.SendSAS.argtypes = [ctypes.c_int]
+        sas_dll.SendSAS.restype = None
+        sas_dll.SendSAS(0)
+        log("SendSAS(0) executed successfully from Session 0 Service.")
+    except Exception as e:
+        log(f"Error calling SendSAS in service: {e}")
+
+def sas_listener_thread():
+    # Setup security attributes with NULL DACL to allow user processes to trigger
+    sa = win32security.SECURITY_ATTRIBUTES()
+    sa.bInheritHandle = 1
+    sd = win32security.SECURITY_DESCRIPTOR()
+    sd.Initialize()
+    sd.SetSecurityDescriptorDacl(True, None, False)
+    sa.SECURITY_DESCRIPTOR = sd
+
+    try:
+        h_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_SAS_Event")
+    except Exception as e:
+        log(f"Failed to create SAS event: {e}")
+        return
+
+    log("SAS Listener Thread started and waiting on Global\\AntigravityP2P_SAS_Event...")
+    while True:
+        rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
+        if rc == win32event.WAIT_OBJECT_0:
+            log("Received SAS event signal from Agent. Triggering SendSAS.")
+            trigger_sas_system()
+
+def terminate_process_with_pid(pid):
+    if not pid:
+        return
+    log(f"Attempting to terminate process {pid}")
+    try:
+        h_process_self = win32api.GetCurrentProcess()
+        h_token_self = win32security.OpenProcessToken(
+            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+        )
+        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
+        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
+        win32api.CloseHandle(h_token_self)
+    except Exception as e:
+        log(f"Failed to enable SeDebugPrivilege for termination: {e}")
+
+    success = False
+    try:
+        h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, pid)
+        win32api.TerminateProcess(h_proc, 0)
+        win32api.CloseHandle(h_proc)
+        log(f"Terminated process {pid} via Windows API.")
+        success = True
+    except Exception as e:
+        log(f"Failed to kill agent {pid} via Windows API: {e}")
+
+    if not success:
+        try:
+            import subprocess
+            subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log(f"Terminated process {pid} via taskkill.")
+            success = True
+        except Exception as e:
+            log(f"Failed to kill agent {pid} via taskkill: {e}")
+
 def main():
     log("Easy Remote Desktop Agent service loop started.")
+    
+    # Clean up any lingering agent processes
+    try:
+        import subprocess
+        subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log("Cleaned up lingering RemoteDesktopP2P.exe processes.")
+    except Exception as e:
+        log(f"Error cleaning up processes on startup: {e}")
+
+    # Start SAS Listener thread
+    import threading
+    t = threading.Thread(target=sas_listener_thread, daemon=True)
+    t.start()
+
     current_agent_pid = None
     last_session_id = None
     last_was_logged_in = None
@@ -178,38 +281,46 @@ def main():
             # Check if screen is locked (LogonUI is running)
             is_screen_locked = is_logon_ui_running(active_session_id)
 
-            state_changed = (last_session_id != active_session_id or 
-                             last_was_logged_in != is_logged_in or
-                             last_was_screen_locked != is_screen_locked)
+            # Check if state has changed (Session ID, Logged-in state, or Lock screen state).
+            # We MUST restart the agent when any of these change to ensure the agent is running
+            # on the correct active desktop (winsta0\default or winsta0\winlogon).
+            state_changed = (
+                (last_session_id != active_session_id) or
+                (last_was_screen_locked != is_screen_locked) or
+                (last_was_logged_in != is_logged_in)
+            )
 
             if state_changed:
-                log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked}")
+                log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked} (Previous: LoggedIn={last_was_logged_in}, Locked={last_was_screen_locked})")
                 
                 # Kill current agent
                 if current_agent_pid:
-                    log(f"Killing current agent with PID {current_agent_pid}")
-                    try:
-                        h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, current_agent_pid)
-                        win32api.TerminateProcess(h_proc, 0)
-                        win32api.CloseHandle(h_proc)
-                    except Exception as e:
-                        log(f"Failed to kill agent: {e}")
+                    log(f"Killing current agent with PID {current_agent_pid} to switch to the new desktop/state.")
+                    terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
 
                 last_session_id = active_session_id
                 last_was_logged_in = is_logged_in
                 last_was_screen_locked = is_screen_locked
 
-            # Check if agent is running
+            # Check if agent is running on the target desktop/session using Mutex
+            target_desktop = 'winlogon' if is_screen_locked else 'default'
+            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{active_session_id}_{target_desktop}"
+            
             agent_running = False
-            if current_agent_pid:
-                try:
-                    h_proc = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION, False, current_agent_pid)
-                    code = win32process.GetExitCodeProcess(h_proc)
-                    win32api.CloseHandle(h_proc)
-                    agent_running = (code == win32con.STILL_ACTIVE)
-                except Exception:
-                    pass
+            try:
+                h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
+                win32api.CloseHandle(h_mutex)
+                agent_running = True
+            except Exception as e:
+                err_code = 0
+                if hasattr(e, 'winerror'):
+                    err_code = e.winerror
+                elif hasattr(e, 'args') and len(e.args) > 0:
+                    err_code = e.args[0]
+                
+                if err_code != 2: # winerror.ERROR_FILE_NOT_FOUND
+                    agent_running = True
 
             if not agent_running:
                 pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
@@ -219,7 +330,7 @@ def main():
         except Exception as e:
             log(f"Error in main loop: {e}\n{traceback.format_exc()}")
 
-        time.sleep(5)
+        time.sleep(1)
 
 if __name__ == '__main__':
     main()

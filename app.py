@@ -2406,6 +2406,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
         except Exception as e:
             print(f"[App] Lỗi thiết lập icon cửa sổ pygame: {e}")
         
+        # Try loading font for SAS button
+        try:
+            btn_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
+        except:
+            try:
+                btn_font = pygame.font.SysFont("Arial", 12, bold=True)
+            except:
+                btn_font = pygame.font.Font(None, 20)
+                
         # Khởi tạo kích thước viewer ban đầu cho Host biết
         def send_event(event_dict):
             try:
@@ -2426,6 +2435,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
             except Exception:
                 pass
 
+            # Calculate floating button rectangle dynamically
+            btn_w, btn_h = 145, 30
+            btn_x = (window_w - btn_w) // 2
+            btn_y = 5
+            btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+            
+            mx, my = pygame.mouse.get_pos()
+            is_hover = btn_rect.collidepoint(mx, my)
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     client_running = False
@@ -2437,12 +2455,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
                     send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                     
                 elif event.type == pygame.MOUSEMOTION:
-                    mx, my = event.pos
-                    host_x = int(mx * (host_w / window_w))
-                    host_y = int(my * (host_h / window_h))
+                    if btn_rect.collidepoint(event.pos):
+                        continue
+                    mx_pos, my_pos = event.pos
+                    host_x = int(mx_pos * (host_w / window_w))
+                    host_y = int(my_pos * (host_h / window_h))
                     send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                     
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+                    if btn_rect.collidepoint(event.pos):
+                        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                            print("[Client] SAS Button Clicked. Sending trigger_sas event.")
+                            send_event({"type": "trigger_sas"})
+                        continue
                     if event.button in button_map:
                         send_event({
                             "type": "mouse_click",
@@ -2470,11 +2495,21 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
                 surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                 scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
                 screen.blit(scaled_surf, (0, 0))
-                pygame.display.flip()
             else:
                 screen.fill((30, 30, 30))
-                pygame.display.flip()
                 
+            # Draw floating SAS button on top
+            bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
+            border_color = (0, 173, 181)
+            pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
+            pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
+            
+            # Render and blit text
+            text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
+            text_rect = text_surf.get_rect(center=btn_rect.center)
+            screen.blit(text_surf, text_rect)
+            
+            pygame.display.flip()
             clock.tick(60)
             
         pygame.quit()
@@ -2508,6 +2543,57 @@ def decrypt_text(encrypted_text, key="AntigravityP2P"):
         return "".join(xored)
     except Exception:
         return ""
+
+def get_session_id():
+    try:
+        import ctypes
+        sid = ctypes.c_ulong()
+        if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+            return sid.value
+    except:
+        pass
+    return 1
+
+def get_desktop_name():
+    try:
+        import ctypes
+        h_desk = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+        name = ctypes.create_unicode_buffer(256)
+        size = ctypes.c_ulong(256)
+        if ctypes.windll.user32.GetUserObjectInformationW(h_desk, 2, name, size, None):
+            return name.value.lower()
+    except:
+        pass
+    return "default"
+
+def set_windows_graphics_effects(enabled=True):
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        # Font Smoothing (ClearType)
+        ctypes.windll.user32.SystemParametersInfoW(0x004B, 1 if enabled else 0, None, 3)
+        
+        # Drag Full Windows
+        ctypes.windll.user32.SystemParametersInfoW(0x0025, 1 if enabled else 0, None, 3)
+        
+        # Menu Animation
+        ctypes.windll.user32.SystemParametersInfoW(0x1003, 1 if enabled else 0, None, 3)
+        
+        # UI Effects
+        ctypes.windll.user32.SystemParametersInfoW(0x103E, 1 if enabled else 0, None, 3)
+        
+        # Window Animations (iMinAnimate)
+        class ANIMATIONINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("iMinAnimate", ctypes.c_int)]
+        info = ANIMATIONINFO()
+        info.cbSize = ctypes.sizeof(ANIMATIONINFO)
+        info.iMinAnimate = 1 if enabled else 0
+        ctypes.windll.user32.SystemParametersInfoW(0x0049, info.cbSize, ctypes.byref(info), 3)
+        
+        print(f"[Host] Set Windows graphics effects to: {enabled}")
+    except Exception as e:
+        print(f"[Host] Error setting Windows graphics effects: {e}")
 
 # Unified Application Class
 class UnifiedApp(tk.Tk):
@@ -2653,18 +2739,37 @@ class UnifiedApp(tk.Tk):
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
         
-        # Cross-process activation setup
-        self.activation_file = os.path.join(os.environ.get("TEMP", ""), "antigravity_p2p_activate.tmp")
-        self.after(500, self.check_activation_request)
+        # Restore Event Listener for waking the GUI
+        if not self.is_headless:
+            threading.Thread(target=self.restore_event_listener_thread, daemon=True).start()
 
-    def check_activation_request(self):
-        if os.path.exists(self.activation_file):
-            try:
-                os.remove(self.activation_file)
-                self._restore_window()
-            except:
-                pass
-        self.after(500, self.check_activation_request)
+    def restore_event_listener_thread(self):
+        if sys.platform != "win32":
+            return
+        import win32event, win32security
+        session_id = get_session_id()
+        desktop_name = get_desktop_name()
+        restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+        
+        sa = win32security.SECURITY_ATTRIBUTES()
+        sa.bInheritHandle = 1
+        sd = win32security.SECURITY_DESCRIPTOR()
+        sd.Initialize()
+        sd.SetSecurityDescriptorDacl(True, None, False)
+        sa.SECURITY_DESCRIPTOR = sd
+        
+        try:
+            h_event = win32event.CreateEvent(sa, False, False, restore_event_name)
+        except Exception as e:
+            print(f"[Event] Failed to create restore event: {e}")
+            return
+            
+        print(f"[Event] Listening for restore event: {restore_event_name}")
+        while True:
+            rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
+            if rc == win32event.WAIT_OBJECT_0:
+                print("[Event] Received restore signal. Restoring window.")
+                self.after(0, self._restore_window)
         
     def setup_ui(self):
         # Setup Window Menu Bar
@@ -4686,7 +4791,44 @@ class UnifiedApp(tk.Tk):
                 }).encode('utf-8')
                 send_msg(conn, res_info)
                 
-                client_state = {"running": True}
+                client_state = {"running": True, "net_class": "medium"}
+                
+                # Perform pre-connection speed test handling on host
+                try:
+                    # 1. Ping / Latency test
+                    for _ in range(3):
+                        ping_msg = recv_msg(conn)
+                        if ping_msg:
+                            ping_data = json.loads(ping_msg.decode('utf-8'))
+                            if ping_data.get("action") == "speed_test_ping":
+                                send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'))
+                                
+                    # 2. Bandwidth test
+                    bw_msg = recv_msg(conn)
+                    if bw_msg:
+                        bw_data = json.loads(bw_msg.decode('utf-8'))
+                        if bw_data.get("action") == "speed_test_bw_req":
+                            dummy_size = 524288
+                            send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'))
+                            conn.sendall(b'\x00' * dummy_size)
+                            
+                    # 3. Receive results
+                    res_msg = recv_msg(conn)
+                    if res_msg:
+                        res_data = json.loads(res_msg.decode('utf-8'))
+                        if res_data.get("action") == "speed_test_result":
+                            net_class = res_data.get("net_class", "medium")
+                            client_state["net_class"] = net_class
+                            print(f"[Host] Speed test finished. Class: {net_class}")
+                            
+                            # Adjust windows graphics effects based on net_class
+                            if net_class == "high":
+                                set_windows_graphics_effects(True)
+                            else:
+                                set_windows_graphics_effects(False)
+                except Exception as ste:
+                    print(f"[Host] Speed test handler error: {ste}")
+                
                 self.active_clients[addr] = client_state
                 
                 addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
@@ -4707,6 +4849,7 @@ class UnifiedApp(tk.Tk):
                     client_state["running"] = False
                     t_sender.join()
                     clipboard_sync_manager.remove_socket(conn)
+                    set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
                     
@@ -4742,6 +4885,11 @@ class UnifiedApp(tk.Tk):
     def host_sender_thread(self, conn, monitor, client_state):
         print("[Host] Started Screen Sender Thread.")
         import io
+        
+        try:
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 2000)
+        except: pass
+
         with mss.mss() as sct:
             while client_state.get("running", False):
                 try:
@@ -4749,30 +4897,87 @@ class UnifiedApp(tk.Tk):
                     # Convert raw BGRA from mss directly to Pillow Image
                     pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
                     
+                    # Grayscale 64x64 difference detection to skip identical frames
+                    static_frame = False
+                    try:
+                        small_gray = pil_img.resize((64, 64)).convert("L")
+                        if "prev_small_gray" in client_state:
+                            prev_gray = client_state["prev_small_gray"]
+                            diff = 0
+                            p1 = small_gray.getdata()
+                            p2 = prev_gray.getdata()
+                            for i in range(64 * 64):
+                                diff += abs(p1[i] - p2[i])
+                            mean_diff = diff / (64.0 * 64.0)
+                            if mean_diff < 0.5:
+                                static_frame = True
+                        if not static_frame:
+                            client_state["prev_small_gray"] = small_gray
+                    except: pass
+                    
+                    if static_frame:
+                        time.sleep(1.0)
+                        continue
+
                     # Lấy độ phân giải hiển thị mong muốn từ Client
                     target_w = getattr(self, 'client_viewer_w', 1280)
                     target_h = getattr(self, 'client_viewer_h', 720)
                     
-                    cap_w, cap_h = img.size
+                    net_class = client_state.get("net_class", "medium")
                     
-                    # Chỉ thực hiện resize nếu kích cỡ thực tế khác kích cỡ hiển thị của Client
-                    if cap_w != target_w or cap_h != target_h:
-                        pil_img = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                        
-                    # Điều chỉnh chất lượng JPEG thích ứng để tối ưu băng thông nhưng vẫn giữ độ nét cao
-                    if target_w >= 2560:   # 2K / 4K
-                        quality = 90       # Chất lượng 90 cho màn hình độ phân giải siêu cao
-                    elif target_w >= 1920: # Full HD
-                        quality = 95       # Chất lượng 95 cho Full HD
+                    if net_class == "high":
+                        base_quality = 90
+                        fps_limit = 60
+                        res_scale = 1.0
+                    elif net_class == "low":
+                        base_quality = 40
+                        fps_limit = 12
+                        res_scale = 0.6
                     else:
-                        quality = 98       # Chất lượng 98 cho HD / màn hình nhỏ hơn
+                        base_quality = 70
+                        fps_limit = 30
+                        res_scale = 0.8
+
+                    quality = client_state.get("dyn_quality", base_quality)
+                    sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
+                    dyn_scale = client_state.get("dyn_scale", res_scale)
+
+                    cap_w, cap_h = img.size
+                    w = int(target_w * dyn_scale)
+                    h = int(target_h * dyn_scale)
+                    
+                    if cap_w != w or cap_h != h:
+                        pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
                         
                     buf = io.BytesIO()
                     pil_img.save(buf, format="JPEG", quality=quality)
                     jpeg_data = buf.getvalue()
                     
+                    t_start_send = time.time()
                     send_msg(conn, jpeg_data)
-                    time.sleep(0.035)
+                    send_time = time.time() - t_start_send
+                    
+                    if "send_ema" not in client_state:
+                        client_state["send_ema"] = send_time
+                    else:
+                        client_state["send_ema"] = 0.8 * client_state["send_ema"] + 0.2 * send_time
+                        
+                    ema = client_state["send_ema"]
+                    
+                    if ema > 0.15:
+                        quality = max(35, quality - 5)
+                        sleep_time = min(0.2, sleep_time + 0.02)
+                        dyn_scale = max(0.5, dyn_scale - 0.05)
+                    elif ema < 0.05:
+                        quality = min(base_quality, quality + 2)
+                        sleep_time = max(1.0 / fps_limit, sleep_time - 0.01)
+                        dyn_scale = min(res_scale, dyn_scale + 0.05)
+                        
+                    client_state["dyn_quality"] = quality
+                    client_state["dyn_sleep_time"] = sleep_time
+                    client_state["dyn_scale"] = dyn_scale
+
+                    time.sleep(sleep_time)
                 except Exception as e:
                     print(f"[Host] Screen Sender Error: {e}")
                     break
@@ -4868,6 +5073,34 @@ class UnifiedApp(tk.Tk):
         elif ev_type == 'resize_viewer':
             self.client_viewer_w = event.get('w', 1280)
             self.client_viewer_h = event.get('h', 720)
+            
+        elif ev_type == 'trigger_sas':
+            self.trigger_sas()
+
+    def trigger_sas(self):
+        print("[Host] Received trigger_sas command.")
+        import ctypes
+        try:
+            sas_dll = ctypes.windll.LoadLibrary("sas.dll")
+            sas_dll.SendSAS.argtypes = [ctypes.c_int]
+            sas_dll.SendSAS.restype = None
+            sas_dll.SendSAS(0)
+            print("[Host] SendSAS(0) executed successfully via direct API.")
+            return
+        except Exception as e:
+            print(f"[Host] Direct SendSAS call failed: {e}. Falling back to named event.")
+            
+        import win32event
+        try:
+            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, "Global\\AntigravityP2P_SAS_Event")
+            if h_event:
+                win32event.SetEvent(h_event)
+                win32event.CloseHandle(h_event)
+                print("[Host] Signaled Global\\AntigravityP2P_SAS_Event successfully.")
+            else:
+                print("[Host] Failed to open Global\\AntigravityP2P_SAS_Event.")
+        except Exception as ex:
+            print(f"[Host] Failed to signal SAS event: {ex}")
 
     def host_release_all_modifiers(self):
         for mod_key in [Key.shift, Key.ctrl, Key.alt]:
@@ -5070,6 +5303,95 @@ class UnifiedApp(tk.Tk):
                 host_h = res.get("height")
                 computer_name = res.get("computer_name", "")
                 zalo_phone = res.get("zalo_phone", "")
+                
+                # Perform pre-connection speed test (Ping/Latency and Bandwidth)
+                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông)...")
+                net_class = "medium"
+                net_class_viet = "Trung bình (Medium)"
+                avg_ping = 50.0
+                bandwidth = 10.0
+                try:
+                    # 1. Ping / Latency test
+                    rtts = []
+                    for _ in range(3):
+                        t0 = time.time()
+                        send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'))
+                        pong_msg = recv_msg(sock)
+                        if pong_msg:
+                            pong_data = json.loads(pong_msg.decode('utf-8'))
+                            if pong_data.get("action") == "speed_test_pong":
+                                rtts.append(time.time() - t0)
+                        time.sleep(0.05)
+                    if rtts:
+                        avg_ping = (sum(rtts) / len(rtts)) * 1000.0
+                        
+                    # 2. Bandwidth test
+                    send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'))
+                    bw_start_msg = recv_msg(sock)
+                    if bw_start_msg:
+                        bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
+                        if bw_start_data.get("action") == "speed_test_bw_start":
+                            dummy_size = 524288
+                            t_start = time.time()
+                            dummy_data = b''
+                            while len(dummy_data) < dummy_size:
+                                chunk = sock.recv(dummy_size - len(dummy_data))
+                                if not chunk:
+                                    break
+                                dummy_data += chunk
+                            t_end = time.time()
+                            duration = t_end - t_start
+                            if duration > 0 and len(dummy_data) == dummy_size:
+                                bandwidth = (len(dummy_data) * 8.0) / (duration * 1024.0 * 1024.0)
+                                
+                    # 3. Network quality classification
+                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 30ms.
+                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 30 - 100ms.
+                    # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
+                    if bandwidth > 20.0 and avg_ping < 30.0:
+                        net_class = "high"
+                        net_class_viet = "Tốt (High-speed)"
+                    elif bandwidth < 5.0 or avg_ping > 100.0:
+                        net_class = "low"
+                        net_class_viet = "Yếu (Low-speed)"
+                    else:
+                        net_class = "medium"
+                        net_class_viet = "Trung bình (Medium)"
+                        
+                    # 4. Report speed test results to Host
+                    send_msg(sock, json.dumps({
+                        "action": "speed_test_result",
+                        "net_class": net_class,
+                        "ping": avg_ping,
+                        "bandwidth": bandwidth
+                    }).encode('utf-8'))
+                    
+                    status_text = f"Đo tốc độ: Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
+                    print(f"[Client] {status_text}")
+                    self.update_status(status_text)
+                    time.sleep(1.0)
+                except Exception as ste:
+                    print(f"[Client] Speed test error: {ste}")
+                    # Send default result to host to avoid locking
+                    try:
+                        send_msg(sock, json.dumps({
+                            "action": "speed_test_result",
+                            "net_class": "medium",
+                            "ping": 50.0,
+                            "bandwidth": 10.0
+                        }).encode('utf-8'))
+                    except: pass
+                    
+                # Adjust screen dimensions on client based on net_class to reduce frame size
+                if net_class == "low":
+                    scale = min(1.0, 1024.0 / host_w)
+                    host_w = int(host_w * scale)
+                    host_h = int(host_h * scale)
+                elif net_class == "medium":
+                    scale = min(1.0, 1366.0 / host_w)
+                    host_w = int(host_w * scale)
+                    host_h = int(host_h * scale)
+                    
                 self.update_status("Kết nối thành công! Đang khởi động màn hình...")
                 # Launch Pygame Viewer on the main thread
                 self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone)
@@ -5287,73 +5609,60 @@ if __name__ == '__main__':
     import sys
     import ctypes
     
-    # Đảm bảo chỉ 1 phiên bản (instance) duy nhất được chạy
+    is_headless = "--headless" in sys.argv
+    
     if sys.platform == "win32":
-        import win32event, win32api, winerror
-        mutex = win32event.CreateMutex(None, False, "Global\\AntigravityP2PRemoteDesktopAppMutex")
-        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            import tkinter as tk
-            import os
-            root = tk.Tk()
-            root.withdraw()
-            
-            dialog = tk.Toplevel(root)
-            dialog.title("Thông báo")
-            dialog.resizable(False, False)
-            bg_color = "#1E1E24"
-            dialog.configure(bg=bg_color)
-            
+        import win32event, win32api, winerror, win32security
+        
+        def get_session_id():
             try:
-                # pyrefly: ignore [missing-import]
-                from PIL import Image, ImageTk
-                if getattr(sys, 'frozen', False):
-                    app_dir = os.path.dirname(sys.executable)
-                else:
-                    app_dir = os.path.dirname(os.path.abspath(__file__))
-                icon_path = os.path.join(app_dir, "app_icon.png")
-                if os.path.exists(icon_path):
-                    img = Image.open(icon_path)
-                    icon_img = ImageTk.PhotoImage(img)
-                    dialog.iconphoto(True, icon_img)
-                    root._icon_ref = icon_img
-                    
-                    resized_img = img.resize((36, 36), Image.LANCZOS)
-                    dialog_icon_img = ImageTk.PhotoImage(resized_img)
-                    root._dialog_icon_ref = dialog_icon_img
-            except: pass
-            
-            w, h = 340, 140
-            x = (root.winfo_screenwidth() - w) // 2
-            y = (root.winfo_screenheight() - h) // 2
-            dialog.geometry(f"{w}x{h}+{x}+{y}")
-            
-            content_frame = tk.Frame(dialog, bg=bg_color)
-            content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
-            
-            if hasattr(root, '_dialog_icon_ref'):
-                tk.Label(content_frame, image=root._dialog_icon_ref, bg=bg_color).pack(side=tk.LEFT, padx=(0, 12))
-            else:
-                tk.Label(content_frame, text="ℹ", font=("Segoe UI", 22), fg="#00ADB5", bg=bg_color).pack(side=tk.LEFT, padx=(0, 12))
-                
-            msg = "Ứng dụng đang hoạt động!\n\nVui lòng kiểm tra dưới khay hệ thống (Góc dưới bên phải màn hình)."
-            tk.Label(content_frame, text=msg, font=("Segoe UI", 9), fg="#FFFFFF", bg=bg_color, wraplength=250, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            btn_frame = tk.Frame(dialog, bg=bg_color)
-            btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
-            tk.Button(
-                btn_frame, text="OK", font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg="#00ADB5", activebackground="#008B92",
-                relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=root.destroy
-            ).pack(side=tk.RIGHT)
-            
-            dialog.protocol("WM_DELETE_WINDOW", root.destroy)
-            root.mainloop()
-            try:
-                import os
-                with open(os.path.join(os.environ.get("TEMP", ""), "antigravity_p2p_activate.tmp"), "w") as f:
-                    f.write("1")
+                sid = ctypes.c_ulong()
+                if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+                    return sid.value
             except:
                 pass
-            sys.exit(0)
+            return 1
+            
+        def get_desktop_name():
+            try:
+                h_desk = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+                name = ctypes.create_unicode_buffer(256)
+                size = ctypes.c_ulong(256)
+                if ctypes.windll.user32.GetUserObjectInformationW(h_desk, 2, name, size, None):
+                    return name.value.lower()
+            except:
+                pass
+            return "default"
+            
+        session_id = get_session_id()
+        desktop_name = get_desktop_name()
+        
+        if is_headless:
+            # Service headless helper uses mutex index 1
+            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"
+            mutex = win32event.CreateMutex(None, False, mutex_name)
+        else:
+            # GUI client uses mutex index 2
+            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{session_id}_{desktop_name}"
+            mutex = win32event.CreateMutex(None, False, mutex_name)
+            
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                # Topmost native message dialog
+                msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
+                msg_title = "Thông báo"
+                # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
+                ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
+                
+                # Signal restore event to primary GUI instance
+                restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+                try:
+                    h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, restore_event_name)
+                    if h_event:
+                        win32event.SetEvent(h_event)
+                        win32api.CloseHandle(h_event)
+                except Exception as e:
+                    print(f"Failed to signal restore event: {e}")
+                sys.exit(0)
     if sys.platform == "win32":
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)

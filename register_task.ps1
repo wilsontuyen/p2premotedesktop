@@ -7,17 +7,25 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 $WorkspaceDir = Get-Location
-$PythonwExe = "$WorkspaceDir\.venv\Scripts\pythonw.exe"
-$ScriptPy = "$WorkspaceDir\windows_service_loop.py"
+$ServiceExe = "$WorkspaceDir\RemoteDesktopService.exe"
+$CompiledMode = $false
 
-if (-not (Test-Path $PythonwExe)) {
-    Write-Error "Could not find pythonw.exe at: $PythonwExe"
-    Exit
+if (Test-Path $ServiceExe) {
+    $CompiledMode = $true
+} else {
+    $PythonwExe = "$WorkspaceDir\.venv\Scripts\pythonw.exe"
+    $ScriptPy = "$WorkspaceDir\windows_service_loop.py"
+
+    if (-not (Test-Path $PythonwExe)) {
+        Write-Error "Could not find pythonw.exe at: $PythonwExe"
+        Exit
+    }
+    if (-not (Test-Path $ScriptPy)) {
+        Write-Error "Could not find script at: $ScriptPy"
+        Exit
+    }
 }
-if (-not (Test-Path $ScriptPy)) {
-    Write-Error "Could not find script at: $ScriptPy"
-    Exit
-}
+
 
 $TaskName = "EasyRemoteDesktopAgent"
 
@@ -31,7 +39,11 @@ if ($Existing) {
 
 # 2. Configure new task
 Write-Host "Configuring task action and trigger..."
-$Action = New-ScheduledTaskAction -Execute "$PythonwExe" -Argument "`"$ScriptPy`""
+if ($CompiledMode) {
+    $Action = New-ScheduledTaskAction -Execute "$ServiceExe"
+} else {
+    $Action = New-ScheduledTaskAction -Execute "$PythonwExe" -Argument "`"$ScriptPy`""
+}
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Compatibility Win8

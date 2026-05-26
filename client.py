@@ -8,6 +8,7 @@ import pygame
 import sys
 
 pygame.init()
+pygame.key.set_repeat(500, 50)
 
 # Shared frame buffer
 frame_lock = threading.Lock()
