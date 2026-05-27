@@ -287,11 +287,20 @@ vk_map = {
 
 def send_input_keyboard_event(key_name, pressed):
     try:
+        if len(key_name) == 1:
+            # Use KEYEVENTF_UNICODE for reliable character injection (vital for password boxes in Winlogon/Server)
+            inp = INPUT()
+            inp.type = INPUT_KEYBOARD
+            flags = 0x0004 # KEYEVENTF_UNICODE
+            if not pressed:
+                flags |= KEYEVENTF_KEYUP
+            inp.union.ki = KEYBDINPUT(0, ord(key_name), flags, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            return
+            
         vk = None
         if key_name in vk_map:
             vk = vk_map[key_name]
-        elif len(key_name) == 1:
-            vk = ctypes.windll.user32.VkKeyScanW(ord(key_name)) & 0xFF
             
         if vk is not None:
             inp = INPUT()
@@ -5180,102 +5189,117 @@ class UnifiedApp(tk.Tk):
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 2000)
         except: pass
 
-        with mss.mss() as sct:
-            while client_state.get("running", False):
-                try:
-                    img = sct.grab(monitor)
-                    # Convert raw BGRA from mss directly to Pillow Image
-                    pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
-                    
-                    # Grayscale 64x64 difference detection to skip identical frames
-                    static_frame = False
-                    try:
-                        small_gray = pil_img.resize((64, 64)).convert("L")
-                        if "prev_small_gray" in client_state:
-                            prev_gray = client_state["prev_small_gray"]
-                            diff = 0
-                            p1 = small_gray.getdata()
-                            p2 = prev_gray.getdata()
-                            for i in range(64 * 64):
-                                diff += abs(p1[i] - p2[i])
-                            mean_diff = diff / (64.0 * 64.0)
-                            if mean_diff < 0.5:
-                                static_frame = True
-                        if not static_frame:
-                            client_state["prev_small_gray"] = small_gray
-                    except: pass
-                    
-                    if static_frame:
-                        time.sleep(1.0)
-                        continue
-
-                    # Lấy độ phân giải hiển thị mong muốn từ Client
-                    target_w = getattr(self, 'client_viewer_w', 1280)
-                    target_h = getattr(self, 'client_viewer_h', 720)
-                    
-                    net_class = client_state.get("net_class", "medium")
-                    
-                    if net_class == "high":
-                        base_quality = 95
-                        fps_limit = 60
-                        res_scale = 1.0
-                    elif net_class == "low":
-                        base_quality = 40
-                        fps_limit = 12
-                        res_scale = 0.6
+        while client_state.get("running", False):
+            try:
+                with mss.mss() as sct:
+                    # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
+                    if len(sct.monitors) > 1:
+                        dynamic_monitor = sct.monitors[1]
                     else:
-                        base_quality = 75
-                        fps_limit = 30
-                        res_scale = 0.8
-
-                    quality = client_state.get("dyn_quality", base_quality)
-                    sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
-                    dyn_scale = client_state.get("dyn_scale", res_scale)
-
-                    cap_w, cap_h = img.size
-                    w = int(target_w * dyn_scale)
-                    h = int(target_h * dyn_scale)
-                    
-                    if cap_w != w or cap_h != h:
-                        pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
+                        dynamic_monitor = sct.monitors[0]
                         
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="JPEG", quality=quality)
-                    jpeg_data = buf.getvalue()
-                    
-                    t_start_send = time.time()
-                    send_msg(conn, jpeg_data)
-                    send_time = time.time() - t_start_send
-                    
-                    if "send_ema" not in client_state:
-                        client_state["send_ema"] = send_time
-                    else:
-                        client_state["send_ema"] = 0.8 * client_state["send_ema"] + 0.2 * send_time
-                        
-                    ema = client_state["send_ema"]
-                    
-                    if ema > 0.15:
-                        quality = max(35, quality - 5)
-                        sleep_time = min(0.2, sleep_time + 0.02)
-                        dyn_scale = max(0.5, dyn_scale - 0.05)
-                    elif ema < 0.05:
-                        quality = min(base_quality, quality + 2)
-                        sleep_time = max(1.0 / fps_limit, sleep_time - 0.01)
-                        dyn_scale = min(res_scale, dyn_scale + 0.05)
-                        
-                    client_state["dyn_quality"] = quality
-                    client_state["dyn_sleep_time"] = sleep_time
-                    client_state["dyn_scale"] = dyn_scale
+                    while client_state.get("running", False):
+                        try:
+                            img = sct.grab(dynamic_monitor)
+                            # Convert raw BGRA from mss directly to Pillow Image
+                            pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+                            
+                            # Grayscale 64x64 difference detection to skip identical frames
+                            static_frame = False
+                            try:
+                                small_gray = pil_img.resize((64, 64)).convert("L")
+                                if "prev_small_gray" in client_state:
+                                    prev_gray = client_state["prev_small_gray"]
+                                    diff = 0
+                                    p1 = small_gray.getdata()
+                                    p2 = prev_gray.getdata()
+                                    for i in range(64 * 64):
+                                        diff += abs(p1[i] - p2[i])
+                                    mean_diff = diff / (64.0 * 64.0)
+                                    if mean_diff < 0.5:
+                                        static_frame = True
+                                if not static_frame:
+                                    client_state["prev_small_gray"] = small_gray
+                            except: pass
+                            
+                            if static_frame:
+                                time.sleep(1.0)
+                                continue
 
-                    time.sleep(sleep_time)
-                except Exception as e:
-                    print(f"[Host] Screen Sender Error: {e}")
-                    client_state["running"] = False
-                    try:
-                        conn.close()
-                    except:
-                        pass
-                    break
+                            # Lấy độ phân giải hiển thị mong muốn từ Client
+                            target_w = getattr(self, 'client_viewer_w', 1280)
+                            target_h = getattr(self, 'client_viewer_h', 720)
+                            
+                            net_class = client_state.get("net_class", "medium")
+                            
+                            if net_class == "high":
+                                base_quality = 95
+                                fps_limit = 60
+                                res_scale = 1.0
+                            elif net_class == "low":
+                                base_quality = 40
+                                fps_limit = 12
+                                res_scale = 0.6
+                            else:
+                                base_quality = 75
+                                fps_limit = 30
+                                res_scale = 0.8
+
+                            quality = client_state.get("dyn_quality", base_quality)
+                            sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
+                            dyn_scale = client_state.get("dyn_scale", res_scale)
+
+                            cap_w, cap_h = img.size
+                            w = int(target_w * dyn_scale)
+                            h = int(target_h * dyn_scale)
+                            
+                            if cap_w != w or cap_h != h:
+                                pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
+                                
+                            buf = io.BytesIO()
+                            pil_img.save(buf, format="JPEG", quality=quality)
+                            jpeg_data = buf.getvalue()
+                            
+                            t_start_send = time.time()
+                            send_msg(conn, jpeg_data)
+                            send_time = time.time() - t_start_send
+                            
+                            if "send_ema" not in client_state:
+                                client_state["send_ema"] = send_time
+                            else:
+                                client_state["send_ema"] = 0.8 * client_state["send_ema"] + 0.2 * send_time
+                                
+                            ema = client_state["send_ema"]
+                            
+                            if ema > 0.15:
+                                quality = max(35, quality - 5)
+                                sleep_time = min(0.2, sleep_time + 0.02)
+                                dyn_scale = max(0.5, dyn_scale - 0.05)
+                            elif ema < 0.05:
+                                quality = min(base_quality, quality + 2)
+                                sleep_time = max(1.0 / fps_limit, sleep_time - 0.01)
+                                dyn_scale = min(res_scale, dyn_scale + 0.05)
+                                
+                            client_state["dyn_quality"] = quality
+                            client_state["dyn_sleep_time"] = sleep_time
+                            client_state["dyn_scale"] = dyn_scale
+
+                            time.sleep(sleep_time)
+                        except mss.exception.ScreenShotError as e:
+                            print(f"[Host] Screen capture error (re-initializing): {e}")
+                            time.sleep(1.0)
+                            break  # Break inner loop to recreate mss.mss()
+                        except Exception as e:
+                            print(f"[Host] Screen Sender Error: {e}")
+                            client_state["running"] = False
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                            break
+            except Exception as e:
+                print(f"[Host] mss.mss() context error: {e}")
+                time.sleep(1.0)
         print("[Host] Screen Sender Thread Stopped.")
         
     # Host Receiver Thread (Simulates actions)
