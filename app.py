@@ -2539,6 +2539,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
             frame_counter = 0
             blink_frames_remaining = 0
+            active_unicode_map = {}
             
             while client_running:
                 frame_counter += 1
@@ -2608,9 +2609,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         
                     elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
                         key_name = pygame.key.name(event.key)
+                        
+                        char_to_send = key_name
+                        if event.type == pygame.KEYDOWN:
+                            if hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
+                                char_to_send = event.unicode
+                            active_unicode_map[event.key] = char_to_send
+                        else:
+                            char_to_send = active_unicode_map.get(event.key, key_name)
+                            if event.key in active_unicode_map:
+                                del active_unicode_map[event.key]
+                                
                         send_event({
                             "type": "key_event",
-                            "key": key_name,
+                            "key": char_to_send,
                             "pressed": event.type == pygame.KEYDOWN
                         })
                         
