@@ -176,6 +176,25 @@ def trigger_sas_system():
         log(f"Error configuring SoftwareSASGeneration in service: {e}")
 
     try:
+        h_process = win32api.GetCurrentProcess()
+        h_token = win32security.OpenProcessToken(
+            h_process, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+        )
+        privs = []
+        for priv_name in [win32security.SE_TCB_NAME, win32security.SE_DEBUG_NAME]:
+            try:
+                luid = win32security.LookupPrivilegeValue(None, priv_name)
+                privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
+            except:
+                pass
+        if privs:
+            win32security.AdjustTokenPrivileges(h_token, False, privs)
+        win32api.CloseHandle(h_token)
+        log("Adjusted token privileges for SeTcbPrivilege in service.")
+    except Exception as priv_err:
+        log(f"Failed to adjust privilege in Service: {priv_err}")
+
+    try:
         sas_dll = ctypes.windll.LoadLibrary("sas.dll")
         sas_dll.SendSAS.argtypes = [ctypes.c_int]
         sas_dll.SendSAS.restype = None

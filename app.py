@@ -252,6 +252,37 @@ vk_map = {
     'f10': 0x79,        # VK_F10
     'f11': 0x7A,        # VK_F11
     'f12': 0x7B,        # VK_F12
+    '[0]': 0x60,        # VK_NUMPAD0
+    '[1]': 0x61,        # VK_NUMPAD1
+    '[2]': 0x62,        # VK_NUMPAD2
+    '[3]': 0x63,        # VK_NUMPAD3
+    '[4]': 0x64,        # VK_NUMPAD4
+    '[5]': 0x65,        # VK_NUMPAD5
+    '[6]': 0x66,        # VK_NUMPAD6
+    '[7]': 0x67,        # VK_NUMPAD7
+    '[8]': 0x68,        # VK_NUMPAD8
+    '[9]': 0x69,        # VK_NUMPAD9
+    '[.]': 0x6E,        # VK_DECIMAL
+    '[/]': 0x6F,        # VK_DIVIDE
+    '[*]': 0x6A,        # VK_MULTIPLY
+    '[-]': 0x6D,        # VK_SUBTRACT
+    '[+]': 0x6B,        # VK_ADD
+    'keypad 0': 0x60,
+    'keypad 1': 0x61,
+    'keypad 2': 0x62,
+    'keypad 3': 0x63,
+    'keypad 4': 0x64,
+    'keypad 5': 0x65,
+    'keypad 6': 0x66,
+    'keypad 7': 0x67,
+    'keypad 8': 0x68,
+    'keypad 9': 0x69,
+    'keypad .': 0x6E,
+    'keypad /': 0x6F,
+    'keypad *': 0x6A,
+    'keypad -': 0x6D,
+    'keypad +': 0x6B,
+    'keypad enter': 0x0D,
 }
 
 def send_input_keyboard_event(key_name, pressed):
@@ -315,6 +346,21 @@ def send_input_mouse_scroll(dx, dy):
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Mouse scroll injection failed: {e}")
+
+def send_input_mouse_move(x, y):
+    try:
+        w = ctypes.windll.user32.GetSystemMetrics(0) # SM_CXSCREEN
+        h = ctypes.windll.user32.GetSystemMetrics(1) # SM_CYSCREEN
+        if w > 0 and h > 0:
+            normalized_x = int((x * 65536) / w)
+            normalized_y = int((y * 65536) / h)
+            inp = INPUT()
+            inp.type = INPUT_MOUSE
+            # MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_ABSOLUTE = 0x8000
+            inp.union.mi = MOUSEINPUT(normalized_x, normalized_y, 0, 0x0001 | 0x8000, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception as e:
+        print(f"[SendInput] Mouse move injection failed: {e}")
 
 # TCP Frame Helper Functions
 socket_send_lock = threading.Lock()
@@ -2320,6 +2366,8 @@ clipboard_sync_manager = ClipboardSyncManager()
 client_latest_frame = None
 client_frame_lock = threading.Lock()
 client_running = True
+client_is_domain = False
+client_is_locked = False
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock):
@@ -2339,6 +2387,17 @@ def client_receiver_thread(sock):
                     if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                         clipboard_sync_manager.handle_received_packet(event)
                         continue
+                    elif evt_type == "domain_status":
+                        global client_is_domain, client_is_locked
+                        client_is_domain = event.get("is_domain", False)
+                        client_is_locked = event.get("is_locked", False)
+                        reason = event.get("reason", "No reason provided")
+                        try:
+                            with open("domain_debug.log", "a", encoding="utf-8") as df:
+                                df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n")
+                        except:
+                            pass
+                        continue
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
                     pass
@@ -2357,12 +2416,21 @@ def client_receiver_thread(sock):
             break
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id=""):
+    exit_due_to_disconnect = True
     try:
-        global client_latest_frame, client_running
+        global client_latest_frame, client_running, client_is_domain, client_is_locked
         client_latest_frame = None
         client_running = True
+        client_is_domain = is_domain
         
+        try:
+            # Check if domain was already queried and reason passed in handshake (or check local log)
+            with open("domain_debug.log", "a", encoding="utf-8") as df:
+                df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
+        except:
+            pass
+            
         import tkinter as tk
         hidden_root = tk.Tk()
         try:
@@ -2384,6 +2452,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
         clipboard_sync_manager.add_socket(sock)
         
         pygame.init()
+        # Enable keyboard repeat (delay: 500ms, interval: 50ms)
+        pygame.key.set_repeat(500, 50)
+        
         info = pygame.display.Info()
         client_max_w, client_max_h = info.current_w, info.current_h
         
@@ -2393,6 +2464,22 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
         
         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
         
+        # Get HWND of pygame window to bring it to foreground when requested
+        hwnd = None
+        try:
+            hwnd = pygame.display.get_wm_info().get("window")
+        except:
+            pass
+            
+        # Setup blink file path
+        import tempfile
+        blink_file = ""
+        if partner_id:
+            blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
+            if os.path.exists(blink_file):
+                try: os.remove(blink_file)
+                except: pass
+                
         # Đặt tiêu đề cửa sổ kèm tên máy Host
         if computer_name:
             pygame.display.set_caption(f"P2P Remote Desktop  |  {computer_name}")
@@ -2424,17 +2511,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
                 pass
                 
         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+        send_event({"type": "check_domain"})
         
         clock = pygame.time.Clock()
         button_map = {1: 'left', 2: 'middle', 3: 'right'}
         
+        frame_counter = 0
+        blink_frames_remaining = 0
+        
         while client_running:
+            frame_counter += 1
+            # Check for blink signal file periodically
+            if blink_file and frame_counter % 15 == 0:
+                if os.path.exists(blink_file):
+                    try:
+                        os.remove(blink_file)
+                        blink_frames_remaining = 180 # 3 seconds at 60 FPS
+                        if hwnd:
+                            import ctypes
+                            ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
+                            ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except:
+                        pass
+
             # Cập nhật event loop của Tkinter ẩn để các hộp thoại (dialog truyền file) vẫn hoạt động trong subprocess
             try:
                 hidden_root.update()
             except Exception:
                 pass
-
+ 
             # Calculate floating button rectangle dynamically
             btn_w, btn_h = 145, 30
             btn_x = (window_w - btn_w) // 2
@@ -2442,10 +2547,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
             btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
             
             mx, my = pygame.mouse.get_pos()
-            is_hover = btn_rect.collidepoint(mx, my)
-
+            is_hover = btn_rect.collidepoint(mx, my) if (client_is_domain and client_is_locked) else False
+ 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    exit_due_to_disconnect = False
                     client_running = False
                     break
                     
@@ -2455,7 +2561,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
                     send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                     
                 elif event.type == pygame.MOUSEMOTION:
-                    if btn_rect.collidepoint(event.pos):
+                    if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
                         continue
                     mx_pos, my_pos = event.pos
                     host_x = int(mx_pos * (host_w / window_w))
@@ -2463,9 +2569,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
                     send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                     
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                    if btn_rect.collidepoint(event.pos):
+                    if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
                         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                            print("[Client] SAS Button Clicked. Sending trigger_sas event.")
+                            print("[Client] SAS Button Clicked. Sending trigger_sas to host.")
                             send_event({"type": "trigger_sas"})
                         continue
                     if event.button in button_map:
@@ -2493,32 +2599,47 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name=""):
             if frame_to_draw is not None:
                 w, h = frame_to_draw.size
                 surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
-                scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
+                scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
                 screen.blit(scaled_surf, (0, 0))
             else:
                 screen.fill((30, 30, 30))
                 
+            # Draw red border if blinking (focus requested)
+            if blink_frames_remaining > 0:
+                if (blink_frames_remaining // 15) % 2 == 0:
+                    border_rect = pygame.Rect(0, 0, window_w, window_h)
+                    pygame.draw.rect(screen, (255, 0, 0), border_rect, width=10)
+                blink_frames_remaining -= 1
+                
             # Draw floating SAS button on top
-            bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
-            border_color = (0, 173, 181)
-            pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
-            pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
-            
-            # Render and blit text
-            text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
-            text_rect = text_surf.get_rect(center=btn_rect.center)
-            screen.blit(text_surf, text_rect)
+            if client_is_domain and client_is_locked:
+                bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
+                border_color = (0, 173, 181)
+                pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
+                pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
+                
+                # Render and blit text
+                text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
+                text_rect = text_surf.get_rect(center=btn_rect.center)
+                screen.blit(text_surf, text_rect)
             
             pygame.display.flip()
             clock.tick(60)
             
         pygame.quit()
+        if exit_due_to_disconnect:
+            print("[Client] Viewer exited due to disconnect. Exit code 99.")
+            import sys
+            sys.exit(99)
     except Exception as critical_e:
         import traceback
         with open("client_crash.log", "w", encoding="utf-8") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
         try: pygame.quit()
         except: pass
+        if exit_due_to_disconnect:
+            import sys
+            sys.exit(99)
 
 def encrypt_text(text, key="AntigravityP2P"):
     if not text:
@@ -2565,6 +2686,152 @@ def get_desktop_name():
     except:
         pass
     return "default"
+
+def is_machine_domain_joined():
+    debug_messages = []
+    
+    # Check if Windows Server first (Server editions always require Ctrl+Alt+Del by default)
+    try:
+        import ctypes
+        is_server_metric = ctypes.windll.user32.GetSystemMetrics(89)
+        debug_messages.append(f"GetSystemMetrics(89)={is_server_metric}")
+        if is_server_metric != 0:
+            return True, f"Windows Server detection (SystemMetrics 89): {is_server_metric}"
+    except Exception as e:
+        debug_messages.append(f"GetSystemMetrics(89) check failed: {e}")
+
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+            install_type, _ = winreg.QueryValueEx(key, "InstallationType")
+            debug_messages.append(f"OS InstallationType={install_type}")
+            if install_type and "server" in install_type.lower():
+                return True, f"Windows Server detection (registry): {install_type}"
+    except Exception as e:
+        debug_messages.append(f"Server check (registry) failed: {e}")
+
+    try:
+        import platform
+        win_ver = platform.win32_ver()
+        release_ver = platform.release()
+        debug_messages.append(f"platform.win32_ver={win_ver}, platform.release={release_ver}")
+        if "server" in win_ver[1].lower() or "server" in release_ver.lower():
+            return True, f"Windows Server detection (platform): win_ver={win_ver}, release={release_ver}"
+    except Exception as e:
+        debug_messages.append(f"Server check (platform) failed: {e}")
+        
+    # Method 1: Pure ctypes NetGetJoinInformation (Official Windows API, no dependencies)
+    try:
+        import ctypes
+        netapi32 = ctypes.windll.netapi32
+        name_ptr = ctypes.c_wchar_p()
+        join_status = ctypes.c_int()
+        res = netapi32.NetGetJoinInformation(None, ctypes.byref(name_ptr), ctypes.byref(join_status))
+        if res == 0:
+            name = name_ptr.value
+            status = join_status.value
+            netapi32.NetApiBufferFree(name_ptr)
+            debug_messages.append(f"ctypes NetGetJoinInformation: name={name}, status={status}")
+            if status == 3: # NetSetupDomainName = 3
+                return True, f"ctypes NetGetJoinInformation: {name}"
+        else:
+            debug_messages.append(f"ctypes NetGetJoinInformation failed: error_code={res}")
+    except Exception as e:
+        debug_messages.append(f"ctypes NetGetJoinInformation exception: {e}")
+
+    # Method 2: Pure ctypes GetComputerNameExW (DnsDomain = 2)
+    try:
+        import ctypes
+        size = ctypes.c_ulong(1024)
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.kernel32.GetComputerNameExW(2, buf, ctypes.byref(size)):
+            dns_domain = buf.value.strip()
+            debug_messages.append(f"ctypes GetComputerNameExW: domain={dns_domain}")
+            if dns_domain and len(dns_domain) > 0:
+                return True, f"ctypes GetComputerNameExW: {dns_domain}"
+        else:
+            debug_messages.append("ctypes GetComputerNameExW failed")
+    except Exception as e:
+        debug_messages.append(f"ctypes GetComputerNameExW exception: {e}")
+
+    # Method 3: win32net
+    try:
+        import win32net
+        name, join_status = win32net.NetGetJoinInformation()
+        debug_messages.append(f"win32net name={name}, status={join_status}")
+        if join_status == 3: # NetSetupDomainName = 3
+            return True, f"win32net: {name}"
+    except Exception as e:
+        debug_messages.append(f"win32net failed: {e}")
+
+    # Method 4: Check registry for Tcpip Parameters Domain
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"System\CurrentControlSet\Services\Tcpip\Parameters") as key:
+            domain, _ = winreg.QueryValueEx(key, "Domain")
+            debug_messages.append(f"Tcpip Domain reg={domain}")
+            if domain and len(domain.strip()) > 0:
+                return True, f"registry (Tcpip): {domain}"
+    except Exception as e:
+        debug_messages.append(f"Tcpip Domain reg failed: {e}")
+
+    # Method 5: Check environment variables
+    if "USERDNSDOMAIN" in os.environ:
+        debug_messages.append(f"USERDNSDOMAIN env={os.environ['USERDNSDOMAIN']}")
+        return True, f"env (USERDNSDOMAIN): {os.environ['USERDNSDOMAIN']}"
+    else:
+        debug_messages.append("USERDNSDOMAIN env not found")
+        
+    return False, f"Not domain joined. Debug details: {'; '.join(debug_messages)}"
+
+def host_type_password(password):
+    import time
+    import ctypes
+    
+    # 1. Type password characters via Unicode SendInput
+    for char in password:
+        inp_down = INPUT()
+        inp_down.type = INPUT_KEYBOARD
+        inp_down.union.ki.wVk = 0
+        inp_down.union.ki.wScan = ord(char)
+        inp_down.union.ki.dwFlags = KEYEVENTF_UNICODE
+        inp_down.union.ki.time = 0
+        inp_down.union.ki.dwExtraInfo = None
+        
+        inp_up = INPUT()
+        inp_up.type = INPUT_KEYBOARD
+        inp_up.union.ki.wVk = 0
+        inp_up.union.ki.wScan = ord(char)
+        inp_up.union.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+        inp_up.union.ki.time = 0
+        inp_up.union.ki.dwExtraInfo = None
+        
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+        time.sleep(0.01)
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+        time.sleep(0.01)
+        
+    # 2. Press Enter to submit (VK_RETURN = 0x0D)
+    time.sleep(0.1)
+    inp_enter_down = INPUT()
+    inp_enter_down.type = INPUT_KEYBOARD
+    inp_enter_down.union.ki.wVk = 0x0D
+    inp_enter_down.union.ki.wScan = 0
+    inp_enter_down.union.ki.dwFlags = 0
+    inp_enter_down.union.ki.time = 0
+    inp_enter_down.union.ki.dwExtraInfo = None
+    
+    inp_enter_up = INPUT()
+    inp_enter_up.type = INPUT_KEYBOARD
+    inp_enter_up.union.ki.wVk = 0x0D
+    inp_enter_up.union.ki.wScan = 0
+    inp_enter_up.union.ki.dwFlags = KEYEVENTF_KEYUP
+    inp_enter_up.union.ki.time = 0
+    inp_enter_up.union.ki.dwExtraInfo = None
+    
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp_enter_down), ctypes.sizeof(INPUT))
+    time.sleep(0.01)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp_enter_up), ctypes.sizeof(INPUT))
 
 def set_windows_graphics_effects(enabled=True):
     if sys.platform != "win32":
@@ -2973,20 +3240,20 @@ class UnifiedApp(tk.Tk):
             pass
 
     def load_window_position(self):
-        default_geometry = "650x400"
-        self.minsize(650, 400)
+        default_geometry = "680x450"
+        self.minsize(680, 450)
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, "r") as f:
                     config = json.load(f)
                     geom = config.get("geometry")
                     if geom:
-                        # Bảo đảm chiều rộng tối thiểu 650 và chiều cao tối thiểu 400
+                        # Bảo đảm chiều rộng tối thiểu 680 và chiều cao tối thiểu 450
                         if "x" in geom:
                             parts = geom.split("+")[0].split("x")
                             if len(parts) == 2:
-                                gw = max(650, int(parts[0]))
-                                gh = max(400, int(parts[1]))
+                                gw = max(680, int(parts[0]))
+                                gh = max(450, int(parts[1]))
                                 pos = "+".join(geom.split("+")[1:])
                                 geom = f"{gw}x{gh}"
                                 if pos:
@@ -3000,8 +3267,8 @@ class UnifiedApp(tk.Tk):
         # Center the window if no config or config is invalid
         self.geometry(default_geometry)
         self.update_idletasks()
-        w = 650
-        h = 400
+        w = 680
+        h = 450
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         x = (screen_w - w) // 2
@@ -4764,6 +5031,12 @@ class UnifiedApp(tk.Tk):
                 print("[Host] Password matches! Accepting connection.")
                 self.wake_display()
                 
+                # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa
+                try:
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except Exception as e:
+                    print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Host: {e}")
+                
                 # Cấu hình TCP Keep-Alive bảo vệ kết nối đục lỗ khỏi bị đóng bởi Firewall/Router
                 try:
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -4782,37 +5055,54 @@ class UnifiedApp(tk.Tk):
                     
                 import platform
                 computer_name = platform.node()
+                
+                is_domain = False
+                chk_reason = "Unknown"
+                try:
+                    is_domain, chk_reason = is_machine_domain_joined()
+                except Exception as ex:
+                    chk_reason = f"Error: {ex}"
+                
+                try:
+                    with open("domain_debug.log", "a", encoding="utf-8") as df:
+                        df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host domain check: is_domain={is_domain}, reason={chk_reason}\n")
+                except:
+                    pass
+                    
                 res_info = json.dumps({
                     "status": "ok",
                     "width": host_w,
                     "height": host_h,
                     "computer_name": computer_name,
-                    "zalo_phone": self.load_zalo_phone_from_xml()
+                    "zalo_phone": self.load_zalo_phone_from_xml(),
+                    "is_domain": is_domain,
+                    "chk_reason": chk_reason
                 }).encode('utf-8')
                 send_msg(conn, res_info)
                 
                 client_state = {"running": True, "net_class": "medium"}
                 
-                # Perform pre-connection speed test handling on host
+                # Perform pre-connection speed test handling on host (2 rounds to match client)
                 try:
-                    # 1. Ping / Latency test
-                    for _ in range(3):
-                        ping_msg = recv_msg(conn)
-                        if ping_msg:
-                            ping_data = json.loads(ping_msg.decode('utf-8'))
-                            if ping_data.get("action") == "speed_test_ping":
-                                send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'))
-                                
-                    # 2. Bandwidth test
-                    bw_msg = recv_msg(conn)
-                    if bw_msg:
-                        bw_data = json.loads(bw_msg.decode('utf-8'))
-                        if bw_data.get("action") == "speed_test_bw_req":
-                            dummy_size = 524288
-                            send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'))
-                            conn.sendall(b'\x00' * dummy_size)
+                    for run_idx in range(2):
+                        # 1. Ping / Latency test (3 pings per round)
+                        for _ in range(3):
+                            ping_msg = recv_msg(conn)
+                            if ping_msg:
+                                ping_data = json.loads(ping_msg.decode('utf-8'))
+                                if ping_data.get("action") == "speed_test_ping":
+                                    send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'))
+                                    
+                        # 2. Bandwidth test
+                        bw_msg = recv_msg(conn)
+                        if bw_msg:
+                            bw_data = json.loads(bw_msg.decode('utf-8'))
+                            if bw_data.get("action") == "speed_test_bw_req":
+                                dummy_size = 524288
+                                send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'))
+                                conn.sendall(b'\x00' * dummy_size)
                             
-                    # 3. Receive results
+                    # 3. Receive final results (sent once after both rounds)
                     res_msg = recv_msg(conn)
                     if res_msg:
                         res_data = json.loads(res_msg.decode('utf-8'))
@@ -4926,7 +5216,7 @@ class UnifiedApp(tk.Tk):
                     net_class = client_state.get("net_class", "medium")
                     
                     if net_class == "high":
-                        base_quality = 90
+                        base_quality = 95
                         fps_limit = 60
                         res_scale = 1.0
                     elif net_class == "low":
@@ -4934,7 +5224,7 @@ class UnifiedApp(tk.Tk):
                         fps_limit = 12
                         res_scale = 0.6
                     else:
-                        base_quality = 70
+                        base_quality = 75
                         fps_limit = 30
                         res_scale = 0.8
 
@@ -4980,6 +5270,11 @@ class UnifiedApp(tk.Tk):
                     time.sleep(sleep_time)
                 except Exception as e:
                     print(f"[Host] Screen Sender Error: {e}")
+                    client_state["running"] = False
+                    try:
+                        conn.close()
+                    except:
+                        pass
                     break
         print("[Host] Screen Sender Thread Stopped.")
         
@@ -5004,17 +5299,18 @@ class UnifiedApp(tk.Tk):
                 if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                     clipboard_sync_manager.handle_received_packet(event)
                 else:
-                    self.host_handle_event(event)
+                    self.host_handle_event(event, conn)
             except Exception as e:
                 print(f"[Host] Input Receiver Error: {e}")
                 break
         print("[Host] Input Receiver Thread Stopped.")
         self.host_release_all_modifiers()
         
-    def host_handle_event(self, event):
+    def host_handle_event(self, event, conn):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
             x, y = event['x'], event['y']
+            send_input_mouse_move(x, y)
             try:
                 mouse.position = (x, y)
             except:
@@ -5076,19 +5372,57 @@ class UnifiedApp(tk.Tk):
             
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
+            
+        elif ev_type == 'check_domain':
+            is_domain = False
+            chk_reason = "Unknown"
+            try:
+                is_domain, chk_reason = is_machine_domain_joined()
+            except Exception as ex:
+                chk_reason = f"Error: {ex}"
+            
+            is_locked = (get_desktop_name() == "winlogon")
+            
+            try:
+                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                    df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host check_domain query response: is_domain={is_domain}, reason={chk_reason}, is_locked={is_locked}\n")
+            except:
+                pass
+                
+            try:
+                send_msg(conn, json.dumps({
+                    "type": "domain_status", 
+                    "is_domain": is_domain, 
+                    "reason": chk_reason,
+                    "is_locked": is_locked
+                }).encode('utf-8'))
+            except Exception as e:
+                print(f"[Host] Failed to send domain_status: {e}")
+                
+        elif ev_type == 'type_password':
+            password = event.get("password", "")
+            if password:
+                print("[Host] Received type_password command.")
+                try:
+                    host_type_password(password)
+                except Exception as e:
+                    print(f"[Host] Failed to type password: {e}")
 
     def trigger_sas(self):
         print("[Host] Received trigger_sas command.")
-        import ctypes
+        
+        # Configure SoftwareSASGeneration = 3 in registry
         try:
-            sas_dll = ctypes.windll.LoadLibrary("sas.dll")
-            sas_dll.SendSAS.argtypes = [ctypes.c_int]
-            sas_dll.SendSAS.restype = None
-            sas_dll.SendSAS(0)
-            print("[Host] SendSAS(0) executed successfully via direct API.")
-            return
-        except Exception as e:
-            print(f"[Host] Direct SendSAS call failed: {e}. Falling back to named event.")
+            import winreg
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_ALL_ACCESS)
+            except WindowsError:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+            winreg.CloseKey(key)
+            print("[Host] Configured SoftwareSASGeneration = 3 in registry.")
+        except Exception as reg_err:
+            print(f"[Host] Failed to configure SoftwareSASGeneration in registry: {reg_err}")
             
         import win32event
         try:
@@ -5098,7 +5432,7 @@ class UnifiedApp(tk.Tk):
                 win32event.CloseHandle(h_event)
                 print("[Host] Signaled Global\\AntigravityP2P_SAS_Event successfully.")
             else:
-                print("[Host] Failed to open Global\\AntigravityP2P_SAS_Event.")
+                print("[Host] Failed to open Global\\AntigravityP2P_SAS_Event (event is null).")
         except Exception as ex:
             print(f"[Host] Failed to signal SAS event: {ex}")
 
@@ -5135,6 +5469,30 @@ class UnifiedApp(tk.Tk):
         threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
         
     def connect_to_partner(self, partner_id, partner_pass):
+        # Clean up dead viewer processes first
+        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        
+        # Check if we already have an active connection to this partner_id
+        existing_viewer = None
+        for v in self.active_viewers:
+            if v.get("partner_id") == partner_id:
+                existing_viewer = v
+                break
+                
+        if existing_viewer:
+            print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
+            self.update_status(f"Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...")
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            # Write blink signal file
+            import tempfile
+            blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
+            try:
+                with open(blink_file, "w") as f:
+                    f.write("1")
+            except Exception as write_err:
+                print(f"[Client] Failed to write blink signal: {write_err}")
+            return
+
         if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
             self.update_status("Chưa kết nối Signaling Server!")
             self.after(0, lambda: self.show_custom_error("Lỗi", "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS."))
@@ -5276,6 +5634,12 @@ class UnifiedApp(tk.Tk):
         # Connection succeeded, proceed with handshake
         sock.settimeout(None) # Reset back to blocking
         
+        # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa cho cả đo tốc độ và điều khiển
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as e:
+            print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+            
         # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -5303,47 +5667,76 @@ class UnifiedApp(tk.Tk):
                 host_h = res.get("height")
                 computer_name = res.get("computer_name", "")
                 zalo_phone = res.get("zalo_phone", "")
+                is_domain = res.get("is_domain", False)
                 
-                # Perform pre-connection speed test (Ping/Latency and Bandwidth)
-                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông)...")
+                # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
+                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
                 net_class = "medium"
                 net_class_viet = "Trung bình (Medium)"
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
-                    # 1. Ping / Latency test
-                    rtts = []
-                    for _ in range(3):
-                        t0 = time.time()
-                        send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'))
-                        pong_msg = recv_msg(sock)
-                        if pong_msg:
-                            pong_data = json.loads(pong_msg.decode('utf-8'))
-                            if pong_data.get("action") == "speed_test_pong":
-                                rtts.append(time.time() - t0)
-                        time.sleep(0.05)
-                    if rtts:
-                        avg_ping = (sum(rtts) / len(rtts)) * 1000.0
+                    runs = []
+                    for run_idx in range(2):
+                        if run_idx > 0:
+                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                        # 1. Ping / Latency test
+                        rtts = []
+                        for _ in range(3):
+                            t0 = time.time()
+                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'))
+                            pong_msg = recv_msg(sock)
+                            if pong_msg:
+                                pong_data = json.loads(pong_msg.decode('utf-8'))
+                                if pong_data.get("action") == "speed_test_pong":
+                                    rtts.append(time.time() - t0)
+                            time.sleep(0.05)
                         
-                    # 2. Bandwidth test
-                    send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'))
-                    bw_start_msg = recv_msg(sock)
-                    if bw_start_msg:
-                        bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
-                        if bw_start_data.get("action") == "speed_test_bw_start":
-                            dummy_size = 524288
-                            t_start = time.time()
-                            dummy_data = b''
-                            while len(dummy_data) < dummy_size:
-                                chunk = sock.recv(dummy_size - len(dummy_data))
-                                if not chunk:
-                                    break
-                                dummy_data += chunk
-                            t_end = time.time()
-                            duration = t_end - t_start
-                            if duration > 0 and len(dummy_data) == dummy_size:
-                                bandwidth = (len(dummy_data) * 8.0) / (duration * 1024.0 * 1024.0)
+                        run_ping = 50.0
+                        if rtts:
+                            run_ping = (sum(rtts) / len(rtts)) * 1000.0
+                            
+                        # 2. Bandwidth test
+                        run_bw = 10.0
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'))
+                        bw_start_msg = recv_msg(sock)
+                        if bw_start_msg:
+                            bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
+                            if bw_start_data.get("action") == "speed_test_bw_start":
+                                dummy_size = 524288
+                                half_size = dummy_size // 2
                                 
+                                warm_data = b''
+                                while len(warm_data) < half_size:
+                                    chunk = sock.recv(half_size - len(warm_data))
+                                    if not chunk:
+                                        break
+                                    warm_data += chunk
+                                    
+                                t_start = time.time()
+                                measured_data = b''
+                                while len(measured_data) < half_size:
+                                    chunk = sock.recv(half_size - len(measured_data))
+                                    if not chunk:
+                                        break
+                                    measured_data += chunk
+                                t_end = time.time()
+                                
+                                duration = t_end - t_start
+                                total_len = len(warm_data) + len(measured_data)
+                                if duration > 0 and total_len == dummy_size:
+                                    run_bw = (half_size * 8.0) / (duration * 1024.0 * 1024.0)
+                        
+                        runs.append((run_ping, run_bw))
+                        if run_idx == 0:
+                            time.sleep(0.2) # Small gap between runs
+                            
+                    if runs:
+                        # Compare and select the run with the highest bandwidth speed
+                        best_run = max(runs, key=lambda x: x[1])
+                        avg_ping = best_run[0]
+                        bandwidth = best_run[1]
+                        
                     # 3. Network quality classification
                     # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 30ms.
                     # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 30 - 100ms.
@@ -5366,10 +5759,10 @@ class UnifiedApp(tk.Tk):
                         "bandwidth": bandwidth
                     }).encode('utf-8'))
                     
-                    status_text = f"Đo tốc độ: Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
+                    status_text = f"Đo tốc độ (Lớn nhất 2 lần): Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
-                    time.sleep(1.0)
+                    time.sleep(0.5)
                 except Exception as ste:
                     print(f"[Client] Speed test error: {ste}")
                     # Send default result to host to avoid locking
@@ -5394,7 +5787,7 @@ class UnifiedApp(tk.Tk):
                     
                 self.update_status("Kết nối thành công! Đang khởi động màn hình...")
                 # Launch Pygame Viewer on the main thread
-                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone)
+                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
                 msg = res.get("message", "Sai mật khẩu!")
                 self.update_status("Bị từ chối kết nối")
@@ -5407,23 +5800,34 @@ class UnifiedApp(tk.Tk):
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             sock.close()
             
-    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone=""):
+    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
         try:
             import multiprocessing as mp
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name), daemon=True)
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id), daemon=True)
             p.start()
             
             # Track active viewer
             self.active_viewers.append({
                 "process": p,
                 "computer_name": computer_name,
-                "zalo_phone": zalo_phone
+                "zalo_phone": zalo_phone,
+                "partner_id": partner_id
             })
             
-            # Đóng bản sao socket ở tiến trình mẹ để tiến trình con toàn quyền sử dụng
-            # NUITKA BUG FIX: Do NOT close socket immediately, WSADuplicateSocket might fail if parent closes before child rebuilds it
-            # try: sock.close()
-            # except: pass
+            # Reconnection Monitor Thread
+            if partner_id and partner_pass:
+                def monitor_reconnect(process, pid, ppass):
+                    process.join()
+                    code = process.exitcode
+                    print(f"[Client Monitor] Pygame viewer process exited with code: {code}")
+                    if code == 99:
+                        print(f"[Client Monitor] Socket disconnected. Automatically attempting reconnect to {pid}...")
+                        self.after(0, lambda: self.update_status(f"Mất kết nối đột ngột (đang đăng nhập/chuyển màn hình). Đang tự động kết nối lại..."))
+                        time.sleep(2.0)
+                        # Reconnect in a background thread
+                        threading.Thread(target=self.connect_to_partner, args=(pid, ppass), daemon=True).start()
+                
+                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
             self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
@@ -5641,6 +6045,8 @@ if __name__ == '__main__':
             # Service headless helper uses mutex index 1
             mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"
             mutex = win32event.CreateMutex(None, False, mutex_name)
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                sys.exit(0)
         else:
             # GUI client uses mutex index 2
             mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{session_id}_{desktop_name}"
