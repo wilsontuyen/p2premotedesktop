@@ -5186,7 +5186,7 @@ class UnifiedApp(tk.Tk):
                         if bw_msg:
                             bw_data = json.loads(bw_msg.decode('utf-8'))
                             if bw_data.get("action") == "speed_test_bw_req":
-                                dummy_size = 524288
+                                dummy_size = 1572864 # 1.5 MB để nới rộng TCP Window
                                 send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'))
                                 conn.sendall(b'\x00' * dummy_size)
                             
@@ -5311,14 +5311,28 @@ class UnifiedApp(tk.Tk):
                                     client_state["prev_small_gray"] = small_gray
                             except: pass
                             
-                            if static_frame:
-                                time.sleep(1.0)
-                                continue
-
-                            # Lấy độ phân giải hiển thị mong muốn từ Client
+                            # Lấy độ phân giải hiển thị mong muốn từ Client (Phải lấy trước khi check static)
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
                             
+                            # Nếu Client vừa cập nhật độ phân giải thực tế, ta phải ép gửi 1 khung hình mới ngay lập tức
+                            if client_state.get("last_target_w") != target_w or client_state.get("last_target_h") != target_h:
+                                static_frame = False
+                                client_state["last_target_w"] = target_w
+                                client_state["last_target_h"] = target_h
+
+                            if static_frame:
+                                current_q = client_state.get("dyn_quality", 40)
+                                current_s = client_state.get("dyn_scale", 0.6)
+                                if current_q < 95 or current_s < 1.0:
+                                    # Cơ hội vàng: Màn hình tĩnh, ép tăng độ nét cực nhanh (Fast Progressive Refinement)
+                                    client_state["dyn_quality"] = min(95, current_q + 15)
+                                    client_state["dyn_scale"] = min(1.0, current_s + 0.1)
+                                    static_frame = False # Bắt buộc gửi tiếp để làm nét ảnh
+                                else:
+                                    time.sleep(1.0)
+                                    continue
+
                             net_class = client_state.get("net_class", "medium")
                             
                             if net_class == "high":
@@ -5337,6 +5351,16 @@ class UnifiedApp(tk.Tk):
                             quality = client_state.get("dyn_quality", base_quality)
                             sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
                             dyn_scale = client_state.get("dyn_scale", res_scale)
+
+                            # Ép buộc tăng độ nét lên tối đa trong 5 giây đầu tiên (Fast Warm-up)
+                            if "start_time" not in client_state:
+                                client_state["start_time"] = time.time()
+                                
+                            if time.time() - client_state["start_time"] < 5.0:
+                                quality = min(95, quality + 10)
+                                dyn_scale = min(1.0, dyn_scale + 0.1)
+                                client_state["dyn_quality"] = quality
+                                client_state["dyn_scale"] = dyn_scale
 
                             cap_w, cap_h = img.size
                             w = int(target_w * dyn_scale)
@@ -5360,11 +5384,13 @@ class UnifiedApp(tk.Tk):
                                 
                             ema = client_state["send_ema"]
                             
-                            if ema > 0.15:
+                            if ema > 0.35:
+                                # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
                                 quality = max(35, quality - 5)
-                                sleep_time = min(0.2, sleep_time + 0.02)
-                                dyn_scale = max(0.5, dyn_scale - 0.05)
-                            elif ema < 0.12:
+                                sleep_time = min(0.3, sleep_time + 0.05)
+                                if ema > 0.6:
+                                    dyn_scale = max(0.6, dyn_scale - 0.05)
+                            elif ema < 0.20:
                                 # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
                                 quality = min(95, quality + 1)
                                 sleep_time = max(1.0 / 60, sleep_time - 0.005)
@@ -5796,20 +5822,21 @@ class UnifiedApp(tk.Tk):
                         if bw_start_msg:
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
-                                dummy_size = 524288
-                                half_size = dummy_size // 2
+                                dummy_size = bw_start_data.get("size", 1572864)
+                                warm_size = 1048576 # 1 MB warm-up để vượt qua TCP slow-start
+                                measure_size = dummy_size - warm_size
                                 
                                 warm_data = b''
-                                while len(warm_data) < half_size:
-                                    chunk = sock.recv(half_size - len(warm_data))
+                                while len(warm_data) < warm_size:
+                                    chunk = sock.recv(warm_size - len(warm_data))
                                     if not chunk:
                                         break
                                     warm_data += chunk
                                     
                                 t_start = time.time()
                                 measured_data = b''
-                                while len(measured_data) < half_size:
-                                    chunk = sock.recv(half_size - len(measured_data))
+                                while len(measured_data) < measure_size:
+                                    chunk = sock.recv(measure_size - len(measured_data))
                                     if not chunk:
                                         break
                                     measured_data += chunk
@@ -5818,7 +5845,7 @@ class UnifiedApp(tk.Tk):
                                 duration = t_end - t_start
                                 total_len = len(warm_data) + len(measured_data)
                                 if duration > 0 and total_len == dummy_size:
-                                    run_bw = (half_size * 8.0) / (duration * 1024.0 * 1024.0)
+                                    run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
                         
                         runs.append((run_ping, run_bw))
                         if run_idx == 0:
