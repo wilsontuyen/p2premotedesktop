@@ -252,22 +252,25 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 # Check if screen is locked (LogonUI is running)
                 is_screen_locked = self.is_logon_ui_running(active_session_id)
 
-                # Check if state has changed (Session ID, Logged-in state, or Lock screen state).
-                # We MUST restart the agent when any of these change to ensure the agent is running
-                # on the correct active desktop (winsta0\default or winsta0\winlogon).
-                state_changed = (
-                    (self.last_session_id != active_session_id) or
-                    (self.last_was_screen_locked != is_screen_locked) or
-                    (self.last_was_logged_in != is_logged_in)
-                )
+                # Check if state has changed (Session ID only).
+                # We MUST restart the agent when session ID changes (e.g., RDP or Fast User Switching).
+                # But if logon state or screen lock state changes within the same session, 
+                # we keep the agent alive so the P2P connection doesn't drop.
+                session_changed = (self.last_session_id != active_session_id)
 
-                if state_changed:
-                    log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked} (Previous: LoggedIn={self.last_was_logged_in}, Locked={self.last_was_screen_locked})")
+                if session_changed:
+                    log(f"Session state changed: SessionId={active_session_id} (Previous: {self.last_session_id}). LoggedIn={is_logged_in}, Locked={is_screen_locked}")
                     self.kill_current_agent()
                     self.last_session_id = active_session_id
                     self.last_was_logged_in = is_logged_in
                     self.last_was_screen_locked = is_screen_locked
                     self.last_spawn_time = 0.0 # Force immediate spawn on state change
+                else:
+                    # Update states without killing the agent
+                    if self.last_was_screen_locked != is_screen_locked or self.last_was_logged_in != is_logged_in:
+                        log(f"Lock/Logon state changed (Locked={is_screen_locked}, LoggedIn={is_logged_in}). Keeping agent alive to maintain P2P connection.")
+                        self.last_was_screen_locked = is_screen_locked
+                        self.last_was_logged_in = is_logged_in
 
                 # Start agent if it's not running
                 if not self.is_agent_running(active_session_id, is_screen_locked):

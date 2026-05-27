@@ -2377,6 +2377,7 @@ client_frame_lock = threading.Lock()
 client_running = True
 client_is_domain = False
 client_is_locked = False
+client_switching_desktop_countdown = 0
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock):
@@ -2407,6 +2408,10 @@ def client_receiver_thread(sock):
                         except:
                             pass
                         continue
+                    elif evt_type == "switching_desktop":
+                        global client_switching_desktop_countdown
+                        client_switching_desktop_countdown = 15
+                        continue
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
                     pass
@@ -2417,6 +2422,8 @@ def client_receiver_thread(sock):
                 pil_img.load()  # Force decode in receiver thread
                 with client_frame_lock:
                     client_latest_frame = pil_img
+                global client_switching_desktop_countdown
+                client_switching_desktop_countdown = 0
             except Exception as ie:
                 with open("client_error.log", "a") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
         except Exception as e:
@@ -2425,62 +2432,26 @@ def client_receiver_thread(sock):
             break
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id=""):
-    exit_due_to_disconnect = True
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None):
     try:
-        global client_latest_frame, client_running, client_is_domain, client_is_locked
-        client_latest_frame = None
-        client_running = True
-        client_is_domain = is_domain
+        outer_running = True
         
-        try:
-            # Check if domain was already queried and reason passed in handshake (or check local log)
-            with open("domain_debug.log", "a", encoding="utf-8") as df:
-                df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
-        except:
-            pass
-            
-        import tkinter as tk
-        hidden_root = tk.Tk()
-        try:
-            icon_path = os.path.join(app_dir, "app_icon.png")
-            if os.path.exists(icon_path):
-                hidden_icon = ImageTk.PhotoImage(Image.open(icon_path))
-                hidden_root.iconphoto(True, hidden_icon)
-                hidden_root._hidden_icon_ref = hidden_icon
-        except Exception:
-            pass
-        hidden_root.withdraw()
-        clipboard_sync_manager.register_app(hidden_root)
-        
-        # Start receiver thread
-        t = threading.Thread(target=client_receiver_thread, args=(sock,), daemon=True)
-        t.start()
-        
-        # Gắn kết socket vào trình quản lý Event Listener của Clipboard
-        clipboard_sync_manager.add_socket(sock)
-        
+        # Initialize Pygame once outside the loop
         pygame.init()
-        # Enable keyboard repeat (delay: 500ms, interval: 50ms)
         pygame.key.set_repeat(500, 50)
         
         info = pygame.display.Info()
         client_max_w, client_max_h = info.current_w, info.current_h
         
-        # Đặt cửa sổ bằng với độ phân giải Host, nhưng không vượt quá màn hình Client và hỗ trợ tối đa 4K
         window_w = min(host_w, client_max_w, 3840)
         window_h = min(host_h, client_max_h, 2160)
         
         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
         
-        # Get HWND of pygame window to bring it to foreground when requested
         hwnd = None
-        try:
-            hwnd = pygame.display.get_wm_info().get("window")
-        except:
-            pass
-            
-        # Setup blink file path
+        try: hwnd = pygame.display.get_wm_info().get("window")
+        except: pass
+        
         import tempfile
         blink_file = ""
         if partner_id:
@@ -2489,7 +2460,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 try: os.remove(blink_file)
                 except: pass
                 
-        # Đặt tiêu đề cửa sổ kèm tên máy Host
         if computer_name:
             pygame.display.set_caption(f"P2P Remote Desktop  |  {computer_name}")
         else:
@@ -2501,139 +2471,248 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 pygame.display.set_icon(pygame.image.load(icon_path))
         except Exception as e:
             print(f"[App] Lỗi thiết lập icon cửa sổ pygame: {e}")
-        
-        # Try loading font for SAS button
-        try:
-            btn_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
+            
+        try: btn_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
         except:
-            try:
-                btn_font = pygame.font.SysFont("Arial", 12, bold=True)
-            except:
-                btn_font = pygame.font.Font(None, 20)
-                
-        # Khởi tạo kích thước viewer ban đầu cho Host biết
-        def send_event(event_dict):
-            try:
-                data = json.dumps(event_dict).encode('utf-8')
-                send_msg(sock, data)
-            except Exception:
-                pass
-                
-        send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
-        send_event({"type": "check_domain"})
-        
+            try: btn_font = pygame.font.SysFont("Arial", 12, bold=True)
+            except: btn_font = pygame.font.Font(None, 20)
+            
         clock = pygame.time.Clock()
         button_map = {1: 'left', 2: 'middle', 3: 'right'}
         
-        frame_counter = 0
-        blink_frames_remaining = 0
-        
-        while client_running:
-            frame_counter += 1
-            # Check for blink signal file periodically
-            if blink_file and frame_counter % 15 == 0:
-                if os.path.exists(blink_file):
-                    try:
-                        os.remove(blink_file)
-                        blink_frames_remaining = 180 # 3 seconds at 60 FPS
-                        if hwnd:
-                            import ctypes
-                            ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
-                            ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    except:
-                        pass
-
-            # Cập nhật event loop của Tkinter ẩn để các hộp thoại (dialog truyền file) vẫn hoạt động trong subprocess
+        while outer_running:
+            exit_due_to_disconnect = True
+            global client_latest_frame, client_running, client_is_domain, client_is_locked
+            client_latest_frame = None
+            client_running = True
+            client_is_domain = is_domain
+            
             try:
-                hidden_root.update()
+                # Check if domain was already queried and reason passed in handshake (or check local log)
+                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                    df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
+            except:
+                pass
+                
+            import tkinter as tk
+            hidden_root = tk.Tk()
+            try:
+                icon_path = os.path.join(app_dir, "app_icon.png")
+                if os.path.exists(icon_path):
+                    hidden_icon = ImageTk.PhotoImage(Image.open(icon_path))
+                    hidden_root.iconphoto(True, hidden_icon)
+                    hidden_root._hidden_icon_ref = hidden_icon
             except Exception:
                 pass
- 
-            # Calculate floating button rectangle dynamically
-            btn_w, btn_h = 145, 30
-            btn_x = (window_w - btn_w) // 2
-            btn_y = 5
-            btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+            hidden_root.withdraw()
+            clipboard_sync_manager.register_app(hidden_root)
             
-            mx, my = pygame.mouse.get_pos()
-            is_hover = btn_rect.collidepoint(mx, my) if (client_is_domain and client_is_locked) else False
- 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    exit_due_to_disconnect = False
-                    client_running = False
-                    break
+            # Start receiver thread
+            t = threading.Thread(target=client_receiver_thread, args=(sock,), daemon=True)
+            t.start()
+            
+            # Gắn kết socket vào trình quản lý Event Listener của Clipboard
+            clipboard_sync_manager.add_socket(sock)
+            # We moved pygame init outside
+            
+            # Khởi tạo kích thước viewer ban đầu cho Host biết
+            def send_event(event_dict):
+                try:
+                    data = json.dumps(event_dict).encode('utf-8')
+                    send_msg(sock, data)
+                except Exception:
+                    pass
                     
-                elif event.type == pygame.VIDEORESIZE:
-                    window_w, window_h = event.w, event.h
-                    screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
-                    send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
-                    
-                elif event.type == pygame.MOUSEMOTION:
-                    if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
-                        continue
-                    mx_pos, my_pos = event.pos
-                    host_x = int(mx_pos * (host_w / window_w))
-                    host_y = int(my_pos * (host_h / window_h))
-                    send_event({"type": "mouse_move", "x": host_x, "y": host_y})
-                    
-                elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                    if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
-                        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                            print("[Client] SAS Button Clicked. Sending trigger_sas to host.")
-                            send_event({"type": "trigger_sas"})
-                        continue
-                    if event.button in button_map:
+            send_event({"type": "check_domain"})
+            send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+            
+            frame_counter = 0
+            blink_frames_remaining = 0
+            
+            while client_running:
+                frame_counter += 1
+                # Check for blink signal file periodically
+                if blink_file and frame_counter % 15 == 0:
+                    if os.path.exists(blink_file):
+                        try:
+                            os.remove(blink_file)
+                            blink_frames_remaining = 180 # 3 seconds at 60 FPS
+                            if hwnd:
+                                import ctypes
+                                ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
+                                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                        except:
+                            pass
+    
+                # Cập nhật event loop của Tkinter ẩn để các hộp thoại (dialog truyền file) vẫn hoạt động trong subprocess
+                try:
+                    hidden_root.update()
+                except Exception:
+                    pass
+     
+                # Calculate floating button rectangle dynamically
+                btn_w, btn_h = 145, 30
+                btn_x = (window_w - btn_w) // 2
+                btn_y = 5
+                btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+                
+                mx, my = pygame.mouse.get_pos()
+                is_hover = btn_rect.collidepoint(mx, my) if (client_is_domain and client_is_locked) else False
+     
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        exit_due_to_disconnect = False
+                        client_running = False
+                        outer_running = False
+                        break
+                        
+                    elif event.type == pygame.VIDEORESIZE:
+                        window_w, window_h = event.w, event.h
+                        screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                        send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+                        
+                    elif event.type == pygame.MOUSEMOTION:
+                        if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
+                            continue
+                        mx_pos, my_pos = event.pos
+                        host_x = int(mx_pos * (host_w / window_w))
+                        host_y = int(my_pos * (host_h / window_h))
+                        send_event({"type": "mouse_move", "x": host_x, "y": host_y})
+                        
+                    elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+                        if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                print("[Client] SAS Button Clicked. Sending trigger_sas to host.")
+                                send_event({"type": "trigger_sas"})
+                            continue
+                        if event.button in button_map:
+                            send_event({
+                                "type": "mouse_click",
+                                "button": button_map[event.button],
+                                "pressed": event.type == pygame.MOUSEBUTTONDOWN
+                            })
+                            
+                    elif event.type == pygame.MOUSEWHEEL:
+                        send_event({"type": "mouse_scroll", "dx": event.x, "dy": event.y})
+                        
+                    elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
+                        key_name = pygame.key.name(event.key)
                         send_event({
-                            "type": "mouse_click",
-                            "button": button_map[event.button],
-                            "pressed": event.type == pygame.MOUSEBUTTONDOWN
+                            "type": "key_event",
+                            "key": key_name,
+                            "pressed": event.type == pygame.KEYDOWN
                         })
                         
-                elif event.type == pygame.MOUSEWHEEL:
-                    send_event({"type": "mouse_scroll", "dx": event.x, "dy": event.y})
+                # Draw frame
+                with client_frame_lock:
+                    frame_to_draw = client_latest_frame
                     
-                elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
-                    key_name = pygame.key.name(event.key)
-                    send_event({
-                        "type": "key_event",
-                        "key": key_name,
-                        "pressed": event.type == pygame.KEYDOWN
-                    })
+                if frame_to_draw is not None:
+                    w, h = frame_to_draw.size
+                    surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
+                    scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+                    screen.blit(scaled_surf, (0, 0))
+                else:
+                    screen.fill((30, 30, 30))
                     
-            # Draw frame
-            with client_frame_lock:
-                frame_to_draw = client_latest_frame
+                # Draw red border if blinking (focus requested)
+                if blink_frames_remaining > 0:
+                    if (blink_frames_remaining // 15) % 2 == 0:
+                        border_rect = pygame.Rect(0, 0, window_w, window_h)
+                        pygame.draw.rect(screen, (255, 0, 0), border_rect, width=10)
+                    blink_frames_remaining -= 1
+                    
+                # Draw floating SAS button on top
+                if client_is_domain and client_is_locked:
+                    bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
+                    border_color = (0, 173, 181)
+                    pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
+                    
+                    # Render and blit text
+                    text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
+                    text_rect = text_surf.get_rect(center=btn_rect.center)
+                    screen.blit(text_surf, text_rect)
+                    
+                if globals().get('client_switching_desktop_countdown', 0) > 0:
+                    if "msg_font" not in locals():
+                        try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
+                        except: msg_font = pygame.font.Font(None, 32)
+                    
+                    overlay = pygame.Surface((window_w, window_h))
+                    overlay.set_alpha(150)
+                    overlay.fill((0, 0, 0))
+                    screen.blit(overlay, (0, 0))
+                    
+                    text_surf = msg_font.render(f"Đang chuyển giao diện ! Sẽ kết nối lại trong vòng {client_switching_desktop_countdown} giây...", True, (255, 255, 255))
+                    text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
+                    screen.blit(text_surf, text_rect)
+                    
+                    current_tick = pygame.time.get_ticks()
+                    if "last_tick" not in locals(): last_tick = current_tick
+                    if current_tick - last_tick >= 1000:
+                        global client_switching_desktop_countdown
+                        client_switching_desktop_countdown -= 1
+                        last_tick = current_tick
                 
-            if frame_to_draw is not None:
-                w, h = frame_to_draw.size
-                surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
-                scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
-                screen.blit(scaled_surf, (0, 0))
-            else:
-                screen.fill((30, 30, 30))
+                pygame.display.flip()
+                clock.tick(60)
                 
-            # Draw red border if blinking (focus requested)
-            if blink_frames_remaining > 0:
-                if (blink_frames_remaining // 15) % 2 == 0:
-                    border_rect = pygame.Rect(0, 0, window_w, window_h)
-                    pygame.draw.rect(screen, (255, 0, 0), border_rect, width=10)
-                blink_frames_remaining -= 1
+            if exit_due_to_disconnect and reconnect_queue:
+                countdown = 15
+                last_tick = pygame.time.get_ticks()
+                try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
+                except: msg_font = pygame.font.Font(None, 32)
                 
-            # Draw floating SAS button on top
-            if client_is_domain and client_is_locked:
-                bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
-                border_color = (0, 173, 181)
-                pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
-                pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
+                print("[Client] Disconnected. Requesting reconnect in background...")
+                try: reconnect_queue.put("RECONNECT_REQUEST")
+                except: pass
                 
-                # Render and blit text
-                text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
-                text_rect = text_surf.get_rect(center=btn_rect.center)
-                screen.blit(text_surf, text_rect)
-            
-            pygame.display.flip()
-            clock.tick(60)
+                while countdown > 0 and outer_running:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            countdown = 0
+                            exit_due_to_disconnect = False
+                            outer_running = False
+                    
+                    if not outer_running:
+                        break
+                        
+                    try:
+                        new_sock = reconnect_queue.get_nowait()
+                        if new_sock == "FAILED":
+                            print("[Client] Reconnection failed. Closing window.")
+                            outer_running = False
+                            break
+                        elif hasattr(new_sock, 'fileno'):
+                            print("[Client] Received new socket. Resuming session!")
+                            sock = new_sock
+                            break # Break inner wait loop, outer loop will continue
+                    except:
+                        pass
+                    
+                    screen.fill((30, 30, 30))
+                    text_surf = msg_font.render(f"Đang chuyển giao diện ! Sẽ kết nối lại trong vòng {countdown} giây...", True, (255, 255, 255))
+                    text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
+                    screen.blit(text_surf, text_rect)
+                    pygame.display.flip()
+                    
+                    current_tick = pygame.time.get_ticks()
+                    if current_tick - last_tick >= 1000:
+                        countdown -= 1
+                        last_tick = current_tick
+                        
+                    clock.tick(30)
+                    
+                if outer_running and countdown == 0:
+                    print("[Client] Reconnect timeout. Closing window.")
+                    outer_running = False
+                    
+                if outer_running:
+                    continue # Jump back to the start of the outer_running loop!
+                    
+            # If we reach here, we are truly exiting
+            outer_running = False
             
         pygame.quit()
         if exit_due_to_disconnect:
@@ -5191,6 +5270,16 @@ class UnifiedApp(tk.Tk):
 
         while client_state.get("running", False):
             try:
+                # Attempt to switch to the active input desktop dynamically to keep connection alive
+                try:
+                    import ctypes
+                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                    if hdesk:
+                        ctypes.windll.user32.SetThreadDesktop(hdesk)
+                        ctypes.windll.user32.CloseDesktop(hdesk)
+                except Exception:
+                    pass
+                    
                 with mss.mss() as sct:
                     # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
                     if len(sct.monitors) > 1:
@@ -5275,10 +5364,11 @@ class UnifiedApp(tk.Tk):
                                 quality = max(35, quality - 5)
                                 sleep_time = min(0.2, sleep_time + 0.02)
                                 dyn_scale = max(0.5, dyn_scale - 0.05)
-                            elif ema < 0.05:
-                                quality = min(base_quality, quality + 2)
-                                sleep_time = max(1.0 / fps_limit, sleep_time - 0.01)
-                                dyn_scale = min(res_scale, dyn_scale + 0.05)
+                            elif ema < 0.12:
+                                # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
+                                quality = min(95, quality + 1)
+                                sleep_time = max(1.0 / 60, sleep_time - 0.005)
+                                dyn_scale = min(1.0, dyn_scale + 0.02)
                                 
                             client_state["dyn_quality"] = quality
                             client_state["dyn_sleep_time"] = sleep_time
@@ -5287,10 +5377,16 @@ class UnifiedApp(tk.Tk):
                             time.sleep(sleep_time)
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
+                            try:
+                                signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                                send_msg(conn, signal)
+                            except: pass
                             time.sleep(1.0)
                             break  # Break inner loop to recreate mss.mss()
                         except Exception as e:
-                            print(f"[Host] Screen Sender Error: {e}")
+                            import traceback
+                            with open("host_error.log", "a") as f:
+                                f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
                             client_state["running"] = False
                             try:
                                 conn.close()
@@ -5348,24 +5444,11 @@ class UnifiedApp(tk.Tk):
         elif ev_type == 'mouse_click':
             button_name = event.get('button')
             pressed = event.get('pressed')
-            btn = button_map.get(button_name)
-            if btn:
-                try:
-                    if pressed:
-                        mouse.press(btn)
-                    else:
-                        mouse.release(btn)
-                except:
-                    pass
             # Primary simulation using standard SendInput API
             send_input_mouse_click(button_name, pressed)
                 
         elif ev_type == 'mouse_scroll':
             dx, dy = event['dx'], event['dy']
-            try:
-                mouse.scroll(dx, dy)
-            except:
-                pass
             # Primary simulation using standard SendInput API
             send_input_mouse_scroll(dx, dy)
                 
@@ -5373,20 +5456,6 @@ class UnifiedApp(tk.Tk):
             key_name = event['key']
             pressed = event['pressed']
             
-            target_key = None
-            if key_name in key_map:
-                target_key = key_map[key_name]
-            elif len(key_name) == 1:
-                target_key = key_name
-                
-            if target_key:
-                try:
-                    if pressed:
-                        keyboard.press(target_key)
-                    else:
-                        keyboard.release(target_key)
-                except Exception:
-                    pass
             # Primary simulation using standard SendInput API
             send_input_keyboard_event(key_name, pressed)
                 
@@ -5492,7 +5561,7 @@ class UnifiedApp(tk.Tk):
         # Connect inside background thread to prevent UI freezing
         threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
         
-    def connect_to_partner(self, partner_id, partner_pass):
+    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None):
         # Clean up dead viewer processes first
         self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
         
@@ -5799,27 +5868,30 @@ class UnifiedApp(tk.Tk):
                         }).encode('utf-8'))
                     except: pass
                     
-                # Adjust screen dimensions on client based on net_class to reduce frame size
-                if net_class == "low":
-                    scale = min(1.0, 1024.0 / host_w)
-                    host_w = int(host_w * scale)
-                    host_h = int(host_h * scale)
-                elif net_class == "medium":
-                    scale = min(1.0, 1366.0 / host_w)
-                    host_w = int(host_w * scale)
-                    host_h = int(host_h * scale)
-                    
+                # Pygame window sẽ mở đúng với độ phân giải thật của host. 
+                # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
                 self.update_status("Kết nối thành công! Đang khởi động màn hình...")
-                # Launch Pygame Viewer on the main thread
-                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
+                if reconnect_queue:
+                    try:
+                        reconnect_queue.put(sock)
+                    except Exception as e:
+                        print(f"Failed to put socket in reconnect queue: {e}")
+                        reconnect_queue.put("FAILED")
+                        sock.close()
+                else:
+                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
                 msg = res.get("message", "Sai mật khẩu!")
                 self.update_status("Bị từ chối kết nối")
+                if reconnect_queue:
+                    reconnect_queue.put("FAILED")
                 self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 sock.close()
         except Exception as e:
             self.update_status("Sẵn sàng kết nối")
+            if reconnect_queue:
+                reconnect_queue.put("FAILED")
             self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             sock.close()
@@ -5827,7 +5899,8 @@ class UnifiedApp(tk.Tk):
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
         try:
             import multiprocessing as mp
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id), daemon=True)
+            reconnect_queue = mp.Queue()
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue), daemon=True)
             p.start()
             
             # Track active viewer
@@ -5840,18 +5913,21 @@ class UnifiedApp(tk.Tk):
             
             # Reconnection Monitor Thread
             if partner_id and partner_pass:
-                def monitor_reconnect(process, pid, ppass):
-                    process.join()
+                def monitor_reconnect(process, pid, ppass, req_queue):
+                    while process.is_alive():
+                        try:
+                            msg = req_queue.get(timeout=1.0)
+                            if msg == "RECONNECT_REQUEST":
+                                print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
+                                self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
+                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue), daemon=True).start()
+                        except:
+                            pass
+                    
                     code = process.exitcode
                     print(f"[Client Monitor] Pygame viewer process exited with code: {code}")
-                    if code == 99:
-                        print(f"[Client Monitor] Socket disconnected. Automatically attempting reconnect to {pid}...")
-                        self.after(0, lambda: self.update_status(f"Mất kết nối đột ngột (đang đăng nhập/chuyển màn hình). Đang tự động kết nối lại..."))
-                        time.sleep(2.0)
-                        # Reconnect in a background thread
-                        threading.Thread(target=self.connect_to_partner, args=(pid, ppass), daemon=True).start()
-                
-                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass), daemon=True).start()
+                    
+                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
             self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
