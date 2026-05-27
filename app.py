@@ -2382,6 +2382,7 @@ client_switching_desktop_countdown = 0
 # Client Screen Receiver Thread
 def client_receiver_thread(sock):
     global client_latest_frame, client_running
+    client_pending_bbox = None
     while client_running:
         try:
             msg = recv_msg(sock)
@@ -2412,6 +2413,9 @@ def client_receiver_thread(sock):
                         global client_switching_desktop_countdown
                         client_switching_desktop_countdown = 15
                         continue
+                    elif evt_type == "partial_frame":
+                        client_pending_bbox = event.get("bbox")
+                        continue
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
                     pass
@@ -2421,7 +2425,14 @@ def client_receiver_thread(sock):
                 pil_img = Image.open(io.BytesIO(msg))
                 pil_img.load()  # Force decode in receiver thread
                 with client_frame_lock:
-                    client_latest_frame = pil_img
+                    if client_pending_bbox is not None:
+                        if client_latest_frame is not None:
+                            temp = client_latest_frame.copy()
+                            temp.paste(pil_img, (client_pending_bbox[0], client_pending_bbox[1]))
+                            client_latest_frame = temp
+                        client_pending_bbox = None
+                    else:
+                        client_latest_frame = pil_img
                 global client_switching_desktop_countdown
                 client_switching_desktop_countdown = 0
             except Exception as ie:
@@ -5168,7 +5179,7 @@ class UnifiedApp(tk.Tk):
                 }).encode('utf-8')
                 send_msg(conn, res_info)
                 
-                client_state = {"running": True, "net_class": "medium"}
+                client_state = {"running": True, "net_class": "medium", "wake_event": threading.Event()}
                 
                 # Perform pre-connection speed test handling on host (2 rounds to match client)
                 try:
@@ -5293,45 +5304,14 @@ class UnifiedApp(tk.Tk):
                             # Convert raw BGRA from mss directly to Pillow Image
                             pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
                             
-                            # Grayscale 64x64 difference detection to skip identical frames
-                            static_frame = False
-                            try:
-                                small_gray = pil_img.resize((64, 64)).convert("L")
-                                if "prev_small_gray" in client_state:
-                                    prev_gray = client_state["prev_small_gray"]
-                                    diff = 0
-                                    p1 = small_gray.getdata()
-                                    p2 = prev_gray.getdata()
-                                    for i in range(64 * 64):
-                                        diff += abs(p1[i] - p2[i])
-                                    mean_diff = diff / (64.0 * 64.0)
-                                    if mean_diff < 0.5:
-                                        static_frame = True
-                                if not static_frame:
-                                    client_state["prev_small_gray"] = small_gray
-                            except: pass
-                            
-                            # Lấy độ phân giải hiển thị mong muốn từ Client (Phải lấy trước khi check static)
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
                             
-                            # Nếu Client vừa cập nhật độ phân giải thực tế, ta phải ép gửi 1 khung hình mới ngay lập tức
+                            force_update = client_state.pop("force_update", False)
                             if client_state.get("last_target_w") != target_w or client_state.get("last_target_h") != target_h:
-                                static_frame = False
+                                force_update = True
                                 client_state["last_target_w"] = target_w
                                 client_state["last_target_h"] = target_h
-
-                            if static_frame:
-                                current_q = client_state.get("dyn_quality", 40)
-                                current_s = client_state.get("dyn_scale", 0.6)
-                                if current_q < 95 or current_s < 1.0:
-                                    # Cơ hội vàng: Màn hình tĩnh, ép tăng độ nét cực nhanh (Fast Progressive Refinement)
-                                    client_state["dyn_quality"] = min(95, current_q + 15)
-                                    client_state["dyn_scale"] = min(1.0, current_s + 0.1)
-                                    static_frame = False # Bắt buộc gửi tiếp để làm nét ảnh
-                                else:
-                                    time.sleep(1.0)
-                                    continue
 
                             net_class = client_state.get("net_class", "medium")
                             
@@ -5352,7 +5332,6 @@ class UnifiedApp(tk.Tk):
                             sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
                             dyn_scale = client_state.get("dyn_scale", res_scale)
 
-                            # Ép buộc tăng độ nét lên tối đa trong 5 giây đầu tiên (Fast Warm-up)
                             if "start_time" not in client_state:
                                 client_state["start_time"] = time.time()
                                 
@@ -5368,7 +5347,45 @@ class UnifiedApp(tk.Tk):
                             
                             if cap_w != w or cap_h != h:
                                 pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
-                                
+
+                            static_frame = False
+                            diff_bbox = None
+                            try:
+                                if "prev_sent_img" in client_state and not force_update:
+                                    from PIL import ImageChops
+                                    prev_img = client_state["prev_sent_img"]
+                                    if prev_img.size == pil_img.size:
+                                        diff_bbox = ImageChops.difference(pil_img, prev_img).getbbox()
+                                        if diff_bbox is None:
+                                            static_frame = True
+                            except: pass
+                            
+                            if not static_frame:
+                                client_state["prev_sent_img"] = pil_img.copy()
+                            
+                            if static_frame:
+                                current_q = client_state.get("dyn_quality", 40)
+                                current_s = client_state.get("dyn_scale", 0.6)
+                                if current_q < 95 or current_s < 1.0:
+                                    client_state["dyn_quality"] = min(95, current_q + 15)
+                                    client_state["dyn_scale"] = min(1.0, current_s + 0.1)
+                                    static_frame = False 
+                                else:
+                                    if "wake_event" in client_state:
+                                        client_state["wake_event"].wait(1.0)
+                                        client_state["wake_event"].clear()
+                                    else:
+                                        time.sleep(1.0)
+                                    continue
+                                    
+                            if diff_bbox is not None and not static_frame and not force_update:
+                                box_w = diff_bbox[2] - diff_bbox[0]
+                                box_h = diff_bbox[3] - diff_bbox[1]
+                                if box_w * box_h < (w * h) * 0.7:
+                                    pil_img = pil_img.crop(diff_bbox)
+                                    partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
+                                    send_msg(conn, json.dumps(partial_meta).encode('utf-8'))
+                            
                             buf = io.BytesIO()
                             pil_img.save(buf, format="JPEG", quality=quality)
                             jpeg_data = buf.getvalue()
@@ -5446,6 +5463,10 @@ class UnifiedApp(tk.Tk):
                     clipboard_sync_manager.handle_received_packet(event)
                 else:
                     self.host_handle_event(event, conn)
+                    if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
+                        client_state["force_update"] = True
+                        if "wake_event" in client_state:
+                            client_state["wake_event"].set()
             except Exception as e:
                 print(f"[Host] Input Receiver Error: {e}")
                 break
