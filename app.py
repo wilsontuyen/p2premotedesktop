@@ -287,7 +287,26 @@ vk_map = {
 
 def send_input_keyboard_event(key_name, pressed):
     try:
-        if len(key_name) == 1:
+        vk = None
+        if key_name in vk_map:
+            vk = vk_map[key_name]
+        elif len(key_name) == 1:
+            char_upper = key_name.upper()
+            if ('A' <= char_upper <= 'Z') or ('0' <= char_upper <= '9'):
+                vk = ord(char_upper)
+                
+        # Check if any shortcut modifier is held down
+        is_modifier = False
+        if ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000: # VK_CONTROL
+            is_modifier = True
+        if ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000: # VK_MENU (Alt)
+            is_modifier = True
+        if ctypes.windll.user32.GetAsyncKeyState(0x5B) & 0x8000 or ctypes.windll.user32.GetAsyncKeyState(0x5C) & 0x8000: # LWIN/RWIN
+            is_modifier = True
+            
+        use_unicode = (len(key_name) == 1) and not is_modifier
+        
+        if use_unicode:
             # Use KEYEVENTF_UNICODE for reliable character injection (vital for password boxes in Winlogon/Server)
             inp = INPUT()
             inp.type = INPUT_KEYBOARD
@@ -297,10 +316,6 @@ def send_input_keyboard_event(key_name, pressed):
             inp.union.ki = KEYBDINPUT(0, ord(key_name), flags, 0, None)
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
             return
-            
-        vk = None
-        if key_name in vk_map:
-            vk = vk_map[key_name]
             
         if vk is not None:
             inp = INPUT()
@@ -2381,7 +2396,7 @@ client_switching_desktop_countdown = 0
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock):
-    global client_latest_frame, client_running
+    global client_latest_frame, client_running, client_switching_desktop_countdown
     client_pending_bbox = None
     while client_running:
         try:
@@ -2410,7 +2425,6 @@ def client_receiver_thread(sock):
                             pass
                         continue
                     elif evt_type == "switching_desktop":
-                        global client_switching_desktop_countdown
                         client_switching_desktop_countdown = 15
                         continue
                     elif evt_type == "partial_frame":
@@ -2433,7 +2447,6 @@ def client_receiver_thread(sock):
                         client_pending_bbox = None
                     else:
                         client_latest_frame = pil_img
-                global client_switching_desktop_countdown
                 client_switching_desktop_countdown = 0
             except Exception as ie:
                 with open("client_error.log", "a") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
@@ -2444,6 +2457,7 @@ def client_receiver_thread(sock):
 
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None):
+    global client_switching_desktop_countdown
     try:
         outer_running = True
         
@@ -2674,7 +2688,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     current_tick = pygame.time.get_ticks()
                     if "last_tick" not in locals(): last_tick = current_tick
                     if current_tick - last_tick >= 1000:
-                        global client_switching_desktop_countdown
                         client_switching_desktop_countdown -= 1
                         last_tick = current_tick
                 
@@ -3351,20 +3364,31 @@ class UnifiedApp(tk.Tk):
             pass
 
     def load_window_position(self):
-        default_geometry = "680x450"
-        self.minsize(680, 450)
+        # Force Tkinter to calculate proper font/widget scales based on physical DPI
+        try:
+            dpi = self.winfo_fpixels('1i')
+            # The default scaling is usually dpi/72.0 for points, but Tkinter on Windows defaults to 96
+            self.tk.call('tk', 'scaling', dpi / 72.0)
+        except Exception:
+            pass
+
+        scale = self.winfo_fpixels('1i') / 96.0
+        min_w = int(680 * scale)
+        min_h = int(340 * scale) # Giảm chiều cao để loại bỏ phần thừa dư
+        default_geometry = f"{min_w}x{min_h}"
+        self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, "r") as f:
                     config = json.load(f)
                     geom = config.get("geometry")
                     if geom:
-                        # Bảo đảm chiều rộng tối thiểu 680 và chiều cao tối thiểu 450
+                        # Bảo đảm chiều rộng tối thiểu 680 và chiều cao tối thiểu 450 (đã scale theo màn hình)
                         if "x" in geom:
                             parts = geom.split("+")[0].split("x")
                             if len(parts) == 2:
-                                gw = max(680, int(parts[0]))
-                                gh = max(450, int(parts[1]))
+                                gw = max(min_w, int(parts[0]))
+                                gh = max(min_h, int(parts[1]))
                                 pos = "+".join(geom.split("+")[1:])
                                 geom = f"{gw}x{gh}"
                                 if pos:
@@ -3378,8 +3402,8 @@ class UnifiedApp(tk.Tk):
         # Center the window if no config or config is invalid
         self.geometry(default_geometry)
         self.update_idletasks()
-        w = 680
-        h = 450
+        w = min_w
+        h = min_h
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         x = (screen_w - w) // 2
