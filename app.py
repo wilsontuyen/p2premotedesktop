@@ -20,6 +20,34 @@ import urllib.request
 import urllib.parse
 import tkinter as tk
 from tkinter import messagebox
+
+# Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
+_orig_toplevel_geometry = tk.Toplevel.geometry
+def _scaled_toplevel_geometry(self, newGeometry=None):
+    if newGeometry is None:
+        return _orig_toplevel_geometry(self)
+    try:
+        import re
+        m = re.match(r'^(\d+)x(\d+)(?:\+([+-]?\d+)\+([+-]?\d+))?$', newGeometry)
+        if m:
+            w = int(m.group(1))
+            h = int(m.group(2))
+            x = m.group(3)
+            y = m.group(4)
+            scale = self.winfo_fpixels('1i') / 96.0
+            sw = int(w * scale)
+            sh = int(h * scale)
+            if x is not None and y is not None:
+                adj_x = int(x) - (sw - w) // 2
+                adj_y = int(y) - (sh - h) // 2
+                newGeometry = f"{sw}x{sh}+{adj_x}+{adj_y}"
+            else:
+                newGeometry = f"{sw}x{sh}"
+    except Exception as e:
+        pass
+    return _orig_toplevel_geometry(self, newGeometry)
+
+tk.Toplevel.geometry = _scaled_toplevel_geometry
 from pynput.mouse import Controller as MouseController, Button
 from pynput.keyboard import Controller as KeyboardController, Key
 import pygame
