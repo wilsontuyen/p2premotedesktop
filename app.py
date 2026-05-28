@@ -3374,7 +3374,7 @@ class UnifiedApp(tk.Tk):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(340 * scale) # Giảm chiều cao để loại bỏ phần thừa dư
+        min_h = int(400 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
@@ -3383,12 +3383,12 @@ class UnifiedApp(tk.Tk):
                     config = json.load(f)
                     geom = config.get("geometry")
                     if geom:
-                        # Bảo đảm chiều rộng tối thiểu 680 và chiều cao tối thiểu 450 (đã scale theo màn hình)
+                        # Bảo đảm kích thước luôn chính xác theo scale màn hình
                         if "x" in geom:
                             parts = geom.split("+")[0].split("x")
                             if len(parts) == 2:
-                                gw = max(min_w, int(parts[0]))
-                                gh = max(min_h, int(parts[1]))
+                                gw = min_w
+                                gh = min_h
                                 pos = "+".join(geom.split("+")[1:])
                                 geom = f"{gw}x{gh}"
                                 if pos:
