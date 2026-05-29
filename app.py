@@ -1582,6 +1582,7 @@ class ClipboardSyncManager:
         self.meta_arrival_time = 0
         self.last_sent_text = ""
         self.last_received_text = ""
+        self._send_cancelled = False
         
         # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
 
@@ -1703,6 +1704,7 @@ class ClipboardSyncManager:
                 
         # 2. Tắt cờ truyền tải
         self.transfer_in_progress = False
+        self._send_cancelled = True
         
         # 3. Đóng và xóa các file dở dang
         for filename, transfer in list(self.incoming_transfers.items()):
@@ -2106,9 +2108,20 @@ class ClipboardSyncManager:
             self.batch_paths = []
             self.transfer_done_event.clear()
             
-            # Lấy thư mục đích hoạt động của Explorer để kiểm tra file tồn tại
+            # Lấy thư mục đích hoạt động của Explorer (nơi người dùng chuột phải Paste)
             dest_dir = self.get_active_explorer_path()
             log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
+            
+            # Nếu có thư mục đích hợp lệ, tải file trực tiếp vào đó
+            # Nếu không, sử dụng thư mục tạm
+            if dest_dir and os.path.isdir(dest_dir):
+                self.target_save_dir = dest_dir
+                log_debug(f"[render_format] Tải file trực tiếp vào thư mục đích: {dest_dir}")
+            else:
+                temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+                os.makedirs(temp_dir, exist_ok=True)
+                self.target_save_dir = temp_dir
+                log_debug(f"[render_format] Không tìm thấy thư mục đích, sử dụng thư mục tạm: {temp_dir}")
             
             files_to_download = []
             files_to_replace = []
@@ -2131,9 +2144,9 @@ class ClipboardSyncManager:
                             source_info = {"size": f.get("size", 0), "mtime": f.get("mtime", 0)}
                             try:
                                 dest_stat = os.stat(dest_file_path)
-                                dest_info = {"size": dest_stat.st_size, "mtime": dest_stat.st_mtime}
+                                dest_info = {"size": dest_stat.st_size, "mtime": dest_stat.st_mtime, "path": dest_file_path}
                             except:
-                                dest_info = {"size": 0, "mtime": 0}
+                                dest_info = {"size": 0, "mtime": 0, "path": dest_file_path}
                                 
                             has_multiple = len(self.pending_remote_files) > 1
                             choice = self.show_classic_conflict_dialog(filename, source_info, dest_info, has_multiple)
@@ -2168,10 +2181,15 @@ class ClipboardSyncManager:
             # Đặt lại danh sách tệp tin thực tế cần tải
             self.pending_remote_files = files_to_download
             
-            # Yêu cầu truyền file thực tế từ Host
+            # Xóa các file cần ghi đè TRƯỚC khi bắt đầu tải (để tránh xung đột ghi)
+            for p in files_to_replace:
+                try: os.remove(p)
+                except: pass
+            
+            # Yêu cầu truyền file thực tế từ đối tác
             self.request_pending_files()
             
-            # Chờ nhận xong file trong thư mục tạm (non-blocking message pump)
+            # Chờ nhận xong file (non-blocking message pump)
             succeeded = False
             start_time = time.time()
             msg = wintypes.MSG()
@@ -2187,13 +2205,10 @@ class ClipboardSyncManager:
                     time.sleep(0.01)
                     
             if succeeded and self.batch_paths:
-                # Xóa các file cần ghi đè ngay trước khi đưa cho Explorer copy
-                for p in files_to_replace:
-                    try: os.remove(p)
-                    except: pass
-
-                print(f"[Clipboard] Tải thành công {len(self.batch_paths)} file. Đang nạp vào Clipboard...")
+                print(f"[Clipboard] Tải thành công {len(self.batch_paths)} file vào: {self.target_save_dir}")
                 log_debug(f"[render_format] Tải thành công {len(self.batch_paths)} file. Đang nạp vào Clipboard...")
+                
+                # Tạo HDROP trỏ đến các file đã tải (nằm trực tiếp tại thư mục đích)
                 hGlobal = create_hdrop_data(self.batch_paths)
                 if hGlobal:
                     self.ignore_destroy_clipboard = True
@@ -2221,7 +2236,7 @@ class ClipboardSyncManager:
         send_msg(self.sock, json.dumps({"type": "request_files", "files": self.pending_remote_files}).encode('utf-8'))
 
     def _process_send_requests(self, sock, files):
-        self.transfer_in_progress = True
+        self._send_cancelled = False
         log_debug(f"[_process_send_requests] Khởi chạy gửi {len(files)} file...")
         try:
             total_size = sum(f.get("size", 0) for f in files)
@@ -2240,7 +2255,7 @@ class ClipboardSyncManager:
             
             total_sent = 0
             for f in files:
-                if not self.transfer_in_progress:
+                if self._send_cancelled:
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
                     break
                 filepath = f["path"]
@@ -2259,7 +2274,7 @@ class ClipboardSyncManager:
                 try:
                     with open(filepath, "rb") as fh:
                         while True:
-                            if not self.transfer_in_progress:
+                            if self._send_cancelled:
                                 break
                             chunk_data = fh.read(4 * 1024 * 1024)
                             if not chunk_data: break
@@ -2271,11 +2286,11 @@ class ClipboardSyncManager:
                     print(f"[FileTransfer] Lỗi khi gửi file {filename}: {e}")
                     log_debug(f"[_process_send_requests] Lỗi khi gửi file {filename}: {e}")
                     
-                if self.transfer_in_progress:
+                if not self._send_cancelled:
                     send_msg(sock, json.dumps({"type": "file_end", "name": filename}).encode('utf-8'))
                     log_debug(f"[_process_send_requests] Đã gửi file_end cho {filename}")
                 
-            if self.transfer_in_progress:
+            if not self._send_cancelled:
                 send_msg(sock, json.dumps({"type": "batch_end"}).encode('utf-8'))
                 log_debug(f"[_process_send_requests] Đã gửi batch_end.")
         except Exception as e:
@@ -2288,7 +2303,7 @@ class ClipboardSyncManager:
             except:
                 pass
         finally:
-            self.transfer_in_progress = False
+            # Không đặt self.transfer_in_progress = False ở đây vì phía nhận (render_format) quản lý cờ này
             log_debug(f"[_process_send_requests] Kết thúc hàm gửi file.")
 
     def handle_received_packet(self, packet):
@@ -2322,7 +2337,8 @@ class ClipboardSyncManager:
             print(f"[Clipboard] Đã nhận được files_copied_meta. Số file: {len(self.pending_remote_files)}")
             if not self.pending_remote_files: return
             
-            # Đặt target_save_dir là thư mục tạm
+            # Đặt target_save_dir tạm thời là thư mục tạm, sẽ được cập nhật lại thành thư mục đích
+            # thực tế khi render_format() được gọi (khi người dùng thực sự Paste)
             temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
             try:
                 os.makedirs(temp_dir, exist_ok=True)
