@@ -259,6 +259,21 @@ def terminate_process_with_pid(pid):
         except Exception as e:
             log(f"Failed to kill agent {pid} via taskkill: {e}")
 
+def is_process_alive(pid):
+    """Check if a process with the given PID is still running."""
+    if not pid:
+        return False
+    try:
+        h_proc = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION, False, pid)
+        if h_proc:
+            exit_code = win32process.GetExitCodeProcess(h_proc)
+            win32api.CloseHandle(h_proc)
+            # STILL_ACTIVE = 259
+            return exit_code == 259
+    except Exception:
+        pass
+    return False
+
 def main():
     log("Easy Remote Desktop Agent service loop started.")
     
@@ -277,8 +292,6 @@ def main():
 
     current_agent_pid = None
     last_session_id = None
-    last_was_logged_in = None
-    last_was_screen_locked = None
 
     while True:
         try:
@@ -288,7 +301,6 @@ def main():
                 continue
 
             # Check if user is logged in
-            h_token = None
             is_logged_in = False
             try:
                 h_token = win32ts.WTSQueryUserToken(active_session_id)
@@ -300,48 +312,47 @@ def main():
             # Check if screen is locked (LogonUI is running)
             is_screen_locked = is_logon_ui_running(active_session_id)
 
-            # Check if state has changed (Session ID, Logged-in state, or Lock screen state).
-            # We MUST restart the agent when any of these change to ensure the agent is running
-            # on the correct active desktop (winsta0\default or winsta0\winlogon).
-            state_changed = (
-                (last_session_id != active_session_id) or
-                (last_was_screen_locked != is_screen_locked) or
-                (last_was_logged_in != is_logged_in)
-            )
+            # Only kill and respawn the agent if the Windows SESSION ID changes
+            # (e.g., fast user switching). Lock/unlock and login transitions are
+            # handled dynamically by the agent via OpenInputDesktop + SetThreadDesktop,
+            # so we do NOT kill the agent on those events to preserve active connections.
+            session_changed = (last_session_id is not None and last_session_id != active_session_id)
 
-            if state_changed:
-                log(f"Session state changed: SessionId={active_session_id}, LoggedIn={is_logged_in}, Locked={is_screen_locked} (Previous: LoggedIn={last_was_logged_in}, Locked={last_was_screen_locked})")
-                
-                # Kill current agent
+            if session_changed:
+                log(f"Session ID changed from {last_session_id} to {active_session_id}. Killing agent to switch session.")
                 if current_agent_pid:
-                    log(f"Killing current agent with PID {current_agent_pid} to switch to the new desktop/state.")
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
 
-                last_session_id = active_session_id
-                last_was_logged_in = is_logged_in
-                last_was_screen_locked = is_screen_locked
+            last_session_id = active_session_id
 
-            # Check if agent is running on the target desktop/session using Mutex
-            target_desktop = 'winlogon' if is_screen_locked else 'default'
-            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{active_session_id}_{target_desktop}"
-            
+            # Check if the current agent process has died on its own
+            if current_agent_pid and not is_process_alive(current_agent_pid):
+                log(f"Agent PID {current_agent_pid} is no longer running. Will respawn.")
+                current_agent_pid = None
+
+            # Check if agent is running using Mutex (check BOTH desktops)
             agent_running = False
-            try:
-                h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
-                win32api.CloseHandle(h_mutex)
-                agent_running = True
-            except Exception as e:
-                err_code = 0
-                if hasattr(e, 'winerror'):
-                    err_code = e.winerror
-                elif hasattr(e, 'args') and len(e.args) > 0:
-                    err_code = e.args[0]
-                
-                if err_code != 2: # winerror.ERROR_FILE_NOT_FOUND
+            for desktop_name in ['default', 'winlogon']:
+                mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{active_session_id}_{desktop_name}"
+                try:
+                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
+                    win32api.CloseHandle(h_mutex)
                     agent_running = True
+                    break
+                except Exception as e:
+                    err_code = 0
+                    if hasattr(e, 'winerror'):
+                        err_code = e.winerror
+                    elif hasattr(e, 'args') and len(e.args) > 0:
+                        err_code = e.args[0]
+                    
+                    if err_code != 2: # winerror.ERROR_FILE_NOT_FOUND
+                        agent_running = True
+                        break
 
             if not agent_running:
+                log(f"No agent mutex found for session {active_session_id}. Spawning new agent. (LoggedIn={is_logged_in}, Locked={is_screen_locked})")
                 pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
                 if pid:
                     current_agent_pid = pid

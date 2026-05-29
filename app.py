@@ -2452,7 +2452,7 @@ def client_receiver_thread(sock):
                             pass
                         continue
                     elif evt_type == "switching_desktop":
-                        client_switching_desktop_countdown = 15
+                        client_switching_desktop_countdown = 10
                         continue
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
@@ -2708,7 +2708,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     overlay.fill((0, 0, 0))
                     screen.blit(overlay, (0, 0))
                     
-                    text_surf = msg_font.render(f"Đang chuyển giao diện ! Sẽ kết nối lại trong vòng {client_switching_desktop_countdown} giây...", True, (255, 255, 255))
+                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {client_switching_desktop_countdown} giây...", True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     
@@ -2722,7 +2722,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 clock.tick(60)
                 
             if exit_due_to_disconnect and reconnect_queue:
-                countdown = 15
+                countdown = 10
                 last_tick = pygame.time.get_ticks()
                 try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
                 except: msg_font = pygame.font.Font(None, 32)
@@ -2755,7 +2755,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pass
                     
                     screen.fill((30, 30, 30))
-                    text_surf = msg_font.render(f"Đang chuyển giao diện ! Sẽ kết nối lại trong vòng {countdown} giây...", True, (255, 255, 255))
+                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {countdown} giây...", True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     pygame.display.flip()
@@ -5511,6 +5511,16 @@ class UnifiedApp(tk.Tk):
         import select
         while client_state.get("running", False):
             try:
+                # Dynamically switch to active input desktop so input events work after session transitions
+                try:
+                    import ctypes
+                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                    if hdesk:
+                        ctypes.windll.user32.SetThreadDesktop(hdesk)
+                        ctypes.windll.user32.CloseDesktop(hdesk)
+                except Exception:
+                    pass
+                    
                 # Chờ 2 giây, nếu không có gói tin nào thì nhả hết phím modifier để chống kẹt
                 r, _, _ = select.select([conn], [], [], 2.0)
                 if not r:
