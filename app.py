@@ -2424,7 +2424,7 @@ client_switching_desktop_countdown = 0
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock):
-    global client_latest_frame, client_running, client_switching_desktop_countdown
+    global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked
     client_pending_bbox = None
     while client_running:
         try:
@@ -2442,7 +2442,6 @@ def client_receiver_thread(sock):
                         clipboard_sync_manager.handle_received_packet(event)
                         continue
                     elif evt_type == "domain_status":
-                        global client_is_domain, client_is_locked
                         client_is_domain = event.get("is_domain", False)
                         client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
@@ -3018,6 +3017,7 @@ def set_windows_graphics_effects(enabled=True):
 class UnifiedApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        import threading
         
         # Check headless flag (run in Session 0 / background service mode)
         self.is_headless = "--headless" in sys.argv
