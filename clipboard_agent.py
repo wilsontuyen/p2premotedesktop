@@ -75,6 +75,16 @@ def set_clipboard_files(file_path):
             win32clipboard.EmptyClipboard()
             # SetClipboardFiles nhận một tuple chứa các đường dẫn file
             win32clipboard.SetClipboardFiles((abs_path,))
+            
+            # Đặt Preferred DropEffect là 2 (DROPEFFECT_MOVE) để file bị di chuyển thay vì copy
+            try:
+                cf_drop_effect = win32clipboard.RegisterClipboardFormat("Preferred DropEffect")
+                import struct
+                # Đóng gói giá trị 2 (DWORD)
+                win32clipboard.SetClipboardData(cf_drop_effect, struct.pack("I", 2))
+            except Exception as e:
+                log_print(f"[Agent] Không thể đặt Preferred DropEffect: {e}")
+                
             log_print(f"[Agent] Đã nạp thành công file vào Clipboard: {abs_path}")
             return True
         finally:

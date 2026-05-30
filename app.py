@@ -280,6 +280,13 @@ vk_map = {
     'f10': 0x79,        # VK_F10
     'f11': 0x7A,        # VK_F11
     'f12': 0x7B,        # VK_F12
+    'left meta': 0x5B,  # VK_LWIN
+    'right meta': 0x5C, # VK_RWIN
+    'left windows': 0x5B,
+    'right windows': 0x5C,
+    'left super': 0x5B,
+    'right super': 0x5C,
+    'insert': 0x2D,     # VK_INSERT
     '[0]': 0x60,        # VK_NUMPAD0
     '[1]': 0x61,        # VK_NUMPAD1
     '[2]': 0x62,        # VK_NUMPAD2
@@ -361,7 +368,8 @@ def send_input_keyboard_event(key_name, pressed):
                 0x90,                   # Numlock
                 0x2F,                   # Print screen
                 0x12, 0xA1,             # Alt_R
-                0x11, 0xA3              # Ctrl_R
+                0x11, 0xA3,             # Ctrl_R
+                0x5B, 0x5C              # LWIN, RWIN
             ]
             if vk in extended_vks:
                 flags |= KEYEVENTF_EXTENDEDKEY
@@ -2182,12 +2190,12 @@ class ClipboardSyncManager:
                 recent_right_click = time_since_rbutton < 5.0
                 meta_age = time.time() - getattr(self, 'meta_arrival_time', 0)
                 
-                # Nếu không có Ctrl+V, không có click chuột phải gần đây, HOẶC nếu đây là truy vấn tự động
+                # Nếu không có click chuột trái gần đây (đã lọc ở trên), không có click chuột phải gần đây, HOẶC nếu đây là truy vấn tự động
                 # xảy ra ngay khi vừa nhận được metadata (thường do clipboard history hoặc shell extension tự quét trong vòng 1.5s đầu)
                 # thì coi như đây không phải là Paste thực tế.
-                if not (ctrl_v or recent_right_click):
+                if not recent_right_click:
                     is_menu_query = True
-                elif meta_age < 0.5 and not ctrl_v:
+                elif meta_age < 0.5:
                     is_menu_query = True
                     
             if is_menu_query:
@@ -2443,7 +2451,6 @@ class ClipboardSyncManager:
                 transfer_dir = HEADLESS_TRANSFER_DIR
                 try:
                     os.makedirs(transfer_dir, exist_ok=True)
-                    # Dọn dẹp file cũ trong thư mục transfer
                     for item in os.listdir(transfer_dir):
                         item_path = os.path.join(transfer_dir, item)
                         if os.path.isfile(item_path):
@@ -2715,11 +2722,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             clipboard_sync_manager.add_socket(sock)
             # We moved pygame init outside
             
+            import queue
+            event_queue = queue.Queue(maxsize=150)
+            
+            def event_sender_thread():
+                while client_running:
+                    try:
+                        event_dict = event_queue.get(timeout=0.1)
+                        send_msg(sock, json.dumps(event_dict).encode('utf-8'))
+                    except queue.Empty:
+                        pass
+                    except Exception:
+                        break
+                        
+            threading.Thread(target=event_sender_thread, daemon=True).start()
+            
             # Khởi tạo kích thước viewer ban đầu cho Host biết
             def send_event(event_dict):
                 try:
-                    data = json.dumps(event_dict).encode('utf-8')
-                    send_msg(sock, data)
+                    if event_dict.get("type") == "mouse_move" and event_queue.full():
+                        return
+                    event_queue.put(event_dict, timeout=0.05)
                 except Exception:
                     pass
                     
@@ -2802,7 +2825,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         char_to_send = key_name
                         if event.type == pygame.KEYDOWN:
                             if hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
-                                char_to_send = event.unicode
+                                if key_name not in ['delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
+                                    char_to_send = event.unicode
                             active_unicode_map[event.key] = char_to_send
                         else:
                             char_to_send = active_unicode_map.get(event.key, key_name)
