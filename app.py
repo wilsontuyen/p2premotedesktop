@@ -1603,8 +1603,8 @@ def create_named_pipe_with_everyone_dacl():
         win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
         win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
         1,       # Số instance tối đa
-        4096,    # Output buffer size
-        4096,    # Input buffer size
+        10 * 1024 * 1024,    # Output buffer size (10MB)
+        10 * 1024 * 1024,    # Input buffer size (10MB)
         0,       # Default timeout
         sa       # Security Attributes với DACL cho Everyone
     )
@@ -1657,47 +1657,53 @@ class ClipboardSyncManager:
         self.app = app
         self.poll_gui_queue()
 
-    def _send_path_to_pipe(self, file_path):
+    def _send_to_pipe(self, data_type, payload):
         """
-        Gửi đường dẫn file qua Named Pipe cho Clipboard Agent.
-        Tạo Pipe mới mỗi lần gửi, chờ Agent kết nối, ghi dữ liệu rồi đóng.
+        Gửi dữ liệu (file hoặc text) qua Named Pipe cho Clipboard Agent.
+        Format gửi: "TYPE:payload"
         """
         import win32pipe
         import win32file
 
         pipe_handle = None
         try:
-            log_debug(f"[_send_path_to_pipe] Đang tạo Named Pipe để gửi: {file_path}")
+            log_debug(f"[_send_to_pipe] Đang tạo Named Pipe để gửi {data_type}...")
             pipe_handle = create_named_pipe_with_everyone_dacl()
 
             if pipe_handle is None or pipe_handle == -1:
-                log_debug("[_send_path_to_pipe] Lỗi: Không tạo được Named Pipe.")
+                log_debug("[_send_to_pipe] Lỗi: Không tạo được Named Pipe.")
                 return
 
-            log_debug(f"[_send_path_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
+            log_debug(f"[_send_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
             # Chờ Agent kết nối (blocking call)
             win32pipe.ConnectNamedPipe(pipe_handle, None)
-            log_debug(f"[_send_path_to_pipe] Agent đã kết nối. Đang gửi đường dẫn...")
+            log_debug(f"[_send_to_pipe] Agent đã kết nối. Đang gửi {data_type}...")
 
-            # Ghi đường dẫn file dưới dạng UTF-8
-            data = file_path.encode("utf-8")
+            # Gửi dữ liệu dưới dạng "TYPE:payload" encoded in UTF-8
+            msg = f"{data_type}:{payload}"
+            data = msg.encode("utf-8")
             win32file.WriteFile(pipe_handle, data)
 
-            log_debug(f"[_send_path_to_pipe] Đã gửi thành công đường dẫn qua Pipe: {file_path}")
-            print(f"[Pipe] Đã gửi đường dẫn file qua Named Pipe: {file_path}")
+            log_debug(f"[_send_to_pipe] Đã gửi thành công qua Pipe: {data_type}")
+            print(f"[Pipe] Đã gửi {data_type} qua Named Pipe.")
 
         except Exception as e:
-            log_debug(f"[_send_path_to_pipe] Lỗi gửi đường dẫn qua Pipe: {e}")
-            print(f"[Pipe] Lỗi gửi đường dẫn: {e}")
+            log_debug(f"[_send_to_pipe] Lỗi gửi qua Pipe: {e}")
+            print(f"[Pipe] Lỗi gửi qua Pipe: {e}")
         finally:
             if pipe_handle is not None and pipe_handle != -1:
                 try:
-                    # Flush pipe trước khi đóng để đảm bảo dữ liệu được gửi hết
                     win32file.FlushFileBuffers(pipe_handle)
                     win32pipe.DisconnectNamedPipe(pipe_handle)
                     win32file.CloseHandle(pipe_handle)
                 except:
                     pass
+
+    def _send_path_to_pipe(self, file_path):
+        """
+        Gửi đường dẫn file qua Named Pipe cho Clipboard Agent.
+        """
+        self._send_to_pipe("FILE", file_path)
 
     def poll_gui_queue(self):
         if not self.app: return
@@ -2434,7 +2440,13 @@ class ClipboardSyncManager:
                 if self.app:
                     try: owner_hwnd = self.app.winfo_id()
                     except: pass
-                set_clipboard_text(text, owner_hwnd)
+                
+                if self.app and getattr(self.app, 'is_headless', False):
+                    # Gửi text qua Named Pipe cho Clipboard Agent
+                    threading.Thread(target=self._send_to_pipe, args=("TEXT", text), daemon=True).start()
+                    log_debug("[handle_received_packet] HEADLESS: Đang gửi text qua Named Pipe cho Clipboard Agent.")
+                else:
+                    set_clipboard_text(text, owner_hwnd)
             finally:
                 self.ignore_destroy_clipboard = False
             return
@@ -2555,10 +2567,12 @@ class ClipboardSyncManager:
             # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
                 if self.batch_paths:
-                    for file_path in self.batch_paths:
-                        self._send_path_to_pipe(file_path)
-                    log_debug(f"[batch_end] HEADLESS: Đã gửi {len(self.batch_paths)} đường dẫn qua Named Pipe.")
-                    print(f"[Clipboard] HEADLESS: Đã gửi {len(self.batch_paths)} đường dẫn file qua Named Pipe cho Clipboard Agent.")
+                    def _send_all_paths(paths):
+                        for file_path in paths:
+                            self._send_path_to_pipe(file_path)
+                    threading.Thread(target=_send_all_paths, args=(self.batch_paths.copy(),), daemon=True).start()
+                    log_debug(f"[batch_end] HEADLESS: Bắt đầu gửi {len(self.batch_paths)} đường dẫn qua Named Pipe (luồng riêng).")
+                    print(f"[Clipboard] HEADLESS: Bắt đầu gửi {len(self.batch_paths)} đường dẫn file qua Named Pipe cho Clipboard Agent.")
                 self.pending_remote_files = []
                 self.transfer_in_progress = False
 
@@ -6460,34 +6474,43 @@ def run_clipboard_agent_mode():
 
             agent_print(f"[ClipboardAgent] Đã kết nối thành công tới Pipe.")
 
-            win32pipe.SetNamedPipeHandleState(
-                pipe_handle,
-                win32pipe.PIPE_READMODE_MESSAGE,
-                None,
-                None
-            )
+            try:
+                win32pipe.SetNamedPipeHandleState(
+                    pipe_handle,
+                    win32pipe.PIPE_READMODE_MESSAGE,
+                    None,
+                    None
+                )
+            except Exception as se:
+                agent_print(f"[ClipboardAgent] Cảnh báo SetNamedPipeHandleState: {se}. Tiếp tục ở chế độ byte mode.")
 
-            # Vòng lặp đọc đường dẫn file từ Pipe
+            # Vòng lặp đọc dữ liệu (file hoặc text) từ Pipe
             while True:
                 try:
-                    hr, data = win32file.ReadFile(pipe_handle, 4096)
+                    # Tăng kích thước buffer đọc lên 10MB để đọc các gói tin text clipboard lớn
+                    hr, data = win32file.ReadFile(pipe_handle, 10 * 1024 * 1024)
                     if hr == 0:  # ERROR_SUCCESS
-                        file_path = data.decode("utf-8").strip()
-                        if file_path:
-                            agent_print(f"[ClipboardAgent] Nhận đường dẫn từ Pipe: {file_path}")
-
-                            if os.path.exists(file_path):
-                                # Dùng hàm set_clipboard_files() đã có sẵn trong app.py
-                                set_clipboard_files([file_path])
-                                agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard: {file_path}")
+                        msg = data.decode("utf-8").strip()
+                        if msg:
+                            agent_print(f"[ClipboardAgent] Nhận tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
+                            if msg.startswith("TEXT:"):
+                                text_val = msg[5:]
+                                agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
+                                set_clipboard_text(text_val)
                             else:
-                                agent_print(f"[ClipboardAgent] File chưa tồn tại, chờ 1s rồi thử lại...")
-                                time.sleep(1.0)
+                                # Nếu bắt đầu bằng FILE:, cắt bỏ. Nếu không, giữ nguyên (fallback)
+                                file_path = msg[5:] if msg.startswith("FILE:") else msg
                                 if os.path.exists(file_path):
                                     set_clipboard_files([file_path])
-                                    agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard (sau retry): {file_path}")
+                                    agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard: {file_path}")
                                 else:
-                                    agent_print(f"[ClipboardAgent] File vẫn không tồn tại: {file_path}")
+                                    agent_print(f"[ClipboardAgent] File chưa tồn tại, chờ 1s rồi thử lại...")
+                                    time.sleep(1.0)
+                                    if os.path.exists(file_path):
+                                        set_clipboard_files([file_path])
+                                        agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard (sau retry): {file_path}")
+                                    else:
+                                        agent_print(f"[ClipboardAgent] File vẫn không tồn tại: {file_path}")
                     else:
                         agent_print(f"[ClipboardAgent] ReadFile trả về mã lỗi: {hr}")
                         break

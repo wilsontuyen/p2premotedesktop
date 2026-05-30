@@ -160,6 +160,60 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
             log(f"CreateProcessAsUser failed: {e}")
     return None
 
+def spawn_clipboard_agent(session_id):
+    """
+    Spawn Clipboard Agent ở quyền User thường (sử dụng WTSQueryUserToken).
+    Dùng chính RemoteDesktopP2P.exe với flag --clipboard-agent.
+    Agent này lắng nghe Named Pipe và nạp file vào Clipboard.
+    """
+    exe_path, cmd_line = get_executable_to_run()
+    if not exe_path:
+        return None
+    
+    cmd_line = cmd_line.replace("--headless", "--clipboard-agent")
+
+    h_user_token = None
+    try:
+        h_user_token = win32ts.WTSQueryUserToken(session_id)
+    except Exception as e:
+        log(f"Failed to query user token for Clipboard Agent (session {session_id}): {e}")
+        return None
+
+    if h_user_token:
+        try:
+            h_token_dup = win32security.DuplicateTokenEx(
+                h_user_token,
+                win32security.SecurityImpersonation,
+                win32con.TOKEN_ALL_ACCESS,
+                win32security.TokenPrimary
+            )
+            win32api.CloseHandle(h_user_token)
+
+            startup_info = win32process.STARTUPINFO()
+            startup_info.lpDesktop = "winsta0\\default"
+
+            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+                h_token_dup,
+                exe_path,
+                cmd_line,
+                None,
+                None,
+                False,
+                win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
+                None,
+                os.path.dirname(exe_path),
+                startup_info
+            )
+            win32api.CloseHandle(h_process)
+            win32api.CloseHandle(h_thread)
+            win32api.CloseHandle(h_token_dup)
+
+            log(f"Clipboard Agent spawned with PID {dwProcessId} on winsta0\\default (User privilege)")
+            return dwProcessId
+        except Exception as e:
+            log(f"CreateProcessAsUser for Clipboard Agent failed: {e}")
+    return None
+
 def trigger_sas_system():
     try:
         import winreg
@@ -291,6 +345,7 @@ def main():
     t.start()
 
     current_agent_pid = None
+    clipboard_agent_pid = None
     last_session_id = None
 
     while True:
@@ -323,6 +378,9 @@ def main():
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
+                if clipboard_agent_pid:
+                    terminate_process_with_pid(clipboard_agent_pid)
+                    clipboard_agent_pid = None
 
             last_session_id = active_session_id
 
@@ -356,6 +414,28 @@ def main():
                 pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
                 if pid:
                     current_agent_pid = pid
+
+            # Spawn or check Clipboard Agent (only when user is logged in and not locked)
+            if is_logged_in and not is_screen_locked:
+                clipboard_agent_running = False
+                mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                try:
+                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
+                    win32api.CloseHandle(h_mutex)
+                    clipboard_agent_running = True
+                except Exception as e:
+                    err_code = getattr(e, 'winerror', 0)
+                    if err_code != 2:
+                        clipboard_agent_running = True
+                        
+                if not clipboard_agent_running:
+                    log(f"No Clipboard Agent mutex found for session {active_session_id}. Spawning new Clipboard Agent.")
+                    clipboard_agent_pid = spawn_clipboard_agent(active_session_id)
+            else:
+                if clipboard_agent_pid:
+                    log(f"User logged out or locked. Terminating Clipboard Agent.")
+                    terminate_process_with_pid(clipboard_agent_pid)
+                    clipboard_agent_pid = None
 
         except Exception as e:
             log(f"Error in main loop: {e}\n{traceback.format_exc()}")

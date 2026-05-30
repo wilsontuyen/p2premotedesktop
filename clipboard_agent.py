@@ -98,6 +98,44 @@ def set_clipboard_files(file_path):
         return False
 
 
+def set_clipboard_text(text):
+    """
+    Nạp text vào Clipboard hệ thống.
+    """
+    try:
+        import win32clipboard
+        import win32con
+
+        opened = False
+        for attempt in range(10):
+            try:
+                win32clipboard.OpenClipboard()
+                opened = True
+                break
+            except Exception:
+                time.sleep(0.05)
+
+        if not opened:
+            log_print("[Agent] Lỗi: Không thể OpenClipboard sau 10 lần thử.")
+            return False
+
+        try:
+            win32clipboard.EmptyClipboard()
+            # 13 is CF_UNICODETEXT
+            win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
+            log_print(f"[Agent] Đã nạp thành công text vào Clipboard (độ dài {len(text)})")
+            return True
+        finally:
+            win32clipboard.CloseClipboard()
+
+    except ImportError:
+        log_print("[Agent] Lỗi: Thư viện win32clipboard (pywin32) hoặc win32con chưa được cài đặt!")
+        return False
+    except Exception as e:
+        log_print(f"[Agent] Lỗi khi nạp text vào Clipboard: {e}")
+        return False
+
+
 def pipe_listener_loop():
     """
     Vòng lặp chính: Liên tục kết nối tới Named Pipe và lắng nghe
@@ -133,32 +171,41 @@ def pipe_listener_loop():
             log_print(f"[Agent] Đã kết nối thành công tới Pipe.")
 
             # Đặt chế độ đọc message (byte mode)
-            win32pipe.SetNamedPipeHandleState(
-                pipe_handle,
-                win32pipe.PIPE_READMODE_MESSAGE,
-                None,
-                None
-            )
+            try:
+                win32pipe.SetNamedPipeHandleState(
+                    pipe_handle,
+                    win32pipe.PIPE_READMODE_MESSAGE,
+                    None,
+                    None
+                )
+            except Exception as se:
+                log_print(f"[Agent] Cảnh báo SetNamedPipeHandleState: {se}. Tiếp tục ở chế độ byte mode.")
 
             # Vòng lặp đọc dữ liệu từ Pipe
             while True:
                 try:
-                    hr, data = win32file.ReadFile(pipe_handle, 4096)
+                    # Tăng kích thước buffer đọc lên 10MB để đọc các gói tin text clipboard lớn
+                    hr, data = win32file.ReadFile(pipe_handle, 10 * 1024 * 1024)
                     if hr == 0:  # ERROR_SUCCESS
-                        file_path = data.decode("utf-8").strip()
-                        if file_path:
-                            log_print(f"[Agent] Nhận được đường dẫn từ Pipe: {file_path}")
-
-                            # Kiểm tra file tồn tại trước khi nạp Clipboard
-                            if os.path.exists(file_path):
-                                set_clipboard_files(file_path)
+                        msg = data.decode("utf-8").strip()
+                        if msg:
+                            log_print(f"[Agent] Nhận được tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
+                            if msg.startswith("TEXT:"):
+                                text_val = msg[5:]
+                                set_clipboard_text(text_val)
                             else:
-                                log_print(f"[Agent] File chưa tồn tại trên đĩa, chờ 1 giây rồi thử lại...")
-                                time.sleep(1.0)
+                                # Nếu bắt đầu bằng FILE:, cắt bỏ. Nếu không, giữ nguyên (fallback)
+                                file_path = msg[5:] if msg.startswith("FILE:") else msg
+                                # Kiểm tra file tồn tại trước khi nạp Clipboard
                                 if os.path.exists(file_path):
                                     set_clipboard_files(file_path)
                                 else:
-                                    log_print(f"[Agent] File vẫn không tồn tại sau khi chờ: {file_path}")
+                                    log_print(f"[Agent] File chưa tồn tại trên đĩa, chờ 1 giây rồi thử lại...")
+                                    time.sleep(1.0)
+                                    if os.path.exists(file_path):
+                                        set_clipboard_files(file_path)
+                                    else:
+                                        log_print(f"[Agent] File vẫn không tồn tại sau khi chờ: {file_path}")
                     else:
                         log_print(f"[Agent] ReadFile trả về mã lỗi: {hr}")
                         break
@@ -169,8 +216,6 @@ def pipe_listener_loop():
                         log_print("[Agent] Pipe bị ngắt (Service đóng kết nối). Đang kết nối lại...")
                         break
                     elif err_code == 234:  # ERROR_MORE_DATA
-                        # Message lớn hơn buffer, đọc tiếp
-                        log_print("[Agent] Buffer nhỏ hơn message, cần đọc tiếp...")
                         continue
                     else:
                         log_print(f"[Agent] Lỗi đọc Pipe: {read_err}")
