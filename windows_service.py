@@ -91,6 +91,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         self.running = True
         self.current_agent_pid = None
+        self.clipboard_agent_pid = None
         self.last_session_id = None
         self.last_was_logged_in = None
         self.last_was_screen_locked = None
@@ -103,6 +104,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         win32event.SetEvent(self.hWaitStop)
         self.running = False
         self.kill_current_agent()
+        self.kill_clipboard_agent()
 
     def SvcDoRun(self):
         log("Service starting...")
@@ -158,6 +160,17 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
             except Exception as e:
                 log(f"Failed to kill agent: {e}")
             self.current_agent_pid = None
+
+    def kill_clipboard_agent(self):
+        if self.clipboard_agent_pid:
+            log(f"Killing clipboard agent with PID {self.clipboard_agent_pid}")
+            try:
+                h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, self.clipboard_agent_pid)
+                win32api.TerminateProcess(h_proc, 0)
+                win32api.CloseHandle(h_proc)
+            except Exception as e:
+                log(f"Failed to kill clipboard agent: {e}")
+            self.clipboard_agent_pid = None
 
     def is_agent_running(self, session_id, is_screen_locked):
         target_desktop = 'winlogon' if is_screen_locked else 'default'
@@ -261,6 +274,7 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 if session_changed:
                     log(f"Session state changed: SessionId={active_session_id} (Previous: {self.last_session_id}). LoggedIn={is_logged_in}, Locked={is_screen_locked}")
                     self.kill_current_agent()
+                    self.kill_clipboard_agent()
                     self.last_session_id = active_session_id
                     self.last_was_logged_in = is_logged_in
                     self.last_was_screen_locked = is_screen_locked
@@ -278,6 +292,10 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                     if now - self.last_spawn_time >= self.spawn_cooldown:
                         self.spawn_agent(active_session_id, is_logged_in, is_screen_locked)
                         self.last_spawn_time = now
+
+                # Spawn Clipboard Agent ở quyền User thường (chỉ khi user đã đăng nhập)
+                if is_logged_in and not is_screen_locked and self.clipboard_agent_pid is None:
+                    self.spawn_clipboard_agent(active_session_id)
 
             except Exception as e:
                 log(f"Error in checking session: {e}")
@@ -362,6 +380,60 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
                 log(f"Agent successfully spawned with PID {dwProcessId} on {desktop}")
             except Exception as e:
                 log(f"CreateProcessAsUser failed: {e}")
+
+    def spawn_clipboard_agent(self, session_id):
+        """
+        Spawn Clipboard Agent ở quyền User thường (sử dụng WTSQueryUserToken).
+        Dùng chính RemoteDesktopP2P.exe với flag --clipboard-agent.
+        Agent này lắng nghe Named Pipe và nạp file vào Clipboard.
+        """
+        exe_path, cmd_line = self.get_executable_to_run()
+        if not exe_path:
+            return
+        
+        # Thay flag --headless bằng --clipboard-agent
+        cmd_line = cmd_line.replace("--headless", "--clipboard-agent")
+
+        h_user_token = None
+        try:
+            h_user_token = win32ts.WTSQueryUserToken(session_id)
+        except Exception as e:
+            log(f"Failed to query user token for Clipboard Agent (session {session_id}): {e}")
+            return
+
+        if h_user_token:
+            try:
+                h_token_dup = win32security.DuplicateTokenEx(
+                    h_user_token,
+                    win32security.SecurityImpersonation,
+                    win32con.TOKEN_ALL_ACCESS,
+                    win32security.TokenPrimary
+                )
+                win32api.CloseHandle(h_user_token)
+
+                startup_info = win32process.STARTUPINFO()
+                startup_info.lpDesktop = "winsta0\\default"
+
+                h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+                    h_token_dup,
+                    exe_path,
+                    cmd_line,
+                    None,
+                    None,
+                    False,
+                    win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
+                    None,
+                    os.path.dirname(exe_path),
+                    startup_info
+                )
+                win32api.CloseHandle(h_process)
+                win32api.CloseHandle(h_thread)
+                win32api.CloseHandle(h_token_dup)
+
+                self.clipboard_agent_pid = dwProcessId
+                log(f"Clipboard Agent spawned with PID {dwProcessId} on winsta0\\default (User privilege)")
+            except Exception as e:
+                log(f"CreateProcessAsUser for Clipboard Agent failed: {e}")
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] in ['install', 'update', 'remove', 'start', 'stop']:

@@ -1549,6 +1549,61 @@ class ClipboardEventListener:
             try: ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.hwnd), 0, 0, 0)
             except: pass
 
+# Đường dẫn thư mục lưu file chuyển từ Client (dùng cho headless/SYSTEM mode)
+HEADLESS_TRANSFER_DIR = r"C:\Users\Public\Downloads\RemoteDesktopTransfers"
+# Tên Named Pipe để giao tiếp giữa Service (SYSTEM) và Agent (User)
+CLIPBOARD_PIPE_NAME = r"\\.\pipe\RemoteDesktopClipboardPipe"
+
+def create_named_pipe_with_everyone_dacl():
+    """
+    Tạo Named Pipe Server với Security Descriptor cho phép nhóm Everyone 
+    có quyền Read/Write. TUYỆT ĐỐI KHÔNG truyền None vào Security Attributes.
+    """
+    import win32pipe
+    import win32file
+    import win32security
+    import ntsecuritycon as con
+    
+    # Tạo Security Descriptor với DACL cho Everyone
+    sd = win32security.SECURITY_DESCRIPTOR()
+    sd.Initialize()
+    
+    # Tạo DACL
+    dacl = win32security.ACL()
+    dacl.Initialize()
+    
+    # Lấy SID của nhóm "Everyone"
+    everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid)
+    
+    # Thêm quyền Read/Write cho Everyone
+    dacl.AddAccessAllowedAce(
+        win32security.ACL_REVISION,
+        con.FILE_GENERIC_READ | con.FILE_GENERIC_WRITE,
+        everyone_sid
+    )
+    
+    sd.SetSecurityDescriptorDacl(True, dacl, False)
+    
+    # Tạo Security Attributes
+    sa = win32security.SECURITY_ATTRIBUTES()
+    sa.bInheritHandle = False
+    sa.SECURITY_DESCRIPTOR = sd
+    
+    # Tạo Named Pipe
+    pipe_handle = win32pipe.CreateNamedPipe(
+        CLIPBOARD_PIPE_NAME,
+        win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
+        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
+        1,       # Số instance tối đa
+        4096,    # Output buffer size
+        4096,    # Input buffer size
+        0,       # Default timeout
+        sa       # Security Attributes với DACL cho Everyone
+    )
+    
+    return pipe_handle
+
+
 class ClipboardSyncManager:
     def __init__(self):
         import queue
@@ -1584,11 +1639,57 @@ class ClipboardSyncManager:
         self.last_received_text = ""
         self._send_cancelled = False
         
+        # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
+        self._pipe_handle = None
+        self._pipe_lock = threading.Lock()
+        
         # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
 
     def register_app(self, app):
         self.app = app
         self.poll_gui_queue()
+
+    def _send_path_to_pipe(self, file_path):
+        """
+        Gửi đường dẫn file qua Named Pipe cho Clipboard Agent.
+        Tạo Pipe mới mỗi lần gửi, chờ Agent kết nối, ghi dữ liệu rồi đóng.
+        """
+        import win32pipe
+        import win32file
+
+        pipe_handle = None
+        try:
+            log_debug(f"[_send_path_to_pipe] Đang tạo Named Pipe để gửi: {file_path}")
+            pipe_handle = create_named_pipe_with_everyone_dacl()
+
+            if pipe_handle is None or pipe_handle == -1:
+                log_debug("[_send_path_to_pipe] Lỗi: Không tạo được Named Pipe.")
+                return
+
+            log_debug(f"[_send_path_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
+            # Chờ Agent kết nối (blocking call)
+            win32pipe.ConnectNamedPipe(pipe_handle, None)
+            log_debug(f"[_send_path_to_pipe] Agent đã kết nối. Đang gửi đường dẫn...")
+
+            # Ghi đường dẫn file dưới dạng UTF-8
+            data = file_path.encode("utf-8")
+            win32file.WriteFile(pipe_handle, data)
+
+            log_debug(f"[_send_path_to_pipe] Đã gửi thành công đường dẫn qua Pipe: {file_path}")
+            print(f"[Pipe] Đã gửi đường dẫn file qua Named Pipe: {file_path}")
+
+        except Exception as e:
+            log_debug(f"[_send_path_to_pipe] Lỗi gửi đường dẫn qua Pipe: {e}")
+            print(f"[Pipe] Lỗi gửi đường dẫn: {e}")
+        finally:
+            if pipe_handle is not None and pipe_handle != -1:
+                try:
+                    # Flush pipe trước khi đóng để đảm bảo dữ liệu được gửi hết
+                    win32file.FlushFileBuffers(pipe_handle)
+                    win32pipe.DisconnectNamedPipe(pipe_handle)
+                    win32file.CloseHandle(pipe_handle)
+                except:
+                    pass
 
     def poll_gui_queue(self):
         if not self.app: return
@@ -2337,8 +2438,29 @@ class ClipboardSyncManager:
             print(f"[Clipboard] Đã nhận được files_copied_meta. Số file: {len(self.pending_remote_files)}")
             if not self.pending_remote_files: return
             
-            # Đặt target_save_dir tạm thời là thư mục tạm, sẽ được cập nhật lại thành thư mục đích
-            # thực tế khi render_format() được gọi (khi người dùng thực sự Paste)
+            # --- HEADLESS MODE (SYSTEM/Service): Lưu file vào thư mục Public, KHÔNG động vào Clipboard ---
+            if self.app and getattr(self.app, 'is_headless', False):
+                transfer_dir = HEADLESS_TRANSFER_DIR
+                try:
+                    os.makedirs(transfer_dir, exist_ok=True)
+                    # Dọn dẹp file cũ trong thư mục transfer
+                    for item in os.listdir(transfer_dir):
+                        item_path = os.path.join(transfer_dir, item)
+                        if os.path.isfile(item_path):
+                            try: os.remove(item_path)
+                            except: pass
+                except Exception as e:
+                    log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục transfer: {e}")
+                self.target_save_dir = transfer_dir
+                
+                # Tự động yêu cầu gửi file ngay lập tức (không cần delayed rendering)
+                self.batch_paths = []
+                self.transfer_done_event.clear()
+                self.request_pending_files()
+                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã yêu cầu tải file về {transfer_dir}")
+                return
+            
+            # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
             temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
             try:
                 os.makedirs(temp_dir, exist_ok=True)
@@ -2422,6 +2544,16 @@ class ClipboardSyncManager:
             self.close_dialog()
             self.transfer_done_event.set()
             log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
+            
+            # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
+            if self.app and getattr(self.app, 'is_headless', False):
+                if self.batch_paths:
+                    for file_path in self.batch_paths:
+                        self._send_path_to_pipe(file_path)
+                    log_debug(f"[batch_end] HEADLESS: Đã gửi {len(self.batch_paths)} đường dẫn qua Named Pipe.")
+                    print(f"[Clipboard] HEADLESS: Đã gửi {len(self.batch_paths)} đường dẫn file qua Named Pipe cho Clipboard Agent.")
+                self.pending_remote_files = []
+                self.transfer_in_progress = False
 
 
 
@@ -6244,6 +6376,119 @@ class UnifiedApp(tk.Tk):
         except:
             pass
 
+
+def run_clipboard_agent_mode():
+    """
+    Chế độ Clipboard Agent: Chạy ở quyền User thường.
+    Lắng nghe Named Pipe từ Service/headless app để nhận đường dẫn file
+    và nạp vào Clipboard hệ thống.
+    
+    Kiến trúc: App Headless (SYSTEM) -> Named Pipe -> App ClipboardAgent (User) -> Clipboard
+    """
+    import logging
+    
+    log_path = os.path.join(app_dir, "clipboard_agent.log")
+    logging.basicConfig(
+        filename=log_path,
+        level=logging.DEBUG,
+        format="[%(asctime)s] [PID %(process)d] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    agent_log = logging.getLogger("clipboard_agent")
+
+    def agent_print(msg):
+        agent_log.info(msg)
+        try:
+            print(msg)
+        except:
+            pass
+
+    agent_print("=" * 60)
+    agent_print(f"[ClipboardAgent] Khởi động. PID: {os.getpid()}")
+    agent_print(f"[ClipboardAgent] Thư mục ứng dụng: {app_dir}")
+    agent_print("=" * 60)
+
+    import win32file
+    import win32pipe
+
+    pipe_name = CLIPBOARD_PIPE_NAME
+
+    while True:
+        pipe_handle = None
+        try:
+            agent_print(f"[ClipboardAgent] Đang chờ kết nối tới Pipe: {pipe_name}")
+
+            # Chờ Pipe sẵn sàng (Service/headless app đã tạo)
+            while True:
+                try:
+                    pipe_handle = win32file.CreateFile(
+                        pipe_name,
+                        win32file.GENERIC_READ,
+                        0,
+                        None,
+                        win32file.OPEN_EXISTING,
+                        0,
+                        None
+                    )
+                    break
+                except Exception:
+                    time.sleep(1.0)
+
+            agent_print(f"[ClipboardAgent] Đã kết nối thành công tới Pipe.")
+
+            win32pipe.SetNamedPipeHandleState(
+                pipe_handle,
+                win32pipe.PIPE_READMODE_MESSAGE,
+                None,
+                None
+            )
+
+            # Vòng lặp đọc đường dẫn file từ Pipe
+            while True:
+                try:
+                    hr, data = win32file.ReadFile(pipe_handle, 4096)
+                    if hr == 0:  # ERROR_SUCCESS
+                        file_path = data.decode("utf-8").strip()
+                        if file_path:
+                            agent_print(f"[ClipboardAgent] Nhận đường dẫn từ Pipe: {file_path}")
+
+                            if os.path.exists(file_path):
+                                # Dùng hàm set_clipboard_files() đã có sẵn trong app.py
+                                set_clipboard_files([file_path])
+                                agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard: {file_path}")
+                            else:
+                                agent_print(f"[ClipboardAgent] File chưa tồn tại, chờ 1s rồi thử lại...")
+                                time.sleep(1.0)
+                                if os.path.exists(file_path):
+                                    set_clipboard_files([file_path])
+                                    agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard (sau retry): {file_path}")
+                                else:
+                                    agent_print(f"[ClipboardAgent] File vẫn không tồn tại: {file_path}")
+                    else:
+                        agent_print(f"[ClipboardAgent] ReadFile trả về mã lỗi: {hr}")
+                        break
+                except Exception as read_err:
+                    err_code = getattr(read_err, 'winerror', 0)
+                    if err_code == 109:  # ERROR_BROKEN_PIPE
+                        agent_print("[ClipboardAgent] Pipe bị ngắt. Đang kết nối lại...")
+                        break
+                    elif err_code == 234:  # ERROR_MORE_DATA
+                        continue
+                    else:
+                        agent_print(f"[ClipboardAgent] Lỗi đọc Pipe: {read_err}")
+                        break
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] Lỗi kết nối Pipe: {e}")
+        finally:
+            if pipe_handle is not None:
+                try:
+                    win32file.CloseHandle(pipe_handle)
+                except:
+                    pass
+
+        agent_print("[ClipboardAgent] Chờ 2s trước khi kết nối lại...")
+        time.sleep(2.0)
+
 if __name__ == '__main__':
     import multiprocessing as mp
     mp.freeze_support()
@@ -6252,7 +6497,40 @@ if __name__ == '__main__':
     import ctypes
     
     is_headless = "--headless" in sys.argv
+    is_clipboard_agent = "--clipboard-agent" in sys.argv
     
+    # --- Chế độ Clipboard Agent: Chỉ lắng nghe Pipe và nạp Clipboard, thoát sớm ---
+    if is_clipboard_agent:
+        if sys.platform == "win32":
+            import win32event, win32api, winerror
+            
+            # Mutex riêng cho Clipboard Agent (index 3) để tránh chạy trùng
+            try:
+                sid = ctypes.c_ulong()
+                ctypes.windll.kernel32.ProcessIdToSessionId(
+                    ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)
+                )
+                session_id = sid.value
+            except:
+                session_id = 1
+                
+            mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{session_id}"
+            mutex = win32event.CreateMutex(None, False, mutex_name)
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                sys.exit(0)
+        
+        # Redirect stdout/stderr cho clipboard agent mode
+        try:
+            log_path = os.path.join(app_dir, "clipboard_agent.log")
+            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stderr = sys.stdout
+        except:
+            pass
+        
+        run_clipboard_agent_mode()  # Vòng lặp vô tận, không return
+        sys.exit(0)
+    
+
     if sys.platform == "win32":
         import win32event, win32api, winerror, win32security
         

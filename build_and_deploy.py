@@ -53,7 +53,7 @@ def main():
     subprocess.run("powershell -Command \"Stop-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 2. Terminate running instances to release file locks
-    log("Terminating any running instances of agent or service...")
+    log("Terminating any running instances of agent and service...")
     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2)
@@ -73,6 +73,7 @@ def main():
     if not run_cmd(nuitka_cmd):
         log("ERROR: Nuitka build failed. Aborting deployment.")
         return
+
 
     # 5. Post-build renaming and asset preparation
     log("Preparing build outputs...")
@@ -112,6 +113,7 @@ def main():
     else:
         log("ERROR: Compiled RemoteDesktopService standalone directory not found!")
         return
+
 
     # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
     files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt"]
