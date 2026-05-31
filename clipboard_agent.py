@@ -136,11 +136,7 @@ def set_clipboard_text(text):
         return False
 
 
-def pipe_listener_loop():
-    """
-    Vòng lặp chính: Liên tục kết nối tới Named Pipe và lắng nghe
-    đường dẫn file từ Service.
-    """
+def pipe_listener_loop(gui_queue):
     import win32file
     import win32pipe
 
@@ -149,7 +145,6 @@ def pipe_listener_loop():
     while True:
         pipe_handle = None
         try:
-            # Chờ đến khi Pipe sẵn sàng (Service đã tạo)
             log_print(f"[Agent] Đang chờ kết nối tới Pipe...")
 
             while True:
@@ -157,20 +152,18 @@ def pipe_listener_loop():
                     pipe_handle = win32file.CreateFile(
                         PIPE_NAME,
                         win32file.GENERIC_READ,
-                        0,        # Không chia sẻ
-                        None,     # Security Attributes mặc định (đủ cho User thường)
+                        0,
+                        None,
                         win32file.OPEN_EXISTING,
                         0,
                         None
                     )
-                    break  # Kết nối thành công
+                    break
                 except Exception:
-                    # Pipe chưa tồn tại hoặc bận, chờ rồi thử lại
-                    time.sleep(1.0)
+                    time.sleep(0.5)
 
             log_print(f"[Agent] Đã kết nối thành công tới Pipe.")
 
-            # Đặt chế độ đọc message (byte mode)
             try:
                 win32pipe.SetNamedPipeHandleState(
                     pipe_handle,
@@ -181,71 +174,145 @@ def pipe_listener_loop():
             except Exception as se:
                 log_print(f"[Agent] Cảnh báo SetNamedPipeHandleState: {se}. Tiếp tục ở chế độ byte mode.")
 
-            # Vòng lặp đọc dữ liệu từ Pipe
+            buffer = bytearray()
             while True:
                 try:
-                    # Tăng kích thước buffer đọc lên 10MB để đọc các gói tin text clipboard lớn
                     hr, data = win32file.ReadFile(pipe_handle, 10 * 1024 * 1024)
-                    if hr == 0:  # ERROR_SUCCESS
-                        msg = data.decode("utf-8").strip()
-                        if msg:
-                            log_print(f"[Agent] Nhận được tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
-                            if msg.startswith("TEXT:"):
-                                text_val = msg[5:]
-                                set_clipboard_text(text_val)
-                            else:
-                                # Nếu bắt đầu bằng FILE:, cắt bỏ. Nếu không, giữ nguyên (fallback)
-                                file_path = msg[5:] if msg.startswith("FILE:") else msg
-                                # Kiểm tra file tồn tại trước khi nạp Clipboard
-                                if os.path.exists(file_path):
-                                    set_clipboard_files(file_path)
+                    if hr == 0:
+                        buffer.extend(data)
+                        while b"\x00" in buffer:
+                            idx = buffer.index(b"\x00")
+                            msg_bytes = buffer[:idx]
+                            del buffer[:idx + 1]
+                            msg = msg_bytes.decode("utf-8").strip()
+                            if msg:
+                                log_print(f"[Agent] Nhận được tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
+                                if msg.startswith("TEXT:"):
+                                    text_val = msg[5:]
+                                    gui_queue.put(("text", text_val))
+                                elif msg.startswith("START:"):
+                                    parts = msg[6:].split("|")
+                                    display_name = parts[0]
+                                    total_size = int(parts[1]) if len(parts) > 1 else 0
+                                    gui_queue.put(("start", (display_name, total_size)))
+                                elif msg.startswith("PROGRESS:"):
+                                    received = int(msg[9:])
+                                    gui_queue.put(("progress", received))
+                                elif msg.startswith("END"):
+                                    gui_queue.put(("end", None))
+                                elif msg.startswith("CANCEL"):
+                                    gui_queue.put(("cancel", None))
+                                elif msg.startswith("FILE:"):
+                                    gui_queue.put(("file", msg[5:]))
                                 else:
-                                    log_print(f"[Agent] File chưa tồn tại trên đĩa, chờ 1 giây rồi thử lại...")
-                                    time.sleep(1.0)
-                                    if os.path.exists(file_path):
-                                        set_clipboard_files(file_path)
-                                    else:
-                                        log_print(f"[Agent] File vẫn không tồn tại sau khi chờ: {file_path}")
+                                    gui_queue.put(("file", msg))
                     else:
                         log_print(f"[Agent] ReadFile trả về mã lỗi: {hr}")
                         break
-
                 except Exception as read_err:
                     err_code = getattr(read_err, 'winerror', 0)
-                    if err_code == 109:  # ERROR_BROKEN_PIPE
+                    if err_code == 109:
                         log_print("[Agent] Pipe bị ngắt (Service đóng kết nối). Đang kết nối lại...")
                         break
-                    elif err_code == 234:  # ERROR_MORE_DATA
+                    elif err_code == 234:
                         continue
                     else:
                         log_print(f"[Agent] Lỗi đọc Pipe: {read_err}")
                         break
-
         except Exception as e:
             log_print(f"[Agent] Lỗi kết nối Pipe: {e}")
-
         finally:
             if pipe_handle is not None:
                 try:
                     win32file.CloseHandle(pipe_handle)
                 except:
                     pass
-
-        # Chờ trước khi thử kết nối lại
-        log_print("[Agent] Chờ 2 giây trước khi kết nối lại Pipe...")
-        time.sleep(2.0)
+        time.sleep(0.1)
 
 
 def main():
+    import queue
+    import tkinter as tk
+    import win32event
+    import win32api
+    try:
+        from app import ProgressDialog
+    except ImportError:
+        class ProgressDialog:
+            def __init__(self, *args, **kwargs): pass
+            def update_progress(self, *args, **kwargs): pass
+            def destroy(self): pass
+
     log_print("=" * 60)
     log_print(f"[Agent] Clipboard Agent khởi động. PID: {os.getpid()}")
     log_print(f"[Agent] Thư mục ứng dụng: {app_dir}")
     log_print("=" * 60)
 
-    # Chạy pipe_listener_loop trực tiếp trên main thread
-    # (vì Agent này chỉ có 1 nhiệm vụ duy nhất)
+    gui_queue = queue.Queue()
+    t = threading.Thread(target=pipe_listener_loop, args=(gui_queue,), daemon=True)
+    t.start()
+
+    root = tk.Tk()
+    root.withdraw()
+    active_dialog = None
+
+    def trigger_cancel():
+        log_print("[Agent] Người dùng ấn Hủy truyền tải.")
+        try:
+            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, "Global\\AntigravityP2P_CancelTransfer_Event")
+            win32event.SetEvent(h_event)
+            win32api.CloseHandle(h_event)
+        except Exception as e:
+            log_print(f"[Agent] Không thể gửi sự kiện hủy: {e}")
+
+    def poll_gui_queue():
+        nonlocal active_dialog
+        while not gui_queue.empty():
+            try:
+                action, val = gui_queue.get_nowait()
+                if action == "text":
+                    set_clipboard_text(val)
+                elif action == "file":
+                    if os.path.exists(val):
+                        set_clipboard_files(val)
+                    else:
+                        log_print(f"[Agent] File không tồn tại để nạp clipboard: {val}")
+                elif action == "start":
+                    display_name, total_size = val
+                    if active_dialog:
+                        try: active_dialog.destroy()
+                        except: pass
+                    active_dialog = ProgressDialog(
+                        root, "Đang tải file về...", display_name, total_size,
+                        on_cancel=trigger_cancel
+                    )
+                elif action == "progress":
+                    if active_dialog:
+                        try: active_dialog.update_progress(val)
+                        except: pass
+                elif action == "end":
+                    if active_dialog:
+                        def _close():
+                            nonlocal active_dialog
+                            if active_dialog:
+                                try: active_dialog.destroy()
+                                except: pass
+                                active_dialog = None
+                        root.after(500, _close)
+                elif action == "cancel":
+                    if active_dialog:
+                        try: active_dialog.destroy()
+                        except: pass
+                        active_dialog = None
+            except queue.Empty:
+                break
+            except Exception as e:
+                log_print(f"[Agent] Lỗi xử lý hàng đợi GUI: {e}")
+        root.after(50, poll_gui_queue)
+
     try:
-        pipe_listener_loop()
+        poll_gui_queue()
+        root.mainloop()
     except KeyboardInterrupt:
         log_print("[Agent] Nhận Ctrl+C. Đang thoát...")
     except Exception as e:
