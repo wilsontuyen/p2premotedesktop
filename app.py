@@ -1269,8 +1269,15 @@ class ProgressDialog(tk.Toplevel):
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
         
     def trigger_cancel(self):
+        try:
+            self.destroy()
+        except:
+            pass
         if self.on_cancel:
-            self.on_cancel()
+            try:
+                self.on_cancel()
+            except:
+                pass
         
     def update_progress(self, sent_bytes):
         percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
@@ -1646,6 +1653,7 @@ class ClipboardSyncManager:
         self.last_sent_text = ""
         self.last_received_text = ""
         self._send_cancelled = False
+        self._receive_cancelled = False
         
         # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
         self._pipe_handle = None
@@ -1868,6 +1876,7 @@ class ClipboardSyncManager:
         # Dọn dẹp cache file và trạng thái paste
         self.pending_remote_files = []
         self.is_paste_triggered = False
+        self._receive_cancelled = True
         
         # Giải phóng delayed rendering trên clipboard bằng cách xóa sạch clipboard nếu app đang sở hữu
         try:
@@ -1917,6 +1926,17 @@ class ClipboardSyncManager:
                     print(f"[FileTransfer] Không thể xóa file dở dang: {e}")
                     
         self.incoming_transfers.clear()
+        
+        # Xóa các file đã tải xong trong batch hiện tại nếu bị hủy
+        if hasattr(self, 'batch_paths') and self.batch_paths:
+            for p in list(self.batch_paths):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                        print(f"[FileTransfer] Đã xóa file đã hoàn thành của lô bị hủy: {p}")
+                    except Exception as e:
+                        print(f"[FileTransfer] Không thể xóa file đã hoàn thành: {e}")
+            self.batch_paths = []
         
         # 4. Đóng progress dialog
         if self.active_dialog:
@@ -2199,97 +2219,37 @@ class ClipboardSyncManager:
             return
             
         # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
-        is_menu_query = False
+        is_menu_query = True
         try:
             user32 = ctypes.windll.user32
             
-            # 0. Nếu vừa click chuột trái (trong vòng 0.8 giây), đây chắc chắn là thao tác click "Paste" từ Menu, bỏ qua mọi kiểm tra
-            time_since_lbutton = time.time() - getattr(self, 'last_lbutton_time', 0)
-            if time_since_lbutton < 0.8:
-                log_debug("[render_format] Bỏ qua kiểm tra menu do người dùng vừa click chuột trái (Paste).")
+            # 1. Kiểm tra phím tắt Ctrl+V hoặc Shift+Insert
+            is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
+            is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
+            
+            if is_ctrl_v or is_shift_ins:
+                is_menu_query = False
+                log_debug("[render_format] Chấp nhận Paste từ phím tắt (Ctrl+V / Shift+Insert)")
             else:
-                # 1. Kiểm tra nếu vừa mới click chuột phải (trong vòng 1.5 giây)
+                # 2. Kiểm tra click chuột trái từ context menu hoặc ribbon
+                time_since_lbutton = time.time() - getattr(self, 'last_lbutton_time', 0)
                 time_since_rbutton = time.time() - getattr(self, 'last_rbutton_time', 0)
-                if time_since_rbutton < 1.5:
-                    is_menu_query = True
-                    
-                # 2. Kiểm tra nếu lớp cửa sổ menu hiển thị (#32768) hoặc tồn tại (kể cả ẩn)
-                if not is_menu_query:
-                    user32.FindWindowW.restype = wintypes.HWND
-                    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-                    hwnd_menu = user32.FindWindowW("#32768", None)
-                    if hwnd_menu:
-                        is_menu_query = True
-                    
-            # 3. Kiểm tra trạng thái Menu Loop của luồng yêu cầu clipboard (Explorer) hoặc Foreground Window
-            if not is_menu_query:
-                user32.GetOpenClipboardWindow.restype = wintypes.HWND
-                user32.GetOpenClipboardWindow.argtypes = []
-                user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-                user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-                user32.GetGUIThreadInfo.restype = wintypes.BOOL
-                user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.c_void_p]
                 
-                class GUITHREADINFO(ctypes.Structure):
-                    _fields_ = [
-                        ("cbSize", wintypes.DWORD),
-                        ("flags", wintypes.DWORD),
-                        ("hwndActive", wintypes.HWND),
-                        ("hwndFocus", wintypes.HWND),
-                        ("hwndCapture", wintypes.HWND),
-                        ("hwndMenuOwner", wintypes.HWND),
-                        ("hwndMoveSize", wintypes.HWND),
-                        ("hwndCaret", wintypes.HWND),
-                        ("rcCaret", wintypes.RECT),
-                    ]
+                # Nếu chuột phải vừa được click gần đây (< 1.5s) và xảy ra sau hoặc đồng thời với chuột trái,
+                # điều đó có nghĩa là người dùng đang mở context menu (chưa thể click chọn Paste từ menu).
+                if time_since_rbutton < 1.5 and getattr(self, 'last_rbutton_time', 0) >= getattr(self, 'last_lbutton_time', 0):
+                    log_debug(f"[render_format] Từ chối Paste: phát hiện đang mở context menu (rbutton={time_since_rbutton:.3f}s, rbutton >= lbutton)")
+                elif time_since_lbutton < 1.5:
+                    is_menu_query = False
+                    log_debug(f"[render_format] Chấp nhận Paste: time_since_lbutton={time_since_lbutton:.3f}s")
+                else:
+                    log_debug(f"[render_format] Từ chối Paste: không phát hiện click chuột trái context menu (time_since_lbutton={time_since_lbutton:.3f}s)")
                 
-                hwnd_clip = user32.GetOpenClipboardWindow()
-                for hwnd_check in (hwnd_clip, user32.GetForegroundWindow()):
-                    if hwnd_check:
-                        pid = wintypes.DWORD()
-                        tid = user32.GetWindowThreadProcessId(hwnd_check, ctypes.byref(pid))
-                        gui_info = GUITHREADINFO()
-                        gui_info.cbSize = ctypes.sizeof(GUITHREADINFO)
-                        if user32.GetGUIThreadInfo(tid, ctypes.byref(gui_info)):
-                            # GUI_INMENULOOP = 0x04, GUI_POPUPMENUMODE = 0x10, GUI_SYSTEMMENUMODE = 0x08
-                            if gui_info.flags & (0x04 | 0x10 | 0x08):
-                                is_menu_query = True
-                                break
-                                
-            # 4. Kiểm tra nếu nút chuột phải đang được nhấn giữ (Fallback)
-            if not is_menu_query:
-                user32.GetAsyncKeyState.restype = wintypes.SHORT
-                user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-                VK_RBUTTON = 0x02
-                if user32.GetAsyncKeyState(VK_RBUTTON) & 0x8000:
-                    is_menu_query = True
-                    
-            # 5. Nếu không phải là truy vấn menu hiển nhiên, hãy kiểm tra xem có dấu hiệu hành động PASTE thực tế không
-            if not is_menu_query:
-                user32.GetAsyncKeyState.restype = wintypes.SHORT
-                user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-                VK_CONTROL = 0x11
-                VK_V = 0x56
-                ctrl_pressed = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-                v_pressed = bool(user32.GetAsyncKeyState(VK_V) & 0x8000)
-                ctrl_v = ctrl_pressed and v_pressed
-                
-                recent_right_click = time_since_rbutton < 5.0
-                meta_age = time.time() - getattr(self, 'meta_arrival_time', 0)
-                
-                # Nếu không có click chuột trái gần đây (đã lọc ở trên), không có click chuột phải gần đây, HOẶC nếu đây là truy vấn tự động
-                # xảy ra ngay khi vừa nhận được metadata (thường do clipboard history hoặc shell extension tự quét trong vòng 1.5s đầu)
-                # thì coi như đây không phải là Paste thực tế.
-                if not recent_right_click:
-                    is_menu_query = True
-                elif meta_age < 0.5:
-                    is_menu_query = True
-                    
             if is_menu_query:
-                log_debug(f"[render_format] Phát hiện truy vấn tự động hoặc menu chuột phải. Bỏ qua tải file thực tế và giữ delayed rendering.")
                 return
         except Exception as e:
             log_debug(f"[render_format] Lỗi kiểm tra context menu: {e}")
+            return
             
         if getattr(self, 'is_rendering', False):
             log_debug("[render_format] Bỏ qua WM_RENDERFORMAT trùng lặp (đang render).")
@@ -2301,6 +2261,15 @@ class ClipboardSyncManager:
             print("[Clipboard] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             
+            # --- HIỂN THỊ DIALOG TIẾN TRÌNH NGAY LẬP TỨC ---
+            display_name = self.pending_remote_files[0].get("name") if self.pending_remote_files else "Files"
+            total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
+            log_debug(f"[render_format] Hiển thị dialog truyền tải ngay lập tức: {display_name}, size={total_size}")
+            self.show_dialog("Đang tải file về...", display_name, total_size)
+            if self.app and getattr(self.app, 'is_headless', False):
+                self._send_progress_signal("START", f"{display_name}|{total_size}")
+            
+            self._receive_cancelled = False
             self.batch_paths = []
             self.transfer_done_event.clear()
             
@@ -2362,6 +2331,10 @@ class ClipboardSyncManager:
                                 continue
                             else: # cancel
                                 log_debug("[render_format] Hủy bỏ truyền tải từ hộp thoại ghi đè.")
+                                self.close_dialog()
+                                if self.app and getattr(self.app, 'is_headless', False):
+                                    self._send_progress_signal("CANCEL", "")
+                                    self._close_transfer_pipe()
                                 fn_SetClipboardData(15, None)
                                 return
                     else:
@@ -2371,6 +2344,10 @@ class ClipboardSyncManager:
                 
             if not files_to_download:
                 log_debug("[render_format] Không có tệp tin nào được chọn để tải (người dùng bỏ qua tất cả).")
+                self.close_dialog()
+                if self.app and getattr(self.app, 'is_headless', False):
+                    self._send_progress_signal("CANCEL", "")
+                    self._close_transfer_pipe()
                 fn_SetClipboardData(15, None)
                 return
                 
@@ -2391,7 +2368,8 @@ class ClipboardSyncManager:
             msg = wintypes.MSG()
             while time.time() - start_time < 600.0:
                 if self.transfer_done_event.is_set():
-                    succeeded = True
+                    if not getattr(self, '_receive_cancelled', False):
+                        succeeded = True
                     break
                 # Process window messages to keep Tkinter/hidden window responsive
                 if ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1): # PM_REMOVE = 1
@@ -2421,6 +2399,16 @@ class ClipboardSyncManager:
                     log_debug("[render_format] Không tạo được hGlobal, hủy render.")
             else:
                 log_debug(f"[render_format] Tải file thất bại hoặc hết thời gian chờ. succeeded={succeeded}")
+                self.close_dialog()
+                if self.app and getattr(self.app, 'is_headless', False):
+                    self._send_progress_signal("CANCEL", "")
+                    self._close_transfer_pipe()
+        except Exception as e:
+            log_debug(f"[render_format] Lỗi khi xử lý render format: {e}")
+            self.close_dialog()
+            if self.app and getattr(self.app, 'is_headless', False):
+                self._send_progress_signal("CANCEL", "")
+                self._close_transfer_pipe()
         finally:
             if not is_menu_query:
                 self.pending_remote_files = []
@@ -2450,6 +2438,7 @@ class ClipboardSyncManager:
             log_debug(f"[_process_send_requests] Đã gửi batch_start. total_size={total_size}")
             
             total_sent = 0
+            batch_start_time = time.time()
             for f in files:
                 if self._send_cancelled:
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
@@ -2468,15 +2457,47 @@ class ClipboardSyncManager:
                 log_debug(f"[_process_send_requests] Đã gửi file_start cho {filename}, size={file_size}")
                 
                 try:
+                    # Giới hạn băng thông từ từ (Slow Start) để tránh quá tải mạng làm mất điều khiển với host
+                    # Bắt đầu từ 500 KB/s, mỗi giây tăng thêm 500 KB/s, tối đa 4 MB/s
+                    chunk_size = 256 * 1024
+                    file_sent_bytes = 0
+                    file_start_time = time.time()
+                    
                     with open(filepath, "rb") as fh:
                         while True:
                             if self._send_cancelled:
                                 break
-                            chunk_data = fh.read(4 * 1024 * 1024)
-                            if not chunk_data: break
+                            
+                            elapsed_total = time.time() - batch_start_time
+                            current_limit = 500 * 1024 + int(500 * 1024 * elapsed_total)
+                            max_limit = 4 * 1024 * 1024
+                            if current_limit > max_limit:
+                                current_limit = max_limit
+                                
+                            chunk_data = fh.read(chunk_size)
+                            if not chunk_data:
+                                break
+                                
                             b64 = base64.b64encode(chunk_data).decode('utf-8')
                             send_msg(sock, json.dumps({"type": "file_chunk", "name": filename, "data": b64}).encode('utf-8'))
+                            
+                            file_sent_bytes += len(chunk_data)
                             total_sent += len(chunk_data)
+                            
+                            # Tính toán và điều tiết tốc độ gửi
+                            target_time = file_sent_bytes / current_limit
+                            actual_time = time.time() - file_start_time
+                            if actual_time < target_time:
+                                sleep_dur = target_time - actual_time
+                                if sleep_dur > 2.0:
+                                    sleep_dur = 2.0
+                                    
+                                sleep_end = time.time() + sleep_dur
+                                while time.time() < sleep_end:
+                                    if self._send_cancelled:
+                                        break
+                                    time.sleep(0.05)
+                                    
                     log_debug(f"[_process_send_requests] Đã gửi xong dữ liệu cho {filename}")
                 except Exception as e:
                     print(f"[FileTransfer] Lỗi khi gửi file {filename}: {e}")
@@ -2505,6 +2526,11 @@ class ClipboardSyncManager:
     def handle_received_packet(self, packet):
         ptype = packet.get("type")
         
+        # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại
+        if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
+            log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do tiến trình tải đã bị hủy.")
+            return
+            
         if ptype == "cancel_transfer":
             print("[FileTransfer] Nhận tín hiệu hủy truyền tải từ đối tác.")
             self.cancel_active_transfer(remote_triggered=True)
@@ -2533,6 +2559,7 @@ class ClipboardSyncManager:
             return
             
         elif ptype == "files_copied_meta":
+            self._receive_cancelled = False
             self.pending_remote_files = packet.get("files", [])
             self.meta_arrival_time = time.time()
             log_debug(f"[handle_received_packet] Nhận files_copied_meta. Số file: {len(self.pending_remote_files)}")
@@ -5845,6 +5872,14 @@ class UnifiedApp(tk.Tk):
             pressed = event.get('pressed')
             # Primary simulation using standard SendInput API
             send_input_mouse_click(button_name, pressed)
+            try:
+                if pressed:
+                    if button_name == 'right':
+                        clipboard_sync_manager.last_rbutton_time = time.time()
+                    elif button_name == 'left':
+                        clipboard_sync_manager.last_lbutton_time = time.time()
+            except Exception as e:
+                pass
                 
         elif ev_type == 'mouse_scroll':
             dx, dy = event['dx'], event['dy']
