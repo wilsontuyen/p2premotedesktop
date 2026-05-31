@@ -2470,7 +2470,7 @@ class ClipboardSyncManager:
                             
                             elapsed_total = time.time() - batch_start_time
                             current_limit = 500 * 1024 + int(500 * 1024 * elapsed_total)
-                            max_limit = 4 * 1024 * 1024
+                            max_limit = 1000 * 1024 * 1024
                             if current_limit > max_limit:
                                 current_limit = max_limit
                                 
@@ -5577,7 +5577,8 @@ class UnifiedApp(tk.Tk):
                         if res_data.get("action") == "speed_test_result":
                             net_class = res_data.get("net_class", "medium")
                             client_state["net_class"] = net_class
-                            print(f"[Host] Speed test finished. Class: {net_class}")
+                            bandwidth = res_data.get("bandwidth", 32.0)
+                            print(f"[Host] Speed test finished. Class: {net_class}, Bandwidth: {bandwidth:.2f} Mbps")
                             
                             # Adjust windows graphics effects based on net_class
                             if net_class == "high":
@@ -6264,15 +6265,15 @@ class UnifiedApp(tk.Tk):
                         best_run = max(runs, key=lambda x: x[1])
                         avg_ping = best_run[0]
                         bandwidth = best_run[1]
-                        
+                                                                        
                     # 3. Network quality classification
-                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 30ms.
-                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 30 - 100ms.
+                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 10ms.
+                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 50 - 100ms.
                     # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
-                    if bandwidth > 20.0 and avg_ping < 30.0:
+                    if bandwidth > 20.0 and avg_ping < 10.0:
                         net_class = "high"
                         net_class_viet = "Tốt (High-speed)"
-                    elif bandwidth < 5.0 or avg_ping > 100.0:
+                    elif bandwidth < 5.0 or avg_ping > 50.0:
                         net_class = "low"
                         net_class_viet = "Yếu (Low-speed)"
                     else:
