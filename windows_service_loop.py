@@ -264,7 +264,74 @@ def trigger_sas_system():
     except Exception as e:
         log(f"Error calling SendSAS in service: {e}")
 
-def sas_listener_thread():
+def spawn_taskmgr_system():
+    try:
+        active_session_id = win32ts.WTSGetActiveConsoleSessionId()
+        if active_session_id == 0xFFFFFFFF or active_session_id == -1:
+            return
+
+        is_screen_locked = is_logon_ui_running(active_session_id)
+        desktop = "winsta0\\winlogon" if is_screen_locked else "winsta0\\default"
+
+        winlogon_pid = find_winlogon_pid(active_session_id)
+        if not winlogon_pid:
+            return
+
+        # Enable SeDebugPrivilege
+        h_process_self = win32api.GetCurrentProcess()
+        h_token_self = win32security.OpenProcessToken(
+            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+        )
+        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
+        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
+        win32api.CloseHandle(h_token_self)
+
+        # Open winlogon and its token
+        h_winlogon = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, winlogon_pid
+        )
+        h_token = win32security.OpenProcessToken(
+            h_winlogon, win32con.TOKEN_DUPLICATE | win32con.TOKEN_QUERY | win32con.TOKEN_ASSIGN_PRIMARY
+        )
+        win32api.CloseHandle(h_winlogon)
+
+        if h_token:
+            h_token_dup = win32security.DuplicateTokenEx(
+                h_token,
+                win32security.SecurityImpersonation,
+                win32con.TOKEN_ALL_ACCESS,
+                win32security.TokenPrimary
+            )
+            win32api.CloseHandle(h_token)
+
+            startup_info = win32process.STARTUPINFO()
+            startup_info.lpDesktop = desktop
+
+            sys32 = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32")
+            taskmgr_exe = os.path.join(sys32, "taskmgr.exe")
+            if not os.path.exists(taskmgr_exe):
+                taskmgr_exe = "taskmgr.exe"
+
+            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+                h_token_dup,
+                None,
+                taskmgr_exe,
+                None,
+                None,
+                False,
+                win32con.NORMAL_PRIORITY_CLASS,
+                None,
+                sys32,
+                startup_info
+            )
+            win32api.CloseHandle(h_process)
+            win32api.CloseHandle(h_thread)
+            win32api.CloseHandle(h_token_dup)
+            log(f"Task Manager successfully spawned with PID {dwProcessId} on {desktop} as SYSTEM")
+    except Exception as e:
+        log(f"Failed to spawn Task Manager: {e}")
+
+def service_events_listener_thread():
     # Setup security attributes with NULL DACL to allow user processes to trigger
     sa = win32security.SECURITY_ATTRIBUTES()
     sa.bInheritHandle = 1
@@ -274,17 +341,22 @@ def sas_listener_thread():
     sa.SECURITY_DESCRIPTOR = sd
 
     try:
-        h_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_SAS_Event")
+        h_sas_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_SAS_Event")
+        h_taskmgr_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_TaskMgr_Event")
     except Exception as e:
-        log(f"Failed to create SAS event: {e}")
+        log(f"Failed to create events: {e}")
         return
 
-    log("SAS Listener Thread started and waiting on Global\\AntigravityP2P_SAS_Event...")
+    log("Service Events Listener Thread started and waiting...")
+    handles = [h_sas_event, h_taskmgr_event]
     while True:
-        rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
+        rc = win32event.WaitForMultipleObjects(handles, False, win32event.INFINITE)
         if rc == win32event.WAIT_OBJECT_0:
             log("Received SAS event signal from Agent. Triggering SendSAS.")
             trigger_sas_system()
+        elif rc == win32event.WAIT_OBJECT_0 + 1:
+            log("Received TaskMgr event signal from Agent. Triggering Task Manager.")
+            spawn_taskmgr_system()
 
 def terminate_process_with_pid(pid):
     if not pid:
@@ -346,9 +418,9 @@ def main():
     except Exception as e:
         log(f"Error cleaning up processes on startup: {e}")
 
-    # Start SAS Listener thread
+    # Start Service Events Listener thread
     import threading
-    t = threading.Thread(target=sas_listener_thread, daemon=True)
+    t = threading.Thread(target=service_events_listener_thread, daemon=True)
     t.start()
 
     current_agent_pid = None

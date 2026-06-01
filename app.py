@@ -2976,13 +2976,26 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     pass
      
                 # Calculate floating button rectangle dynamically
-                btn_w, btn_h = 145, 30
-                btn_x = (window_w - btn_w) // 2
-                btn_y = 5
-                btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+                sas_btn_w, sas_btn_h = 145, 30
+                taskmgr_btn_w, taskmgr_btn_h = 145, 30
                 
+                show_sas = (client_is_domain and client_is_locked)
+                total_w = taskmgr_btn_w
+                if show_sas:
+                    total_w += sas_btn_w + 10
+                    
+                start_x = (window_w - total_w) // 2
+                
+                if show_sas:
+                    sas_btn_rect = pygame.Rect(start_x, 5, sas_btn_w, sas_btn_h)
+                    taskmgr_btn_rect = pygame.Rect(start_x + sas_btn_w + 10, 5, taskmgr_btn_w, taskmgr_btn_h)
+                else:
+                    sas_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    taskmgr_btn_rect = pygame.Rect(start_x, 5, taskmgr_btn_w, taskmgr_btn_h)
+
                 mx, my = pygame.mouse.get_pos()
-                is_hover = btn_rect.collidepoint(mx, my) if (client_is_domain and client_is_locked) else False
+                sas_is_hover = sas_btn_rect.collidepoint(mx, my) if show_sas else False
+                taskmgr_is_hover = taskmgr_btn_rect.collidepoint(mx, my)
      
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -3005,10 +3018,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                        if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
+                        if show_sas and sas_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] SAS Button Clicked. Sending trigger_sas to host.")
                                 send_event({"type": "trigger_sas"})
+                            continue
+                        if taskmgr_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                print("[Client] TaskMgr Button Clicked. Sending trigger_taskmgr to host.")
+                                send_event({"type": "trigger_taskmgr"})
                             continue
                         if event.button in button_map:
                             send_event({
@@ -3060,16 +3078,26 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     blink_frames_remaining -= 1
                     
                 # Draw floating SAS button on top
-                if client_is_domain and client_is_locked:
-                    bg_color = (58, 58, 77) if is_hover else (42, 42, 53)
+                if show_sas:
+                    bg_color = (58, 58, 77) if sas_is_hover else (42, 42, 53)
                     border_color = (0, 173, 181)
-                    pygame.draw.rect(screen, bg_color, btn_rect, border_radius=4)
-                    pygame.draw.rect(screen, border_color, btn_rect, width=1, border_radius=4)
+                    pygame.draw.rect(screen, bg_color, sas_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, border_color, sas_btn_rect, width=1, border_radius=4)
                     
                     # Render and blit text
                     text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
-                    text_rect = text_surf.get_rect(center=btn_rect.center)
+                    text_rect = text_surf.get_rect(center=sas_btn_rect.center)
                     screen.blit(text_surf, text_rect)
+                    
+                # Draw TaskMgr button
+                tm_bg_color = (58, 58, 77) if taskmgr_is_hover else (42, 42, 53)
+                tm_border_color = (0, 173, 181)
+                pygame.draw.rect(screen, tm_bg_color, taskmgr_btn_rect, border_radius=4)
+                pygame.draw.rect(screen, tm_border_color, taskmgr_btn_rect, width=1, border_radius=4)
+                
+                tm_text_surf = btn_font.render("Mở Task Manager", True, (255, 255, 255))
+                tm_text_rect = tm_text_surf.get_rect(center=taskmgr_btn_rect.center)
+                screen.blit(tm_text_surf, tm_text_rect)
                     
                 if globals().get('client_switching_desktop_countdown', 0) > 0:
                     if "msg_font" not in locals():
@@ -5981,6 +6009,9 @@ class UnifiedApp(tk.Tk):
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
             
+        elif ev_type == 'trigger_taskmgr':
+            self.trigger_taskmgr()
+            
         elif ev_type == 'check_domain':
             is_domain = False
             chk_reason = "Unknown"
@@ -6015,6 +6046,20 @@ class UnifiedApp(tk.Tk):
                     host_type_password(password)
                 except Exception as e:
                     print(f"[Host] Failed to type password: {e}")
+
+    def trigger_taskmgr(self):
+        print("[Host] Received trigger_taskmgr command.")
+        import win32event
+        try:
+            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, "Global\\AntigravityP2P_TaskMgr_Event")
+            if h_event:
+                win32event.SetEvent(h_event)
+                win32event.CloseHandle(h_event)
+                print("[Host] Signaled Global\\AntigravityP2P_TaskMgr_Event successfully.")
+            else:
+                print("[Host] Failed to open Global\\AntigravityP2P_TaskMgr_Event (event is null).")
+        except Exception as e:
+            print(f"[Host] Failed to signal TaskMgr event: {e}")
 
     def trigger_sas(self):
         print("[Host] Received trigger_sas command.")

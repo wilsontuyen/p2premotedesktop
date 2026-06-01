@@ -69,7 +69,7 @@ def main():
     # 4. Build Agent using Nuitka
     log("Building RemoteDesktopP2P via Nuitka (standalone)...")
     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
-    nuitka_cmd = f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin --enable-plugin=tk-inter --windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3,numpy,cv2 --no-deployment-flag=excluded-module-usage --output-dir=dist_nuitka app.py'
+    nuitka_cmd = f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter --windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3,numpy,cv2 --no-deployment-flag=excluded-module-usage --output-dir=dist_nuitka app.py'
     if not run_cmd(nuitka_cmd):
         log("ERROR: Nuitka build failed. Aborting deployment.")
         return
