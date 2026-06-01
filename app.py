@@ -1921,16 +1921,19 @@ class ClipboardSyncManager:
         self.gui_queue.put(("destroy", None))
 
     def cancel_active_transfer(self, remote_triggered=False):
-        if not self.transfer_in_progress and not self.incoming_transfers:
-            if not self.pending_remote_files:
+        # Thiết lập cờ hủy ngay lập tức để ngắt các tiến trình đang gửi/nhận
+        self._receive_cancelled = True
+        self._send_cancelled = True
+        
+        if not getattr(self, 'transfer_in_progress', False) and not getattr(self, 'incoming_transfers', {}):
+            if not getattr(self, 'pending_remote_files', []):
                 return
             
-        print(f"[FileTransfer] Bắt đầu hủy truyền tải (remote_triggered={remote_triggered})...")
+        print(f"[FileTransfer] Bắt đầu dọn dẹp hủy truyền tải (remote_triggered={remote_triggered})...")
         
         # Dọn dẹp cache file và trạng thái paste
         self.pending_remote_files = []
         self.is_paste_triggered = False
-        self._receive_cancelled = True
         
         # Giải phóng delayed rendering trên clipboard bằng cách xóa sạch clipboard nếu app đang sở hữu
         try:
@@ -2174,30 +2177,35 @@ class ClipboardSyncManager:
             
             hwnds_to_check = []
             
-            def get_root_hwnd(h):
-                if not h: return None
+            def get_related_hwnds(h):
+                if not h: return []
+                res = [h]
                 try:
-                    root = ctypes.windll.user32.GetAncestor(h, 2) # GA_ROOT = 2
-                    return root if root else h
+                    root = ctypes.windll.user32.GetAncestor(h, 2) # GA_ROOT
+                    if root: res.append(root)
+                    owner = ctypes.windll.user32.GetWindow(h, 4) # GW_OWNER
+                    if owner: res.append(owner)
+                    if root:
+                        root_owner = ctypes.windll.user32.GetWindow(root, 4)
+                        if root_owner: res.append(root_owner)
                 except:
-                    return h
+                    pass
+                return res
             
             # 1. Cửa sổ đang mở Clipboard (chính xác nhất cho thao tác Paste)
             try:
                 hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
                 if hwnd_clip:
-                    root_clip = get_root_hwnd(hwnd_clip)
-                    if root_clip and root_clip not in hwnds_to_check:
-                        hwnds_to_check.append(root_clip)
+                    for h in get_related_hwnds(hwnd_clip):
+                        if h not in hwnds_to_check: hwnds_to_check.append(h)
             except: pass
                 
             # 2. Cửa sổ Foreground hiện tại
             try:
                 hwnd_fg = win32gui.GetForegroundWindow()
                 if hwnd_fg:
-                    root_fg = get_root_hwnd(hwnd_fg)
-                    if root_fg and root_fg not in hwnds_to_check:
-                        hwnds_to_check.append(root_fg)
+                    for h in get_related_hwnds(hwnd_fg):
+                        if h not in hwnds_to_check: hwnds_to_check.append(h)
             except: pass
                 
             # 3. Cửa sổ nằm dưới con trỏ chuột (phòng trường hợp mất focus vào menu)
@@ -2206,9 +2214,8 @@ class ClipboardSyncManager:
                 if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
                     hwnd_mouse = ctypes.windll.user32.WindowFromPoint(pt)
                     if hwnd_mouse:
-                        root_mouse = get_root_hwnd(hwnd_mouse)
-                        if root_mouse and root_mouse not in hwnds_to_check:
-                            hwnds_to_check.append(root_mouse)
+                        for h in get_related_hwnds(hwnd_mouse):
+                            if h not in hwnds_to_check: hwnds_to_check.append(h)
             except: pass
             
             shell = win32com.client.Dispatch("Shell.Application")
@@ -5846,10 +5853,10 @@ class UnifiedApp(tk.Tk):
                             
                             if ema > 0.35:
                                 # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
-                                quality = max(35, quality - 5)
+                                quality = max(max(35, base_quality - 20), quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
                                 if ema > 0.6:
-                                    dyn_scale = max(0.6, dyn_scale - 0.05)
+                                    dyn_scale = max(res_scale, dyn_scale - 0.05)
                             elif ema < 0.20:
                                 # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
                                 quality = min(95, quality + 1)
