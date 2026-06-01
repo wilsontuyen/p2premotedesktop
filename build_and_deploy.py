@@ -4,7 +4,7 @@ import subprocess
 import shutil
 import time
 
-workspace_dir = r"C:\Users\Tuyen\.gemini\antigravity\scratch\remote_desktop"
+workspace_dir = os.path.dirname(os.path.abspath(__file__))
 target_dir = r"C:\Apps\P2P"
 log_path = os.path.join(workspace_dir, "build_deploy.log")
 

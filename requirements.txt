@@ -3,3 +3,4 @@ pygame-ce
 pynput
 pystray
 Pillow
+cryptography

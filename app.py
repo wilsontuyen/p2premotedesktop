@@ -16,6 +16,7 @@ import base64
 import ctypes
 from ctypes import wintypes
 import hashlib
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 import urllib.request
 import urllib.parse
 import tkinter as tk
@@ -424,11 +425,51 @@ def send_input_mouse_move(x, y):
 
 # TCP Frame Helper Functions
 socket_send_lock = threading.Lock()
+send_nonce_counter = 0
+send_counter_lock = threading.Lock()
+socket_passwords = {}
 
-def send_msg(sock, data_bytes):
+def get_crypto_key(password):
+    return hashlib.sha256(password.encode('utf-8')).digest()
+
+def encrypt_payload(data_bytes, password):
+    global send_nonce_counter
+    key = get_crypto_key(password)
+    chacha = ChaCha20Poly1305(key)
+    
+    with send_counter_lock:
+        send_nonce_counter += 1
+        current_counter = send_nonce_counter
+        
+    nonce = struct.pack('>Q', current_counter) + b'\x00\x00\x00\x00'
+    return nonce + chacha.encrypt(nonce, data_bytes, None)
+
+def decrypt_payload(encrypted_bytes, password):
+    passwords = [password] if isinstance(password, str) else list(password)
+    passwords = [p for p in passwords if p]
+    
+    if len(encrypted_bytes) < 12:
+        raise ValueError("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)")
+    nonce = encrypted_bytes[:12]
+    ciphertext = encrypted_bytes[12:]
+    
+    last_err = None
+    for p in passwords:
+        try:
+            key = get_crypto_key(p)
+            chacha = ChaCha20Poly1305(key)
+            return chacha.decrypt(nonce, ciphertext, None)
+        except Exception as e:
+            last_err = e
+    raise last_err if last_err else ValueError("Không giải mã được với bất kỳ mật khẩu nào")
+
+def send_msg(sock, data_bytes, password=None):
+    if password is None:
+        password = socket_passwords.get(sock, APP_KEY)
     try:
         with socket_send_lock:
-            msg = struct.pack('>I', len(data_bytes)) + data_bytes
+            encrypted_data = encrypt_payload(data_bytes, password)
+            msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
             sock.sendall(msg)
     except Exception as e:
         print(f"[Socket] Lỗi gửi dữ liệu: {e}")
@@ -442,12 +483,21 @@ def recv_exact(sock, length):
         data += packet
     return data
 
-def recv_msg(sock):
+def recv_msg(sock, password=None):
+    if password is None:
+        password = socket_passwords.get(sock, APP_KEY)
     length_bytes = recv_exact(sock, 4)
     if not length_bytes:
         return None
     length = struct.unpack('>I', length_bytes)[0]
-    return recv_exact(sock, length)
+    encrypted_data = recv_exact(sock, length)
+    if not encrypted_data:
+        return None
+    try:
+        return decrypt_payload(encrypted_data, password)
+    except Exception as e:
+        print(f"[Socket] Lỗi giải mã dữ liệu: {e}")
+        return b''
 
 # Helper to fetch hardware identifiers (CPUID & HDD Serial)
 def get_hwid():
@@ -645,14 +695,14 @@ def get_public_ip():
 import configparser
 
 # Real-time TCP Signaling Server configuration
-SIGNALING_SERVER_HOSTS = ['vietnam.sytes.net'] # Fallback default
+SIGNALING_SERVER_HOSTS = ['homed.auavn.com'] # Fallback default
 SIGNALING_SERVER_PORT = 8765
 
 try:
     server_config = configparser.ConfigParser()
     server_config.read('server.ini', encoding='utf-8')
     if 'server' in server_config:
-        hosts_str = server_config['server'].get('host', 'vietnam.sytes.net')
+        hosts_str = server_config['server'].get('host', 'homed.auavn.com')
         SIGNALING_SERVER_HOSTS = [h.strip() for h in hosts_str.split(',') if h.strip()]
         SIGNALING_SERVER_PORT = server_config['server'].getint('port', 8765)
 except Exception as e:
@@ -1856,6 +1906,10 @@ class ClipboardSyncManager:
         with self.lock:
             if sock in self.active_sockets:
                 self.active_sockets.remove(sock)
+            if self.sock == sock:
+                self.sock = list(self.active_sockets)[0] if self.active_sockets else None
+            # Also clean up socket passwords
+            socket_passwords.pop(sock, None)
 
     def show_dialog(self, title_text, filename, total_size):
         self.gui_queue.put(("create", (title_text, filename, total_size)))
@@ -2711,12 +2765,12 @@ client_is_locked = False
 client_switching_desktop_countdown = 0
 
 # Client Screen Receiver Thread
-def client_receiver_thread(sock):
+def client_receiver_thread(sock, password):
     global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked
     client_pending_bbox = None
     while client_running:
         try:
-            msg = recv_msg(sock)
+            msg = recv_msg(sock, password)
             if not msg:
                 print("[Client] Server closed connection.")
                 client_running = False
@@ -2771,7 +2825,7 @@ def client_receiver_thread(sock):
             break
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
     global client_switching_desktop_countdown
     try:
         outer_running = True
@@ -2848,7 +2902,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             clipboard_sync_manager.register_app(hidden_root)
             
             # Start receiver thread
-            t = threading.Thread(target=client_receiver_thread, args=(sock,), daemon=True)
+            t = threading.Thread(target=client_receiver_thread, args=(sock, partner_pass), daemon=True)
             t.start()
             
             # Gắn kết socket vào trình quản lý Event Listener của Clipboard
@@ -2862,7 +2916,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 while client_running:
                     try:
                         event_dict = event_queue.get(timeout=0.1)
-                        send_msg(sock, json.dumps(event_dict).encode('utf-8'))
+                        send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
                     except queue.Empty:
                         pass
                     except Exception:
@@ -4979,9 +5033,9 @@ class UnifiedApp(tk.Tk):
         if sock:
             try:
                 print(f"[StatusQuery] Đang gửi yêu cầu kiểm tra trạng thái ID: {clean_id}")
-                req = json.dumps({"action": "check_online", "target": clean_id}) + '\n'
+                req = json.dumps({"action": "check_online", "target": clean_id})
                 with self.signaling_lock:
-                    sock.sendall(req.encode('utf-8'))
+                    send_msg(sock, req.encode('utf-8'), APP_KEY)
                 
                 # Sau 1.5s nếu đèn LED vẫn là màu xám (chưa có phản hồi) thì tự động chuyển sang màu đỏ (Offline)
                 self.after(1500, lambda cid=clean_id: self.check_and_default_offline(cid))
@@ -5268,8 +5322,9 @@ class UnifiedApp(tk.Tk):
                 sock.connect((host, SIGNALING_SERVER_PORT))
                 sock.settimeout(None)
                 
-                req = json.dumps({"action": "register", "hwid": self.my_id_clean}) + '\n'
-                sock.sendall(req.encode('utf-8'))
+                req = json.dumps({"action": "register", "hwid": self.my_id_clean})
+                req_data = req.encode('utf-8')
+                send_msg(sock, req_data, APP_KEY)
                 
                 with self.signaling_lock:
                     self.signaling_sockets[host] = sock
@@ -5287,19 +5342,24 @@ class UnifiedApp(tk.Tk):
                 while self.running_server:
                     r, _, _ = select.select([sock], [], [], 1.0)
                     if r:
-                        data = sock.recv(4096)
-                        if not data: break
-                        messages = data.decode('utf-8').strip().split('\n')
-                        for msg in messages:
-                            if not msg: continue
+                        msg_bytes = recv_msg(sock, APP_KEY)
+                        if msg_bytes is None:
+                            break
+                        if msg_bytes == b'':
+                            continue
+                        
+                        try:
+                            msg = msg_bytes.decode('utf-8')
                             self.process_signaling_message(msg, sock, host)
                             if "pong" in msg:
                                 last_pong = time.time()
+                        except Exception as de:
+                            print(f"[Signaling] Decode error: {de}")
                                 
                     now = time.time()
                     if now - last_ping > 20:
-                        ping_req = json.dumps({"action": "ping"}) + '\n'
-                        sock.sendall(ping_req.encode('utf-8'))
+                        ping_req = json.dumps({"action": "ping"})
+                        send_msg(sock, ping_req.encode('utf-8'), APP_KEY)
                         last_ping = now
                         
                     if now - last_pong > 50:
@@ -5347,9 +5407,9 @@ class UnifiedApp(tk.Tk):
                     "target": from_hwid,
                     "port": BOUND_PORT,
                     "local_ip": self.local_ip
-                }) + '\n'
+                })
                 with self.signaling_lock:
-                    sock.sendall(accept_req.encode('utf-8'))
+                    send_msg(sock, accept_req.encode('utf-8'), APP_KEY)
                     
                 threading.Thread(target=self.punch_hole_to_client, args=(public_ip, public_port), daemon=True).start()
                 
@@ -5480,10 +5540,13 @@ class UnifiedApp(tk.Tk):
         # We now support multiple clients, so we don't block new connections if active_clients is non-empty.
             
         try:
-            msg = recv_msg(conn)
+            # Register the socket with candidate passwords so recv_msg can decrypt client's handshake
+            socket_passwords[conn] = [self.my_password, self.fixed_password]
+            msg = recv_msg(conn, [self.my_password, self.fixed_password])
             if not msg:
                 try: conn.close()
                 except: pass
+                socket_passwords.pop(conn, None)
                 return
                 
             data = json.loads(msg.decode('utf-8'))
@@ -5497,6 +5560,7 @@ class UnifiedApp(tk.Tk):
                 
             if password_valid:
                 print("[Host] Password matches! Accepting connection.")
+                socket_passwords[conn] = client_pass
                 self.wake_display()
                 
                 # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa
@@ -5546,7 +5610,7 @@ class UnifiedApp(tk.Tk):
                     "is_domain": is_domain,
                     "chk_reason": chk_reason
                 }).encode('utf-8')
-                send_msg(conn, res_info)
+                send_msg(conn, res_info, client_pass)
                 
                 client_state = {"running": True, "net_class": "medium", "wake_event": threading.Event()}
                 
@@ -5555,23 +5619,23 @@ class UnifiedApp(tk.Tk):
                     for run_idx in range(2):
                         # 1. Ping / Latency test (3 pings per round)
                         for _ in range(3):
-                            ping_msg = recv_msg(conn)
+                            ping_msg = recv_msg(conn, client_pass)
                             if ping_msg:
                                 ping_data = json.loads(ping_msg.decode('utf-8'))
                                 if ping_data.get("action") == "speed_test_ping":
-                                    send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'))
+                                    send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'), client_pass)
                                     
                         # 2. Bandwidth test
-                        bw_msg = recv_msg(conn)
+                        bw_msg = recv_msg(conn, client_pass)
                         if bw_msg:
                             bw_data = json.loads(bw_msg.decode('utf-8'))
                             if bw_data.get("action") == "speed_test_bw_req":
                                 dummy_size = 1572864 # 1.5 MB để nới rộng TCP Window
-                                send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'))
+                                send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'), client_pass)
                                 conn.sendall(b'\x00' * dummy_size)
                             
                     # 3. Receive final results (sent once after both rounds)
-                    res_msg = recv_msg(conn)
+                    res_msg = recv_msg(conn, client_pass)
                     if res_msg:
                         res_data = json.loads(res_msg.decode('utf-8'))
                         if res_data.get("action") == "speed_test_result":
@@ -5591,10 +5655,10 @@ class UnifiedApp(tk.Tk):
                 self.active_clients[addr] = client_state
                 
                 addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
-                self.update_status(f"Đang bị điều khiển bởi {addrs_str}")
+                self.update_status(f"Đang dùng máy chủ {addrs_str}")
                 
-                t_sender = threading.Thread(target=self.host_sender_thread, args=(conn, monitor, client_state), daemon=True)
-                t_receiver = threading.Thread(target=self.host_receiver_thread, args=(conn, client_state), daemon=True)
+                t_sender = threading.Thread(target=self.host_sender_thread, args=(conn, monitor, client_state, client_pass), daemon=True)
+                t_receiver = threading.Thread(target=self.host_receiver_thread, args=(conn, client_state, client_pass), daemon=True)
                 
                 t_sender.start()
                 t_receiver.start()
@@ -5626,8 +5690,9 @@ class UnifiedApp(tk.Tk):
                     "status": "error",
                     "message": "Sai mật khẩu kết nối!"
                 }).encode('utf-8')
-                send_msg(conn, err_info)
+                send_msg(conn, err_info, client_pass)
                 conn.close()
+                socket_passwords.pop(conn, None)
         except Exception as e:
             print(f"[Host] Handshake Exception: {e}")
             try:
@@ -5635,13 +5700,14 @@ class UnifiedApp(tk.Tk):
                     "status": "error",
                     "message": f"Lỗi xảy ra trên máy Host:\n{e}"
                 }).encode('utf-8')
-                send_msg(conn, err_info)
+                send_msg(conn, err_info, locals().get('client_pass'))
             except:
                 pass
             conn.close()
+            socket_passwords.pop(conn, None)
             
     # Host Sender Thread
-    def host_sender_thread(self, conn, monitor, client_state):
+    def host_sender_thread(self, conn, monitor, client_state, password):
         print("[Host] Started Screen Sender Thread.")
         import io
         
@@ -5754,14 +5820,14 @@ class UnifiedApp(tk.Tk):
                                 if box_w * box_h < (w * h) * 0.7:
                                     pil_img = pil_img.crop(diff_bbox)
                                     partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
-                                    send_msg(conn, json.dumps(partial_meta).encode('utf-8'))
+                                    send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
                             buf = io.BytesIO()
                             pil_img.save(buf, format="JPEG", quality=quality)
                             jpeg_data = buf.getvalue()
                             
                             t_start_send = time.time()
-                            send_msg(conn, jpeg_data)
+                            send_msg(conn, jpeg_data, password)
                             send_time = time.time() - t_start_send
                             
                             if "send_ema" not in client_state:
@@ -5792,7 +5858,7 @@ class UnifiedApp(tk.Tk):
                             print(f"[Host] Screen capture error (re-initializing): {e}")
                             try:
                                 signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                                send_msg(conn, signal)
+                                send_msg(conn, signal, password)
                             except: pass
                             time.sleep(1.0)
                             break  # Break inner loop to recreate mss.mss()
@@ -5812,7 +5878,7 @@ class UnifiedApp(tk.Tk):
         print("[Host] Screen Sender Thread Stopped.")
         
     # Host Receiver Thread (Simulates actions)
-    def host_receiver_thread(self, conn, client_state):
+    def host_receiver_thread(self, conn, client_state, password):
         print("[Host] Started Input Receiver Thread.")
         import select
         while client_state.get("running", False):
@@ -5833,7 +5899,7 @@ class UnifiedApp(tk.Tk):
                     self.host_release_all_modifiers()
                     continue
                     
-                msg = recv_msg(conn)
+                msg = recv_msg(conn, password)
                 if not msg:
                     print("[Host] Input Receiver got empty message (Client disconnected).")
                     break
@@ -5842,7 +5908,7 @@ class UnifiedApp(tk.Tk):
                 if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                     clipboard_sync_manager.handle_received_packet(event)
                 else:
-                    self.host_handle_event(event, conn)
+                    self.host_handle_event(event, conn, password)
                     if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
                         client_state["force_update"] = True
                         if "wake_event" in client_state:
@@ -5853,7 +5919,7 @@ class UnifiedApp(tk.Tk):
         print("[Host] Input Receiver Thread Stopped.")
         self.host_release_all_modifiers()
         
-    def host_handle_event(self, event, conn):
+    def host_handle_event(self, event, conn, password):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
             x, y = event['x'], event['y']
@@ -5923,7 +5989,7 @@ class UnifiedApp(tk.Tk):
                     "is_domain": is_domain, 
                     "reason": chk_reason,
                     "is_locked": is_locked
-                }).encode('utf-8'))
+                }).encode('utf-8'), password)
             except Exception as e:
                 print(f"[Host] Failed to send domain_status: {e}")
                 
@@ -5965,17 +6031,16 @@ class UnifiedApp(tk.Tk):
             print(f"[Host] Failed to signal SAS event: {ex}")
 
     def host_release_all_modifiers(self):
-        for mod_key in [Key.shift, Key.ctrl, Key.alt]:
-            try:
-                keyboard.release(mod_key)
-            except:
-                pass
         try:
-            # Release via SendInput
-            for key_name in ['left shift', 'right shift', 'left ctrl', 'right ctrl', 'left alt', 'right alt']:
+            for key_name in [
+                'left shift', 'right shift', 
+                'left ctrl', 'right ctrl', 
+                'left alt', 'right alt', 
+                'left windows', 'right windows'
+            ]:
                 send_input_keyboard_event(key_name, False)
-        except:
-            pass
+        except Exception as e:
+            print(f"[Host] Failed to release modifiers via SendInput: {e}")
                 
     # CLIENT (Controller) functions
     def click_connect(self):
@@ -6050,7 +6115,7 @@ class UnifiedApp(tk.Tk):
             self.pending_connection_info = None
             try:
                 with self.signaling_lock:
-                    sock.sendall(req.encode('utf-8'))
+                    send_msg(sock, req.encode('utf-8'), APP_KEY)
             except Exception as e:
                 continue
                 
@@ -6131,7 +6196,7 @@ class UnifiedApp(tk.Tk):
                 }) + '\n'
                 with self.signaling_lock:
                     if getattr(self, 'primary_signaling_socket', None):
-                        self.primary_signaling_socket.sendall(relay_req.encode('utf-8'))
+                        send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
                 
                 # 2. Tạo kết nối từ Client lên Relay Server
                 host_to_connect = specific_host if specific_host else SIGNALING_SERVER_HOSTS[0]
@@ -6176,12 +6241,14 @@ class UnifiedApp(tk.Tk):
             print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
             
         try:
+            # Register the socket password
+            socket_passwords[sock] = partner_pass
             # Send handshake password
             handshake = json.dumps({"password": partner_pass}).encode('utf-8')
-            send_msg(sock, handshake)
+            send_msg(sock, handshake, partner_pass)
             
             # Read verification response
-            res_msg = recv_msg(sock)
+            res_msg = recv_msg(sock, partner_pass)
             if not res_msg:
                 self.update_status("Sẵn sàng kết nối")
                 self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
@@ -6212,8 +6279,8 @@ class UnifiedApp(tk.Tk):
                         rtts = []
                         for _ in range(3):
                             t0 = time.time()
-                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'))
-                            pong_msg = recv_msg(sock)
+                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), partner_pass)
+                            pong_msg = recv_msg(sock, partner_pass)
                             if pong_msg:
                                 pong_data = json.loads(pong_msg.decode('utf-8'))
                                 if pong_data.get("action") == "speed_test_pong":
@@ -6226,8 +6293,8 @@ class UnifiedApp(tk.Tk):
                             
                         # 2. Bandwidth test
                         run_bw = 10.0
-                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'))
-                        bw_start_msg = recv_msg(sock)
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'), partner_pass)
+                        bw_start_msg = recv_msg(sock, partner_pass)
                         if bw_start_msg:
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
@@ -6286,7 +6353,7 @@ class UnifiedApp(tk.Tk):
                         "net_class": net_class,
                         "ping": avg_ping,
                         "bandwidth": bandwidth
-                    }).encode('utf-8'))
+                    }).encode('utf-8'), partner_pass)
                     
                     status_text = f"Đo tốc độ (Lớn nhất 2 lần): Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
                     print(f"[Client] {status_text}")
@@ -6301,7 +6368,7 @@ class UnifiedApp(tk.Tk):
                             "net_class": "medium",
                             "ping": 50.0,
                             "bandwidth": 10.0
-                        }).encode('utf-8'))
+                        }).encode('utf-8'), partner_pass)
                     except: pass
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
@@ -6314,6 +6381,7 @@ class UnifiedApp(tk.Tk):
                         print(f"Failed to put socket in reconnect queue: {e}")
                         reconnect_queue.put("FAILED")
                         sock.close()
+                        socket_passwords.pop(sock, None)
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
@@ -6324,19 +6392,22 @@ class UnifiedApp(tk.Tk):
                 self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 sock.close()
+                socket_passwords.pop(sock, None)
         except Exception as e:
             self.update_status("Sẵn sàng kết nối")
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
             self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            sock.close()
+            if sock:
+                sock.close()
+                socket_passwords.pop(sock, None)
             
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue), daemon=True)
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass), daemon=True)
             p.start()
             
             # Track active viewer
