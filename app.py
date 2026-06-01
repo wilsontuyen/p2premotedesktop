@@ -3509,7 +3509,7 @@ class UnifiedApp(tk.Tk):
         self.status_var = tk.StringVar(value="Đang kết nối tới mạng đăng ký...")
         self.partner_id_var = tk.StringVar()
         self.partner_pass_var = tk.StringVar()
-        self.force_relay_var = tk.BooleanVar(value=True)
+        self.force_relay_var = tk.BooleanVar(value=False)
         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
         
         # Register Trace for Auto-Formatting Partner ID
