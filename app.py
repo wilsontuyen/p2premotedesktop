@@ -2827,6 +2827,13 @@ def client_receiver_thread(sock, password):
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
     global client_switching_desktop_countdown
+    
+    # [FIX] Trong Windows, multiprocessing.Process khởi tạo tiến trình con mới hoàn toàn.
+    # Từ điển socket_passwords toàn cục bị trống, dẫn đến encrypt_payload mặc định dùng APP_KEY,
+    # gây ra lỗi InvalidTag khi Host giải mã dữ liệu clipboard/file.
+    if partner_pass:
+        socket_passwords[sock] = partner_pass
+        
     try:
         outer_running = True
         

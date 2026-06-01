@@ -9,6 +9,13 @@ import os
 import time
 import traceback
 
+if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
+    try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except: pass
+if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):
+    try: sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except: pass
+
 # Determine the application directory robustly across source execution, Nuitka standalone, and Nuitka onefile.
 app_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
 if not app_dir:
