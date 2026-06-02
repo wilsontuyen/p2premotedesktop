@@ -129,8 +129,8 @@ def log_debug(msg):
 # In pygame-ce, it is still imported as pygame.
 
 # Remote Desktop Ports (Avoid 80/443 to prevent Router Web UI collision)
-PORTS_TO_TRY = [random.randint(20000, 60000) for _ in range(5)]
-BOUND_PORT = PORTS_TO_TRY[0]
+PORTS_TO_TRY = [12345]
+BOUND_PORT = 12345
 APP_KEY = "q3tu0y7j"
 
 # Host Controllers
@@ -463,6 +463,21 @@ def decrypt_payload(encrypted_bytes, password):
             last_err = e
     raise last_err if last_err else ValueError("Không giải mã được với bất kỳ mật khẩu nào")
 
+
+def force_close_socket(sock):
+    if not sock: return
+    try:
+        import struct
+        # Set SO_LINGER to abort the connection with RST to avoid TIME_WAIT
+        linger = struct.pack('ii', 1, 0)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger)
+    except:
+        pass
+    try:
+        force_close_socket(sock)
+    except:
+        pass
+
 def send_msg(sock, data_bytes, password=None):
     if password is None:
         password = socket_passwords.get(sock, APP_KEY)
@@ -588,7 +603,7 @@ def attempt_upnp_forward(internal_port):
     except Exception as e:
         print(f"[UPnP] SSDP discovery timeout/error: {e}")
     finally:
-        sock.close()
+        force_close_socket(sock)
         
     if not location_url:
         print("[UPnP] UPnP Router not found on local network.")
@@ -5323,7 +5338,20 @@ class UnifiedApp(tk.Tk):
         self._blink_job = self.after(500, self._blink_status)
         
     # Background Network Initialization
+    def add_firewall_rule_for_app(self):
+        try:
+            import sys, os, subprocess
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
+            rule_name = "EasyRemoteDesktop_P2P"
+            subprocess.run(f'netsh advfirewall firewall delete rule name="{rule_name}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow program="{exe_path}" enable=yes profile=any', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def init_network_services(self):
+        # 0. Thử tự động thêm rule Tường lửa (sẽ thành công nếu có quyền Admin)
+        self.add_firewall_rule_for_app()
+        
         # 1. Start Host Server first to determine which port is available
         self.update_status("Đang khởi động Server lắng nghe...")
         self.start_host_server()
@@ -5430,7 +5458,7 @@ class UnifiedApp(tk.Tk):
                 
             finally:
                 if sock:
-                    try: sock.close()
+                    try: force_close_socket(sock)
                     except: pass
                 with self.signaling_lock:
                     if host in getattr(self, 'signaling_sockets', {}):
@@ -5456,7 +5484,7 @@ class UnifiedApp(tk.Tk):
             if action == "incoming_request":
                 from_hwid = res.get("from_hwid")
                 public_ip = res.get("public_ip")
-                public_port = res.get("public_port")
+                public_port = res.get("port") or res.get("public_port")
                 local_ip = res.get("local_ip")
                 
                 print(f"[Signaling] Connection request from {from_hwid} ({public_ip}:{public_port}) via {host}")
@@ -5474,7 +5502,7 @@ class UnifiedApp(tk.Tk):
                 
             elif action == "request_accepted":
                 public_ip = res.get("public_ip")
-                public_port = res.get("public_port")
+                public_port = res.get("port") or res.get("public_port")
                 local_ip = res.get("local_ip")
                 self.pending_connection_info = (public_ip, public_port, local_ip)
                 self.current_signaling_host = host
@@ -5493,6 +5521,14 @@ class UnifiedApp(tk.Tk):
             print(f"[Signaling] Lỗi xử lý tin nhắn từ {host}: {e}")
 
     def punch_hole_to_client(self, c_ip, c_port):
+        # 1. Tạm thời đóng server_socket để giải phóng port
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except: pass
+            
+        success_sock = None
+        
         # Spam outbound connections quickly for Simultaneous Open
         for _ in range(20):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -5505,12 +5541,36 @@ class UnifiedApp(tk.Tk):
             try:
                 sock.connect((c_ip, c_port))
                 print("[HolePunch] Host successfully punched through to Client!")
-                threading.Thread(target=self.handle_host_handshake, args=(sock, (c_ip, c_port)), daemon=True).start()
-                return
+                success_sock = sock
+                break
             except Exception:
-                sock.close()
+                force_close_socket(sock)
                 time.sleep(0.1)
-        print("[HolePunch] Host gave up trying to punch hole.")
+                
+        if not success_sock:
+            print("[HolePunch] Host gave up trying to punch hole.")
+            
+        # 2. Mở lại server_socket bất kể đục lỗ thành công hay thất bại
+        try:
+            if hasattr(socket, 'create_server') and hasattr(socket, 'AF_INET6'):
+                try:
+                    self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET6, dualstack_ipv6=True)
+                except Exception:
+                    self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET)
+            else:
+                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+            self.server_socket.listen(5)
+            print(f"[Host] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+        except Exception as e:
+            print(f"[Host] Cảnh báo: Không thể phục hồi server_socket: {e}")
+            
+        # 3. Bắt tay kết nối nếu thành công
+        if success_sock:
+            # Khôi phục timeout về None (blocking) cho socket sau khi đục lỗ thành công
+            success_sock.settimeout(None)
+            threading.Thread(target=self.handle_host_handshake, args=(success_sock, (c_ip, c_port)), daemon=True).start()
 
 
     # TCP Server (Host) functions
@@ -5553,8 +5613,12 @@ class UnifiedApp(tk.Tk):
                 conn, addr = self.server_socket.accept()
                 print(f"[Host] Connection attempt from {addr[0]}:{addr[1]}")
                 threading.Thread(target=self.handle_host_handshake, args=(conn, addr), daemon=True).start()
-            except Exception:
-                break
+            except Exception as e:
+                if not self.running_server:
+                    break
+                print(f"[Host] Warning: accept() failed with error: {e}")
+                time.sleep(0.1)
+                continue
                 
     def wake_display(self):
         try:
@@ -5580,7 +5644,7 @@ class UnifiedApp(tk.Tk):
             socket_passwords[conn] = [self.my_password, self.fixed_password]
             msg = recv_msg(conn, [self.my_password, self.fixed_password])
             if not msg:
-                try: conn.close()
+                try: force_close_socket(conn)
                 except: pass
                 socket_passwords.pop(conn, None)
                 return
@@ -5725,6 +5789,11 @@ class UnifiedApp(tk.Tk):
                         self.update_status(f"Đang bị điều khiển bởi {addrs_str}")
                     else:
                         self.update_status(f"Đã đóng kết nối với Client {addr[0]} lúc {time.strftime('%H:%M:%S')} (Sẵn sàng kết nối)")
+                        
+                    try:
+                        force_close_socket(conn)
+                    except:
+                        pass
             else:
                 print("[Host] Password mismatch!")
                 err_info = json.dumps({
@@ -5732,7 +5801,7 @@ class UnifiedApp(tk.Tk):
                     "message": "Sai mật khẩu kết nối!"
                 }).encode('utf-8')
                 send_msg(conn, err_info, client_pass)
-                conn.close()
+                force_close_socket(conn)
                 socket_passwords.pop(conn, None)
         except Exception as e:
             print(f"[Host] Handshake Exception: {e}")
@@ -5744,7 +5813,7 @@ class UnifiedApp(tk.Tk):
                 send_msg(conn, err_info, locals().get('client_pass'))
             except:
                 pass
-            conn.close()
+            force_close_socket(conn)
             socket_passwords.pop(conn, None)
             
     # Host Sender Thread
@@ -5915,7 +5984,7 @@ class UnifiedApp(tk.Tk):
                                 f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
                             client_state["running"] = False
                             try:
-                                conn.close()
+                                force_close_socket(conn)
                             except:
                                 pass
                             break
@@ -6219,12 +6288,18 @@ class UnifiedApp(tk.Tk):
                 print(f"[Client] Connected via LAN: {local_ip}")
             except Exception:
                 print(f"[Client] LAN connection failed.")
-                if sock: sock.close()
+                if sock: force_close_socket(sock)
                 
         # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
         if not self.force_relay_var.get() and not connected:
             self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
             print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
+            
+            # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
+            if getattr(self, 'server_socket', None):
+                try:
+                    self.server_socket.close()
+                except: pass
             
             # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
             for _ in range(20):
@@ -6241,8 +6316,24 @@ class UnifiedApp(tk.Tk):
                     print(f"[Client] Hole punch successful to {public_ip}:{port}!")
                     break
                 except Exception:
-                    sock.close()
+                    force_close_socket(sock)
                     time.sleep(0.1)
+                    
+            # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
+            try:
+                if hasattr(socket, 'create_server') and hasattr(socket, 'AF_INET6'):
+                    try:
+                        self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET6, dualstack_ipv6=True)
+                    except Exception:
+                        self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET)
+                else:
+                    self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+                self.server_socket.listen(5)
+                print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+            except Exception as e:
+                print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
 
         if not connected:
             self.update_status("Sẵn sàng kết nối")
@@ -6251,7 +6342,7 @@ class UnifiedApp(tk.Tk):
                 f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
             ))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if sock: sock.close()
+            if sock: force_close_socket(sock)
             return
                 
         # Connection succeeded, proceed with handshake
@@ -6286,7 +6377,7 @@ class UnifiedApp(tk.Tk):
                 self.update_status("Sẵn sàng kết nối")
                 self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                sock.close()
+                force_close_socket(sock)
                 return
                 
             res = json.loads(res_msg.decode('utf-8'))
@@ -6413,7 +6504,7 @@ class UnifiedApp(tk.Tk):
                     except Exception as e:
                         print(f"Failed to put socket in reconnect queue: {e}")
                         reconnect_queue.put("FAILED")
-                        sock.close()
+                        force_close_socket(sock)
                         socket_passwords.pop(sock, None)
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
@@ -6424,7 +6515,7 @@ class UnifiedApp(tk.Tk):
                     reconnect_queue.put("FAILED")
                 self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                sock.close()
+                force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
             self.update_status("Sẵn sàng kết nối")
@@ -6433,7 +6524,7 @@ class UnifiedApp(tk.Tk):
             self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
-                sock.close()
+                force_close_socket(sock)
                 socket_passwords.pop(sock, None)
             
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
@@ -6476,7 +6567,7 @@ class UnifiedApp(tk.Tk):
         except Exception as e:
             print(f"[Client] Lỗi khởi chạy tiến trình điều khiển: {e}")
             self.connect_btn.config(state=tk.NORMAL)
-            try: sock.close()
+            try: force_close_socket(sock)
             except: pass
             
     def on_close_window(self):
@@ -6621,7 +6712,7 @@ class UnifiedApp(tk.Tk):
         
         if hasattr(self, 'signaling_sockets'):
             for sock in self.signaling_sockets.values():
-                try: sock.close()
+                try: force_close_socket(sock)
                 except: pass
                 
         # Terminate any running child processes (viewers)
