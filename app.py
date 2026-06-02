@@ -129,8 +129,8 @@ def log_debug(msg):
 # In pygame-ce, it is still imported as pygame.
 
 # Remote Desktop Ports (Avoid 80/443 to prevent Router Web UI collision)
-PORTS_TO_TRY = [9999, 8443, 5900, 27015, 4444]
-BOUND_PORT = 9999
+PORTS_TO_TRY = [random.randint(20000, 60000) for _ in range(5)]
+BOUND_PORT = PORTS_TO_TRY[0]
 APP_KEY = "q3tu0y7j"
 
 # Host Controllers
@@ -525,8 +525,13 @@ def get_hwid():
         hdd = res_hdd.stdout.strip()
     except Exception:
         hdd = "FALLBACK_HDD_999"
+    try:
+        import uuid
+        mac = str(uuid.getnode())
+    except Exception:
+        mac = "FALLBACK_MAC_777"
         
-    combined = f"{cpu}_{hdd}".strip()
+    combined = f"{cpu}_{hdd}_{mac}".strip()
     sha = hashlib.sha256(combined.encode('utf-8')).hexdigest()
     # Take first 12 hex characters (48-bit int)
     val = int(sha[:12], 16)
@@ -5479,12 +5484,6 @@ class UnifiedApp(tk.Tk):
                 print(f"[Signaling] Error on {host}: {res.get('message')}")
                 self.pending_connection_info = "error"
                 
-            elif action == "relay_request":
-                session_id = res.get("session_id")
-                relay_host = res.get("relay_host") or host
-                print(f"[Signaling] Nhận yêu cầu trung chuyển (RELAY) via {host}. Đang kết nối làm Host...")
-                threading.Thread(target=self.start_relay_host, args=(session_id, relay_host), daemon=True).start()
-                
             elif action == "online_status":
                 target = res.get("target")
                 online = res.get("online", False)
@@ -5513,24 +5512,7 @@ class UnifiedApp(tk.Tk):
                 time.sleep(0.1)
         print("[HolePunch] Host gave up trying to punch hole.")
 
-    def start_relay_host(self, session_id, specific_host=None):
-        try:
-            print(f"[Relay] Host đang kết nối tới Relay Server cho session: {session_id}")
-            host_to_connect = specific_host if specific_host else SIGNALING_SERVER_HOSTS[0]
-            
-            relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            relay_sock.settimeout(5.0)
-            relay_sock.connect((host_to_connect, SIGNALING_SERVER_PORT))
-            relay_sock.settimeout(None)
-            
-            header = f"RELAY_HOST:{session_id}\n"
-            relay_sock.sendall(header.encode('utf-8'))
-            
-            # Truyền hình ảnh qua kết nối Relay
-            threading.Thread(target=self.handle_host_handshake, args=(relay_sock, (host_to_connect, SIGNALING_SERVER_PORT)), daemon=True).start()
-        except Exception as e:
-            print(f"[Relay] Host kết nối Relay Server thất bại: {e}")
-            
+
     # TCP Server (Host) functions
     def start_host_server(self):
         global BOUND_PORT
@@ -5615,6 +5597,11 @@ class UnifiedApp(tk.Tk):
             if password_valid:
                 print("[Host] Password matches! Accepting connection.")
                 socket_passwords[conn] = client_pass
+                
+                client_id = data.get("client_id", "Không rõ")
+                fmt_client_id = f"{client_id[:3]} {client_id[3:6]} {client_id[6:9]} {client_id[9:]}" if len(client_id) == 12 else client_id
+                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", f"Người dùng với ID {fmt_client_id} đang điều khiển máy của bạn!"))
+                
                 self.wake_display()
                 
                 # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa
@@ -6258,44 +6245,10 @@ class UnifiedApp(tk.Tk):
                     time.sleep(0.1)
 
         if not connected:
-            specific_host = getattr(self, 'current_signaling_host', None)
-            display_host = specific_host or 'Relay'
-            self.update_status(f"Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({display_host})...")
-            print("[Client] Hole punching failed. Attempting Relay fallback...")
-            try:
-                # 1. Gửi tín hiệu yêu cầu Host cùng nhảy vào Relay
-                relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
-                relay_req = json.dumps({
-                    "action": "relay_request",
-                    "target": partner_id,
-                    "session_id": relay_session_id,
-                    "relay_host": specific_host
-                }) + '\n'
-                with self.signaling_lock:
-                    if getattr(self, 'primary_signaling_socket', None):
-                        send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
-                
-                # 2. Tạo kết nối từ Client lên Relay Server
-                host_to_connect = specific_host if specific_host else SIGNALING_SERVER_HOSTS[0]
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect((host_to_connect, SIGNALING_SERVER_PORT))
-                sock.settimeout(None)
-                
-                header = f"RELAY_CLIENT:{relay_session_id}\n"
-                sock.sendall(header.encode('utf-8'))
-                
-                connected = True
-                print("[Client] Relay connection established successfully!")
-            except Exception as e:
-                print(f"[Client] Relay fallback failed: {e}")
-                connected = False
-
-        if not connected:
             self.update_status("Sẵn sàng kết nối")
             self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
-                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) & Server Trung Chuyển ({getattr(self, 'current_signaling_host', None) or 'Relay'}) đều thất bại!\n\n"
-                f"Lý do: Không thể kết nối tới máy chủ trung chuyển."
+                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
+                f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
             ))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock: sock.close()
@@ -6321,7 +6274,10 @@ class UnifiedApp(tk.Tk):
             # Register the socket password
             socket_passwords[sock] = partner_pass
             # Send handshake password
-            handshake = json.dumps({"password": partner_pass}).encode('utf-8')
+            handshake = json.dumps({
+                "password": partner_pass,
+                "client_id": self.my_id_clean
+            }).encode('utf-8')
             send_msg(sock, handshake, partner_pass)
             
             # Read verification response
