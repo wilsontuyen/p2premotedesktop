@@ -3010,7 +3010,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if client_is_domain and client_is_locked and btn_rect.collidepoint(event.pos):
+                        if (show_sas and sas_btn_rect.collidepoint(event.pos)) or taskmgr_btn_rect.collidepoint(event.pos):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))

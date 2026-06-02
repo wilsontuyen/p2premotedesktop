@@ -271,38 +271,52 @@ def spawn_taskmgr_system():
             return
 
         is_screen_locked = is_logon_ui_running(active_session_id)
-        desktop = "winsta0\\winlogon" if is_screen_locked else "winsta0\\default"
-
-        winlogon_pid = find_winlogon_pid(active_session_id)
-        if not winlogon_pid:
+        if is_screen_locked:
+            log("Screen is locked, skipping Task Manager spawn.")
             return
 
-        # Enable SeDebugPrivilege
+        desktop = "winsta0\\default"
+
+        # Enable privileges
         h_process_self = win32api.GetCurrentProcess()
         h_token_self = win32security.OpenProcessToken(
             h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
         )
-        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
-        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
+        privs = []
+        for priv_name in [win32security.SE_DEBUG_NAME, win32security.SE_TCB_NAME]:
+            try:
+                luid = win32security.LookupPrivilegeValue(None, priv_name)
+                privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
+            except:
+                pass
+        if privs:
+            win32security.AdjustTokenPrivileges(h_token_self, False, privs)
         win32api.CloseHandle(h_token_self)
 
-        # Open winlogon and its token
-        h_winlogon = win32api.OpenProcess(
-            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, winlogon_pid
-        )
-        h_token = win32security.OpenProcessToken(
-            h_winlogon, win32con.TOKEN_DUPLICATE | win32con.TOKEN_QUERY | win32con.TOKEN_ASSIGN_PRIMARY
-        )
-        win32api.CloseHandle(h_winlogon)
+        try:
+            h_user_token = win32ts.WTSQueryUserToken(active_session_id)
+        except Exception as e:
+            log(f"Failed to query user token for Task Manager (session {active_session_id}): {e}")
+            return
 
-        if h_token:
+        try:
+            elevation_type = win32security.GetTokenInformation(h_user_token, win32security.TokenElevationType)
+            if elevation_type == 3: # TokenElevationTypeLimited
+                linked_token = win32security.GetTokenInformation(h_user_token, win32security.TokenLinkedToken)
+                if linked_token:
+                    win32api.CloseHandle(h_user_token)
+                    h_user_token = linked_token
+        except Exception as e:
+            log(f"Failed to get linked token: {e}")
+
+        if h_user_token:
             h_token_dup = win32security.DuplicateTokenEx(
-                h_token,
+                h_user_token,
                 win32security.SecurityImpersonation,
                 win32con.TOKEN_ALL_ACCESS,
                 win32security.TokenPrimary
             )
-            win32api.CloseHandle(h_token)
+            win32api.CloseHandle(h_user_token)
 
             startup_info = win32process.STARTUPINFO()
             startup_info.lpDesktop = desktop
