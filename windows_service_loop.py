@@ -427,6 +427,8 @@ def is_process_alive(pid):
             exit_code = win32process.GetExitCodeProcess(h_proc)
             win32api.CloseHandle(h_proc)
             # STILL_ACTIVE = 259
+            if exit_code != 259:
+                log(f"[DEBUG] Process {pid} exited with code: {exit_code}")
             return exit_code == 259
     except Exception:
         pass

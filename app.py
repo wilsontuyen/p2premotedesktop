@@ -129,7 +129,7 @@ def log_debug(msg):
 # In pygame-ce, it is still imported as pygame.
 
 # Remote Desktop Ports (Avoid 80/443 to prevent Router Web UI collision)
-PORTS_TO_TRY = [12345]
+PORTS_TO_TRY = [12345, 12346, 12347, 12348, 12349]
 BOUND_PORT = 12345
 APP_KEY = "q3tu0y7j"
 
@@ -474,7 +474,7 @@ def force_close_socket(sock):
     except:
         pass
     try:
-        force_close_socket(sock)
+        sock.close()
     except:
         pass
 
@@ -516,6 +516,9 @@ def recv_msg(sock, password=None):
 
 # Helper to fetch hardware identifiers (CPUID & HDD Serial)
 def get_hwid():
+    cpu = "FALLBACK_CPUID_888"
+    hdd = "FALLBACK_HDD_999"
+    mac = "FALLBACK_MAC_777"
     startupinfo = None
     if os.name == 'nt':
         startupinfo = subprocess.STARTUPINFO()
@@ -528,23 +531,25 @@ def get_hwid():
             ['powershell', '-Command', '(Get-CimInstance Win32_Processor).ProcessorId'],
             capture_output=True, text=True, check=True, startupinfo=startupinfo
         )
-        cpu = res_cpu.stdout.strip()
+        if res_cpu and res_cpu.stdout:
+            cpu = res_cpu.stdout.strip()
     except Exception:
-        cpu = "FALLBACK_CPUID_888"
+        pass
     try:
         # Get HDD Serial
         res_hdd = subprocess.run(
             ['powershell', '-Command', '(Get-CimInstance Win32_DiskDrive)[0].SerialNumber'],
             capture_output=True, text=True, check=True, startupinfo=startupinfo
         )
-        hdd = res_hdd.stdout.strip()
+        if res_hdd and res_hdd.stdout:
+            hdd = res_hdd.stdout.strip()
     except Exception:
-        hdd = "FALLBACK_HDD_999"
+        pass
     try:
         import uuid
         mac = str(uuid.getnode())
     except Exception:
-        mac = "FALLBACK_MAC_777"
+        pass
         
     combined = f"{cpu}_{hdd}_{mac}".strip()
     sha = hashlib.sha256(combined.encode('utf-8')).hexdigest()
@@ -590,16 +595,23 @@ def attempt_upnp_forward(internal_port):
     location_url = None
     
     try:
+        import time
         sock.sendto(ssdp_msg.encode('utf-8'), ('239.255.255.250', 1900))
-        while True:
-            data, addr = sock.recvfrom(65535)
-            response = data.decode('utf-8', errors='ignore')
-            for line in response.split('\r\n'):
-                if line.upper().startswith('LOCATION:'):
-                    location_url = line.split(':', 1)[1].strip()
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
+            try:
+                sock.settimeout(max(0.1, 3.0 - (time.time() - start_time)))
+                data, addr = sock.recvfrom(65535)
+                response = data.decode('utf-8', errors='ignore')
+                for line in response.split('\r\n'):
+                    if line.upper().startswith('LOCATION:'):
+                        location_url = line.split(':', 1)[1].strip()
+                        break
+                if location_url:
                     break
-            if location_url:
-                break
+            except socket.timeout:
+                # Timeout is expected when discovering
+                continue
     except Exception as e:
         print(f"[UPnP] SSDP discovery timeout/error: {e}")
     finally:
@@ -1504,24 +1516,22 @@ class ClipboardEventListener:
         self.callback = callback
         self.manager = manager
         self.hwnd = None
-        self.mouse_hook = None
-        self.mouse_hook_callback = None
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
+        self.poll_thread = threading.Thread(target=self._mouse_poll_loop, daemon=True)
+        self.poll_thread.start()
 
-    def _mouse_hook_proc(self, nCode, wParam, lParam):
-        if nCode >= 0:
-            # WM_RBUTTONDOWN = 0x0204, WM_RBUTTONUP = 0x0205, WM_NCRBUTTONDOWN = 0x00A4, WM_NCRBUTTONUP = 0x00A5
-            if wParam in (0x0204, 0x0205, 0x00A4, 0x00A5):
-                if self.manager:
-                    self.manager.last_rbutton_time = time.time()
-                    log_debug(f"[MouseHook] Phát hiện click chuột phải lúc: {self.manager.last_rbutton_time}")
-            # WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_NCLBUTTONDOWN = 0x00A1, WM_NCLBUTTONUP = 0x00A2
-            elif wParam in (0x0201, 0x0202, 0x00A1, 0x00A2):
+    def _mouse_poll_loop(self):
+        user32 = ctypes.windll.user32
+        while self.running:
+            if user32.GetAsyncKeyState(0x01) & 0x8000:
                 if self.manager:
                     self.manager.last_lbutton_time = time.time()
-        return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+            if user32.GetAsyncKeyState(0x02) & 0x8000:
+                if self.manager:
+                    self.manager.last_rbutton_time = time.time()
+            time.sleep(0.05)
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         WM_CLIPBOARDUPDATE = 0x031D
@@ -1565,26 +1575,7 @@ class ClipboardEventListener:
             kernel32.GetModuleHandleW.restype = ctypes.c_void_p
             h_mod = kernel32.GetModuleHandleW(None)
             
-            # Định nghĩa types cho CallNextHookEx để tránh lỗi OverflowError trên 64-bit Windows
-            user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, WPARAM_64, LPARAM_64]
-            user32.CallNextHookEx.restype = LRESULT_64
-            
-            # Đăng ký Low-level Mouse Hook để theo dõi chuột phải toàn hệ thống
-            try:
-                HOOKPROC = ctypes.WINFUNCTYPE(LRESULT_64, ctypes.c_int, WPARAM_64, LPARAM_64)
-                self.mouse_hook_callback = HOOKPROC(self._mouse_hook_proc)
-                user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HANDLE, wintypes.DWORD]
-                user32.SetWindowsHookExW.restype = wintypes.HANDLE
-                
-                self.mouse_hook = user32.SetWindowsHookExW(
-                    14, # WH_MOUSE_LL = 14
-                    self.mouse_hook_callback,
-                    h_mod,
-                    0
-                )
-                log_debug(f"[Listener] Đã đăng ký Low-level Mouse Hook thành công: {self.mouse_hook}")
-            except Exception as e:
-                log_debug(f"[Listener] Lỗi đăng ký Mouse Hook: {e}")
+            # Không còn dùng Low-level Mouse Hook (WH_MOUSE_LL) để tránh lag chuột toàn hệ thống
 
             user32.CreateWindowExW.argtypes = [
                 ctypes.c_uint, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -1624,12 +1615,6 @@ class ClipboardEventListener:
 
     def stop(self):
         self.running = False
-        if self.mouse_hook:
-            try:
-                ctypes.windll.user32.UnhookWindowsHookEx(self.mouse_hook)
-                log_debug("[Listener] Đã gỡ bỏ Low-level Mouse Hook.")
-            except Exception as e:
-                log_debug(f"[Listener] Lỗi gỡ bỏ Mouse Hook: {e}")
         if self.hwnd:
             try: ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.hwnd), 0, 0, 0)
             except: pass
@@ -5313,22 +5298,25 @@ class UnifiedApp(tk.Tk):
         return result[0]
 
     def update_status(self, text, is_error=False, blink=False):
-        self.status_var.set(f"Trạng thái: {text}")
+        def _do_update():
+            self.status_var.set(f"Trạng thái: {text}")
+            
+            if not hasattr(self, 'lbl_status'):
+                return
+                
+            if hasattr(self, '_blink_job') and self._blink_job:
+                self.after_cancel(self._blink_job)
+                self._blink_job = None
+                
+            if blink:
+                self.lbl_status.config(fg="#FF4D4D")
+                self._blink_status()
+            elif is_error:
+                self.lbl_status.config(fg="#FF4D4D")
+            else:
+                self.lbl_status.config(fg="#8A8A9A")
         
-        if not hasattr(self, 'lbl_status'):
-            return
-            
-        if hasattr(self, '_blink_job') and self._blink_job:
-            self.after_cancel(self._blink_job)
-            self._blink_job = None
-            
-        if blink:
-            self.lbl_status.config(fg="#FF4D4D")
-            self._blink_status()
-        elif is_error:
-            self.lbl_status.config(fg="#FF4D4D")
-        else:
-            self.lbl_status.config(fg="#8A8A9A")
+        self.after(0, _do_update)
 
     def _blink_status(self):
         if not hasattr(self, 'lbl_status'): return
@@ -5362,9 +5350,15 @@ class UnifiedApp(tk.Tk):
         
         # 3. Get Public & Local IPs
         self.update_status("Đang lấy thông vị trí mạng...")
+        print("[DEBUG] Calling get_public_ip()")
         self.current_ip = get_public_ip()
+        print("[DEBUG] Returned from get_public_ip()")
+        print("[DEBUG] Calling get_public_ipv6()")
         self.ipv6 = get_public_ipv6()
+        print("[DEBUG] Returned from get_public_ipv6()")
+        print("[DEBUG] Calling get_local_ip()")
         self.local_ip = get_local_ip()
+        print("[DEBUG] Returned from get_local_ip()")
         print(f"[Host] Public IPv4: {self.current_ip}, IPv6: {self.ipv6}, Local IP: {self.local_ip}")
         
         # 4. Connect to real-time Signaling Server
@@ -5552,12 +5546,17 @@ class UnifiedApp(tk.Tk):
             
         # 2. Mở lại server_socket bất kể đục lỗ thành công hay thất bại
         try:
-            if hasattr(socket, 'create_server') and hasattr(socket, 'AF_INET6'):
-                try:
-                    self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET6, dualstack_ipv6=True)
-                except Exception:
-                    self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET)
-            else:
+            try:
+                if hasattr(socket, 'AF_INET6'):
+                    self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                        try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                        except: pass
+                    self.server_socket.bind(("", BOUND_PORT))
+                else:
+                    raise Exception("No IPv6")
+            except Exception:
                 self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.server_socket.bind(('0.0.0.0', BOUND_PORT))
@@ -5580,12 +5579,17 @@ class UnifiedApp(tk.Tk):
         for port in PORTS_TO_TRY:
             try:
                 # Try IPv6 Dual-Stack first (binds to both IPv6 and IPv4)
-                if hasattr(socket, 'create_server') and hasattr(socket, 'AF_INET6'):
-                    try:
-                        self.server_socket = socket.create_server(("", port), family=socket.AF_INET6, dualstack_ipv6=True)
-                    except Exception:
-                        self.server_socket = socket.create_server(("", port), family=socket.AF_INET)
-                else:
+                try:
+                    if hasattr(socket, 'AF_INET6'):
+                        self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                            try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                            except: pass
+                        self.server_socket.bind(("", port))
+                    else:
+                        raise Exception("No IPv6")
+                except Exception:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     self.server_socket.bind(('0.0.0.0', port))
@@ -6321,12 +6325,17 @@ class UnifiedApp(tk.Tk):
                     
             # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
             try:
-                if hasattr(socket, 'create_server') and hasattr(socket, 'AF_INET6'):
-                    try:
-                        self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET6, dualstack_ipv6=True)
-                    except Exception:
-                        self.server_socket = socket.create_server(("", BOUND_PORT), family=socket.AF_INET)
-                else:
+                try:
+                    if hasattr(socket, 'AF_INET6'):
+                        self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                            try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                            except: pass
+                        self.server_socket.bind(("", BOUND_PORT))
+                    else:
+                        raise Exception("No IPv6")
+                except Exception:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     self.server_socket.bind(('0.0.0.0', BOUND_PORT))
@@ -6542,6 +6551,13 @@ class UnifiedApp(tk.Tk):
                 "partner_id": partner_id
             })
             
+            # Close the socket handle in the parent process to prevent port leakage
+            # on Windows, which causes Hole Punching to fail on the second connection
+            try:
+                sock.close()
+            except Exception:
+                pass
+            
             # Reconnection Monitor Thread
             if partner_id and partner_pass:
                 def monitor_reconnect(process, pid, ppass, req_queue):
@@ -6679,6 +6695,10 @@ class UnifiedApp(tk.Tk):
         self.after(0, self.destroy)
 
     def destroy(self):
+        import traceback
+        with open("C:\\Apps\\P2P\\destroy_stack.txt", "a") as f:
+            f.write(f"\\n--- destroy called at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
+            traceback.print_stack(file=f)
         # Force terminate in a background thread to prevent any hanging issues on Windows 11
         def force_terminate():
             import time
@@ -7035,5 +7055,18 @@ if __name__ == '__main__':
             try: ctypes.windll.user32.SetProcessDPIAware()
             except: pass
             
-    app = UnifiedApp()
-    app.mainloop()
+    try:
+        app = UnifiedApp()
+        app.mainloop()
+        with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
+            f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
+        # Keep the process alive just in case
+        if "--headless" in sys.argv:
+            import time
+            while True:
+                time.sleep(1)
+    except BaseException as e:
+        import traceback
+        with open("C:\\Apps\\P2P\\agent_crash.txt", "w") as f:
+            traceback.print_exc(file=f)
+        raise

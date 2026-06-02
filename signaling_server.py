@@ -265,6 +265,7 @@ def handle_client(conn, addr):
         else:
             length = struct.unpack('>I', first_4)[0]
             if length > 65536: # Chống DDoS kích thước ảo (tối đa 64KB)
+                print(f"[-] Client {addr} gửi length quá lớn ({length}), có thể là phiên bản client cũ chưa mã hóa.")
                 try: conn.close()
                 except: pass
                 return
@@ -275,6 +276,7 @@ def handle_client(conn, addr):
                 return
             msg_bytes = decrypt_payload(encrypted_data, APP_KEY)
             if not msg_bytes:
+                print(f"[-] Client {addr} giải mã thất bại. Ngắt kết nối.")
                 try: conn.close()
                 except: pass
                 return
