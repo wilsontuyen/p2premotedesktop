@@ -39,6 +39,17 @@ def log(msg):
     except:
         pass
 
+def get_active_session_id():
+    try:
+        sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
+        for s in sessions:
+            if s['State'] == 0:  # WTSActive
+                return s['SessionId']
+    except Exception as e:
+        log(f"Error enumerating WTS sessions: {e}")
+    # Fallback
+    return win32ts.WTSGetActiveConsoleSessionId()
+
 def is_logon_ui_running(session_id):
     try:
         procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
@@ -266,7 +277,7 @@ def trigger_sas_system():
 
 def spawn_taskmgr_system():
     try:
-        active_session_id = win32ts.WTSGetActiveConsoleSessionId()
+        active_session_id = get_active_session_id()
         if active_session_id == 0xFFFFFFFF or active_session_id == -1:
             return
 
@@ -443,7 +454,7 @@ def main():
 
     while True:
         try:
-            active_session_id = win32ts.WTSGetActiveConsoleSessionId()
+            active_session_id = get_active_session_id()
             if active_session_id == 0xFFFFFFFF or active_session_id == -1:
                 time.sleep(5)
                 continue

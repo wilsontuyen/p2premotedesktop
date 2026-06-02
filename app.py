@@ -5910,6 +5910,12 @@ class UnifiedApp(tk.Tk):
                             time.sleep(sleep_time)
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
+                            
+                            if len(sct.monitors) > 1 and dynamic_monitor != sct.monitors[0]:
+                                print("[Host] Falling back to sct.monitors[0] (Virtual Screen)")
+                                dynamic_monitor = sct.monitors[0]
+                                continue
+                                
                             try:
                                 signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
                                 send_msg(conn, signal, password)
