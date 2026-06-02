@@ -312,7 +312,7 @@ def handle_client(conn, addr):
                         "action": "incoming_request",
                         "from_hwid": hwid,
                         "public_ip": addr[0],
-                        "public_port": req.get("port"),
+                        "public_port": addr[1],
                         "local_ip": req.get("local_ip")
                     })
                     send_msg(target_conn, forward_msg.encode('utf-8'), APP_KEY)
@@ -331,7 +331,7 @@ def handle_client(conn, addr):
                         "action": "request_accepted",
                         "from_hwid": hwid,
                         "public_ip": addr[0],
-                        "public_port": req.get("port"),
+                        "public_port": addr[1],
                         "local_ip": req.get("local_ip")
                     })
                     send_msg(target_conn, forward_msg.encode('utf-8'), APP_KEY)

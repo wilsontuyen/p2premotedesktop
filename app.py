@@ -5391,6 +5391,12 @@ class UnifiedApp(tk.Tk):
             try:
                 # 1. Connect
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind(('0.0.0.0', BOUND_PORT))
+                except Exception as e:
+                    print(f"[Signaling] Warning: Could not bind to BOUND_PORT {BOUND_PORT} for signaling: {e}")
+                    
                 try:
                     if os.name == 'nt':
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
