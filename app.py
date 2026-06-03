@@ -5486,6 +5486,7 @@ class UnifiedApp(tk.Tk):
                 public_ip = res.get("public_ip")
                 public_port = res.get("port") or res.get("public_port")
                 local_ip = res.get("local_ip")
+                local_port = res.get("local_port") or 12345
                 
                 print(f"[Signaling] Connection request from {from_hwid} ({public_ip}:{public_port}) via {host}")
                 
@@ -5504,7 +5505,8 @@ class UnifiedApp(tk.Tk):
                 public_ip = res.get("public_ip")
                 public_port = res.get("port") or res.get("public_port")
                 local_ip = res.get("local_ip")
-                self.pending_connection_info = (public_ip, public_port, local_ip)
+                local_port = res.get("local_port") or 12345
+                self.pending_connection_info = (public_ip, public_port, local_ip, local_port)
                 self.current_signaling_host = host
                 self.primary_signaling_socket = sock
                 
@@ -6277,7 +6279,11 @@ class UnifiedApp(tk.Tk):
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
             
-        public_ip, port, local_ip = self.pending_connection_info
+        if len(self.pending_connection_info) >= 4:
+            public_ip, port, local_ip, local_port = self.pending_connection_info[:4]
+        else:
+            public_ip, port, local_ip = self.pending_connection_info
+            local_port = 12345
             
         # If connecting to self (testing on the same computer)
         if partner_id == self.my_id_clean:
@@ -6289,13 +6295,13 @@ class UnifiedApp(tk.Tk):
         
         # 1. Try local IP first (LAN) (Chỉ thử nếu không ép buộc Relay)
         if not self.force_relay_var.get() and local_ip:
-            self.update_status(f"Đang thử kết nối nội bộ (LAN): {local_ip}:{port}...")
+            self.update_status(f"Đang thử kết nối nội bộ (LAN): {local_ip}:{local_port}...")
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2.0)
-                sock.connect((local_ip, port))
+                sock.connect((local_ip, local_port))
                 connected = True
-                print(f"[Client] Connected via LAN: {local_ip}")
+                print(f"[Client] Connected via LAN: {local_ip}:{local_port}")
             except Exception:
                 print(f"[Client] LAN connection failed.")
                 if sock: force_close_socket(sock)

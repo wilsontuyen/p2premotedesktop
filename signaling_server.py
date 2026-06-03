@@ -232,19 +232,21 @@ def handle_relay_connection(conn, role, session_id):
                 del relay_pairs[session_id]
 
 def handle_client(conn, addr):
-    print(f"[+] Client mới kết nối từ: {addr}")
     set_keepalive(conn)
     conn.settimeout(15.0)  # Khởi tạo timeout 15s để chống treo thread do Slowloris
     hwid = None
     is_relay = False
+    silent_disconnect = False
     try:
         first_4 = recv_exact(conn, 4)
         if not first_4:
+            silent_disconnect = True
             try: conn.close()
             except: pass
             return
             
         if first_4.startswith(b'RELA'):
+            print(f"[+] Client mới kết nối từ: {addr}")
             rest = bytearray()
             # FIX LỖI CPU: Giới hạn số byte tối đa đọc tiêu đề để không bị treo vòng lặp
             for _ in range(1024): 
@@ -265,10 +267,11 @@ def handle_client(conn, addr):
         else:
             length = struct.unpack('>I', first_4)[0]
             if length > 65536: # Chống DDoS kích thước ảo (tối đa 64KB)
-                print(f"[-] Client {addr} gửi length quá lớn ({length}), có thể là phiên bản client cũ chưa mã hóa.")
+                silent_disconnect = True
                 try: conn.close()
                 except: pass
                 return
+            print(f"[+] Client mới kết nối từ: {addr}")
             encrypted_data = recv_exact(conn, length)
             if not encrypted_data:
                 try: conn.close()
@@ -313,7 +316,8 @@ def handle_client(conn, addr):
                         "from_hwid": hwid,
                         "public_ip": addr[0],
                         "public_port": addr[1],
-                        "local_ip": req.get("local_ip")
+                        "local_ip": req.get("local_ip"),
+                        "local_port": req.get("port")
                     })
                     send_msg(target_conn, forward_msg.encode('utf-8'), APP_KEY)
                 else:
@@ -332,7 +336,8 @@ def handle_client(conn, addr):
                         "from_hwid": hwid,
                         "public_ip": addr[0],
                         "public_port": addr[1],
-                        "local_ip": req.get("local_ip")
+                        "local_ip": req.get("local_ip"),
+                        "local_port": req.get("port")
                     })
                     send_msg(target_conn, forward_msg.encode('utf-8'), APP_KEY)
             
@@ -393,7 +398,8 @@ def handle_client(conn, addr):
                         del clients[hwid]
             try: conn.close()
             except: pass
-            print(f"[-] Client ngắt kết nối: {addr} (ID: {hwid})")
+            if not silent_disconnect:
+                print(f"[-] Client ngắt kết nối: {addr} (ID: {hwid})")
 
 def main():
     host = '0.0.0.0'
