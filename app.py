@@ -5409,7 +5409,10 @@ class UnifiedApp(tk.Tk):
                 sock.connect((host, SIGNALING_SERVER_PORT))
                 sock.settimeout(None)
                 
-                req = json.dumps({"action": "register", "hwid": self.my_id_clean})
+                # Use base HWID if we are the primary instance (port 12345), else append port to avoid stealing ID from background service
+                register_id = self.my_id_clean if BOUND_PORT == PORTS_TO_TRY[0] else f"{self.my_id_clean}_{BOUND_PORT}"
+                
+                req = json.dumps({"action": "register", "hwid": register_id})
                 req_data = req.encode('utf-8')
                 send_msg(sock, req_data, APP_KEY)
                 
@@ -5523,6 +5526,11 @@ class UnifiedApp(tk.Tk):
             print(f"[Signaling] Lỗi xử lý tin nhắn từ {host}: {e}")
 
     def punch_hole_to_client(self, c_ip, c_port):
+        # 0. Đợi Client thử kết nối mạng LAN trước (2.0 giây)
+        # Việc này giúp giữ listener mở để Client có thể kết nối nội bộ.
+        # Đồng thời đồng bộ thời gian đục lỗ (Simultaneous Open) với Client (Client timeout LAN là 2.0s)
+        time.sleep(2.0)
+        
         # 1. Tạm thời đóng server_socket để giải phóng port
         if self.server_socket:
             try:
@@ -5585,6 +5593,15 @@ class UnifiedApp(tk.Tk):
         global BOUND_PORT
         bound = False
         for port in PORTS_TO_TRY:
+            # Check if port is already in use by another instance
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(0.5)
+            in_use = (test_sock.connect_ex(('127.0.0.1', port)) == 0)
+            test_sock.close()
+            if in_use:
+                print(f"[Host] Port {port} is already in use. Skipping.")
+                continue
+
             try:
                 # Try IPv6 Dual-Stack first (binds to both IPv6 and IPv4)
                 try:
