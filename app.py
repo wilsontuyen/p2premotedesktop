@@ -562,14 +562,21 @@ def get_hwid():
 
 # Get Local LAN IP address
 def get_local_ip():
+    ips = []
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
+        ips.append(s.getsockname()[0])
         s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+    except: pass
+    try:
+        _, _, ip_list = socket.gethostbyname_ex(socket.gethostname())
+        for ip in ip_list:
+            if ip not in ips and not ip.startswith("127."):
+                ips.append(ip)
+    except: pass
+    if not ips: ips.append("127.0.0.1")
+    return ",".join(ips)
 
 # Automatic UPnP Port Forwarding via SSDP and SOAP
 def attempt_upnp_forward(internal_port):
@@ -5487,9 +5494,9 @@ class UnifiedApp(tk.Tk):
             if action == "incoming_request":
                 from_hwid = res.get("from_hwid")
                 public_ip = res.get("public_ip")
-                public_port = res.get("port") or res.get("public_port")
+                public_port = int(res.get("port") or res.get("public_port") or 0)
                 local_ip = res.get("local_ip")
-                local_port = res.get("local_port") or 12345
+                local_port = int(res.get("local_port") or 12345)
                 
                 print(f"[Signaling] Connection request from {from_hwid} ({public_ip}:{public_port}) via {host}")
                 
@@ -5497,7 +5504,8 @@ class UnifiedApp(tk.Tk):
                     "action": "connect_accept",
                     "target": from_hwid,
                     "port": BOUND_PORT,
-                    "local_ip": self.local_ip
+                    "local_ip": self.local_ip,
+                    "local_port": BOUND_PORT
                 })
                 with self.signaling_lock:
                     send_msg(sock, accept_req.encode('utf-8'), APP_KEY)
@@ -5506,9 +5514,9 @@ class UnifiedApp(tk.Tk):
                 
             elif action == "request_accepted":
                 public_ip = res.get("public_ip")
-                public_port = res.get("port") or res.get("public_port")
+                public_port = int(res.get("port") or res.get("public_port") or 0)
                 local_ip = res.get("local_ip")
-                local_port = res.get("local_port") or 12345
+                local_port = int(res.get("local_port") or 12345)
                 self.pending_connection_info = (public_ip, public_port, local_ip, local_port)
                 self.current_signaling_host = host
                 self.primary_signaling_socket = sock
@@ -5673,6 +5681,14 @@ class UnifiedApp(tk.Tk):
             socket_passwords[conn] = [self.my_password, self.fixed_password]
             msg = recv_msg(conn, [self.my_password, self.fixed_password])
             if not msg:
+                print("[Host] Failed to decrypt handshake. Sending error using APP_KEY.")
+                try:
+                    err_info = json.dumps({
+                        "status": "error",
+                        "message": "Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!"
+                    }).encode('utf-8')
+                    send_msg(conn, err_info, APP_KEY)
+                except: pass
                 try: force_close_socket(conn)
                 except: pass
                 socket_passwords.pop(conn, None)
@@ -6258,7 +6274,8 @@ class UnifiedApp(tk.Tk):
             "action": "connect_request",
             "target": partner_id,
             "port": BOUND_PORT,
-            "local_ip": self.local_ip
+            "local_ip": self.local_ip,
+            "local_port": BOUND_PORT
         }) + '\n'
         
         # Thử tìm đối tác trên tất cả các server đang kết nối
@@ -6302,6 +6319,9 @@ class UnifiedApp(tk.Tk):
             public_ip, port, local_ip = self.pending_connection_info
             local_port = 12345
             
+        port = int(port) if port else 0
+        local_port = int(local_port) if local_port else 12345
+            
         # If connecting to self (testing on the same computer)
         if partner_id == self.my_id_clean:
             local_ip = "127.0.0.1"
@@ -6309,22 +6329,89 @@ class UnifiedApp(tk.Tk):
             
         sock = None
         connected = False
+        handshake_done = False
+        cached_res_payload = None
         
         # 1. Try local IP first (LAN) (Chỉ thử nếu không ép buộc Relay)
         if not self.force_relay_var.get() and local_ip:
-            self.update_status(f"Đang thử kết nối nội bộ (LAN): {local_ip}:{local_port}...")
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2.0)
-                sock.connect((local_ip, local_port))
-                connected = True
-                print(f"[Client] Connected via LAN: {local_ip}:{local_port}")
-            except Exception:
-                print(f"[Client] LAN connection failed.")
-                if sock: force_close_socket(sock)
+            ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
+            ports_to_try = [local_port]
+            for p in [12345, 12346, 12347, 12348]:
+                if p not in ports_to_try:
+                    ports_to_try.append(p)
+                    
+            self.update_status(f"Đang quét kết nối nội bộ (LAN)...")
+            import select
+            
+            # Quét tuần tự từng port (ưu tiên local_port trước) để tránh lỗi dính Kaspersky/ứng dụng rác ở port 12345
+            for p in ports_to_try:
+                if connected: break
+                sockets = []
+                for ip in ips_to_try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setblocking(False)
+                    try: s.connect((ip, p))
+                    except Exception: pass
+                    sockets.append((s, ip, p))
+                
+                # Chờ tối đa 0.4s cho mỗi port
+                end_time = time.time() + 0.4
+                while time.time() < end_time and not connected:
+                    timeout = max(0.05, end_time - time.time())
+                    try:
+                        sock_list = [item[0] for item in sockets]
+                        if not sock_list: break
+                        _, writable, _ = select.select([], sock_list, [], timeout)
+                        for w_sock in writable:
+                            if w_sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                                try:
+                                    w_sock.getpeername()
+                                    w_sock.setblocking(True)
+                                    
+                                    # Kểm tra handshake ngay để xác minh đây có phải Host thật không
+                                    # (Tránh trường hợp VM NAT hay proxy tự động nhận TCP rồi reset)
+                                    w_sock.settimeout(2.0)
+                                    try:
+                                        socket_passwords[w_sock] = partner_pass
+                                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean}).encode('utf-8')
+                                        send_msg(w_sock, hs_data, partner_pass)
+                                        tmp_res_msg = recv_msg(w_sock, [partner_pass, APP_KEY])
+                                        if tmp_res_msg:
+                                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                                            if tmp_res.get("status") == "ok" or tmp_res.get("status") == "error":
+                                                sock = w_sock
+                                                connected = True
+                                                handshake_done = True
+                                                cached_res_payload = tmp_res
+                                                matched = next((item for item in sockets if item[0] == w_sock), None)
+                                                if matched:
+                                                    print(f"[Client] Connected & Handshaked via LAN: {matched[1]}:{matched[2]}")
+                                                break
+                                    except Exception:
+                                        pass
+                                    
+                                    if not connected:
+                                        force_close_socket(w_sock)
+                                except: pass
+                    except: pass
+                    if connected: break
+                    
+                # Đóng các socket không dùng tới trong batch này
+                for s_tuple in sockets:
+                    if s_tuple[0] != sock: force_close_socket(s_tuple[0])
                 
         # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
         if not self.force_relay_var.get() and not connected:
+            if hasattr(self, 'current_ip') and self.current_ip == public_ip:
+                print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
+                self.update_status("Sẵn sàng kết nối")
+                self.after(0, lambda: self.show_custom_error("Lỗi mạng LAN", 
+                    f"Cả hai máy đều dùng chung mạng (cùng Public IP) nhưng kết nối LAN nội bộ thất bại!\n\n"
+                    f"Lý do: Tường lửa (Firewall) của máy đích đang chặn kết nối hoặc sai cổng.\n"
+                    f"Vui lòng kiểm tra lại Tường lửa Windows trên máy đích."
+                ))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                return
             self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
             print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
             
@@ -6400,25 +6487,29 @@ class UnifiedApp(tk.Tk):
             print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
             
         try:
-            # Register the socket password
-            socket_passwords[sock] = partner_pass
-            # Send handshake password
-            handshake = json.dumps({
-                "password": partner_pass,
-                "client_id": self.my_id_clean
-            }).encode('utf-8')
-            send_msg(sock, handshake, partner_pass)
-            
-            # Read verification response
-            res_msg = recv_msg(sock, partner_pass)
-            if not res_msg:
-                self.update_status("Sẵn sàng kết nối")
-                self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                force_close_socket(sock)
-                return
+            if not handshake_done:
+                # Register the socket password
+                socket_passwords[sock] = partner_pass
+                # Send handshake password
+                handshake = json.dumps({
+                    "password": partner_pass,
+                    "client_id": self.my_id_clean
+                }).encode('utf-8')
+                send_msg(sock, handshake, partner_pass)
                 
-            res = json.loads(res_msg.decode('utf-8'))
+                # Read verification response (allow APP_KEY fallback to receive error messages)
+                res_msg = recv_msg(sock, [partner_pass, APP_KEY])
+                if not res_msg:
+                    self.update_status("Sẵn sàng kết nối")
+                    self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                    self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                    force_close_socket(sock)
+                    return
+                    
+                res = json.loads(res_msg.decode('utf-8'))
+            else:
+                res = cached_res_payload
+                
             if res.get("status") == "ok":
                 host_w = res.get("width")
                 host_h = res.get("height")
@@ -6724,10 +6815,7 @@ class UnifiedApp(tk.Tk):
         self.after(0, self.destroy)
 
     def destroy(self):
-        import traceback
-        with open("C:\\Apps\\P2P\\destroy_stack.txt", "a") as f:
-            f.write(f"\\n--- destroy called at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
-            traceback.print_stack(file=f)
+        # Force terminate in a background thread to prevent any hanging issues on Windows 11
         # Force terminate in a background thread to prevent any hanging issues on Windows 11
         def force_terminate():
             import time
