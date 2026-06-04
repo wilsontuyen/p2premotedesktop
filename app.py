@@ -518,7 +518,10 @@ def recv_msg(sock, password=None):
 def get_hwid():
     cpu = "FALLBACK_CPUID_888"
     hdd = "FALLBACK_HDD_999"
-    mac = "FALLBACK_MAC_777"
+    mac_eth = "FALLBACK_ETH_777"
+    mac_wifi = "FALLBACK_WIFI_777"
+    machine_guid = "FALLBACK_GUID_666"
+    
     startupinfo = None
     if os.name == 'nt':
         startupinfo = subprocess.STARTUPINFO()
@@ -535,6 +538,7 @@ def get_hwid():
             cpu = res_cpu.stdout.strip()
     except Exception:
         pass
+        
     try:
         # Get HDD Serial
         res_hdd = subprocess.run(
@@ -545,13 +549,57 @@ def get_hwid():
             hdd = res_hdd.stdout.strip()
     except Exception:
         pass
+
     try:
-        import uuid
-        mac = str(uuid.getnode())
+        # Get MachineGuid from Registry
+        res_guid = subprocess.run(
+            ['powershell', '-Command', '(Get-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Cryptography" -Name "MachineGuid").MachineGuid'],
+            capture_output=True, text=True, check=True, startupinfo=startupinfo
+        )
+        if res_guid and res_guid.stdout:
+            machine_guid = res_guid.stdout.strip()
     except Exception:
         pass
-        
-    combined = f"{cpu}_{hdd}_{mac}".strip()
+
+    try:
+        import uuid
+        mac_fallback = str(uuid.getnode())
+    except:
+        mac_fallback = "FALLBACK_MAC_777"
+
+    try:
+        # Get physical MACs (Ethernet and Wi-Fi) excluding virtual adapters
+        script = """
+        $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue
+        $eth = @()
+        $wifi = @()
+        if ($adapters) {
+            foreach ($a in $adapters) {
+                if ($a.MediaType -match '802.3' -or $a.Name -match 'Ethernet') { $eth += $a.MacAddress }
+                if ($a.MediaType -match 'Native 802.11' -or $a.Name -match 'Wi-Fi' -or $a.Name -match 'Wireless') { $wifi += $a.MacAddress }
+            }
+        }
+        Write-Output ('ETH:' + ($eth -join ','))
+        Write-Output ('WIFI:' + ($wifi -join ','))
+        """
+        res_mac = subprocess.run(
+            ['powershell', '-Command', script],
+            capture_output=True, text=True, startupinfo=startupinfo
+        )
+        if res_mac and res_mac.stdout:
+            for line in res_mac.stdout.split('\n'):
+                line = line.strip()
+                if line.startswith('ETH:') and len(line) > 4:
+                    mac_eth = line[4:].strip()
+                if line.startswith('WIFI:') and len(line) > 5:
+                    mac_wifi = line[5:].strip()
+    except Exception:
+        pass
+
+    if mac_eth == "FALLBACK_ETH_777" and mac_wifi == "FALLBACK_WIFI_777":
+        mac_eth = mac_fallback
+
+    combined = f"{cpu}_{hdd}_{machine_guid}_{mac_eth}_{mac_wifi}".strip()
     sha = hashlib.sha256(combined.encode('utf-8')).hexdigest()
     # Take first 12 hex characters (48-bit int)
     val = int(sha[:12], 16)
@@ -5147,6 +5195,7 @@ class UnifiedApp(tk.Tk):
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
         dialog.transient(p)
         dialog.grab_set()
         
@@ -5708,8 +5757,15 @@ class UnifiedApp(tk.Tk):
                 socket_passwords[conn] = client_pass
                 
                 client_id = data.get("client_id", "Không rõ")
+                client_comp = data.get("computer_name", "Không rõ")
                 fmt_client_id = f"{client_id[:3]} {client_id[3:6]} {client_id[6:9]} {client_id[9:]}" if len(client_id) == 12 else client_id
-                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", f"Người dùng với ID {fmt_client_id} đang điều khiển máy của bạn!"))
+                
+                if client_comp != "Không rõ":
+                    msg_text = f"Máy tính [{client_comp}] đang điều khiển máy bạn"
+                else:
+                    msg_text = f"Máy tính có ID [{fmt_client_id}] đang điều khiển máy bạn"
+                    
+                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
                 
                 self.wake_display()
                 
@@ -6240,6 +6296,12 @@ class UnifiedApp(tk.Tk):
         threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
         
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None):
+        if partner_id == getattr(self, "my_id_clean", ""):
+            self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            self.update_status("Kết nối bị hủy.")
+            return
+            
         # Clean up dead viewer processes first
         self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
         
@@ -6322,11 +6384,6 @@ class UnifiedApp(tk.Tk):
         port = int(port) if port else 0
         local_port = int(local_port) if local_port else 12345
             
-        # If connecting to self (testing on the same computer)
-        if partner_id == self.my_id_clean:
-            local_ip = "127.0.0.1"
-            print("[Client] Self-connection detected! Routing connection to localhost.")
-            
         sock = None
         connected = False
         handshake_done = False
@@ -6373,7 +6430,8 @@ class UnifiedApp(tk.Tk):
                                     w_sock.settimeout(2.0)
                                     try:
                                         socket_passwords[w_sock] = partner_pass
-                                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean}).encode('utf-8')
+                                        import platform
+                                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
                                         send_msg(w_sock, hs_data, partner_pass)
                                         tmp_res_msg = recv_msg(w_sock, [partner_pass, APP_KEY])
                                         if tmp_res_msg:
@@ -6491,9 +6549,11 @@ class UnifiedApp(tk.Tk):
                 # Register the socket password
                 socket_passwords[sock] = partner_pass
                 # Send handshake password
+                import platform
                 handshake = json.dumps({
                     "password": partner_pass,
-                    "client_id": self.my_id_clean
+                    "client_id": self.my_id_clean,
+                    "computer_name": platform.node()
                 }).encode('utf-8')
                 send_msg(sock, handshake, partner_pass)
                 
