@@ -321,8 +321,24 @@ vk_map = {
     'keypad enter': 0x0D,
 }
 
+# Track remote modifier key state (set of held modifier key names) to avoid
+# polling HOST keyboard state via GetAsyncKeyState which is incorrect for remote input.
+_remote_modifier_keys = set()
+_remote_modifier_names = {
+    'left ctrl', 'right ctrl', 'left alt', 'right alt',
+    'left meta', 'right meta', 'left windows', 'right windows',
+    'left super', 'right super'
+}
+
 def send_input_keyboard_event(key_name, pressed):
     try:
+        # Update remote modifier state tracker
+        if key_name in _remote_modifier_names:
+            if pressed:
+                _remote_modifier_keys.add(key_name)
+            else:
+                _remote_modifier_keys.discard(key_name)
+
         vk = None
         if key_name in vk_map:
             vk = vk_map[key_name]
@@ -331,14 +347,8 @@ def send_input_keyboard_event(key_name, pressed):
             if ('A' <= char_upper <= 'Z') or ('0' <= char_upper <= '9'):
                 vk = ord(char_upper)
                 
-        # Check if any shortcut modifier is held down
-        is_modifier = False
-        if ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000: # VK_CONTROL
-            is_modifier = True
-        if ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000: # VK_MENU (Alt)
-            is_modifier = True
-        if ctypes.windll.user32.GetAsyncKeyState(0x5B) & 0x8000 or ctypes.windll.user32.GetAsyncKeyState(0x5C) & 0x8000: # LWIN/RWIN
-            is_modifier = True
+        # Check if any shortcut modifier is held down based on tracked remote state
+        is_modifier = bool(_remote_modifier_keys)
             
         use_unicode = (len(key_name) == 1) and not is_modifier
         
@@ -408,13 +418,25 @@ def send_input_mouse_scroll(dx, dy):
     except Exception as e:
         print(f"[SendInput] Mouse scroll injection failed: {e}")
 
+# Cached screen metrics for mouse move normalization (avoid calling GetSystemMetrics on every event)
+_cached_screen_w = 0
+_cached_screen_h = 0
+_cached_screen_time = 0
+
 def send_input_mouse_move(x, y):
+    global _cached_screen_w, _cached_screen_h, _cached_screen_time
     try:
-        w = ctypes.windll.user32.GetSystemMetrics(0) # SM_CXSCREEN
-        h = ctypes.windll.user32.GetSystemMetrics(1) # SM_CYSCREEN
+        # Refresh cached screen dimensions every 2 seconds
+        now = time.monotonic() if hasattr(time, 'monotonic') else time.time()
+        if now - _cached_screen_time > 2.0 or _cached_screen_w == 0:
+            _cached_screen_w = ctypes.windll.user32.GetSystemMetrics(0) # SM_CXSCREEN
+            _cached_screen_h = ctypes.windll.user32.GetSystemMetrics(1) # SM_CYSCREEN
+            _cached_screen_time = now
+        w, h = _cached_screen_w, _cached_screen_h
         if w > 0 and h > 0:
-            normalized_x = int((x * 65536) / w)
-            normalized_y = int((y * 65536) / h)
+            # Standard absolute coordinate formula: (coord * 65535) / (screen_size - 1)
+            normalized_x = int((x * 65535) / (w - 1)) if w > 1 else 0
+            normalized_y = int((y * 65535) / (h - 1)) if h > 1 else 0
             inp = INPUT()
             inp.type = INPUT_MOUSE
             # MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_ABSOLUTE = 0x8000
@@ -424,10 +446,20 @@ def send_input_mouse_move(x, y):
         print(f"[SendInput] Mouse move injection failed: {e}")
 
 # TCP Frame Helper Functions
-socket_send_lock = threading.Lock()
+# Per-socket send locks: prevent screen-frame sends from blocking input-event sends on the same socket
+_socket_send_locks = {}
+_socket_send_locks_meta = threading.Lock()
 send_nonce_counter = 0
 send_counter_lock = threading.Lock()
 socket_passwords = {}
+
+def _get_socket_send_lock(sock):
+    with _socket_send_locks_meta:
+        lock = _socket_send_locks.get(sock)
+        if lock is None:
+            lock = threading.Lock()
+            _socket_send_locks[sock] = lock
+        return lock
 
 def get_crypto_key(password):
     return hashlib.sha256(password.encode('utf-8')).digest()
@@ -477,12 +509,16 @@ def force_close_socket(sock):
         sock.close()
     except:
         pass
+    # Clean up per-socket lock to prevent memory leaks
+    with _socket_send_locks_meta:
+        _socket_send_locks.pop(sock, None)
 
 def send_msg(sock, data_bytes, password=None):
     if password is None:
         password = socket_passwords.get(sock, APP_KEY)
     try:
-        with socket_send_lock:
+        lock = _get_socket_send_lock(sock)
+        with lock:
             encrypted_data = encrypt_payload(data_bytes, password)
             msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
             sock.sendall(msg)
@@ -6140,16 +6176,8 @@ class UnifiedApp(tk.Tk):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
             x, y = event['x'], event['y']
+            # Single SendInput call with MOUSEEVENTF_ABSOLUTE is sufficient and fastest
             send_input_mouse_move(x, y)
-            try:
-                mouse.position = (x, y)
-            except:
-                pass
-            try:
-                import win32api
-                win32api.SetCursorPos((x, y))
-            except Exception as e:
-                print(f"[Host] SetCursorPos fallback failed: {e}")
                 
         elif ev_type == 'mouse_click':
             button_name = event.get('button')
@@ -6273,6 +6301,8 @@ class UnifiedApp(tk.Tk):
                 'left windows', 'right windows'
             ]:
                 send_input_keyboard_event(key_name, False)
+            # Clear remote modifier tracker to stay in sync
+            _remote_modifier_keys.clear()
         except Exception as e:
             print(f"[Host] Failed to release modifiers via SendInput: {e}")
                 
