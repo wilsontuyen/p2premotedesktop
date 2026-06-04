@@ -3667,6 +3667,9 @@ class UnifiedApp(tk.Tk):
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
         
+        # Bắt đầu polling Signaling status trên main thread (độ tin cậy cao hơn self.after từ background thread)
+        self.after(3000, self._poll_signaling_status)
+        
         # Restore Event Listener for waking the GUI
         if not self.is_headless:
             threading.Thread(target=self.restore_event_listener_thread, daemon=True).start()
@@ -4946,15 +4949,30 @@ class UnifiedApp(tk.Tk):
         import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         key_name = "RemoteDesktopP2P"
+        approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
             try:
                 value, _ = winreg.QueryValueEx(key, key_name)
                 winreg.CloseKey(key)
-                return True
             except FileNotFoundError:
                 winreg.CloseKey(key)
                 return False
+            
+            # Check if StartupApproved has disabled it (Windows 11)
+            try:
+                approved_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_key_path, 0, winreg.KEY_READ)
+                approved_val, _ = winreg.QueryValueEx(approved_key, key_name)
+                winreg.CloseKey(approved_key)
+                # First byte: 02=enabled, 03/06=disabled
+                if isinstance(approved_val, bytes) and len(approved_val) >= 1 and approved_val[0] != 0x02:
+                    return False
+            except FileNotFoundError:
+                pass  # No approved entry = not blocked
+            except Exception:
+                pass
+            
+            return True
         except Exception:
             return False
 
@@ -4966,6 +4984,7 @@ class UnifiedApp(tk.Tk):
         enabled = self.startup_var.get()
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         key_name = "RemoteDesktopP2P"
+        approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
         
         if getattr(sys, 'frozen', False):
             exe_path = sys.executable
@@ -4976,6 +4995,16 @@ class UnifiedApp(tk.Tk):
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
             if enabled:
                 winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, exe_path)
+                # Mark as Enabled in StartupApproved (required for Windows 11)
+                try:
+                    approved_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, approved_key_path)
+                    # 12 bytes: first byte 02 = enabled
+                    enabled_value = b'\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                    winreg.SetValueEx(approved_key, key_name, 0, winreg.REG_BINARY, enabled_value)
+                    winreg.CloseKey(approved_key)
+                    print("[Startup] Set StartupApproved = Enabled for Windows 11")
+                except Exception as e:
+                    print(f"[Startup] Warning: Could not set StartupApproved: {e}")
                 print(f"[Startup] Enabled run on startup: {exe_path}")
                 self.show_custom_info("Thành công", "Đã bật tính năng chạy khi mở máy thành công!")
             else:
@@ -4983,12 +5012,20 @@ class UnifiedApp(tk.Tk):
                     winreg.DeleteValue(key, key_name)
                 except FileNotFoundError:
                     pass
+                # Also remove from StartupApproved
+                try:
+                    approved_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_key_path, 0, winreg.KEY_ALL_ACCESS)
+                    winreg.DeleteValue(approved_key, key_name)
+                    winreg.CloseKey(approved_key)
+                except Exception:
+                    pass
                 self.show_custom_info("Thành công", "Đã tắt tính năng chạy khi mở máy thành công!")
             winreg.CloseKey(key)
         except Exception as e:
             print(f"[Startup] Failed to modify registry: {e}")
             self.show_custom_error("Thất bại", f"Không thể thay đổi cài đặt Registry: {e}")
             self.startup_var.set(not enabled)
+
 
     def open_zalo(self):
         import webbrowser
@@ -5362,10 +5399,111 @@ class UnifiedApp(tk.Tk):
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)
 
+    def _show_lan_error_dialog(self, public_ip=""):
+        if getattr(self, 'is_headless', False):
+            print("[LAN Error] Kết nối LAN thất bại - Firewall có thể đang chặn kết nối.")
+            return
+        import tkinter as tk
+
+        dialog = tk.Toplevel(self)
+        dialog.withdraw()
+        dialog.title("Lỗi kết nối mạng LAN")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        W = 460
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - W) // 2
+        y = self.winfo_y() + (self.winfo_height() - 420) // 2
+        dialog.geometry(f"{W}x420+{x}+{y}")
+        dialog.deiconify()
+
+        # ── HEADER ──────────────────────────────────────────────
+        hdr = tk.Frame(dialog, bg="#C0392B", height=5)
+        hdr.pack(fill=tk.X)
+
+        title_frame = tk.Frame(dialog, bg=self.bg_color)
+        title_frame.pack(fill=tk.X, padx=20, pady=(14, 0))
+
+        tk.Label(title_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
+        title_col = tk.Frame(title_frame, bg=self.bg_color)
+        title_col.pack(side=tk.LEFT, fill=tk.BOTH)
+        tk.Label(title_col, text="Kết nối mạng LAN thất bại", font=("Segoe UI", 12, "bold"),
+                 fg="#E05252", bg=self.bg_color, anchor="w").pack(anchor="w")
+        tk.Label(title_col, text="Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+                 font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
+
+        # ── SEPARATOR ───────────────────────────────────────────
+        tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(12, 0))
+
+        # ── THÔNG TIN KỸ THUẬT ──────────────────────────────────
+        info_frame = tk.Frame(dialog, bg="#1A1A2A", bd=0, highlightthickness=1, highlightbackground="#2A2A4A")
+        info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
+
+        tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
+                 fg=self.btn_color, bg="#1A1A2A", anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
+
+        rows = [
+            ("Public IP phát hiện", public_ip if public_ip else "N/A"),
+            ("Trạng thái",          "Cùng Public IP → cùng Router/Mạng nội bộ"),
+            ("Phương thức thử",     "Kết nối TCP trực tiếp qua Local IP (LAN)"),
+            ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
+        ]
+        for label, value in rows:
+            row = tk.Frame(info_frame, bg="#1A1A2A")
+            row.pack(fill=tk.X, padx=12, pady=2)
+            tk.Label(row, text=f"{label}:", font=("Segoe UI", 8), fg=self.text_gray,
+                     bg="#1A1A2A", width=22, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=value, font=("Segoe UI", 8, "bold"), fg=self.text_white,
+                     bg="#1A1A2A", anchor="w", wraplength=240, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X)
+        tk.Frame(info_frame, bg="#1A1A2A", height=6).pack()
+
+        # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
+        tk.Label(dialog, text="🔧  Cách khắc phục", font=("Segoe UI", 9, "bold"),
+                 fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
+
+        steps = [
+            ("1", "Kiểm tra Tường lửa Windows",
+             "Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network."),
+            ("2", "Kiểm tra phần mềm diệt virus / VPN",
+             "Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ."),
+            ("3", "Kiểm tra cổng mạng đang dùng",
+             f"Ứng dụng dùng cổng {BOUND_PORT}. Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall."),
+        ]
+        for num, title_step, desc in steps:
+            sf = tk.Frame(dialog, bg=self.bg_color)
+            sf.pack(fill=tk.X, padx=20, pady=2)
+            badge = tk.Label(sf, text=num, font=("Segoe UI", 8, "bold"), fg=self.bg_color,
+                             bg=self.btn_color, width=2, height=1)
+            badge.pack(side=tk.LEFT, anchor="n", padx=(0, 8), pady=2)
+            txt_col = tk.Frame(sf, bg=self.bg_color)
+            txt_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            tk.Label(txt_col, text=title_step, font=("Segoe UI", 8, "bold"),
+                     fg=self.text_white, bg=self.bg_color, anchor="w").pack(anchor="w")
+            tk.Label(txt_col, text=desc, font=("Segoe UI", 8), fg=self.text_gray,
+                     bg=self.bg_color, anchor="w", wraplength=360, justify=tk.LEFT).pack(anchor="w")
+
+        # ── BUTTON ──────────────────────────────────────────────
+        tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(10, 0))
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
+        tk.Button(
+            btn_frame, text="Đã hiểu", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg="#E05252", activebackground="#C0392B",
+            relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
+            command=dialog.destroy
+        ).pack(side=tk.RIGHT)
+
+        self.wait_window(dialog)
+
     def show_custom_question(self, title, message, parent=None):
         if getattr(self, 'is_headless', False):
             print(f"[Question] {title}: {message} -> Auto-confirmed (Yes)")
             return True
+
         import tkinter as tk
         p = parent if parent else self
         
@@ -5454,6 +5592,27 @@ class UnifiedApp(tk.Tk):
         
         self.after(0, _do_update)
 
+    def _poll_signaling_status(self):
+        """Polling loop chạy trên main Tkinter thread - kiểm tra Signaling mỗi 3s và cập nhật status UI đáng tin cậy."""
+        if not getattr(self, 'running_server', True):
+            return
+        try:
+            current_status = self.status_var.get()
+            # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
+            is_pending = any(kw in current_status for kw in [
+                "Không thể kết nối Signaling",
+                "Chưa kết nối Signaling",
+                "Đang kết nối Signaling",
+                "Đang thử lại",
+                "chế độ nền",
+                "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
+            ])
+            if is_pending and getattr(self, 'signaling_sockets', {}):
+                self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối.")
+        except Exception:
+            pass
+        self.after(3000, self._poll_signaling_status)
+
     def _blink_status(self):
         if not hasattr(self, 'lbl_status'): return
         current_color = self.lbl_status.cget("fg")
@@ -5506,11 +5665,16 @@ class UnifiedApp(tk.Tk):
         for host in SIGNALING_SERVER_HOSTS:
             threading.Thread(target=self.signaling_maintainer_thread, args=(host,), daemon=True).start()
             
-        # Try to wait up to 3 seconds for at least one connection
-        timeout = 3.0
+        # Try to wait up to 8 seconds for at least one connection
+        # (GUI instance starts after headless, needs more time for Signaling Server to stabilize)
+        timeout = 8.0
         while timeout > 0 and not self.signaling_sockets:
             time.sleep(0.2)
             timeout -= 0.2
+            # Hiện thông báo đang chờ mỗi 2 giây
+            elapsed = 8.0 - timeout
+            if abs(elapsed - 2.0) < 0.1 or abs(elapsed - 5.0) < 0.1:
+                self.update_status(f"Đang kết nối Signaling Server... ({8 - int(timeout)}s)")
             
         if self.signaling_sockets:
             if upnp_success:
@@ -5518,10 +5682,12 @@ class UnifiedApp(tk.Tk):
             else:
                 self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.")
         else:
-            self.update_status(f"Không thể kết nối Signaling Server. Đang tiếp tục thử ở chế độ nền...")
+            self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...")
+
 
     def signaling_maintainer_thread(self, host):
-        retry_delay = 5
+        retry_delay = 2  # Bắt đầu retry nhanh (2s), tăng dần sau 3 lần thất bại
+        fail_count = 0
         while self.running_server:
             sock = None
             try:
@@ -5557,7 +5723,12 @@ class UnifiedApp(tk.Tk):
                     if getattr(self, 'current_signaling_host', None) is None:
                         self.current_signaling_host = host
                         self.primary_signaling_socket = sock
-                        self.after(0, lambda: self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                    # Luôn cập nhật status khi kết nối thành công (kể cả lần đầu sau timeout hoặc sau reconnect)
+                    self.after(0, lambda: self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                
+                # Reset counters khi kết nối thành công
+                fail_count = 0
+                retry_delay = 2
                 
                 print(f"[Signaling] Connected to {host}")
                 
@@ -5614,6 +5785,10 @@ class UnifiedApp(tk.Tk):
                                 self.after(0, lambda: self.update_status("Mất kết nối toàn bộ Signaling Server. Đang thử lại...", is_error=True, blink=True))
             
             time.sleep(retry_delay)
+            # Tăng retry_delay sau 3 lần thất bại liên tiếp
+            fail_count += 1
+            if fail_count >= 3:
+                retry_delay = 5
 
     def process_signaling_message(self, msg, sock, host):
         try:
@@ -6537,11 +6712,7 @@ class UnifiedApp(tk.Tk):
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
                 self.update_status("Sẵn sàng kết nối")
-                self.after(0, lambda: self.show_custom_error("Lỗi mạng LAN", 
-                    f"Cả hai máy đều dùng chung mạng (cùng Public IP) nhưng kết nối LAN nội bộ thất bại!\n\n"
-                    f"Lý do: Tường lửa (Firewall) của máy đích đang chặn kết nối hoặc sai cổng.\n"
-                    f"Vui lòng kiểm tra lại Tường lửa Windows trên máy đích."
-                ))
+                self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
             self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")

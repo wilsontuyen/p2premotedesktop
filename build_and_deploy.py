@@ -173,20 +173,36 @@ def main():
     else:
         log("Deployment completed successfully!")
 
-    # 7. Start Scheduled Task
-    log("Starting scheduled task 'EasyRemoteDesktopAgent'...")
+    # 7. Kill hết mọi instance cũ còn sót lại
+    log("Killing any remaining instances before clean launch...")
+    subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(2)
+
+    # 8. Re-enable & Start Scheduled Task (Service sẽ tự spawn --headless agent)
+    log("Re-enabling and starting scheduled task 'EasyRemoteDesktopAgent'...")
+    subprocess.run("powershell -Command \"Enable-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run("powershell -Command \"Start-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    # 8. Start GUI Agent
-    log("Starting GUI Agent on user desktop...")
+
+    # 9. Chờ Service khởi động và hoàn tất bước cleanup (Service kill RemoteDesktopP2P.exe khi start)
+    log("Waiting for service to initialize and complete cleanup (5s)...")
+    time.sleep(5)
+
+    # 10. Launch GUI Agent bằng explorer.exe (chạy trong user context, không bị Service kill vì Service
+    #     chỉ kill 1 lần khi startup, không kill liên tục)
+    log("Launching GUI Agent via explorer.exe in user context...")
     gui_exe = os.path.join(target_dir, "RemoteDesktopP2P.exe")
     if os.path.exists(gui_exe):
         try:
-            # Start GUI agent in a non-blocking way
-            subprocess.Popen(f'"{gui_exe}"', shell=True, cwd=target_dir)
-            log("GUI Agent started successfully.")
+            # Dùng explorer.exe để launch trong user session (tránh SYSTEM context)
+            subprocess.Popen(
+                ["explorer.exe", gui_exe],
+                shell=False,
+                cwd=target_dir
+            )
+            log("GUI Agent launched successfully via explorer.exe.")
         except Exception as e:
-            log(f"Failed to start GUI Agent: {e}")
+            log(f"Failed to launch GUI Agent: {e}")
 
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
 
