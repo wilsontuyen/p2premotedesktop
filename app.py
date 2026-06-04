@@ -3866,7 +3866,26 @@ class UnifiedApp(tk.Tk):
         
     # Auto formatting spaces inside ID: "123 456 789 012"
     def format_partner_id(self, *args):
-        raw_val = self.partner_id_var.get().replace(" ", "")
+        # Defer formatting to after the current key event is fully processed
+        # This prevents cursor position conflicts when typing rapidly
+        if hasattr(self, '_format_after_id') and self._format_after_id:
+            try:
+                self.after_cancel(self._format_after_id)
+            except Exception:
+                pass
+        self._format_after_id = self.after_idle(self._do_format_partner_id)
+
+    def _do_format_partner_id(self):
+        self._format_after_id = None
+        
+        # Save cursor position (now stable since key event is fully processed)
+        try:
+            cursor_pos = self.entry_p_id.index(tk.INSERT)
+        except Exception:
+            cursor_pos = None
+        
+        current_val = self.partner_id_var.get()
+        raw_val = current_val.replace(" ", "")
         clean_val = "".join([c for c in raw_val if c.isdigit()])[:12]
         
         formatted = ""
@@ -3878,10 +3897,35 @@ class UnifiedApp(tk.Tk):
             formatted = f"{clean_val[:3]} {clean_val[3:]}"
         else:
             formatted = clean_val
-            
+        
+        # Only update if the value actually changed
+        if current_val == formatted:
+            return
+        
+        # Count digits before cursor in the current (unformatted) string
+        new_cursor = None
+        if cursor_pos is not None:
+            digits_before = sum(1 for c in current_val[:cursor_pos] if c.isdigit())
+            # Find position in formatted string after the same number of digits
+            count = 0
+            new_cursor = len(formatted)
+            for i, ch in enumerate(formatted):
+                if ch.isdigit():
+                    count += 1
+                    if count == digits_before:
+                        new_cursor = i + 1
+                        break
+        
         self.partner_id_var.trace_remove("write", self.id_trace_id)
         self.partner_id_var.set(formatted)
         self.id_trace_id = self.partner_id_var.trace_add("write", self.format_partner_id)
+        
+        # Restore cursor position
+        if new_cursor is not None:
+            try:
+                self.entry_p_id.icursor(new_cursor)
+            except Exception:
+                pass
         
     def on_window_configure(self, event):
         try:
