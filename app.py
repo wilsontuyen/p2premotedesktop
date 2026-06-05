@@ -2927,6 +2927,91 @@ def client_receiver_thread(sock, password):
             client_running = False
             break
 
+# Client keyboard hook helper functions
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_void_p)
+    ]
+
+_keyboard_hook = None
+_keyboard_hook_id = None
+
+def install_keyboard_hook(hwnd, send_event_fn):
+    global _keyboard_hook, _keyboard_hook_id
+    
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    
+    LRESULT = ctypes.c_int64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_int32
+    WPARAM = ctypes.c_size_t
+    LPARAM = ctypes.c_size_t
+    
+    HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, WPARAM, LPARAM)
+    
+    def hook_proc(nCode, wParam, lParam):
+        if nCode >= 0:
+            try:
+                user32.GetForegroundWindow.restype = ctypes.c_void_p
+                active_hwnd = user32.GetForegroundWindow()
+                if hwnd and active_hwnd == hwnd:
+                    kbd = KBDLLHOOKSTRUCT.from_address(lParam)
+                    vkCode = kbd.vkCode
+                    
+                    is_win_key = (vkCode == 0x5B or vkCode == 0x5C)
+                    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+                    user32.GetAsyncKeyState.restype = ctypes.c_short
+                    is_ctrl_esc = (vkCode == 0x1B and (user32.GetAsyncKeyState(0x11) & 0x8000))
+                    
+                    if is_win_key or is_ctrl_esc:
+                        pressed = (wParam == 0x0100 or wParam == 0x0104) # WM_KEYDOWN or WM_SYSKEYDOWN
+                        
+                        if is_win_key:
+                            key_name = 'left windows' if vkCode == 0x5B else 'right windows'
+                        else:
+                            key_name = 'escape'
+                            
+                        send_event_fn({
+                            "type": "key_event",
+                            "key": key_name,
+                            "pressed": pressed
+                        })
+                        
+                        return 1
+            except Exception:
+                pass
+                
+        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, WPARAM, LPARAM]
+        user32.CallNextHookEx.restype = LRESULT
+        return user32.CallNextHookEx(None, nCode, wParam, lParam)
+        
+    _keyboard_hook = HOOKPROC(hook_proc)
+    
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    h_mod = kernel32.GetModuleHandleW(None)
+    
+    user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HANDLE, wintypes.DWORD]
+    user32.SetWindowsHookExW.restype = wintypes.HANDLE
+    
+    _keyboard_hook_id = user32.SetWindowsHookExW(13, _keyboard_hook, h_mod, 0)
+    if not _keyboard_hook_id:
+        print(f"[Client] Hook keyboard failed. Error: {ctypes.GetLastError()}")
+    else:
+        print(f"[Client] Keyboard hook installed successfully: {_keyboard_hook_id}")
+
+def uninstall_keyboard_hook():
+    global _keyboard_hook_id
+    if _keyboard_hook_id:
+        user32 = ctypes.windll.user32
+        user32.UnhookWindowsHookEx.argtypes = [wintypes.HANDLE]
+        user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+        user32.UnhookWindowsHookEx(_keyboard_hook_id)
+        _keyboard_hook_id = None
+        print("[Client] Keyboard hook uninstalled.")
+
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
     global client_switching_desktop_countdown
@@ -3043,6 +3128,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     pass
                     
+            # Install keyboard hook to intercept Windows keys and Ctrl+Esc
+            if hwnd:
+                install_keyboard_hook(hwnd, send_event)
+                
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
             
@@ -3243,6 +3332,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 pygame.display.flip()
                 clock.tick(60)
                 
+            uninstall_keyboard_hook()
+            
             if exit_due_to_disconnect and reconnect_queue:
                 countdown = 10
                 last_tick = pygame.time.get_ticks()
@@ -3299,12 +3390,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             # If we reach here, we are truly exiting
             outer_running = False
             
+        uninstall_keyboard_hook()
         pygame.quit()
         if exit_due_to_disconnect:
             print("[Client] Viewer exited due to disconnect. Exit code 99.")
             import sys
             sys.exit(99)
     except Exception as critical_e:
+        uninstall_keyboard_hook()
         import traceback
         with open("client_crash.log", "w", encoding="utf-8") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
@@ -3853,6 +3946,12 @@ class UnifiedApp(tk.Tk):
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
         self.entry_p_pass.pack(pady=(5, 20), padx=20, fill=tk.X)
+        
+        # Bind Enter keys to trigger Connection immediately
+        self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
+        self.entry_p_id.bind("<KP_Enter>", lambda event: self.click_connect())
+        self.entry_p_pass.bind("<Return>", lambda event: self.click_connect())
+        self.entry_p_pass.bind("<KP_Enter>", lambda event: self.click_connect())
         
         # Container to hold CONNECT & ADD (+) buttons
         btn_container = tk.Frame(right_panel, bg=self.card_color)
