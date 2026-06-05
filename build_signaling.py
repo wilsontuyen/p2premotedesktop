@@ -44,6 +44,14 @@ def main():
         log(f"ERROR: Standalone folder not found at {dist_folder}")
         return
 
+    # Copy .ini files if they exist
+    for ini_file in ['signaling_server.ini', 'server.ini']:
+        src_ini = os.path.join(workspace_dir, ini_file)
+        if os.path.exists(src_ini):
+            dst_ini = os.path.join(dist_folder, ini_file)
+            shutil.copy2(src_ini, dst_ini)
+            log(f"Copied {ini_file} to dist folder.")
+
     # Zip the archive
     log("Creating signaling_server.zip...")
     zip_base = os.path.join(workspace_dir, "signaling_server")

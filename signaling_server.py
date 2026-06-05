@@ -6,6 +6,7 @@ import time
 import hashlib
 import os
 import struct
+import configparser
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 APP_KEY = "q3tu0y7j"
@@ -401,9 +402,32 @@ def handle_client(conn, addr):
             if not silent_disconnect:
                 print(f"[-] Client ngắt kết nối: {addr} (ID: {hwid})")
 
-def main():
+def load_config():
+    config = configparser.ConfigParser()
+    # Thử đọc cả 2 tên file để tương thích
+    ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signaling_server.ini')
+    if not os.path.exists(ini_path):
+        ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server.ini')
+        
     host = '0.0.0.0'
     port = 8765
+    
+    if os.path.exists(ini_path):
+        try:
+            config.read(ini_path, encoding='utf-8')
+            if 'server' in config:
+                host = config['server'].get('host', host)
+                try:
+                    port = config['server'].getint('port', port)
+                except ValueError:
+                    pass
+        except Exception as e:
+            print(f"[!] Lỗi đọc file cấu hình: {e}")
+            
+    return host, port
+
+def main():
+    host, port = load_config()
     
     # Khởi động luồng dọn dẹp các session relay quá hạn
     threading.Thread(target=cleanup_stale_relays, daemon=True).start()
