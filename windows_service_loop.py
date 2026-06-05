@@ -39,6 +39,28 @@ def log(msg):
     except:
         pass
 
+def configure_uac_registry():
+    """
+    Configure registry to disable UAC secure desktop switching (PromptOnSecureDesktop = 0).
+    This ensures that on virtual machines (or when GPU display drivers are limited),
+    UAC prompt windows are displayed on the default user desktop where they can be captured
+    and controlled without session freeze or connection loss.
+    """
+    try:
+        import winreg
+        path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+        except WindowsError:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
+        
+        winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+        winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+        winreg.CloseKey(key)
+        log("Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
+    except Exception as e:
+        log(f"Failed to configure registry: {e}")
+
 def get_active_session_id():
     try:
         sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
@@ -436,6 +458,7 @@ def is_process_alive(pid):
 
 def main():
     log("Easy Remote Desktop Agent service loop started.")
+    configure_uac_registry()
     
     # Clean up any lingering agent processes
     try:
