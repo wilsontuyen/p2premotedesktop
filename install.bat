@@ -60,5 +60,5 @@ echo ========================================================
 echo  INSTALLATION COMPLETED SUCCESSFULLY!
 echo ========================================================
 echo.
-pause
+timeout /t 5
 exit /b
