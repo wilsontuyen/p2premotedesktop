@@ -3140,6 +3140,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             active_unicode_map = {}
             was_switching = False
             switching_last_tick = 0
+            switching_start_tick = 0
             
             while client_running:
                 frame_counter += 1
@@ -3304,6 +3305,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     if not was_switching:
                         was_switching = True
                         switching_last_tick = pygame.time.get_ticks()
+                        switching_start_tick = pygame.time.get_ticks()
                     
                     if "msg_font" not in locals():
                         try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
@@ -3314,7 +3316,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     overlay.fill((0, 0, 0))
                     screen.blit(overlay, (0, 0))
                     
-                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây...", True, (255, 255, 255))
+                    elapsed_switching = pygame.time.get_ticks() - switching_start_tick
+                    if elapsed_switching > 3000:
+                        text_msg = "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host..."
+                    else:
+                        text_msg = f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây..."
+                    
+                    text_surf = msg_font.render(text_msg, True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     
@@ -5689,7 +5697,7 @@ class UnifiedApp(tk.Tk):
         self.wait_window(dialog)
         return result[0]
 
-    def update_status(self, text, is_error=False, blink=False):
+    def update_status(self, text, is_error=False, blink=False, is_success=False):
         def _do_update():
             self.status_var.set(f"Trạng thái: {text}")
             
@@ -5705,6 +5713,8 @@ class UnifiedApp(tk.Tk):
                 self._blink_status()
             elif is_error:
                 self.lbl_status.config(fg="#FF4D4D")
+            elif is_success or "thành công" in text.lower():
+                self.lbl_status.config(fg="#2ECC71")  # Xanh lục (Emerald Green)
             else:
                 self.lbl_status.config(fg="#8A8A9A")
         
@@ -5749,8 +5759,27 @@ class UnifiedApp(tk.Tk):
         except Exception:
             pass
 
+    def configure_uac_registry(self):
+        if sys.platform != "win32":
+            return
+        try:
+            import winreg
+            path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            except WindowsError:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
+            
+            winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+            winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+            winreg.CloseKey(key)
+            print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
+        except Exception as e:
+            print(f"[Host] Failed to configure registry for UAC: {e}")
+
     def init_network_services(self):
-        # 0. Thử tự động thêm rule Tường lửa (sẽ thành công nếu có quyền Admin)
+        # 0. Thử tự động thêm rule Tường lửa và cấu hình UAC (sẽ thành công nếu có quyền Admin)
+        self.configure_uac_registry()
         self.add_firewall_rule_for_app()
         
         # 1. Start Host Server first to determine which port is available
