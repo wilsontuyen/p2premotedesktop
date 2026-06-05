@@ -3049,6 +3049,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             frame_counter = 0
             blink_frames_remaining = 0
             active_unicode_map = {}
+            was_switching = False
+            switching_last_tick = 0
             
             while client_running:
                 frame_counter += 1
@@ -3075,8 +3077,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 sas_btn_w, sas_btn_h = 145, 30
                 taskmgr_btn_w, taskmgr_btn_h = 145, 30
                 
-                show_sas = (client_is_domain and client_is_locked)
-                show_taskmgr = not client_is_locked
+                is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
+                show_sas = (client_is_domain and client_is_locked) and not is_switching
+                show_taskmgr = (not client_is_locked) and not is_switching
                 
                 total_w = 0
                 if show_sas:
@@ -3207,7 +3210,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     tm_text_rect = tm_text_surf.get_rect(center=taskmgr_btn_rect.center)
                     screen.blit(tm_text_surf, tm_text_rect)
                     
-                if globals().get('client_switching_desktop_countdown', 0) > 0:
+                current_countdown = globals().get('client_switching_desktop_countdown', 0)
+                if current_countdown > 0:
+                    if not was_switching:
+                        was_switching = True
+                        switching_last_tick = pygame.time.get_ticks()
+                    
                     if "msg_font" not in locals():
                         try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
                         except: msg_font = pygame.font.Font(None, 32)
@@ -3217,15 +3225,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     overlay.fill((0, 0, 0))
                     screen.blit(overlay, (0, 0))
                     
-                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {client_switching_desktop_countdown} giây...", True, (255, 255, 255))
+                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây...", True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     
                     current_tick = pygame.time.get_ticks()
-                    if "last_tick" not in locals(): last_tick = current_tick
-                    if current_tick - last_tick >= 1000:
-                        client_switching_desktop_countdown -= 1
-                        last_tick = current_tick
+                    if current_tick - switching_last_tick >= 1000:
+                        client_switching_desktop_countdown = max(0, current_countdown - 1)
+                        switching_last_tick = current_tick
+                        if client_switching_desktop_countdown == 0:
+                            was_switching = False
+                            send_event({"type": "check_domain"})
+                elif was_switching:
+                    was_switching = False
+                    send_event({"type": "check_domain"})
                 
                 pygame.display.flip()
                 clock.tick(60)
@@ -4063,6 +4076,7 @@ class UnifiedApp(tk.Tk):
             return
             
         dialog = tk.Toplevel(self)
+        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
         self.saved_computers_dialog = dialog
         dialog.title("Danh sách Máy tính")
         dialog.resizable(False, False)
@@ -4076,6 +4090,7 @@ class UnifiedApp(tk.Tk):
         x = self.winfo_x() + (self.winfo_width() - w) // 2
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
         # Top title
         lbl_title = tk.Label(dialog, text="DANH SÁCH MÁY TÍNH ĐÃ LƯU", font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
@@ -4320,6 +4335,7 @@ class UnifiedApp(tk.Tk):
         parent = parent_win if parent_win else self
         
         add_win = tk.Toplevel(parent)
+        add_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
         add_win.title("Thêm Máy tính")
         add_win.resizable(False, False)
         add_win.configure(bg=self.bg_color)
@@ -4333,6 +4349,7 @@ class UnifiedApp(tk.Tk):
         ax = parent.winfo_x() + (parent.winfo_width() - aw) // 2
         ay = parent.winfo_y() + (parent.winfo_height() - ah) // 2
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
+        add_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
         lbl_add_title = tk.Label(add_win, text="THÊM MÁY TÍNH MỚI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_add_title.pack(pady=(12, 10))
@@ -4411,6 +4428,7 @@ class UnifiedApp(tk.Tk):
         parent = parent_win
         
         edit_win = tk.Toplevel(parent)
+        edit_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
         edit_win.title("Sửa thông tin")
         edit_win.resizable(False, False)
         edit_win.configure(bg=self.bg_color)
@@ -4424,6 +4442,7 @@ class UnifiedApp(tk.Tk):
         ex = parent.winfo_x() + (parent.winfo_width() - ew) // 2
         ey = parent.winfo_y() + (parent.winfo_height() - eh) // 2
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
+        edit_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
         lbl_edit_title = tk.Label(edit_win, text="CẬP NHẬT THÔNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_edit_title.pack(pady=(12, 10))
