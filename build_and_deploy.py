@@ -58,18 +58,40 @@ def main():
     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2)
 
+    # Metadata for Anti-Virus (Reduces False Positives)
+    company_name = "P2P Remote Desktop"
+    version_string = "1.0.0.0"
+    
     # 3. Build Service using Nuitka (standalone)
     log("Building RemoteDesktopService via Nuitka (standalone)...")
     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
-    nuitka_service_cmd = f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin --windows-icon-from-ico=app_icon.ico --output-dir=dist_nuitka_service windows_service_loop.py'
+    service_product_name = "P2P Remote Desktop Service"
+    service_desc = "Background Service for P2P Remote Desktop"
+    nuitka_service_cmd = (
+        f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+        f'--windows-icon-from-ico=app_icon.ico '
+        f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
+        f'--windows-file-version={version_string} --windows-product-version={version_string} '
+        f'--windows-file-description="{service_desc}" '
+        f'--output-dir=dist_nuitka_service windows_service_loop.py'
+    )
     if not run_cmd(nuitka_service_cmd):
         log("ERROR: Nuitka service build failed. Aborting deployment.")
         return
 
     # 4. Build Agent using Nuitka
     log("Building RemoteDesktopP2P via Nuitka (standalone)...")
-    python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
-    nuitka_cmd = f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter --windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3,numpy,cv2 --no-deployment-flag=excluded-module-usage --output-dir=dist_nuitka app.py'
+    app_product_name = "P2P Remote Desktop Client"
+    app_desc = "Client GUI for P2P Remote Desktop"
+    nuitka_cmd = (
+        f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
+        f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3,numpy,cv2 '
+        f'--no-deployment-flag=excluded-module-usage '
+        f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
+        f'--windows-file-version={version_string} --windows-product-version={version_string} '
+        f'--windows-file-description="{app_desc}" '
+        f'--output-dir=dist_nuitka app.py'
+    )
     if not run_cmd(nuitka_cmd):
         log("ERROR: Nuitka build failed. Aborting deployment.")
         return

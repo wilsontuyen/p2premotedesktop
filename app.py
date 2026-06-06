@@ -4404,6 +4404,8 @@ class UnifiedApp(tk.Tk):
         def on_dialog_destroy():
             canvas.unbind_all("<MouseWheel>")
             self.status_dots_widgets.clear()
+            if hasattr(self, '_reorder_saved_computers_func'):
+                delattr(self, '_reorder_saved_computers_func')
             dialog.destroy()
             
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
@@ -4422,7 +4424,33 @@ class UnifiedApp(tk.Tk):
                 save_computers(computers)
                 refresh_list()
 
+        def reorder_list():
+            if not scrollable_frame.winfo_exists(): return
+            cards = scrollable_frame.winfo_children()
+            cards = [c for c in cards if hasattr(c, 'comp_id')]
+            if not cards: return
+            
+            def get_is_online(c):
+                if c.comp_id in self.status_dots_widgets:
+                    widgets = self.status_dots_widgets[c.comp_id]
+                    if widgets and widgets[0].winfo_exists():
+                        return widgets[0].cget("fg") == "#00F5D4"
+                return False
+
+            cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
+            for c in cards:
+                c.pack_forget()
+            for c in cards:
+                c.pack(fill=tk.X, pady=(0, 6), padx=(0, 10))
+
+        self._reorder_saved_computers_func = reorder_list
+
         def refresh_list():
+            current_online = {}
+            for cid, widgets in self.status_dots_widgets.items():
+                if widgets and widgets[0].winfo_exists():
+                    current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
+
             # Clear previous items
             for widget in scrollable_frame.winfo_children():
                 widget.destroy()
@@ -4434,8 +4462,8 @@ class UnifiedApp(tk.Tk):
 
             computers = load_computers()
             
-            # 1. Sắp xếp danh sách theo tên gợi nhớ (không phân biệt chữ hoa/thường)
-            computers.sort(key=lambda x: x["name"].lower())
+            # 1. Sắp xếp danh sách (Online lên trên, sau đó theo tên)
+            computers.sort(key=lambda x: (not current_online.get(x["id"].replace(" ", ""), False), x["name"].lower()))
             
             # 2. Lọc theo từ khóa tìm kiếm (tên hoặc ID)
             if query:
@@ -4450,6 +4478,8 @@ class UnifiedApp(tk.Tk):
             for comp in computers:
                 # Card for each saved computer
                 card = tk.Frame(scrollable_frame, bg=self.bg_color, pady=8, padx=12, highlightthickness=1, highlightbackground=self.divider_color)
+                card.comp_id = comp["id"].replace(" ", "")
+                card.comp_name = comp["name"]
                 card.pack(fill=tk.X, pady=(0, 6), padx=(0, 10))
 
                 info_frame = tk.Frame(card, bg=self.bg_color)
@@ -5540,6 +5570,8 @@ class UnifiedApp(tk.Tk):
                         dot_widget.config(fg="#E05252")  # Đỏ (Offline)
                 except Exception:
                     pass
+            if hasattr(self, '_reorder_saved_computers_func'):
+                self.after(50, self._reorder_saved_computers_func)
 
     def update_saved_computer_status(self, partner_id, is_online):
         clean_id = partner_id.replace(" ", "")
@@ -5554,6 +5586,8 @@ class UnifiedApp(tk.Tk):
                             dot_widget.config(fg="#E05252")  # Đỏ (Crimson / Coral Red)
                 except Exception:
                     pass
+            if hasattr(self, '_reorder_saved_computers_func'):
+                self.after(50, self._reorder_saved_computers_func)
     def show_custom_info(self, title, message, parent=None):
         if getattr(self, 'is_headless', False):
             print(f"[Info] {title}: {message}")
