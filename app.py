@@ -1694,6 +1694,18 @@ class ClipboardEventListener:
             self.hwnd = user32.CreateWindowExW(0, wndclass.lpszClassName, "HiddenWindow", 0, 0, 0, 0, 0, ctypes.c_void_p(HWND_MESSAGE), None, wndclass.hInstance, None)
             log_debug(f"[Listener] CreateWindowExW trả về HWND: {self.hwnd}")
             
+            try:
+                WM_CLIPBOARDUPDATE = 0x031D
+                WM_RENDERFORMAT = 0x0305
+                WM_DESTROYCLIPBOARD = 0x0307
+                MSGFLT_ALLOW = 1
+                user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_CLIPBOARDUPDATE, MSGFLT_ALLOW, None)
+                user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_RENDERFORMAT, MSGFLT_ALLOW, None)
+                user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_DESTROYCLIPBOARD, MSGFLT_ALLOW, None)
+                log_debug("[Listener] ChangeWindowMessageFilterEx thành công.")
+            except Exception as e:
+                log_debug(f"[Listener] ChangeWindowMessageFilterEx thất bại: {e}")
+
             add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
             log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
             
@@ -6730,13 +6742,13 @@ class UnifiedApp(tk.Tk):
             try:
                 # Dynamically switch to active input desktop so input events work after session transitions
                 try:
-                    needs_switch, is_blocked = check_desktop_change()
-                    if needs_switch and not is_blocked:
-                        import ctypes
-                        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
-                        if hdesk:
-                            ctypes.windll.user32.SetThreadDesktop(hdesk)
-                            ctypes.windll.user32.CloseDesktop(hdesk)
+                    import ctypes
+                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                    if hdesk:
+                        ctypes.windll.user32.SetThreadDesktop(hdesk)
+                        if hasattr(self, 'last_hdesk') and self.last_hdesk:
+                            ctypes.windll.user32.CloseDesktop(self.last_hdesk)
+                        self.last_hdesk = hdesk
                 except Exception:
                     pass
                     
