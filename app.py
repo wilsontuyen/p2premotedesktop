@@ -576,9 +576,13 @@ def get_hwid():
         pass
         
     try:
-        # Get HDD Serial
+        # Get HDD Serial (C: drive prioritized, fallback to first drive)
+        script_hdd = """
+        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" | Get-CimAssociatedInstance -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue | Get-CimAssociatedInstance -ResultClassName Win32_DiskDrive -ErrorAction SilentlyContinue
+        if ($disk) { $disk[0].SerialNumber } else { (Get-CimInstance Win32_DiskDrive)[0].SerialNumber }
+        """
         res_hdd = subprocess.run(
-            ['powershell', '-Command', '(Get-CimInstance Win32_DiskDrive)[0].SerialNumber'],
+            ['powershell', '-Command', script_hdd],
             capture_output=True, text=True, check=True, startupinfo=startupinfo
         )
         if res_hdd and res_hdd.stdout:
@@ -6726,11 +6730,13 @@ class UnifiedApp(tk.Tk):
             try:
                 # Dynamically switch to active input desktop so input events work after session transitions
                 try:
-                    import ctypes
-                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
-                    if hdesk:
-                        ctypes.windll.user32.SetThreadDesktop(hdesk)
-                        ctypes.windll.user32.CloseDesktop(hdesk)
+                    needs_switch, is_blocked = check_desktop_change()
+                    if needs_switch and not is_blocked:
+                        import ctypes
+                        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                        if hdesk:
+                            ctypes.windll.user32.SetThreadDesktop(hdesk)
+                            ctypes.windll.user32.CloseDesktop(hdesk)
                 except Exception:
                     pass
                     
