@@ -3461,6 +3461,57 @@ def get_desktop_name():
         pass
     return "default"
 
+def is_secure_desktop():
+    """Kiểm tra xem thread hiện tại có đang ở Secure Desktop (UAC/Winlogon) không.
+    Trả về True nếu đang ở Secure Desktop và KHÔNG thể chụp màn hình bình thường."""
+    try:
+        # Mở Input Desktop với quyền đọc tối thiểu (DESKTOP_READOBJECTS = 0x0001)
+        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0001)
+        if not hdesk:
+            # Không mở được Input Desktop → đang bị Secure Desktop lock
+            return True
+        name = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetUserObjectInformationW(hdesk, 2, name, ctypes.sizeof(name), None)
+        ctypes.windll.user32.CloseDesktop(hdesk)
+        desktop_name = name.value.lower()
+        # "default" là desktop bình thường; bất kỳ tên nào khác (vd: "winlogon", "secure") là Secure Desktop
+        return desktop_name not in ("default", "")
+    except:
+        return False
+
+def check_desktop_change():
+    """
+    Checks the status of active input desktop relative to the current thread.
+    Returns (needs_switch, is_blocked)
+    - needs_switch: True if the active input desktop is different from the current thread desktop,
+                    and we CAN access/switch to it.
+    - is_blocked: True if the active input desktop cannot be accessed (e.g. secure desktop for normal user).
+    """
+    try:
+        import ctypes
+        # 1. Try to open the active input desktop
+        h_input = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0001) # DESKTOP_READOBJECTS
+        if not h_input:
+            # Cannot open input desktop -> we are blocked
+            return False, True
+            
+        # Get active input desktop name
+        name_input = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetUserObjectInformationW(h_input, 2, name_input, ctypes.sizeof(name_input), None)
+        ctypes.windll.user32.CloseDesktop(h_input)
+        input_name = name_input.value.lower()
+        
+        # 2. Get current thread desktop name
+        thread_name = get_desktop_name()
+            
+        if input_name != thread_name:
+            return True, False
+            
+        return False, False
+    except Exception as e:
+        print(f"[DesktopCheck] Error: {e}")
+        return False, False
+
 def is_machine_domain_joined():
     debug_messages = []
     
@@ -3724,7 +3775,73 @@ class UnifiedApp(tk.Tk):
         
         # Host State Variables
         self.my_id_clean, self.my_id_formatted = get_hwid()
-        self.my_password = str(random.randint(1000, 9999))
+        
+        # Check if service (headless agent) is active by checking the mutex
+        self.is_service_active = False
+        if sys.platform == "win32" and not self.is_headless:
+            import win32event, win32con
+            
+            # Check Windows Service status first to avoid race condition on startup
+            try:
+                import win32service, win32serviceutil
+                status = win32serviceutil.QueryServiceStatus("EasyRemoteDesktopService")
+                if status[1] == win32service.SERVICE_RUNNING:
+                    self.is_service_active = True
+                    print("[Host GUI] Detected Windows Service is running.")
+            except Exception:
+                pass
+                
+            # Fallback to checking Mutex if service check failed
+            if not self.is_service_active:
+                # Retrieve active session ID
+                session_id = 1
+                try:
+                    sid = ctypes.c_ulong()
+                    if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+                        session_id = sid.value
+                    else:
+                        session_id = 1
+                except:
+                    session_id = 1
+                
+                for d_name in ["default", "winlogon"]:
+                    m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
+                    try:
+                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+                        if h_mutex:
+                            win32api.CloseHandle(h_mutex)
+                            self.is_service_active = True
+                            break
+                    except Exception:
+                        pass
+
+        # Load or generate password
+        if self.is_headless:
+            self.my_password = str(random.randint(1000, 9999))
+            try:
+                pass_path = os.path.join(app_dir, "session_pass.txt")
+                with open(pass_path, "w", encoding="utf-8") as f:
+                    f.write(self.my_password)
+                print(f"[Host Service] Generated and saved session password to {pass_path}")
+            except Exception as e:
+                print(f"[Host Service] Failed to save session password: {e}")
+        else:
+            if getattr(self, "is_service_active", False):
+                global BOUND_PORT
+                BOUND_PORT = 12346 # Prevent using port 12345 to avoid conflicting with the service
+                pass_path = os.path.join(app_dir, "session_pass.txt")
+                if os.path.exists(pass_path):
+                    try:
+                        with open(pass_path, "r", encoding="utf-8") as f:
+                            self.my_password = f.read().strip()
+                        print(f"[Host GUI] Loaded shared session password from {pass_path}: {self.my_password}")
+                    except Exception as e:
+                        print(f"[Host GUI] Failed to load shared session password: {e}")
+                        self.my_password = str(random.randint(1000, 9999))
+                else:
+                    self.my_password = str(random.randint(1000, 9999))
+            else:
+                self.my_password = str(random.randint(1000, 9999))
         # Migrate old fixed_password.txt to XML if it exists
         self.fixed_password = ""
         if os.path.exists("fixed_password.txt"):
@@ -4174,6 +4291,17 @@ class UnifiedApp(tk.Tk):
             self.my_password = ''.join(random.choices(chars, k=8))
         else:  # Mặc định: 4 chữ số
             self.my_password = str(random.randint(1000, 9999))
+            
+        # Write to session_pass.txt if service is active or we are headless
+        if self.is_headless or getattr(self, "is_service_active", False):
+            try:
+                pass_path = os.path.join(app_dir, "session_pass.txt")
+                with open(pass_path, "w", encoding="utf-8") as f:
+                    f.write(self.my_password)
+                print(f"[Host] Saved refreshed session password to {pass_path}")
+            except Exception as e:
+                print(f"[Host] Failed to save refreshed session password: {e}")
+                
         self.my_pass_label.config(text=self.my_password)
         
     def show_saved_computers_dialog(self):
@@ -5765,15 +5893,14 @@ class UnifiedApp(tk.Tk):
         try:
             import winreg
             path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-            try:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
-            except WindowsError:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
-            
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
             winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
             winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
             winreg.CloseKey(key)
             print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
+        except PermissionError:
+            # Không có quyền Admin → UAC vẫn sẽ dùng Secure Desktop → cảnh báo người dùng ở console/log
+            print("[Host] WARNING: No Admin rights → PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
         except Exception as e:
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
@@ -5783,12 +5910,17 @@ class UnifiedApp(tk.Tk):
         self.add_firewall_rule_for_app()
         
         # 1. Start Host Server first to determine which port is available
-        self.update_status("Đang khởi động Server lắng nghe...")
-        self.start_host_server()
-        
-        # 2. Try automatic UPnP Port Forwarding
-        self.update_status("Đang tự động cấu hình Router (UPnP)...")
-        upnp_success = attempt_upnp_forward(BOUND_PORT)
+        if not self.is_headless and getattr(self, "is_service_active", False):
+            print("[Host GUI] Service is active. Skipping local host TCP server startup to avoid conflict.")
+            self.server_socket = None
+            upnp_success = False
+        else:
+            self.update_status("Đang khởi động Server lắng nghe...")
+            self.start_host_server()
+            
+            # 2. Try automatic UPnP Port Forwarding
+            self.update_status("Đang tự động cấu hình Router (UPnP)...")
+            upnp_success = attempt_upnp_forward(BOUND_PORT)
         
         # 3. Get Public & Local IPs
         self.update_status("Đang lấy thông vị trí mạng...")
@@ -5824,12 +5956,14 @@ class UnifiedApp(tk.Tk):
                 self.update_status(f"Đang kết nối Signaling Server... ({8 - int(timeout)}s)")
             
         if self.signaling_sockets:
+            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
             if upnp_success:
-                self.update_status(f"Kết nối Signaling & Mở cổng Router thành công (Cổng {BOUND_PORT})!")
+                self.update_status(f"Kết nối Signaling & Mở cổng Router thành công (Cổng {BOUND_PORT})!{suffix}")
             else:
-                self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.")
+                self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.{suffix}")
         else:
-            self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...")
+            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
+            self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...{suffix}")
 
 
     def signaling_maintainer_thread(self, host):
@@ -6128,6 +6262,18 @@ class UnifiedApp(tk.Tk):
         # We now support multiple clients, so we don't block new connections if active_clients is non-empty.
             
         try:
+            # If we are headless, let's reload the random password from session_pass.txt to stay in sync with GUI
+            if self.is_headless:
+                try:
+                    pass_path = os.path.join(app_dir, "session_pass.txt")
+                    if os.path.exists(pass_path):
+                        with open(pass_path, "r", encoding="utf-8") as f:
+                            val = f.read().strip()
+                            if val:
+                                self.my_password = val
+                except Exception as e:
+                    print(f"[Host Service] Failed to reload password from session_pass.txt during handshake: {e}")
+                    
             # Register the socket with candidate passwords so recv_msg can decrypt client's handshake
             socket_passwords[conn] = [self.my_password, self.fixed_password]
             msg = recv_msg(conn, [self.my_password, self.fixed_password])
@@ -6330,15 +6476,34 @@ class UnifiedApp(tk.Tk):
 
         while client_state.get("running", False):
             try:
-                # Attempt to switch to the active input desktop dynamically to keep connection alive
-                try:
-                    import ctypes
-                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
-                    if hdesk:
-                        ctypes.windll.user32.SetThreadDesktop(hdesk)
-                        ctypes.windll.user32.CloseDesktop(hdesk)
-                except Exception:
-                    pass
+                # Early check for desktop status
+                needs_switch, is_blocked = check_desktop_change()
+                if is_blocked:
+                    print("[Host] Secure Desktop detected and cannot be accessed. Pausing screen capture...")
+                    try:
+                        signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                        send_msg(conn, signal, password)
+                    except:
+                        pass
+                    time.sleep(0.5)
+                    continue
+
+                # Switch thread to active Input Desktop if needed
+                if needs_switch:
+                    print("[Host] Desktop change detected. Switching thread desktop...")
+                    try:
+                        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                        if hdesk:
+                            result = ctypes.windll.user32.SetThreadDesktop(hdesk)
+                            ctypes.windll.user32.CloseDesktop(hdesk)
+                            if not result:
+                                print("[Host] SetThreadDesktop() failed (thread may have existing windows). Retrying...")
+                                time.sleep(0.3)
+                                continue
+                    except Exception as e:
+                        print(f"[Host] SetThreadDesktop exception: {e}")
+                        time.sleep(0.3)
+                        continue
                     
                 with mss.mss() as sct:
                     # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
@@ -6349,6 +6514,20 @@ class UnifiedApp(tk.Tk):
                         
                     while client_state.get("running", False):
                         try:
+                            # Check for mid-session desktop transitions
+                            inner_needs_switch, inner_is_blocked = check_desktop_change()
+                            if inner_is_blocked or inner_needs_switch:
+                                if inner_is_blocked:
+                                    print("[Host] Secure Desktop appeared mid-session and blocked. Signaling client...")
+                                    try:
+                                        signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                                        send_msg(conn, signal, password)
+                                    except:
+                                        pass
+                                    time.sleep(0.5)
+                                else:
+                                    print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
+                                break  # Break inner loop to recreate mss.mss() on new desktop
                             img = sct.grab(dynamic_monitor)
                             # Convert raw BGRA from mss directly to Pillow Image
                             pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
@@ -6470,10 +6649,19 @@ class UnifiedApp(tk.Tk):
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
                             
+                            # Thử fallback sang monitors[0] một lần duy nhất.
+                            # KHÔNG dùng continue vì nếu monitors[0] cũng fail → vòng lặp vô tận.
                             if len(sct.monitors) > 1 and dynamic_monitor != sct.monitors[0]:
-                                print("[Host] Falling back to sct.monitors[0] (Virtual Screen)")
+                                print("[Host] Falling back to sct.monitors[0] (Virtual Screen) - one-shot attempt")
                                 dynamic_monitor = sct.monitors[0]
-                                continue
+                                try:
+                                    img2 = sct.grab(dynamic_monitor)
+                                    # Fallback thành công: cập nhật dynamic_monitor và tiếp tục
+                                    img = img2
+                                except Exception:
+                                    pass  # Fallback cũng fail → rơi xuống break bên dưới
+                                else:
+                                    continue  # Fallback thành công → tiếp tục inner loop
                                 
                             try:
                                 signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
