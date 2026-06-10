@@ -180,6 +180,7 @@ key_map = {
     'f9': Key.f9,
     'f10': Key.f10,
     'f11': Key.f11,
+    'f12': Key.f12,
 }
 
 # Ctypes definitions for SendInput API (standard modern input simulation)
@@ -287,6 +288,8 @@ vk_map = {
     'right windows': 0x5C,
     'left super': 0x5B,
     'right super': 0x5C,
+    'menu': 0x5D,       # VK_APPS (phím right-click / context menu trên bàn phím)
+    'application': 0x5D,# VK_APPS (tên thay thế trong một số layout)
     'insert': 0x2D,     # VK_INSERT
     '[0]': 0x60,        # VK_NUMPAD0
     '[1]': 0x61,        # VK_NUMPAD1
@@ -380,7 +383,8 @@ def send_input_keyboard_event(key_name, pressed):
                 0x2F,                   # Print screen
                 0x12, 0xA1,             # Alt_R
                 0x11, 0xA3,             # Ctrl_R
-                0x5B, 0x5C              # LWIN, RWIN
+                0x5B, 0x5C,             # LWIN, RWIN
+                0x5D                    # VK_APPS (Menu/Application key)
             ]
             if vk in extended_vks:
                 flags |= KEYEVENTF_EXTENDEDKEY
@@ -2978,15 +2982,18 @@ def install_keyboard_hook(hwnd, send_event_fn):
                     vkCode = kbd.vkCode
                     
                     is_win_key = (vkCode == 0x5B or vkCode == 0x5C)
+                    is_menu_key = (vkCode == 0x5D)  # VK_APPS - phím Menu/Application (right-click keyboard key)
                     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
                     user32.GetAsyncKeyState.restype = ctypes.c_short
                     is_ctrl_esc = (vkCode == 0x1B and (user32.GetAsyncKeyState(0x11) & 0x8000))
                     
-                    if is_win_key or is_ctrl_esc:
+                    if is_win_key or is_ctrl_esc or is_menu_key:
                         pressed = (wParam == 0x0100 or wParam == 0x0104) # WM_KEYDOWN or WM_SYSKEYDOWN
                         
                         if is_win_key:
                             key_name = 'left windows' if vkCode == 0x5B else 'right windows'
+                        elif is_menu_key:
+                            key_name = 'menu'
                         else:
                             key_name = 'escape'
                             
