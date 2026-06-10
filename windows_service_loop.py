@@ -146,7 +146,7 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
 
         # Open winlogon and its token
         h_winlogon = win32api.OpenProcess(
-            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, winlogon_pid
+            win32con.PROCESS_QUERY_INFORMATION, False, winlogon_pid
         )
         h_token = win32security.OpenProcessToken(
             h_winlogon, win32con.TOKEN_DUPLICATE | win32con.TOKEN_QUERY | win32con.TOKEN_ASSIGN_PRIMARY
