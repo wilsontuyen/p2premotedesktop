@@ -3123,15 +3123,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             # We moved pygame init outside
             
             import queue
-            event_queue = queue.Queue(maxsize=150)
+            import collections
+            # Queue riêng cho sự kiện quan trọng (click, key, scroll) - KHÔNG bao giờ bị drop
+            critical_queue = queue.Queue()
+            # Buffer mouse_move: chỉ giữ vị trí mới nhất, tránh làm đầy queue và mất click
+            _mouse_move_buf = {}
+            _mouse_move_lock = threading.Lock()
+            _mouse_move_has_new = threading.Event()
             
             def event_sender_thread():
                 while client_running:
                     try:
-                        event_dict = event_queue.get(timeout=0.1)
-                        send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
-                    except queue.Empty:
-                        pass
+                        # Ưu tiên gửi sự kiện quan trọng (click/key/scroll) trước
+                        try:
+                            event_dict = critical_queue.get_nowait()
+                            send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
+                            continue
+                        except queue.Empty:
+                            pass
+                        # Nếu không có sự kiện quan trọng, gửi mouse_move mới nhất nếu có
+                        if _mouse_move_has_new.wait(timeout=0.05):
+                            with _mouse_move_lock:
+                                move = _mouse_move_buf.get("latest")
+                                _mouse_move_has_new.clear()
+                            if move:
+                                send_msg(sock, json.dumps(move).encode('utf-8'), partner_pass)
                     except Exception:
                         break
                         
@@ -3140,9 +3156,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             # Khởi tạo kích thước viewer ban đầu cho Host biết
             def send_event(event_dict):
                 try:
-                    if event_dict.get("type") == "mouse_move" and event_queue.full():
-                        return
-                    event_queue.put(event_dict, timeout=0.05)
+                    evt_type = event_dict.get("type")
+                    if evt_type == "mouse_move":
+                        # Chỉ giữ vị trí mới nhất, bỏ các vị trí cũ để không làm block click
+                        with _mouse_move_lock:
+                            _mouse_move_buf["latest"] = event_dict
+                        _mouse_move_has_new.set()
+                    else:
+                        # Click, key, scroll: KHÔNG bao giờ drop, đưa thẳng vào critical_queue
+                        critical_queue.put(event_dict)
                 except Exception:
                     pass
                     
@@ -6740,25 +6762,55 @@ class UnifiedApp(tk.Tk):
     def host_receiver_thread(self, conn, client_state, password):
         print("[Host] Started Input Receiver Thread.")
         import select
+        # Cache để tránh gọi OpenInputDesktop/SetThreadDesktop mỗi vòng lặp
+        _last_desk_check_time = 0.0
+        _last_desk_name = None
+        _DESK_CHECK_INTERVAL = 0.5  # Chỉ kiểm tra desktop mỗi 0.5 giây
         while client_state.get("running", False):
             try:
-                # Dynamically switch to active input desktop so input events work after session transitions
-                try:
-                    import ctypes
-                    hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
-                    if hdesk:
-                        ctypes.windll.user32.SetThreadDesktop(hdesk)
-                        if hasattr(self, 'last_hdesk') and self.last_hdesk:
-                            ctypes.windll.user32.CloseDesktop(self.last_hdesk)
-                        self.last_hdesk = hdesk
-                except Exception:
-                    pass
-                    
                 # Chờ 2 giây, nếu không có gói tin nào thì nhả hết phím modifier để chống kẹt
                 r, _, _ = select.select([conn], [], [], 2.0)
                 if not r:
                     self.host_release_all_modifiers()
                     continue
+
+                # Chỉ kiểm tra/chuyển desktop khi có gói tin đến VÀ đã qua interval
+                # Điều này tránh overhead khi mouse_move liên tục và tránh SetThreadDesktop
+                # gọi quá nhiều lần (có thể fail nếu hook đã được gắn vào thread)
+                now = time.monotonic()
+                if now - _last_desk_check_time >= _DESK_CHECK_INTERVAL:
+                    _last_desk_check_time = now
+                    try:
+                        import ctypes as _ct
+                        # Lấy tên desktop hiện tại để phát hiện thay đổi (UAC/Winlogon)
+                        _buf = _ct.create_unicode_buffer(256)
+                        _hd_cur = _ct.windll.user32.GetThreadDesktop(_ct.windll.kernel32.GetCurrentThreadId())
+                        _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
+                        _cur_name = _buf.value.lower() if _buf.value else None
+
+                        _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                        if _hdesk_new:
+                            # Lấy tên của input desktop mới
+                            _buf2 = _ct.create_unicode_buffer(256)
+                            _ct.windll.user32.GetUserObjectInformationW(_hdesk_new, 2, _buf2, _ct.sizeof(_buf2), None)
+                            _new_name = _buf2.value.lower() if _buf2.value else None
+
+                            if _new_name != _last_desk_name:
+                                # Desktop đã thay đổi → switch thread sang desktop mới
+                                if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
+                                    _last_desk_name = _new_name
+                                    print(f"[Host] Switched input desktop: {_last_desk_name}")
+                                    # Đóng handle cũ sau khi switch thành công
+                                    if hasattr(self, '_last_hdesk') and self._last_hdesk:
+                                        _ct.windll.user32.CloseDesktop(self._last_hdesk)
+                                    self._last_hdesk = _hdesk_new
+                                    _hdesk_new = None  # Prevent double-close below
+                                # else: SetThreadDesktop thất bại → giữ nguyên desktop cũ
+                            # Đóng handle nếu không được lưu lại (không có thay đổi hoặc switch fail)
+                            if _hdesk_new:
+                                _ct.windll.user32.CloseDesktop(_hdesk_new)
+                    except Exception:
+                        pass
                     
                 msg = recv_msg(conn, password)
                 if not msg:
