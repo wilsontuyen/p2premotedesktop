@@ -3051,6 +3051,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         # Initialize Pygame once outside the loop
         import os
         os.environ['SDL_RENDER_DRIVER'] = 'software'
+        os.environ['SDL_MOUSE_FOCUS_CLICKTHROUGH'] = '1'
         pygame.init()
         pygame.key.set_repeat(500, 50)
         
