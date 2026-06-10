@@ -3042,6 +3042,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         outer_running = True
         
         # Initialize Pygame once outside the loop
+        import os
+        os.environ['SDL_RENDER_DRIVER'] = 'software'
         pygame.init()
         pygame.key.set_repeat(500, 50)
         
@@ -7445,11 +7447,15 @@ class UnifiedApp(tk.Tk):
         self.after(0, self._restore_window)
         
     def _restore_window(self):
-        if self.state() == "normal" and self.attributes("-alpha") == 1.0:
-            self.lift()
-            self.focus_force()
-            return
-            
+        if self.state() == "normal":
+            try:
+                if self.attributes("-alpha") == 1.0:
+                    self.lift()
+                    self.focus_force()
+                    return
+            except:
+                pass
+                
         import re
         geom = self.geometry()
         m = re.match(r"(\d+)x(\d+)([-+]\d+)([-+]\d+)", geom)
@@ -7459,43 +7465,16 @@ class UnifiedApp(tk.Tk):
         else:
             end_w, end_h, end_x, end_y = 1000, 700, 100, 100 # Fallback
             
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
-        start_w, start_h = 20, 20
-        start_x, start_y = screen_w - 50, screen_h - 50
-        
-        self.geometry(f"{start_w}x{start_h}+{start_x}+{start_y}")
-        self.attributes("-alpha", 0.0)
+        self.geometry(f"{end_w}x{end_h}+{end_x}+{end_y}")
+        try:
+            self.attributes("-alpha", 1.0)
+        except:
+            pass
+            
         self.deiconify()
         self.lift()
-        
-        frames = 15
-        duration_ms = 250
-        delay = duration_ms // frames
-        
-        def animate_step(frame):
-            if frame > frames:
-                self.geometry(f"{end_w}x{end_h}+{end_x}+{end_y}")
-                self.attributes("-alpha", 1.0)
-                self.focus_force()
-                print("[Tray] Main window restored with animation.")
-                return
-                
-            progress = frame / frames
-            ease = 1 - (1 - progress) ** 3
-            
-            cur_w = int(start_w + (end_w - start_w) * ease)
-            cur_h = int(start_h + (end_h - start_h) * ease)
-            cur_x = int(start_x + (end_x - start_x) * ease)
-            cur_y = int(start_y + (end_y - start_y) * ease)
-            cur_alpha = ease
-            
-            self.geometry(f"{cur_w}x{cur_h}+{cur_x}+{cur_y}")
-            self.attributes("-alpha", cur_alpha)
-            
-            self.after(delay, animate_step, frame + 1)
-            
-        animate_step(1)
+        self.focus_force()
+        print("[Tray] Main window restored.")
         
     def exit_from_tray(self, icon=None, item=None):
         if hasattr(self, 'tray_icon') and self.tray_icon:
