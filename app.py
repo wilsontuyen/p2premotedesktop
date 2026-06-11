@@ -3858,28 +3858,43 @@ class UnifiedApp(tk.Tk):
             import win32event, win32con
             
             # Check Windows Service status first to avoid race condition on startup
+            # Check Windows Service status first to avoid race condition on startup
+            # Since the service is actually a Scheduled Task (EasyRemoteDesktopAgent),
+            # we check if we are running from the installation directory and wait for the headless agent.
+            is_installed_version = False
             try:
-                import win32service, win32serviceutil
-                status = win32serviceutil.QueryServiceStatus("EasyRemoteDesktopService")
-                if status[1] == win32service.SERVICE_RUNNING:
-                    self.is_service_active = True
-                    print("[Host GUI] Detected Windows Service is running.")
-            except Exception:
+                exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
+                if "C:\\Apps\\P2P" in os.path.abspath(exe_path):
+                    is_installed_version = True
+            except:
                 pass
-                
-            # Fallback to checking Mutex if service check failed
+
+            session_id = 1
+            try:
+                sid = ctypes.c_ulong()
+                if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+                    session_id = sid.value
+            except:
+                pass
+
+            if is_installed_version:
+                for _ in range(10): # Wait up to 5 seconds for the service to spawn headless agent
+                    for d_name in ["default", "winlogon"]:
+                        m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
+                        try:
+                            h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+                            if h_mutex:
+                                win32api.CloseHandle(h_mutex)
+                                self.is_service_active = True
+                                break
+                        except Exception:
+                            pass
+                    if self.is_service_active:
+                        break
+                    time.sleep(0.5)
+
+            # Fallback to checking Mutex if not installed version or still not found
             if not self.is_service_active:
-                # Retrieve active session ID
-                session_id = 1
-                try:
-                    sid = ctypes.c_ulong()
-                    if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
-                        session_id = sid.value
-                    else:
-                        session_id = 1
-                except:
-                    session_id = 1
-                
                 for d_name in ["default", "winlogon"]:
                     m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
                     try:
