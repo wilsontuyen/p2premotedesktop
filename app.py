@@ -1176,6 +1176,15 @@ class ClassicCopyDialog(tk.Toplevel):
         self.resizable(False, False)
         self.configure(bg="#FFFFFF")
         
+        try:
+            icon_path = os.path.join(app_dir, "app_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                self.iconphoto(False, icon_img)
+                self._dialog_icon_img = icon_img
+        except Exception:
+            pass
+            
         self.choice = None
         self.has_multiple = has_multiple
         
@@ -1382,6 +1391,15 @@ class ProgressDialog(tk.Toplevel):
         self.resizable(False, False)
         self.configure(bg="#1E1E24")
         
+        try:
+            icon_path = os.path.join(app_dir, "app_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                self.iconphoto(False, icon_img)
+                self._dialog_icon_img = icon_img
+        except Exception:
+            pass
+            
         # Luôn hiển thị trên cùng mọi cửa sổ
         self.attributes("-topmost", True)
         self.lift()
@@ -1515,6 +1533,16 @@ class ConfirmDialog(tk.Toplevel):
         self.title(title)
         self.resizable(False, False)
         self.configure(bg="#1E1E24")
+        
+        try:
+            icon_path = os.path.join(app_dir, "app_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                self.iconphoto(False, icon_img)
+                self._dialog_icon_img = icon_img
+        except Exception:
+            pass
+            
         # Thiết lập thuộc tính Modal & Topmost
         self.attributes("-topmost", True)
         # Chỉ liên kết transient nếu cửa sổ cha đang hiển thị, nếu không hộp thoại sẽ bị ẩn theo cha.
