@@ -6626,7 +6626,7 @@ class UnifiedApp(tk.Tk):
                             net_class = client_state.get("net_class", "medium")
                             
                             if net_class == "high":
-                                base_quality = 95
+                                base_quality = 98
                                 fps_limit = 60
                                 res_scale = 1.0
                             elif net_class == "low":
@@ -6646,7 +6646,7 @@ class UnifiedApp(tk.Tk):
                                 client_state["start_time"] = time.time()
                                 
                             if time.time() - client_state["start_time"] < 5.0:
-                                quality = min(95, quality + 10)
+                                quality = min(98, quality + 10)
                                 dyn_scale = min(1.0, dyn_scale + 0.1)
                                 client_state["dyn_quality"] = quality
                                 client_state["dyn_scale"] = dyn_scale
@@ -6676,8 +6676,8 @@ class UnifiedApp(tk.Tk):
                             if static_frame:
                                 current_q = client_state.get("dyn_quality", 40)
                                 current_s = client_state.get("dyn_scale", 0.6)
-                                if current_q < 95 or current_s < 1.0:
-                                    client_state["dyn_quality"] = min(95, current_q + 15)
+                                if current_q < 98 or current_s < 1.0:
+                                    client_state["dyn_quality"] = min(98, current_q + 15)
                                     client_state["dyn_scale"] = min(1.0, current_s + 0.1)
                                     static_frame = False 
                                 else:
@@ -6697,7 +6697,7 @@ class UnifiedApp(tk.Tk):
                                     send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
                             buf = io.BytesIO()
-                            pil_img.save(buf, format="JPEG", quality=quality)
+                            pil_img.save(buf, format="JPEG", quality=quality, subsampling=0)
                             jpeg_data = buf.getvalue()
                             
                             t_start_send = time.time()
@@ -6719,7 +6719,7 @@ class UnifiedApp(tk.Tk):
                                     dyn_scale = max(res_scale, dyn_scale - 0.05)
                             elif ema < 0.20:
                                 # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
-                                quality = min(95, quality + 1)
+                                quality = min(98, quality + 1)
                                 sleep_time = max(1.0 / 60, sleep_time - 0.005)
                                 dyn_scale = min(1.0, dyn_scale + 0.02)
                                 
