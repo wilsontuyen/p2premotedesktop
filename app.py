@@ -6406,6 +6406,11 @@ class UnifiedApp(tk.Tk):
                 except Exception as e:
                     print(f"[Host Service] Failed to reload password from session_pass.txt during handshake: {e}")
                     
+                try:
+                    self.fixed_password = self.load_fixed_password_from_xml()
+                except Exception as e:
+                    print(f"[Host Service] Failed to reload fixed password from XML during handshake: {e}")
+
             # Register the socket with candidate passwords so recv_msg can decrypt client's handshake
             socket_passwords[conn] = [self.my_password, self.fixed_password]
             msg = recv_msg(conn, [self.my_password, self.fixed_password])
