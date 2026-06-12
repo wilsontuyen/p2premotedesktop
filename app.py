@@ -3078,8 +3078,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         
         # Initialize Pygame once outside the loop
         import os
-        os.environ['SDL_RENDER_DRIVER'] = 'software'
         os.environ['SDL_MOUSE_FOCUS_CLICKTHROUGH'] = '1'
+        os.environ['SDL_RENDER_DRIVER'] = 'hardware'
         pygame.init()
         pygame.key.set_repeat(500, 50)
         
@@ -3089,7 +3089,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         window_w = min(host_w, client_max_w, 3840)
         window_h = min(host_h, client_max_h, 2160)
         
-        screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+        try:
+            screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+        except Exception as e:
+            print(f"[Client] Hardware rendering failed ({e}). Falling back to software rendering.")
+            os.environ['SDL_RENDER_DRIVER'] = 'software'
+            pygame.display.quit()
+            pygame.display.init()
+            screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
         
         hwnd = None
         try: hwnd = pygame.display.get_wm_info().get("window")
