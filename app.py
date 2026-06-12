@@ -4689,6 +4689,14 @@ class UnifiedApp(tk.Tk):
 
         refresh_list()
 
+        def auto_refresh_status():
+            if not dialog.winfo_exists(): return
+            for clean_id in list(self.status_dots_widgets.keys()):
+                self.query_computer_status(clean_id)
+            dialog.after(10000, auto_refresh_status)
+
+        dialog.after(10000, auto_refresh_status)
+
     def add_current_partner_to_saved(self):
         curr_id = self.partner_id_var.get().strip()
         curr_pass = self.partner_pass_var.get().strip()
