@@ -2914,6 +2914,7 @@ client_running = True
 client_is_domain = False
 client_is_locked = False
 client_switching_desktop_countdown = 0
+client_host_resolution = None
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
@@ -2946,6 +2947,13 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type == "switching_desktop":
                         client_switching_desktop_countdown = 10
+                        continue
+                    elif evt_type == "resolution_change":
+                        new_w = event.get("w")
+                        new_h = event.get("h")
+                        if new_w and new_h:
+                            global client_host_resolution
+                            client_host_resolution = (new_w, new_h)
                         continue
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
@@ -3246,6 +3254,49 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     pass
      
+                global client_host_resolution
+                if client_host_resolution is not None:
+                    new_host_w, new_host_h = client_host_resolution
+                    client_host_resolution = None
+                    if new_host_w != host_w or new_host_h != host_h:
+                        print(f"[Client] Host resolution changed from {host_w}x{host_h} to {new_host_w}x{new_host_h}")
+                        host_w, host_h = new_host_w, new_host_h
+                        
+                        import ctypes
+                        client_max_w = ctypes.windll.user32.GetSystemMetrics(0) - 100
+                        client_max_h = ctypes.windll.user32.GetSystemMetrics(1) - 100
+                        
+                        ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
+                        window_w = int(host_w * ratio)
+                        window_h = int(host_h * ratio)
+                        
+                        window_w = max(100, window_w)
+                        window_h = max(100, window_h)
+                        
+                        uninstall_keyboard_hook()
+                        pygame.display.quit()
+                        pygame.display.init()
+                        screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                        
+                        if computer_name:
+                            pygame.display.set_caption(f"P2P Remote Desktop  |  {computer_name}")
+                        else:
+                            pygame.display.set_caption("P2P Remote Desktop Viewer")
+                        try:
+                            icon_path = os.path.join(app_dir, "app_icon.png")
+                            if os.path.exists(icon_path):
+                                pygame.display.set_icon(pygame.image.load(icon_path))
+                        except Exception:
+                            pass
+                            
+                        hwnd = None
+                        try: hwnd = pygame.display.get_wm_info().get("window")
+                        except: pass
+                        if hwnd:
+                            install_keyboard_hook(hwnd, send_event)
+
+                        send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+
                 # Calculate floating button rectangle dynamically
                 sas_btn_w, sas_btn_h = 145, 30
                 taskmgr_btn_w, taskmgr_btn_h = 145, 30
@@ -6673,6 +6724,13 @@ class UnifiedApp(tk.Tk):
                                 else:
                                     print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
                                 break  # Break inner loop to recreate mss.mss() on new desktop
+                                
+                            sys_w = ctypes.windll.user32.GetSystemMetrics(0)
+                            sys_h = ctypes.windll.user32.GetSystemMetrics(1)
+                            if sys_w > 0 and sys_h > 0 and (dynamic_monitor['width'] != sys_w or dynamic_monitor['height'] != sys_h):
+                                print("[Host] Resolution change detected via GetSystemMetrics. Breaking capture loop...")
+                                break
+                                
                             img = sct.grab(dynamic_monitor)
                             # Convert raw BGRA from mss directly to Pillow Image
                             pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
@@ -6715,6 +6773,16 @@ class UnifiedApp(tk.Tk):
                                 client_state["dyn_scale"] = dyn_scale
 
                             cap_w, cap_h = img.size
+                            if client_state.get("last_cap_w") != cap_w or client_state.get("last_cap_h") != cap_h:
+                                client_state["last_cap_w"] = cap_w
+                                client_state["last_cap_h"] = cap_h
+                                force_update = True
+                                try:
+                                    res_meta = {"type": "resolution_change", "w": cap_w, "h": cap_h}
+                                    send_msg(conn, json.dumps(res_meta).encode('utf-8'), password)
+                                except Exception:
+                                    pass
+
                             w = int(target_w * dyn_scale)
                             h = int(target_h * dyn_scale)
                             
