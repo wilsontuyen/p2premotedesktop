@@ -3022,14 +3022,17 @@ def install_keyboard_hook(hwnd, send_event_fn):
                     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
                     user32.GetAsyncKeyState.restype = ctypes.c_short
                     is_ctrl_esc = (vkCode == 0x1B and (user32.GetAsyncKeyState(0x11) & 0x8000))
+                    is_alt_f4 = (vkCode == 0x73 and (kbd.flags & 0x20))
                     
-                    if is_win_key or is_ctrl_esc or is_menu_key:
+                    if is_win_key or is_ctrl_esc or is_menu_key or is_alt_f4:
                         pressed = (wParam == 0x0100 or wParam == 0x0104) # WM_KEYDOWN or WM_SYSKEYDOWN
                         
                         if is_win_key:
                             key_name = 'left windows' if vkCode == 0x5B else 'right windows'
                         elif is_menu_key:
                             key_name = 'menu'
+                        elif is_alt_f4:
+                            key_name = 'f4'
                         else:
                             key_name = 'escape'
                             
@@ -3298,38 +3301,28 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
 
                 # Calculate floating button rectangle dynamically
-                sas_btn_w, sas_btn_h = 145, 30
-                taskmgr_btn_w, taskmgr_btn_h = 145, 30
+                cad_btn_w, cad_btn_h = 145, 30
+                close_btn_w, close_btn_h = 40, 30
                 
                 is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
-                show_sas = (client_is_domain and client_is_locked) and not is_switching
-                show_taskmgr = (not client_is_locked) and not is_switching
+                show_buttons = not is_switching
                 
                 total_w = 0
-                if show_sas:
-                    total_w += sas_btn_w
-                if show_taskmgr:
-                    if total_w > 0:
-                        total_w += 10
-                    total_w += taskmgr_btn_w
+                if show_buttons:
+                    total_w = cad_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
-                if show_sas:
-                    sas_btn_rect = pygame.Rect(start_x, 5, sas_btn_w, sas_btn_h)
-                    curr_x = start_x + sas_btn_w + 10
+                if show_buttons:
+                    cad_btn_rect = pygame.Rect(start_x, 5, cad_btn_w, cad_btn_h)
+                    close_btn_rect = pygame.Rect(start_x + cad_btn_w + 10, 5, close_btn_w, close_btn_h)
                 else:
-                    sas_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
-                    curr_x = start_x
-
-                if show_taskmgr:
-                    taskmgr_btn_rect = pygame.Rect(curr_x, 5, taskmgr_btn_w, taskmgr_btn_h)
-                else:
-                    taskmgr_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
 
                 mx, my = pygame.mouse.get_pos()
-                sas_is_hover = sas_btn_rect.collidepoint(mx, my) if show_sas else False
-                taskmgr_is_hover = taskmgr_btn_rect.collidepoint(mx, my) if show_taskmgr else False
+                cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
+                close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
      
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -3344,7 +3337,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if (show_sas and sas_btn_rect.collidepoint(event.pos)) or (show_taskmgr and taskmgr_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (cad_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -3352,15 +3345,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                        if show_sas and sas_btn_rect.collidepoint(event.pos):
+                        if show_buttons and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                                print("[Client] SAS Button Clicked. Sending trigger_sas to host.")
+                                print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
                                 send_event({"type": "trigger_sas"})
                             continue
-                        if show_taskmgr and taskmgr_btn_rect.collidepoint(event.pos):
+                        if show_buttons and close_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                                print("[Client] TaskMgr Button Clicked. Sending trigger_taskmgr to host.")
-                                send_event({"type": "trigger_taskmgr"})
+                                print("[Client] Close Button Clicked. Exiting viewer.")
+                                pygame.event.post(pygame.event.Event(pygame.QUIT))
                             continue
                         if event.button in button_map:
                             send_event({
@@ -3411,28 +3404,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.draw.rect(screen, (255, 0, 0), border_rect, width=10)
                     blink_frames_remaining -= 1
                     
-                # Draw floating SAS button on top
-                if show_sas:
-                    bg_color = (58, 58, 77) if sas_is_hover else (42, 42, 53)
-                    border_color = (0, 173, 181)
-                    pygame.draw.rect(screen, bg_color, sas_btn_rect, border_radius=4)
-                    pygame.draw.rect(screen, border_color, sas_btn_rect, width=1, border_radius=4)
+                # Draw floating buttons on top
+                if show_buttons:
+                    # CAD button
+                    cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
+                    cad_border_color = (0, 173, 181)
+                    pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, cad_border_color, cad_btn_rect, width=1, border_radius=4)
                     
-                    # Render and blit text
-                    text_surf = btn_font.render("Gửi Ctrl+Alt+Del", True, (255, 255, 255))
-                    text_rect = text_surf.get_rect(center=sas_btn_rect.center)
-                    screen.blit(text_surf, text_rect)
+                    cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, (255, 255, 255))
+                    cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
+                    screen.blit(cad_text_surf, cad_text_rect)
                     
-                # Draw TaskMgr button
-                if show_taskmgr:
-                    tm_bg_color = (58, 58, 77) if taskmgr_is_hover else (42, 42, 53)
-                    tm_border_color = (0, 173, 181)
-                    pygame.draw.rect(screen, tm_bg_color, taskmgr_btn_rect, border_radius=4)
-                    pygame.draw.rect(screen, tm_border_color, taskmgr_btn_rect, width=1, border_radius=4)
+                    # Close button (Red X)
+                    close_bg_color = (255, 77, 77) if close_is_hover else (204, 0, 0)
+                    close_border_color = (255, 255, 255)
+                    pygame.draw.rect(screen, close_bg_color, close_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, close_border_color, close_btn_rect, width=1, border_radius=4)
                     
-                    tm_text_surf = btn_font.render("Mở Task Manager", True, (255, 255, 255))
-                    tm_text_rect = tm_text_surf.get_rect(center=taskmgr_btn_rect.center)
-                    screen.blit(tm_text_surf, tm_text_rect)
+                    close_text_surf = btn_font.render("X", True, (255, 255, 255))
+                    close_text_rect = close_text_surf.get_rect(center=close_btn_rect.center)
+                    screen.blit(close_text_surf, close_text_rect)
                     
                 current_countdown = globals().get('client_switching_desktop_countdown', 0)
                 if current_countdown > 0:
