@@ -3306,6 +3306,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
 
                 # Calculate floating button rectangle dynamically
+                min_btn_w, min_btn_h = 40, 30
                 cad_btn_w, cad_btn_h = 145, 30
                 close_btn_w, close_btn_h = 40, 30
                 
@@ -3314,18 +3315,21 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
                 total_w = 0
                 if show_buttons:
-                    total_w = cad_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + cad_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
                 if show_buttons:
-                    cad_btn_rect = pygame.Rect(start_x, 5, cad_btn_w, cad_btn_h)
-                    close_btn_rect = pygame.Rect(start_x + cad_btn_w + 10, 5, close_btn_w, close_btn_h)
+                    min_btn_rect = pygame.Rect(start_x, 5, min_btn_w, min_btn_h)
+                    cad_btn_rect = pygame.Rect(start_x + min_btn_w + 10, 5, cad_btn_w, cad_btn_h)
+                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 5, close_btn_w, close_btn_h)
                 else:
+                    min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
 
                 mx, my = pygame.mouse.get_pos()
+                min_is_hover = min_btn_rect.collidepoint(mx, my) if show_buttons else False
                 cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
      
@@ -3342,7 +3346,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (cad_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -3350,6 +3354,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+                        if show_buttons and min_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                print("[Client] Minimize Button Clicked. Minimizing viewer.")
+                                pygame.display.iconify()
+                            continue
                         if show_buttons and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
@@ -3411,6 +3420,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     
                 # Draw floating buttons on top
                 if show_buttons:
+                    # Minimize button
+                    min_bg_color = (51, 153, 255) if min_is_hover else (0, 102, 204)
+                    min_border_color = (255, 255, 255)
+                    pygame.draw.rect(screen, min_bg_color, min_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, min_border_color, min_btn_rect, width=1, border_radius=4)
+                    
+                    min_text_surf = btn_font.render("_", True, (255, 255, 255))
+                    min_text_rect = min_text_surf.get_rect(center=min_btn_rect.center)
+                    min_text_rect.y -= 2 # Adjust slightly up to center visually
+                    screen.blit(min_text_surf, min_text_rect)
+
                     # CAD button
                     cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
                     cad_border_color = (0, 173, 181)
