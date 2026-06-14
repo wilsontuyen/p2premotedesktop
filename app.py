@@ -2948,6 +2948,11 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "switching_desktop":
                         client_switching_desktop_countdown = 10
                         continue
+                    elif evt_type == "host_shutdown":
+                        print("[Client] Received host_shutdown. Exiting viewer immediately.")
+                        import pygame
+                        pygame.event.post(pygame.event.Event(pygame.QUIT))
+                        continue
                     elif evt_type == "resolution_change":
                         new_w = event.get("w")
                         new_h = event.get("h")
@@ -3502,7 +3507,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pass
                     
                     screen.fill((30, 30, 30))
-                    text_surf = msg_font.render(f"Đang chuyển giao diện... Vui lòng đợi {countdown} giây...", True, (255, 255, 255))
+                    text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     pygame.display.flip()
@@ -3847,6 +3852,32 @@ class UnifiedApp(tk.Tk):
         # Window attributes
         self.title("Easy Remote Desktop")
         self.resizable(False, False)
+        
+        # Shutdown listener for closing client cleanly
+        if sys.platform == "win32":
+            try:
+                import win32gui, win32con, win32api
+                def WndProc(hwnd, msg, wparam, lparam):
+                    if msg == win32con.WM_QUERYENDSESSION:
+                        if not (lparam & 0x80000000): # 0x80000000 is ENDSESSION_LOGOFF
+                            print("[Host] System Shutdown/Restart detected!")
+                            for conn in list(socket_passwords.keys()):
+                                try:
+                                    import json
+                                    send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                                except: pass
+                        return True
+                    return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+                
+                wc = win32gui.WNDCLASS()
+                wc.lpfnWndProc = WndProc
+                wc.lpszClassName = "AntigravityShutdownListener"
+                wc.hInstance = win32api.GetModuleHandle(None)
+                try: win32gui.RegisterClass(wc)
+                except: pass
+                self.shutdown_hwnd = win32gui.CreateWindow(wc.lpszClassName, "ShutdownListener", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
+            except Exception as e:
+                print(f"[Host] Failed to setup shutdown listener: {e}")
         
         # Cờ trạng thái chống mở nhiều cửa sổ điều khiển cùng lúc
         self.is_client_connected = False
