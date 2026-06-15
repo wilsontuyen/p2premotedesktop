@@ -2909,6 +2909,7 @@ clipboard_sync_manager = ClipboardSyncManager()
 
 # Shared client variables
 client_latest_frame = None
+client_last_recv_time = 0
 client_frame_lock = threading.Lock()
 client_running = True
 client_is_domain = False
@@ -2928,11 +2929,16 @@ def client_receiver_thread(sock, password):
                 client_running = False
                 break
                 
+            global client_last_recv_time
+            client_last_recv_time = time.time()
+                
             if msg.startswith(b'{'):
                 try:
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
-                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
+                    if evt_type == "pong":
+                        continue
+                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
                         clipboard_sync_manager.handle_received_packet(event)
                         continue
                     elif evt_type == "domain_status":
@@ -3148,8 +3154,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         
         while outer_running:
             exit_due_to_disconnect = True
-            global client_latest_frame, client_running, client_is_domain, client_is_locked
+            global client_latest_frame, client_running, client_is_domain, client_is_locked, client_last_recv_time
             client_latest_frame = None
+            client_last_recv_time = time.time()
             client_running = True
             client_is_domain = is_domain
             
@@ -3191,8 +3198,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             _mouse_move_has_new = threading.Event()
             
             def event_sender_thread():
+                last_ping_time = time.time()
                 while client_running:
                     try:
+                        now = time.time()
+                        if now - last_ping_time >= 3.0:
+                            send_msg(sock, json.dumps({"type": "ping"}).encode('utf-8'), partner_pass)
+                            last_ping_time = now
+
                         # Ưu tiên gửi sự kiện quan trọng (click/key/scroll) trước
                         try:
                             event_dict = critical_queue.get_nowait()
@@ -3488,13 +3501,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     was_switching = False
                     send_event({"type": "check_domain"})
                 
+                global client_last_recv_time
+                if client_last_recv_time > 0 and time.time() - client_last_recv_time > 10.0:
+                    print("[Client] Connection ping timeout. Disconnecting.")
+                    exit_due_to_disconnect = True
+                    client_running = False
+                    break
+
                 pygame.display.flip()
                 clock.tick(60)
                 
             uninstall_keyboard_hook()
             
             if exit_due_to_disconnect and reconnect_queue:
-                countdown = 10
+                countdown = 90
                 last_tick = pygame.time.get_ticks()
                 try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
                 except: msg_font = pygame.font.Font(None, 32)
@@ -3519,6 +3539,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             print("[Client] Reconnection failed. Closing window.")
                             outer_running = False
                             break
+                        elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
+                            print("[Client] Received shared socket. Resuming session!")
+                            sock = socket.fromshare(new_sock[1])
+                            break # Break inner wait loop, outer loop will continue
                         elif hasattr(new_sock, 'fileno'):
                             print("[Client] Received new socket. Resuming session!")
                             sock = new_sock
@@ -6948,12 +6972,17 @@ class UnifiedApp(tk.Tk):
         _last_desk_check_time = 0.0
         _last_desk_name = None
         _DESK_CHECK_INTERVAL = 0.5  # Chỉ kiểm tra desktop mỗi 0.5 giây
+        last_recv_time = time.time()
         while client_state.get("running", False):
             try:
                 # Chờ 2 giây, nếu không có gói tin nào thì nhả hết phím modifier để chống kẹt
                 r, _, _ = select.select([conn], [], [], 2.0)
                 if not r:
                     self.host_release_all_modifiers()
+                    if time.time() - last_recv_time > 10.0:
+                        print("[Host] Connection ping timeout. Disconnecting client.")
+                        client_state["running"] = False
+                        break
                     continue
 
                 # Chỉ kiểm tra/chuyển desktop khi có gói tin đến VÀ đã qua interval
@@ -6998,6 +7027,7 @@ class UnifiedApp(tk.Tk):
                 if not msg:
                     print("[Host] Input Receiver got empty message (Client disconnected).")
                     break
+                last_recv_time = time.time()
                 event = json.loads(msg.decode('utf-8'))
                 evt_type = event.get("type", "")
                 if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
@@ -7050,6 +7080,12 @@ class UnifiedApp(tk.Tk):
         elif ev_type == 'resize_viewer':
             self.client_viewer_w = event.get('w', 1280)
             self.client_viewer_h = event.get('h', 720)
+            
+        elif ev_type == 'ping':
+            try:
+                send_msg(conn, json.dumps({"type": "pong"}).encode('utf-8'), password)
+            except Exception:
+                pass
             
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
@@ -7167,7 +7203,7 @@ class UnifiedApp(tk.Tk):
         # Connect inside background thread to prevent UI freezing
         threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
         
-    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None):
+    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
@@ -7184,7 +7220,7 @@ class UnifiedApp(tk.Tk):
                 existing_viewer = v
                 break
                 
-        if existing_viewer:
+        if existing_viewer and reconnect_queue is None:
             print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
             self.update_status(f"Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...")
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
@@ -7242,9 +7278,18 @@ class UnifiedApp(tk.Tk):
                 break
                 
         if not success:
+            if reconnect_queue and retry_count < 30:
+                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                time.sleep(2)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                return
+                
             self.update_status("Sẵn sàng kết nối")
-            self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
+            if not reconnect_queue:
+                self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            if reconnect_queue:
+                reconnect_queue.put("FAILED")
             return
             
         if len(self.pending_connection_info) >= 4:
@@ -7557,7 +7602,11 @@ class UnifiedApp(tk.Tk):
                 self.update_status("Kết nối thành công! Đang khởi động màn hình...")
                 if reconnect_queue:
                     try:
-                        reconnect_queue.put(sock)
+                        if viewer_pid and sys.platform == "win32":
+                            sock_data = sock.share(viewer_pid)
+                            reconnect_queue.put(("SHARED_SOCK", sock_data))
+                        else:
+                            reconnect_queue.put(sock)
                     except Exception as e:
                         print(f"Failed to put socket in reconnect queue: {e}")
                         reconnect_queue.put("FAILED")
@@ -7575,10 +7624,20 @@ class UnifiedApp(tk.Tk):
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
+            if reconnect_queue and retry_count < 30:
+                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                if sock:
+                    force_close_socket(sock)
+                    socket_passwords.pop(sock, None)
+                time.sleep(2)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                return
+
             self.update_status("Sẵn sàng kết nối")
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
-            self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
+            else:
+                self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
@@ -7615,7 +7674,10 @@ class UnifiedApp(tk.Tk):
                             if msg == "RECONNECT_REQUEST":
                                 print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
                                 self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
-                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue), daemon=True).start()
+                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
+                            else:
+                                req_queue.put(msg)
+                                time.sleep(0.5)
                         except:
                             pass
                     
