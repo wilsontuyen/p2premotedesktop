@@ -2184,23 +2184,42 @@ class ClipboardSyncManager:
                 
             current_files = get_clipboard_files(owner_hwnd)
             if current_files:
-                valid_files = [f for f in current_files if os.path.isfile(f)]
-                if not valid_files: return
-                
                 # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                 temp_dir_abs = os.path.abspath(temp_dir).lower()
-                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in valid_files):
+                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in current_files):
                     log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
                     return
                     
                 with self.lock:
-                    if valid_files == self.last_files and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
+                    if current_files == getattr(self, 'last_current_files', []) and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
                         return
-                    self.last_files = valid_files
+                    self.last_current_files = current_files
                     self.last_files_time = time.time()
-                    
-                metadata = [{"name": os.path.basename(f), "size": os.path.getsize(f), "mtime": os.path.getmtime(f), "path": f} for f in valid_files]
+                
+                metadata = []
+                for f in current_files:
+                    if os.path.isfile(f):
+                        metadata.append({
+                            "name": os.path.basename(f),
+                            "path": f,
+                            "size": os.path.getsize(f),
+                            "mtime": os.path.getmtime(f)
+                        })
+                    elif os.path.isdir(f):
+                        parent_dir = os.path.dirname(f)
+                        for root, _, files in os.walk(f):
+                            for file in files:
+                                full_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
+                                metadata.append({
+                                    "name": rel_path,
+                                    "path": full_path,
+                                    "size": os.path.getsize(full_path),
+                                    "mtime": os.path.getmtime(full_path)
+                                })
+                                
+                if not metadata: return
                 if metadata and self.active_sockets:
                     print(f"[Clipboard] Đã gửi tín hiệu files_copied_meta cho {len(metadata)} file qua EventListener.")
                     pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
@@ -2836,6 +2855,7 @@ class ClipboardSyncManager:
             log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path}")
 
             try:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 fh = open(target_path, "wb")
                 self.incoming_transfers[filename] = {
                     "path": target_path,
@@ -2880,7 +2900,10 @@ class ClipboardSyncManager:
                         except Exception as e:
                             log_debug(f"[file_end] Lỗi đóng handle file {filename}: {e}")
                     
-                    self.batch_paths.append(transfer["path"])
+                    top_level_name = filename.replace('\\', '/').split('/')[0]
+                    top_level_path = os.path.join(self.target_save_dir, top_level_name)
+                    if top_level_path not in self.batch_paths:
+                        self.batch_paths.append(top_level_path)
                     log_debug(f"[file_end] Đã xử lý xong file: {filename}")
                 
         elif ptype == "batch_end":
@@ -2893,8 +2916,9 @@ class ClipboardSyncManager:
                 if self.batch_paths:
                     self._send_progress_signal("PROGRESS", str(self.batch_total_size))
                     self._send_progress_signal("END", "")
-                    for file_path in self.batch_paths:
-                        self._send_progress_signal("FILE", file_path)
+                    if self.batch_paths:
+                        files_str = "|".join(self.batch_paths)
+                        self._send_progress_signal("FILES", files_str)
                     self._close_transfer_pipe()
                     log_debug(f"[batch_end] HEADLESS: Đã gửi xong toàn bộ file qua transfer pipe.")
                 self.pending_remote_files = []
@@ -7941,10 +7965,10 @@ def run_clipboard_agent_mode():
                                         gui_queue.put(("end", None))
                                     elif msg.startswith("CANCEL"):
                                         gui_queue.put(("cancel", None))
-                                    elif msg.startswith("FILE:"):
-                                        gui_queue.put(("file", msg[5:]))
+                                    elif msg.startswith("FILES:"):
+                                        gui_queue.put(("files", msg[6:]))
                                     else:
-                                        gui_queue.put(("file", msg))
+                                        gui_queue.put(("files", msg))
                         else:
                             agent_print(f"[ClipboardAgent] ReadFile trả về mã lỗi: {hr}")
                             break
@@ -7991,12 +8015,13 @@ def run_clipboard_agent_mode():
                 if action == "text":
                     agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
                     set_clipboard_text(val)
-                elif action == "file":
-                    if os.path.exists(val):
-                        set_clipboard_files([val])
-                        agent_print(f"[ClipboardAgent] Đã nạp file vào Clipboard: {val}")
+                elif action == "files":
+                    paths = [p for p in val.split("|") if os.path.exists(p)]
+                    if paths:
+                        set_clipboard_files(paths)
+                        agent_print(f"[ClipboardAgent] Đã nạp {len(paths)} file vào Clipboard.")
                     else:
-                        agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard: {val}")
+                        agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard.")
                 elif action == "start":
                     display_name, total_size = val
                     if active_dialog:
