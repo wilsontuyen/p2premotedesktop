@@ -3157,6 +3157,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         socket_passwords[sock] = partner_pass
         
     try:
+        pygame_theme = "dark"
+        try:
+            import json, os
+            with open("window_config.json", "r") as f:
+                cfg = json.load(f)
+                pygame_theme = cfg.get("theme", "dark")
+        except:
+            pass
+
         outer_running = True
         
         # Initialize Pygame once outside the loop
@@ -3488,7 +3497,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
                     screen.blit(scaled_surf, (0, 0))
                 else:
-                    screen.fill((30, 30, 30))
+                    if pygame_theme == "light":
+                        screen.fill((240, 240, 245))
+                    elif pygame_theme == "gray":
+                        screen.fill((82, 89, 98))
+                    elif pygame_theme == "pink":
+                        screen.fill((255, 240, 245))
+                    else:
+                        screen.fill((30, 30, 30))
                     
                 # Draw red border if blinking (focus requested)
                 if blink_frames_remaining > 0:
@@ -3511,12 +3527,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     screen.blit(min_text_surf, min_text_rect)
 
                     # CAD button
-                    cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
-                    cad_border_color = (0, 173, 181)
+                    if pygame_theme == "light":
+                        cad_bg_color = (220, 220, 235) if cad_is_hover else (245, 245, 255)
+                        cad_text_color = (40, 40, 50)
+                        cad_border_color = (0, 173, 181)
+                    elif pygame_theme == "gray":
+                        cad_bg_color = (99, 106, 115) if cad_is_hover else (82, 89, 98)
+                        cad_text_color = (240, 240, 240)
+                        cad_border_color = (0, 173, 181)
+                    elif pygame_theme == "pink":
+                        cad_bg_color = (255, 105, 180) if cad_is_hover else (255, 182, 193)
+                        cad_text_color = (255, 255, 255)
+                        cad_border_color = (255, 105, 180)
+                    else:
+                        cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
+                        cad_text_color = (255, 255, 255)
+                        cad_border_color = (0, 173, 181)
+                    
                     pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
                     pygame.draw.rect(screen, cad_border_color, cad_btn_rect, width=1, border_radius=4)
                     
-                    cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, (255, 255, 255))
+                    cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
                     cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
                     screen.blit(cad_text_surf, cad_text_rect)
                     
@@ -3567,7 +3598,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     was_switching = False
                     send_event({"type": "check_domain"})
                 
-                global client_last_recv_time
                 if client_last_recv_time > 0 and time.time() - client_last_recv_time > 10.0:
                     print("[Client] Connection ping timeout. Disconnecting.")
                     exit_due_to_disconnect = True
@@ -4027,17 +4057,32 @@ class UnifiedApp(tk.Tk):
             except Exception as e:
                 print(f"[Migration] Lỗi chuyển đổi: {e}")
         
-        # Color Theme (Sleek Dark Mode)
-        self.bg_color = "#1E1E24"
-        self.card_color = "#2A2A35"
-        self.text_white = "#FFFFFF"
-        self.text_gray = "#A0A0B0"
-        self.btn_color = "#00ADB5"
-        self.btn_hover = "#008B90"
-        self.entry_bg = "#15151B"
-        self.entry_fg = "#FFFFFF"
-        self.divider_color = "#3A3A4A"
-        
+        # Color Theme Setup
+        self.current_theme = tk.StringVar(value="dark")
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r") as f:
+                    config = json.load(f)
+                    saved_theme = config.get("theme")
+                    if saved_theme in ["light", "dark", "gray", "pink", "custom"]:
+                        self.current_theme.set(saved_theme)
+            except Exception as e:
+                pass
+
+        self._last_applied_theme = self.current_theme.get()
+        pal = self.get_theme_palette(self._last_applied_theme)
+        self.bg_color = pal["bg_color"]
+        self.card_color = pal["card_color"]
+        self.text_white = pal["text_white"]
+        self.text_gray = pal["text_gray"]
+        self.btn_color = pal["btn_color"]
+        self.btn_hover = pal["btn_hover"]
+        self.entry_bg = pal["entry_bg"]
+        self.entry_fg = pal["entry_fg"]
+        self.divider_color = pal["divider_color"]
+        self.btn_cancel_bg = pal.get("btn_cancel_bg", "#3A3A4A")
+        self.btn_cancel_fg = pal.get("btn_cancel_fg", "#FFFFFF")
+
         self.config(bg=self.bg_color)
         
         # Host State Variables
@@ -4267,6 +4312,17 @@ class UnifiedApp(tk.Tk):
             label="Cài đặt máy chủ...",
             command=self.show_server_settings_dialog
         )
+        options_menu.add_separator()
+        
+        # Submenu: Theme
+        theme_menu = tk.Menu(options_menu, tearoff=0)
+        theme_menu.add_radiobutton(label="Sáng", variable=self.current_theme, value="light", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Tối", variable=self.current_theme, value="dark", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Xám", variable=self.current_theme, value="gray", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Hồng", variable=self.current_theme, value="pink", command=self.change_theme)
+        theme_menu.add_separator()
+        theme_menu.add_radiobutton(label="Tùy chỉnh", variable=self.current_theme, value="custom", command=self.change_theme)
+        options_menu.add_cascade(label="Giao diện", menu=theme_menu)
  
         menubar.add_cascade(label="Options", menu=options_menu)
         
@@ -4515,6 +4571,125 @@ class UnifiedApp(tk.Tk):
         self.geometry(geom)
         self.last_normal_geometry = geom
 
+    def get_theme_palette(self, theme_name):
+        if theme_name == "light":
+            return {
+                "bg_color": "#F0F2F5",
+                "card_color": "#FFFFFF",
+                "text_white": "#1C1C21",
+                "text_gray": "#606070",
+                "btn_color": "#00ADB5",
+                "btn_hover": "#008B90",
+                "entry_bg": "#EAECEF",
+                "entry_fg": "#1C1C22",
+                "divider_color": "#D1D5DB",
+                "btn_cancel_bg": "#3A3A4A",
+                "btn_cancel_fg": "#FFFFFC"
+            }
+        elif theme_name == "gray":
+            return {
+                "bg_color": "#525962",
+                "card_color": "#636A73",
+                "text_white": "#FFFFFF",
+                "text_gray": "#C5CBD1",
+                "btn_color": "#00ADB5",
+                "btn_hover": "#008B90",
+                "entry_bg": "#42474E",
+                "entry_fg": "#FFFFFE",
+                "divider_color": "#7D848C",
+                "btn_cancel_bg": "#3A3A4A",
+                "btn_cancel_fg": "#FFFFFD"
+            }
+        elif theme_name == "pink":
+            return {
+                "bg_color": "#FFF0F5",
+                "card_color": "#FFFFFF",
+                "text_white": "#3B2F36",
+                "text_gray": "#8C7A86",
+                "btn_color": "#FF69B4",
+                "btn_hover": "#FF1493",
+                "entry_bg": "#FFE4E1",
+                "entry_fg": "#3B2F37",
+                "divider_color": "#FFC0CB",
+                "btn_cancel_bg": "#3A3A4A",
+                "btn_cancel_fg": "#FF69B4"
+            }
+        elif theme_name == "custom":
+            custom_pal = {
+                "bg_color": "#1E1E24",
+                "card_color": "#2A2A35",
+                "text_white": "#FFFFFF",
+                "text_gray": "#A0A0B0",
+                "btn_color": "#00ADB5",
+                "btn_hover": "#008B90",
+                "entry_bg": "#15151B",
+                "entry_fg": "#FFFFFE",
+                "divider_color": "#3A3A4A",
+                "btn_cancel_bg": "#3A3A4B",
+                "btn_cancel_fg": "#FFFFFD"
+            }
+            try:
+                import configparser, os
+                ini_path = "color.ini"
+                if not os.path.exists(ini_path):
+                    config = configparser.ConfigParser()
+                    config['COLORS'] = custom_pal
+                    with open(ini_path, 'w') as configfile:
+                        config.write(configfile)
+                else:
+                    config = configparser.ConfigParser()
+                    config.read(ini_path)
+                    if 'COLORS' in config:
+                        for k in custom_pal:
+                            if k in config['COLORS']:
+                                custom_pal[k] = config['COLORS'][k]
+            except:
+                pass
+            return custom_pal
+        else:
+            return {
+                "bg_color": "#1E1E24",
+                "card_color": "#2A2A35",
+                "text_white": "#FFFFFF",
+                "text_gray": "#A0A0B0",
+                "btn_color": "#00ADB5",
+                "btn_hover": "#008B90",
+                "entry_bg": "#15151B",
+                "entry_fg": "#FFFFFE",
+                "divider_color": "#3A3A4A",
+                "btn_cancel_bg": "#3A3A4B",
+                "btn_cancel_fg": "#FFFFFD"
+            }
+
+    def change_theme(self):
+        new_theme = self.current_theme.get()
+        if new_theme == getattr(self, '_last_applied_theme', None):
+            return
+            
+        self._last_applied_theme = new_theme
+        
+        # Save position & theme to config file immediately
+        self.save_window_position()
+        
+        # We restart the application to apply the theme cleanly without glitches
+        import sys, subprocess
+        
+        # Launch new instance
+        if getattr(sys, 'frozen', False):
+            subprocess.Popen([sys.executable] + sys.argv[1:])
+        else:
+            subprocess.Popen([sys.executable] + sys.argv)
+            
+        # Close current instance gracefully
+        try:
+            if hasattr(self, 'signal_socket') and self.signal_socket:
+                self.signal_socket.close()
+        except:
+            pass
+            
+        self.destroy()
+        sys.exit(0)
+
     def save_window_position(self):
         try:
             # Ưu tiên lấy tọa độ hoạt động bình thường cuối cùng được ghi nhận
@@ -4532,9 +4707,12 @@ class UnifiedApp(tk.Tk):
                         print(f"[Config] Skip saving minimized geometry: {geom}")
                         return
                         
+            config_data = {"geometry": geom}
+            if hasattr(self, 'current_theme'):
+                config_data["theme"] = self.current_theme.get()
             with open(self.config_file, "w") as f:
-                json.dump({"geometry": geom}, f)
-            print(f"[Config] Saved window position: {geom}")
+                json.dump(config_data, f)
+            print(f"[Config] Saved window position & theme: {geom}")
         except Exception as e:
             print(f"[Config] Error saving window config: {e}")
 
@@ -4863,7 +5041,7 @@ class UnifiedApp(tk.Tk):
 
         btn_close = tk.Button(
             bottom_frame, text="Đóng", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=on_dialog_destroy
         )
         btn_close.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
@@ -4974,7 +5152,7 @@ class UnifiedApp(tk.Tk):
 
         btn_cancel = tk.Button(
             btn_add_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
@@ -5066,7 +5244,7 @@ class UnifiedApp(tk.Tk):
 
         btn_cancel = tk.Button(
             btn_edit_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
@@ -5334,7 +5512,7 @@ class UnifiedApp(tk.Tk):
 
         btn_cancel = tk.Button(
             btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
@@ -5429,7 +5607,7 @@ class UnifiedApp(tk.Tk):
         
         btn_cancel = tk.Button(
             btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
@@ -5514,7 +5692,7 @@ class UnifiedApp(tk.Tk):
 
         btn_cancel = tk.Button(
             btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
@@ -5896,8 +6074,8 @@ class UnifiedApp(tk.Tk):
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 320
-        h = 130
+        w = 400
+        h = 180
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -5905,14 +6083,14 @@ class UnifiedApp(tk.Tk):
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
         
         # Icon & Message side-by-side
         icon_lbl = tk.Label(content_frame, text="ℹ", font=("Segoe UI", 22), fg=self.btn_color, bg=self.bg_color)
-        icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
         
-        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
         
         # OK Button at bottom
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -5945,8 +6123,8 @@ class UnifiedApp(tk.Tk):
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 320
-        h = 130
+        w = 400
+        h = 180
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -5954,14 +6132,14 @@ class UnifiedApp(tk.Tk):
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
         
         # Icon & Message side-by-side
         icon_lbl = tk.Label(content_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color)
-        icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
         
-        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
         
         # OK Button at bottom
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -6015,14 +6193,14 @@ class UnifiedApp(tk.Tk):
                  font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
 
         # ── SEPARATOR ───────────────────────────────────────────
-        tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(12, 0))
+        tk.Frame(dialog, bg=self.divider_color, height=1).pack(fill=tk.X, padx=20, pady=(12, 0))
 
         # ── THÔNG TIN KỸ THUẬT ──────────────────────────────────
-        info_frame = tk.Frame(dialog, bg="#1A1A2A", bd=0, highlightthickness=1, highlightbackground="#2A2A4A")
+        info_frame = tk.Frame(dialog, bg=self.entry_bg, bd=0, highlightthickness=1, highlightbackground=self.divider_color)
         info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
 
         tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
-                 fg=self.btn_color, bg="#1A1A2A", anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
+                 fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
             ("Public IP phát hiện", public_ip if public_ip else "N/A"),
@@ -6031,13 +6209,13 @@ class UnifiedApp(tk.Tk):
             ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
         ]
         for label, value in rows:
-            row = tk.Frame(info_frame, bg="#1A1A2A")
+            row = tk.Frame(info_frame, bg=self.entry_bg)
             row.pack(fill=tk.X, padx=12, pady=2)
             tk.Label(row, text=f"{label}:", font=("Segoe UI", 8), fg=self.text_gray,
-                     bg="#1A1A2A", width=22, anchor="w").pack(side=tk.LEFT)
+                     bg=self.entry_bg, width=22, anchor="w").pack(side=tk.LEFT)
             tk.Label(row, text=value, font=("Segoe UI", 8, "bold"), fg=self.text_white,
-                     bg="#1A1A2A", anchor="w", wraplength=240, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X)
-        tk.Frame(info_frame, bg="#1A1A2A", height=6).pack()
+                     bg=self.entry_bg, anchor="w", wraplength=240, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X)
+        tk.Frame(info_frame, bg=self.entry_bg, height=6).pack()
 
         # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
         tk.Label(dialog, text="🔧  Cách khắc phục", font=("Segoe UI", 9, "bold"),
@@ -6095,8 +6273,8 @@ class UnifiedApp(tk.Tk):
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 320
-        h = 130
+        w = 400
+        h = 180
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -6104,14 +6282,14 @@ class UnifiedApp(tk.Tk):
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
         
         # Icon & Message side-by-side
         icon_lbl = tk.Label(content_frame, text="❓", font=("Segoe UI", 22), fg="#F39C12", bg=self.bg_color)
-        icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
         
-        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
         
         result = [False]
         
@@ -6130,7 +6308,7 @@ class UnifiedApp(tk.Tk):
         # Nút "Không"
         btn_no = tk.Button(
             btn_frame, text="Không", font=("Segoe UI", 9, "bold"),
-            fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_no
         )
         btn_no.pack(side=tk.RIGHT, padx=(4, 0))
