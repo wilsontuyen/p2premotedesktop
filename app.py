@@ -2236,7 +2236,8 @@ class ClipboardSyncManager:
                 # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                 temp_dir_abs = os.path.abspath(temp_dir).lower()
-                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in current_files):
+                headless_dir_abs = os.path.abspath(HEADLESS_TRANSFER_DIR).lower()
+                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) or os.path.abspath(f).lower().startswith(headless_dir_abs) for f in current_files):
                     log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
                     return
                     
