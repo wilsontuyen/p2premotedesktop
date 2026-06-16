@@ -3166,10 +3166,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         pygame.key.set_repeat(500, 50)
         
         info = pygame.display.Info()
-        client_max_w, client_max_h = info.current_w, info.current_h
+        client_max_w = info.current_w - 100
+        client_max_h = info.current_h - 100
         
-        window_w = min(host_w, client_max_w, 3840)
-        window_h = min(host_h, client_max_h, 2160)
+        ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
+        window_w = int(host_w * ratio)
+        window_h = int(host_h * ratio)
+        
+        window_w = max(100, min(window_w, 3840))
+        window_h = max(100, min(window_h, 2160))
         
         try:
             screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
