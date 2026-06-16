@@ -1,4 +1,4 @@
-import socket
+﻿import socket
 import threading
 import json
 import struct
@@ -70,7 +70,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = handle_exception
 
-# Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
+# Chuyß╗ân th╞░ mß╗Ñc l├ám viß╗çc vß╗ü th╞░ mß╗Ñc chß╗⌐a file thß╗▒c thi (.exe hoß║╖c .py) ─æß╗â tr├ính lß╗ùi ─æß╗ìc/ghi file cß║Ñu h├¼nh khi khß╗ƒi ─æß╗Öng c├╣ng Windows
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:
@@ -79,7 +79,7 @@ os.chdir(app_dir)
 
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 
-# Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
+# Hß╗ù trß╗ú DPI High-Scaling tr├¬n Windows 10/11 ─æß╗â tr├ính chß╗» mß╗¥ v├á co gi├ún sai tß╗ë lß╗ç cß╗¡a sß╗ò
 try:
     import ctypes
     ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
@@ -114,7 +114,7 @@ def log_file_transfer(filename, file_size):
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(log_line)
     except Exception as e:
-        print(f"[Log] Lỗi ghi log.txt: {e}")
+        print(f"[Log] Lß╗ùi ghi log.txt: {e}")
 
 def log_debug(msg):
     try:
@@ -288,8 +288,8 @@ vk_map = {
     'right windows': 0x5C,
     'left super': 0x5B,
     'right super': 0x5C,
-    'menu': 0x5D,       # VK_APPS (phím right-click / context menu trên bàn phím)
-    'application': 0x5D,# VK_APPS (tên thay thế trong một số layout)
+    'menu': 0x5D,       # VK_APPS (ph├¡m right-click / context menu tr├¬n b├án ph├¡m)
+    'application': 0x5D,# VK_APPS (t├¬n thay thß║┐ trong mß╗Öt sß╗æ layout)
     'insert': 0x2D,     # VK_INSERT
     '[0]': 0x60,        # VK_NUMPAD0
     '[1]': 0x61,        # VK_NUMPAD1
@@ -485,7 +485,7 @@ def decrypt_payload(encrypted_bytes, password):
     passwords = [p for p in passwords if p]
     
     if len(encrypted_bytes) < 12:
-        raise ValueError("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)")
+        raise ValueError("Dß╗» liß╗çu m├ú h├│a kh├┤ng hß╗úp lß╗ç (k├¡ch th╞░ß╗¢c qu├í nhß╗Å)")
     nonce = encrypted_bytes[:12]
     ciphertext = encrypted_bytes[12:]
     
@@ -497,7 +497,7 @@ def decrypt_payload(encrypted_bytes, password):
             return chacha.decrypt(nonce, ciphertext, None)
         except Exception as e:
             last_err = e
-    raise last_err if last_err else ValueError("Không giải mã được với bất kỳ mật khẩu nào")
+    raise last_err if last_err else ValueError("Kh├┤ng giß║úi m├ú ─æ╞░ß╗úc vß╗¢i bß║Ñt kß╗│ mß║¡t khß║⌐u n├áo")
 
 
 def force_close_socket(sock):
@@ -527,7 +527,7 @@ def send_msg(sock, data_bytes, password=None):
             msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
             sock.sendall(msg)
     except Exception as e:
-        print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+        print(f"[Socket] Lß╗ùi gß╗¡i dß╗» liß╗çu: {e}")
 
 def recv_exact(sock, length):
     data = b''
@@ -551,7 +551,7 @@ def recv_msg(sock, password=None):
     try:
         return decrypt_payload(encrypted_data, password)
     except Exception as e:
-        print(f"[Socket] Lỗi giải mã dữ liệu: {e}")
+        print(f"[Socket] Lß╗ùi giß║úi m├ú dß╗» liß╗çu: {e}")
         return b''
 
 # Helper to fetch hardware identifiers (CPUID & HDD Serial)
@@ -839,7 +839,7 @@ try:
 except Exception as e:
     print(f"[Config] Error reading server.ini: {e}")
 
-# Cấu hình bật/tắt đồng bộ Clipboard để phòng tránh cảnh báo Heuristic của phần mềm diệt virus khi không cần thiết
+# Cß║Ñu h├¼nh bß║¡t/tß║»t ─æß╗ông bß╗Ö Clipboard ─æß╗â ph├▓ng tr├ính cß║únh b├ío Heuristic cß╗ºa phß║ºn mß╗üm diß╗çt virus khi kh├┤ng cß║ºn thiß║┐t
 ENABLE_CLIPBOARD_SYNC = True
 
 # Native Windows Win32 Clipboard structures & APIs
@@ -854,7 +854,7 @@ class DROPFILES(ctypes.Structure):
         ("fWide", wintypes.BOOL),
     ]
 
-# Khởi tạo các hàm API Clipboard dưới dạng động để che giấu Signature tĩnh khỏi Antivirus (Kaspersky Clipbanker.gen)
+# Khß╗ƒi tß║ío c├íc h├ám API Clipboard d╞░ß╗¢i dß║íng ─æß╗Öng ─æß╗â che giß║Ñu Signature t─⌐nh khß╗Åi Antivirus (Kaspersky Clipbanker.gen)
 fn_GlobalAlloc = None
 fn_GlobalLock = None
 fn_GlobalUnlock = None
@@ -869,7 +869,7 @@ fn_DragQueryFileW = None
 
 if ENABLE_CLIPBOARD_SYNC:
     try:
-        # Tải động các DLL bằng tên mã hóa nhẹ để tránh phân tích heuristic
+        # Tß║úi ─æß╗Öng c├íc DLL bß║▒ng t├¬n m├ú h├│a nhß║╣ ─æß╗â tr├ính ph├ón t├¡ch heuristic
         k32_lib = "".join(["k", "e", "r", "n", "e", "l", "3", "2", ".d", "l", "l"])
         u32_lib = "".join(["u", "s", "e", "r", "3", "2", ".d", "l", "l"])
         s32_lib = "".join(["s", "h", "e", "l", "l", "3", "2", ".d", "l", "l"])
@@ -878,7 +878,7 @@ if ENABLE_CLIPBOARD_SYNC:
         u32 = ctypes.WinDLL(u32_lib)
         s32 = ctypes.WinDLL(s32_lib)
 
-        # Ánh xạ động các hàm API bằng cách nối chuỗi ký tự (Obfuscation)
+        # ├ünh xß║í ─æß╗Öng c├íc h├ám API bß║▒ng c├ích nß╗æi chuß╗ùi k├╜ tß╗▒ (Obfuscation)
         fn_GlobalAlloc = getattr(k32, "".join(["G", "l", "o", "b", "a", "l", "A", "l", "l", "o", "c"]))
         fn_GlobalLock = getattr(k32, "".join(["G", "l", "o", "b", "a", "l", "L", "o", "c", "k"]))
         fn_GlobalUnlock = getattr(k32, "".join(["G", "l", "o", "b", "a", "l", "U", "n", "l", "o", "c", "k"]))
@@ -893,7 +893,7 @@ if ENABLE_CLIPBOARD_SYNC:
         
         fn_DragQueryFileW = getattr(s32, "".join(["D", "r", "a", "g", "Q", "u", "e", "r", "y", "F", "i", "l", "e", "W"]))
 
-        # Cấu hình signatures an toàn cho 64-bit
+        # Cß║Ñu h├¼nh signatures an to├án cho 64-bit
         fn_GlobalAlloc.restype = wintypes.HGLOBAL
         fn_GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
 
@@ -927,7 +927,7 @@ if ENABLE_CLIPBOARD_SYNC:
         fn_DragQueryFileW.restype = wintypes.UINT
         fn_DragQueryFileW.argtypes = [ctypes.c_void_p, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
     except Exception as e:
-        print(f"[Clipboard] Lỗi cấu hình dynamic ctypes signatures: {e}")
+        print(f"[Clipboard] Lß╗ùi cß║Ñu h├¼nh dynamic ctypes signatures: {e}")
 
 
 def get_clipboard_files(owner_hwnd=None):
@@ -936,7 +936,7 @@ def get_clipboard_files(owner_hwnd=None):
     try:
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        # Retry loop để chờ ứng dụng khác (ví dụ Explorer) nhả khóa Clipboard
+        # Retry loop ─æß╗â chß╗¥ ß╗⌐ng dß╗Ñng kh├íc (v├¡ dß╗Ñ Explorer) nhß║ú kh├│a Clipboard
         for _ in range(10):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
@@ -958,9 +958,9 @@ def get_clipboard_files(owner_hwnd=None):
             finally:
                 fn_CloseClipboard()
         else:
-            print("[Clipboard] Lỗi: OpenClipboard thất bại do bị khóa bởi tiến trình khác.")
+            print("[Clipboard] Lß╗ùi: OpenClipboard thß║Ñt bß║íi do bß╗ï kh├│a bß╗ƒi tiß║┐n tr├¼nh kh├íc.")
     except Exception as e:
-        print(f"[Clipboard] Lỗi đọc clipboard Win32: {e}")
+        print(f"[Clipboard] Lß╗ùi ─æß╗ìc clipboard Win32: {e}")
     return [os.path.abspath(p) for p in paths if os.path.exists(p)]
 
 def create_hdrop_data(file_paths):
@@ -1012,9 +1012,9 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
                 fn_CloseClipboard()
         else:
             fn_GlobalFree(hGlobal)
-            print("[Clipboard] Lỗi: OpenClipboard thất bại khi ghi dữ liệu.")
+            print("[Clipboard] Lß╗ùi: OpenClipboard thß║Ñt bß║íi khi ghi dß╗» liß╗çu.")
     except Exception as e:
-        print(f"[Clipboard] Lỗi ghi clipboard Win32: {e}")
+        print(f"[Clipboard] Lß╗ùi ghi clipboard Win32: {e}")
 
 def get_clipboard_text(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return None
@@ -1042,7 +1042,7 @@ def get_clipboard_text(owner_hwnd=None):
             finally:
                 fn_CloseClipboard()
     except Exception as e:
-        print(f"[Clipboard] Lỗi đọc text clipboard Win32: {e}")
+        print(f"[Clipboard] Lß╗ùi ─æß╗ìc text clipboard Win32: {e}")
     return text
 
 def set_clipboard_text(text, owner_hwnd=None):
@@ -1083,9 +1083,9 @@ def set_clipboard_text(text, owner_hwnd=None):
                 fn_CloseClipboard()
         else:
             fn_GlobalFree(hGlobal)
-            print("[Clipboard] Lỗi: OpenClipboard thất bại khi ghi dữ liệu text.")
+            print("[Clipboard] Lß╗ùi: OpenClipboard thß║Ñt bß║íi khi ghi dß╗» liß╗çu text.")
     except Exception as e:
-        print(f"[Clipboard] Lỗi ghi text clipboard Win32: {e}")
+        print(f"[Clipboard] Lß╗ùi ghi text clipboard Win32: {e}")
     return False
 
 
@@ -1165,7 +1165,7 @@ def get_file_icon_as_image(file_name, size="large"):
         win32gui.ReleaseDC(0, hdc.GetSafeHdc())
         return img
     except Exception as e:
-        log_debug(f"[get_file_icon_as_image] Lỗi trích xuất icon: {e}")
+        log_debug(f"[get_file_icon_as_image] Lß╗ùi tr├¡ch xuß║Ñt icon: {e}")
         return None
 
 class ClassicCopyDialog(tk.Toplevel):
@@ -1287,7 +1287,7 @@ class ClassicCopyDialog(tk.Toplevel):
         link1 = tk.Frame(self, bg="#FFFFFF")
         link1.pack(fill=tk.X, padx=24, pady=5)
         
-        lbl_arrow1 = tk.Label(link1, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow1 = tk.Label(link1, text="ΓåÆ", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
         lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
         
         right_content1 = tk.Frame(link1, bg="#FFFFFF")
@@ -1320,7 +1320,7 @@ class ClassicCopyDialog(tk.Toplevel):
         link2 = tk.Frame(self, bg="#FFFFFF")
         link2.pack(fill=tk.X, padx=24, pady=5)
         
-        lbl_arrow2 = tk.Label(link2, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow2 = tk.Label(link2, text="ΓåÆ", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
         lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
         
         right_content2 = tk.Frame(link2, bg="#FFFFFF")
@@ -1387,7 +1387,7 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
-        self.title("Truyền tải File")
+        self.title("Truyß╗ün tß║úi File")
         self.resizable(False, False)
         self.configure(bg="#1E1E24")
         
@@ -1400,7 +1400,7 @@ class ProgressDialog(tk.Toplevel):
         except Exception:
             pass
             
-        # Luôn hiển thị trên cùng mọi cửa sổ
+        # Lu├┤n hiß╗ân thß╗ï tr├¬n c├╣ng mß╗ìi cß╗¡a sß╗ò
         self.attributes("-topmost", True)
         self.lift()
         
@@ -1415,16 +1415,16 @@ class ProgressDialog(tk.Toplevel):
         display_name = filename
         if len(display_name) > 35:
             display_name = display_name[:20] + "..." + display_name[-12:]
-        self.lbl_file = tk.Label(self, text=f"Tên file: {display_name}", font=("Segoe UI", 9), fg="#FFFFFF", bg="#1E1E24")
+        self.lbl_file = tk.Label(self, text=f"T├¬n file: {display_name}", font=("Segoe UI", 9), fg="#FFFFFF", bg="#1E1E24")
         self.lbl_file.pack(pady=2, padx=20, anchor=tk.W)
         
-        self.lbl_size = tk.Label(self, text=f"Dung lượng: {self.format_size(total_size)}", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
+        self.lbl_size = tk.Label(self, text=f"Dung l╞░ß╗úng: {self.format_size(total_size)}", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_size.pack(pady=2, padx=20, anchor=tk.W)
         
-        self.lbl_progress = tk.Label(self, text="Đang chuẩn bị... 0%", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
+        self.lbl_progress = tk.Label(self, text="─Éang chuß║⌐n bß╗ï... 0%", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_progress.pack(pady=(10, 2), padx=20, anchor=tk.W)
         
-        self.lbl_stats = tk.Label(self, text="Tốc độ: -- KB/s | Thời gian dự kiến: --:--", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
+        self.lbl_stats = tk.Label(self, text="Tß╗æc ─æß╗Ö: -- KB/s | Thß╗¥i gian dß╗▒ kiß║┐n: --:--", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_stats.pack(pady=2, padx=20, anchor=tk.W)
         
         self.progress_bar = PremiumProgressBar(self, width=320, height=12, bg="#15151B", fg="#00ADB5")
@@ -1432,7 +1432,7 @@ class ProgressDialog(tk.Toplevel):
         
         if self.on_cancel:
             btn_cancel = tk.Button(
-                self, text="Hủy (Cancel)", font=("Segoe UI", 9, "bold"),
+                self, text="Hß╗ºy (Cancel)", font=("Segoe UI", 9, "bold"),
                 fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
                 relief=tk.FLAT, bd=0, padx=20, pady=5, cursor="hand2", command=self.trigger_cancel
             )
@@ -1483,7 +1483,7 @@ class ProgressDialog(tk.Toplevel):
         percent = max(0, min(100, percent))
         
         self.lbl_progress.config(
-            text=f"Đang truyền tải... {percent}% ({self.format_size(sent_bytes)} / {self.format_size(self.total_size)})"
+            text=f"─Éang truyß╗ün tß║úi... {percent}% ({self.format_size(sent_bytes)} / {self.format_size(self.total_size)})"
         )
         
         elapsed_time = time.time() - self.start_time
@@ -1494,7 +1494,7 @@ class ProgressDialog(tk.Toplevel):
                 remaining_time = remaining_bytes / speed
                 mins = int(remaining_time // 60)
                 secs = int(remaining_time % 60)
-                time_str = f"{mins} min {secs:02d} giây"
+                time_str = f"{mins} min {secs:02d} gi├óy"
             else:
                 time_str = "--:--"
             speed_str = f"{self.format_speed(speed)}"
@@ -1502,7 +1502,7 @@ class ProgressDialog(tk.Toplevel):
             speed_str = "-- KB/s"
             time_str = "--:--"
             
-        self.lbl_stats.config(text=f"Tốc độ: {speed_str} | Thời gian dự kiến: {time_str}")
+        self.lbl_stats.config(text=f"Tß╗æc ─æß╗Ö: {speed_str} | Thß╗¥i gian dß╗▒ kiß║┐n: {time_str}")
         
         self.progress_bar.set_progress(percent)
         self.update_idletasks()
@@ -1543,17 +1543,17 @@ class ConfirmDialog(tk.Toplevel):
         except Exception:
             pass
             
-        # Thiết lập thuộc tính Modal & Topmost
+        # Thiß║┐t lß║¡p thuß╗Öc t├¡nh Modal & Topmost
         self.attributes("-topmost", True)
-        # Chỉ liên kết transient nếu cửa sổ cha đang hiển thị, nếu không hộp thoại sẽ bị ẩn theo cha.
+        # Chß╗ë li├¬n kß║┐t transient nß║┐u cß╗¡a sß╗ò cha ─æang hiß╗ân thß╗ï, nß║┐u kh├┤ng hß╗Öp thoß║íi sß║╜ bß╗ï ß║⌐n theo cha.
         if parent and parent.state() != "withdrawn":
             self.transient(parent)
         else:
-            # Ép hiển thị vì nếu parent ẩn, Toplevel có thể bị ẩn theo mặc định
+            # ├ëp hiß╗ân thß╗ï v├¼ nß║┐u parent ß║⌐n, Toplevel c├│ thß╗â bß╗ï ß║⌐n theo mß║╖c ─æß╗ïnh
             self.deiconify()
             self.lift()
             self.focus_force()
-        # Bỏ grab_set() để tránh xung đột Focus & Event routing trên một số hệ thống Windows
+        # Bß╗Å grab_set() ─æß╗â tr├ính xung ─æß╗Öt Focus & Event routing tr├¬n mß╗Öt sß╗æ hß╗ç thß╗æng Windows
         
         lbl_title = tk.Label(self, text=title.upper(), font=("Segoe UI", 11, "bold"), fg="#00ADB5", bg="#1E1E24")
         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
@@ -1581,14 +1581,14 @@ class ConfirmDialog(tk.Toplevel):
                 self.on_no_cb()
                 
         btn_yes = tk.Button(
-            btn_frame, text="Đồng ý (Yes)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="─Éß╗ông ├╜ (Yes)", font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
         )
         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
         btn_no = tk.Button(
-            btn_frame, text="Bỏ qua (No)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="Bß╗Å qua (No)", font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
         )
@@ -1614,7 +1614,7 @@ class ConfirmDialog(tk.Toplevel):
 WM_CLIPBOARDUPDATE = 0x031D
 HWND_MESSAGE = -3
 
-# Định nghĩa các kiểu dữ liệu tương thích 64-bit để tránh lỗi OverflowError trên Windows 64-bit
+# ─Éß╗ïnh ngh─⌐a c├íc kiß╗âu dß╗» liß╗çu t╞░╞íng th├¡ch 64-bit ─æß╗â tr├ính lß╗ùi OverflowError tr├¬n Windows 64-bit
 WPARAM_64 = ctypes.c_size_t
 LPARAM_64 = ctypes.c_ssize_t
 LRESULT_64 = ctypes.c_ssize_t
@@ -1631,7 +1631,7 @@ try:
 except:
     pass
 
-# Khởi tạo trước thông số kiểu dữ liệu của DefWindowProcW để tránh lỗi trong quá trình tạo cửa sổ
+# Khß╗ƒi tß║ío tr╞░ß╗¢c th├┤ng sß╗æ kiß╗âu dß╗» liß╗çu cß╗ºa DefWindowProcW ─æß╗â tr├ính lß╗ùi trong qu├í tr├¼nh tß║ío cß╗¡a sß╗ò
 try:
     ctypes.windll.user32.DefWindowProcW.argtypes = [ctypes.c_void_p, ctypes.c_uint, WPARAM_64, LPARAM_64]
     ctypes.windll.user32.DefWindowProcW.restype = LRESULT_64
@@ -1667,22 +1667,22 @@ class ClipboardEventListener:
         WM_SETUP_DELAYED_RENDERING = 0x0400 + 101
         
         if msg == WM_CLIPBOARDUPDATE:
-            log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
+            log_debug(f"[WndProc] Nhß║¡n WM_CLIPBOARDUPDATE")
             self.callback()
             return 0
         elif msg == WM_RENDERFORMAT:
-            log_debug(f"[WndProc] Nhận WM_RENDERFORMAT. wparam={wparam}")
+            log_debug(f"[WndProc] Nhß║¡n WM_RENDERFORMAT. wparam={wparam}")
             if wparam == 15: # CF_HDROP
                 if self.manager:
                     self.manager.render_format(15)
                 return 0
         elif msg == WM_DESTROYCLIPBOARD:
-            log_debug(f"[WndProc] Nhận WM_DESTROYCLIPBOARD")
+            log_debug(f"[WndProc] Nhß║¡n WM_DESTROYCLIPBOARD")
             if self.manager:
                 self.manager.lost_ownership()
             return 0
         elif msg == WM_SETUP_DELAYED_RENDERING:
-            log_debug(f"[WndProc] Nhận WM_SETUP_DELAYED_RENDERING. Đang tiến hành thiết lập delayed rendering...")
+            log_debug(f"[WndProc] Nhß║¡n WM_SETUP_DELAYED_RENDERING. ─Éang tiß║┐n h├ánh thiß║┐t lß║¡p delayed rendering...")
             if self.manager:
                 self.manager._execute_setup_delayed_rendering()
             return 0
@@ -1694,15 +1694,15 @@ class ClipboardEventListener:
 
     def _run(self):
         try:
-            log_debug("[Listener] Bắt đầu thread đăng ký Clipboard listener.")
+            log_debug("[Listener] Bß║»t ─æß║ºu thread ─æ─âng k├╜ Clipboard listener.")
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
             
-            # Định nghĩa types cho GetModuleHandleW trước khi gọi
+            # ─Éß╗ïnh ngh─⌐a types cho GetModuleHandleW tr╞░ß╗¢c khi gß╗ìi
             kernel32.GetModuleHandleW.restype = ctypes.c_void_p
             h_mod = kernel32.GetModuleHandleW(None)
             
-            # Không còn dùng Low-level Mouse Hook (WH_MOUSE_LL) để tránh lag chuột toàn hệ thống
+            # Kh├┤ng c├▓n d├╣ng Low-level Mouse Hook (WH_MOUSE_LL) ─æß╗â tr├ính lag chuß╗Öt to├án hß╗ç thß╗æng
 
             user32.CreateWindowExW.argtypes = [
                 ctypes.c_uint, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -1713,7 +1713,7 @@ class ClipboardEventListener:
             kernel32.GetModuleHandleW.restype = ctypes.c_void_p
 
             wndproc = WNDPROCTYPE(self._wndproc)
-            self.wndproc_ref = wndproc  # Giữ reference để tránh bị garbage collected
+            self.wndproc_ref = wndproc  # Giß╗» reference ─æß╗â tr├ính bß╗ï garbage collected
             wndclass = WNDCLASSEX()
             wndclass.cbSize = ctypes.sizeof(WNDCLASSEX)
             wndclass.lpfnWndProc = wndproc
@@ -1721,10 +1721,10 @@ class ClipboardEventListener:
             wndclass.hInstance = kernel32.GetModuleHandleW(None)
             
             reg_res = user32.RegisterClassExW(ctypes.byref(wndclass))
-            log_debug(f"[Listener] RegisterClassExW trả về: {reg_res}")
+            log_debug(f"[Listener] RegisterClassExW trß║ú vß╗ü: {reg_res}")
             
             self.hwnd = user32.CreateWindowExW(0, wndclass.lpszClassName, "HiddenWindow", 0, 0, 0, 0, 0, ctypes.c_void_p(HWND_MESSAGE), None, wndclass.hInstance, None)
-            log_debug(f"[Listener] CreateWindowExW trả về HWND: {self.hwnd}")
+            log_debug(f"[Listener] CreateWindowExW trß║ú vß╗ü HWND: {self.hwnd}")
             
             try:
                 WM_CLIPBOARDUPDATE = 0x031D
@@ -1734,12 +1734,12 @@ class ClipboardEventListener:
                 user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_CLIPBOARDUPDATE, MSGFLT_ALLOW, None)
                 user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_RENDERFORMAT, MSGFLT_ALLOW, None)
                 user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(self.hwnd), WM_DESTROYCLIPBOARD, MSGFLT_ALLOW, None)
-                log_debug("[Listener] ChangeWindowMessageFilterEx thành công.")
+                log_debug("[Listener] ChangeWindowMessageFilterEx th├ánh c├┤ng.")
             except Exception as e:
-                log_debug(f"[Listener] ChangeWindowMessageFilterEx thất bại: {e}")
+                log_debug(f"[Listener] ChangeWindowMessageFilterEx thß║Ñt bß║íi: {e}")
 
             add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
+            log_debug(f"[Listener] AddClipboardFormatListener trß║ú vß╗ü: {add_res}")
             
             msg = wintypes.MSG()
             while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
@@ -1750,7 +1750,7 @@ class ClipboardEventListener:
             user32.DestroyWindow(ctypes.c_void_p(self.hwnd))
             user32.UnregisterClassW(wndclass.lpszClassName, wndclass.hInstance)
         except Exception as e:
-            print("[ClipboardEvent] Lỗi Listener:", e)
+            print("[ClipboardEvent] Lß╗ùi Listener:", e)
 
     def stop(self):
         self.running = False
@@ -1758,33 +1758,33 @@ class ClipboardEventListener:
             try: ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.hwnd), 0, 0, 0)
             except: pass
 
-# Đường dẫn thư mục lưu file chuyển từ Client (dùng cho headless/SYSTEM mode)
+# ─É╞░ß╗¥ng dß║½n th╞░ mß╗Ñc l╞░u file chuyß╗ân tß╗½ Client (d├╣ng cho headless/SYSTEM mode)
 HEADLESS_TRANSFER_DIR = r"C:\Users\Public\Downloads\RemoteDesktopTransfers"
-# Tên Named Pipe để giao tiếp giữa Service (SYSTEM) và Agent (User)
+# T├¬n Named Pipe ─æß╗â giao tiß║┐p giß╗»a Service (SYSTEM) v├á Agent (User)
 CLIPBOARD_PIPE_NAME = r"\\.\pipe\RemoteDesktopClipboardPipe"
 
 def create_named_pipe_with_everyone_dacl():
     """
-    Tạo Named Pipe Server với Security Descriptor cho phép nhóm Everyone 
-    có quyền Read/Write. TUYỆT ĐỐI KHÔNG truyền None vào Security Attributes.
+    Tß║ío Named Pipe Server vß╗¢i Security Descriptor cho ph├⌐p nh├│m Everyone 
+    c├│ quyß╗ün Read/Write. TUYß╗åT ─Éß╗ÉI KH├öNG truyß╗ün None v├áo Security Attributes.
     """
     import win32pipe
     import win32file
     import win32security
     import ntsecuritycon as con
     
-    # Tạo Security Descriptor với DACL cho Everyone
+    # Tß║ío Security Descriptor vß╗¢i DACL cho Everyone
     sd = win32security.SECURITY_DESCRIPTOR()
     sd.Initialize()
     
-    # Tạo DACL
+    # Tß║ío DACL
     dacl = win32security.ACL()
     dacl.Initialize()
     
-    # Lấy SID của nhóm "Everyone"
+    # Lß║Ñy SID cß╗ºa nh├│m "Everyone"
     everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid)
     
-    # Thêm quyền Read/Write cho Everyone
+    # Th├¬m quyß╗ün Read/Write cho Everyone
     dacl.AddAccessAllowedAce(
         win32security.ACL_REVISION,
         con.FILE_GENERIC_READ | con.FILE_GENERIC_WRITE,
@@ -1793,21 +1793,21 @@ def create_named_pipe_with_everyone_dacl():
     
     sd.SetSecurityDescriptorDacl(True, dacl, False)
     
-    # Tạo Security Attributes
+    # Tß║ío Security Attributes
     sa = win32security.SECURITY_ATTRIBUTES()
     sa.bInheritHandle = False
     sa.SECURITY_DESCRIPTOR = sd
     
-    # Tạo Named Pipe
+    # Tß║ío Named Pipe
     pipe_handle = win32pipe.CreateNamedPipe(
         CLIPBOARD_PIPE_NAME,
-        win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
+        win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chß╗ë ghi (outbound)
         win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
-        1,       # Số instance tối đa
+        1,       # Sß╗æ instance tß╗æi ─æa
         10 * 1024 * 1024,    # Output buffer size (10MB)
         10 * 1024 * 1024,    # Input buffer size (10MB)
         0,       # Default timeout
-        sa       # Security Attributes với DACL cho Everyone
+        sa       # Security Attributes vß╗¢i DACL cho Everyone
     )
     
     return pipe_handle
@@ -1849,60 +1849,11 @@ class ClipboardSyncManager:
         self._send_cancelled = False
         self._receive_cancelled = False
         
-        # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
+        # Named Pipe handle cho headless mode (giao tiß║┐p vß╗¢i Clipboard Agent)
         self._pipe_handle = None
         self._pipe_lock = threading.Lock()
         
-        # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
-        threading.Thread(target=self._start_uppipe_server, daemon=True).start()
-
-    def _start_uppipe_server(self):
-        import win32pipe, win32file, win32security
-        import ntsecuritycon as con
-        import time
-        while True:
-            try:
-                sd = win32security.SECURITY_DESCRIPTOR()
-                sd.Initialize()
-                dacl = win32security.ACL()
-                dacl.Initialize()
-                everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid)
-                dacl.AddAccessAllowedAce(win32security.ACL_REVISION, con.GENERIC_READ | con.GENERIC_WRITE, everyone_sid)
-                sd.SetSecurityDescriptorDacl(1, dacl, 0)
-                sa = win32security.SECURITY_ATTRIBUTES()
-                sa.SECURITY_DESCRIPTOR = sd
-                
-                pipe_handle = win32pipe.CreateNamedPipe(
-                    r"\\.\pipe\RemoteDesktopClipboardUpPipe",
-                    win32pipe.PIPE_ACCESS_INBOUND,
-                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,
-                    win32pipe.PIPE_UNLIMITED_INSTANCES,
-                    65536, 65536, 0, sa
-                )
-                if pipe_handle != -1:
-                    win32pipe.ConnectNamedPipe(pipe_handle, None)
-                    threading.Thread(target=self._handle_uppipe_client, args=(pipe_handle,), daemon=True).start()
-            except Exception as e:
-                time.sleep(1)
-
-    def _handle_uppipe_client(self, pipe_handle):
-        import win32file, json
-        try:
-            hr, data = win32file.ReadFile(pipe_handle, 65536)
-            if hr == 0 and data:
-                metadata = json.loads(data.decode('utf-8'))
-                if metadata and self.active_sockets:
-                    pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
-                    with self.lock:
-                        for s in list(self.active_sockets):
-                            try: send_msg(s, pkt)
-                            except: pass
-        except Exception as e:
-            log_debug(f"[_handle_uppipe_client] Lỗi: {e}")
-        finally:
-            try:
-                win32file.CloseHandle(pipe_handle)
-            except: pass
+        # Kh├┤ng cß║ºn luß╗ông theo d├╡i paste v├¼ d├╣ng delayed rendering thß╗▒c tß║┐
 
     def register_app(self, app):
         self.app = app
@@ -1924,36 +1875,36 @@ class ClipboardSyncManager:
         try:
             h_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_CancelTransfer_Event")
         except Exception as e:
-            log_debug(f"[_cancel_listener_thread] Lỗi tạo Event: {e}")
+            log_debug(f"[_cancel_listener_thread] Lß╗ùi tß║ío Event: {e}")
             return
             
-        log_debug("[_cancel_listener_thread] Bắt đầu lắng nghe Global\\AntigravityP2P_CancelTransfer_Event...")
+        log_debug("[_cancel_listener_thread] Bß║»t ─æß║ºu lß║»ng nghe Global\\AntigravityP2P_CancelTransfer_Event...")
         while True:
             rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
             if rc == win32event.WAIT_OBJECT_0:
-                log_debug("[_cancel_listener_thread] Nhận tín hiệu hủy truyền tải từ Agent.")
+                log_debug("[_cancel_listener_thread] Nhß║¡n t├¡n hiß╗çu hß╗ºy truyß╗ün tß║úi tß╗½ Agent.")
                 self.cancel_active_transfer(remote_triggered=False)
 
     def _send_progress_signal(self, data_type, payload):
         """
-        Gửi tín hiệu tiến trình qua Named Pipe đang mở hoặc tạo mới nếu chưa có.
+        Gß╗¡i t├¡n hiß╗çu tiß║┐n tr├¼nh qua Named Pipe ─æang mß╗ƒ hoß║╖c tß║ío mß╗¢i nß║┐u ch╞░a c├│.
         """
         import win32file
         import win32pipe
         
         if not hasattr(self, '_transfer_pipe') or self._transfer_pipe is None:
             try:
-                log_debug("[_send_progress_signal] Đang tạo Named Pipe cho tiến trình tải file...")
+                log_debug("[_send_progress_signal] ─Éang tß║ío Named Pipe cho tiß║┐n tr├¼nh tß║úi file...")
                 self._transfer_pipe = create_named_pipe_with_everyone_dacl()
                 if self._transfer_pipe is None or self._transfer_pipe == -1:
                     self._transfer_pipe = None
-                    log_debug("[_send_progress_signal] Lỗi: Không tạo được Named Pipe.")
+                    log_debug("[_send_progress_signal] Lß╗ùi: Kh├┤ng tß║ío ─æ╞░ß╗úc Named Pipe.")
                     return
-                log_debug("[_send_progress_signal] Đang chờ Clipboard Agent kết nối...")
+                log_debug("[_send_progress_signal] ─Éang chß╗¥ Clipboard Agent kß║┐t nß╗æi...")
                 win32pipe.ConnectNamedPipe(self._transfer_pipe, None)
-                log_debug("[_send_progress_signal] Clipboard Agent đã kết nối.")
+                log_debug("[_send_progress_signal] Clipboard Agent ─æ├ú kß║┐t nß╗æi.")
             except Exception as e:
-                log_debug(f"[_send_progress_signal] Lỗi tạo/kết nối Pipe: {e}")
+                log_debug(f"[_send_progress_signal] Lß╗ùi tß║ío/kß║┐t nß╗æi Pipe: {e}")
                 self._transfer_pipe = None
                 return
                 
@@ -1963,7 +1914,7 @@ class ClipboardSyncManager:
                 data = msg.encode("utf-8")
                 win32file.WriteFile(self._transfer_pipe, data)
             except Exception as e:
-                log_debug(f"[_send_progress_signal] Lỗi ghi Pipe: {e}. Đang dọn dẹp để kết nối lại...")
+                log_debug(f"[_send_progress_signal] Lß╗ùi ghi Pipe: {e}. ─Éang dß╗ìn dß║╣p ─æß╗â kß║┐t nß╗æi lß║íi...")
                 try:
                     win32pipe.DisconnectNamedPipe(self._transfer_pipe)
                     win32file.CloseHandle(self._transfer_pipe)
@@ -1979,44 +1930,44 @@ class ClipboardSyncManager:
                 win32file.FlushFileBuffers(self._transfer_pipe)
                 win32pipe.DisconnectNamedPipe(self._transfer_pipe)
                 win32file.CloseHandle(self._transfer_pipe)
-                log_debug("[_close_transfer_pipe] Đã đóng Pipe tiến trình tải file.")
+                log_debug("[_close_transfer_pipe] ─É├ú ─æ├│ng Pipe tiß║┐n tr├¼nh tß║úi file.")
             except Exception as e:
-                log_debug(f"[_close_transfer_pipe] Lỗi đóng Pipe: {e}")
+                log_debug(f"[_close_transfer_pipe] Lß╗ùi ─æ├│ng Pipe: {e}")
             self._transfer_pipe = None
 
     def _send_to_pipe(self, data_type, payload):
         """
-        Gửi dữ liệu (file hoặc text) qua Named Pipe cho Clipboard Agent.
-        Format gửi: "TYPE:payload"
+        Gß╗¡i dß╗» liß╗çu (file hoß║╖c text) qua Named Pipe cho Clipboard Agent.
+        Format gß╗¡i: "TYPE:payload"
         """
         import win32pipe
         import win32file
 
         pipe_handle = None
         try:
-            log_debug(f"[_send_to_pipe] Đang tạo Named Pipe để gửi {data_type}...")
+            log_debug(f"[_send_to_pipe] ─Éang tß║ío Named Pipe ─æß╗â gß╗¡i {data_type}...")
             pipe_handle = create_named_pipe_with_everyone_dacl()
 
             if pipe_handle is None or pipe_handle == -1:
-                log_debug("[_send_to_pipe] Lỗi: Không tạo được Named Pipe.")
+                log_debug("[_send_to_pipe] Lß╗ùi: Kh├┤ng tß║ío ─æ╞░ß╗úc Named Pipe.")
                 return
 
-            log_debug(f"[_send_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
-            # Chờ Agent kết nối (blocking call)
+            log_debug(f"[_send_to_pipe] ─Éang chß╗¥ Clipboard Agent kß║┐t nß╗æi tß╗¢i Pipe...")
+            # Chß╗¥ Agent kß║┐t nß╗æi (blocking call)
             win32pipe.ConnectNamedPipe(pipe_handle, None)
-            log_debug(f"[_send_to_pipe] Agent đã kết nối. Đang gửi {data_type}...")
+            log_debug(f"[_send_to_pipe] Agent ─æ├ú kß║┐t nß╗æi. ─Éang gß╗¡i {data_type}...")
 
-            # Gửi dữ liệu dưới dạng "TYPE:payload" encoded in UTF-8
+            # Gß╗¡i dß╗» liß╗çu d╞░ß╗¢i dß║íng "TYPE:payload" encoded in UTF-8
             msg = f"{data_type}:{payload}\x00"
             data = msg.encode("utf-8")
             win32file.WriteFile(pipe_handle, data)
 
-            log_debug(f"[_send_to_pipe] Đã gửi thành công qua Pipe: {data_type}")
-            print(f"[Pipe] Đã gửi {data_type} qua Named Pipe.")
+            log_debug(f"[_send_to_pipe] ─É├ú gß╗¡i th├ánh c├┤ng qua Pipe: {data_type}")
+            print(f"[Pipe] ─É├ú gß╗¡i {data_type} qua Named Pipe.")
 
         except Exception as e:
-            log_debug(f"[_send_to_pipe] Lỗi gửi qua Pipe: {e}")
-            print(f"[Pipe] Lỗi gửi qua Pipe: {e}")
+            log_debug(f"[_send_to_pipe] Lß╗ùi gß╗¡i qua Pipe: {e}")
+            print(f"[Pipe] Lß╗ùi gß╗¡i qua Pipe: {e}")
         finally:
             if pipe_handle is not None and pipe_handle != -1:
                 try:
@@ -2028,7 +1979,7 @@ class ClipboardSyncManager:
 
     def _send_path_to_pipe(self, file_path):
         """
-        Gửi đường dẫn file qua Named Pipe cho Clipboard Agent.
+        Gß╗¡i ─æ╞░ß╗¥ng dß║½n file qua Named Pipe cho Clipboard Agent.
         """
         self._send_to_pipe("FILE", file_path)
 
@@ -2087,7 +2038,7 @@ class ClipboardSyncManager:
             except queue.Empty:
                 break
             except Exception as e:
-                log_debug(f"[process_gui_queue] Lỗi: {e}")
+                log_debug(f"[process_gui_queue] Lß╗ùi: {e}")
 
     def add_socket(self, sock):
         if not ENABLE_CLIPBOARD_SYNC: return
@@ -2114,7 +2065,7 @@ class ClipboardSyncManager:
         self.gui_queue.put(("destroy", None))
 
     def cancel_active_transfer(self, remote_triggered=False):
-        # Thiết lập cờ hủy ngay lập tức để ngắt các tiến trình đang gửi/nhận
+        # Thiß║┐t lß║¡p cß╗¥ hß╗ºy ngay lß║¡p tß╗⌐c ─æß╗â ngß║»t c├íc tiß║┐n tr├¼nh ─æang gß╗¡i/nhß║¡n
         self._receive_cancelled = True
         self._send_cancelled = True
         
@@ -2122,13 +2073,13 @@ class ClipboardSyncManager:
             if not getattr(self, 'pending_remote_files', []):
                 return
             
-        print(f"[FileTransfer] Bắt đầu dọn dẹp hủy truyền tải (remote_triggered={remote_triggered})...")
+        print(f"[FileTransfer] Bß║»t ─æß║ºu dß╗ìn dß║╣p hß╗ºy truyß╗ün tß║úi (remote_triggered={remote_triggered})...")
         
-        # Dọn dẹp cache file và trạng thái paste
+        # Dß╗ìn dß║╣p cache file v├á trß║íng th├íi paste
         self.pending_remote_files = []
         self.is_paste_triggered = False
         
-        # Giải phóng delayed rendering trên clipboard bằng cách xóa sạch clipboard nếu app đang sở hữu
+        # Giß║úi ph├│ng delayed rendering tr├¬n clipboard bß║▒ng c├ích x├│a sß║ích clipboard nß║┐u app ─æang sß╗ƒ hß╗»u
         try:
             user32 = ctypes.windll.user32
             owner = user32.GetClipboardOwner()
@@ -2140,28 +2091,28 @@ class ClipboardSyncManager:
                     finally:
                         self.ignore_destroy_clipboard = False
                     user32.CloseClipboard()
-                    log_debug("[cancel_active_transfer] Đã giải phóng/xóa clipboard sở hữu bởi app.")
+                    log_debug("[cancel_active_transfer] ─É├ú giß║úi ph├│ng/x├│a clipboard sß╗ƒ hß╗»u bß╗ƒi app.")
         except Exception as e:
-            log_debug(f"[cancel_active_transfer] Lỗi khi giải phóng clipboard: {e}")
+            log_debug(f"[cancel_active_transfer] Lß╗ùi khi giß║úi ph├│ng clipboard: {e}")
         
-        # 1. Báo cho remote nếu hủy từ phía local
+        # 1. B├ío cho remote nß║┐u hß╗ºy tß╗½ ph├¡a local
         if not remote_triggered and self.sock:
             try:
                 pkt = json.dumps({"type": "cancel_transfer"}).encode('utf-8')
                 send_msg(self.sock, pkt)
             except Exception as e:
-                print(f"[FileTransfer] Lỗi gửi tín hiệu hủy: {e}")
+                print(f"[FileTransfer] Lß╗ùi gß╗¡i t├¡n hiß╗çu hß╗ºy: {e}")
                 
-        # Gửi tín hiệu hủy cho agent nếu ở chế độ headless
+        # Gß╗¡i t├¡n hiß╗çu hß╗ºy cho agent nß║┐u ß╗ƒ chß║┐ ─æß╗Ö headless
         if self.app and getattr(self.app, 'is_headless', False):
             self._send_progress_signal("CANCEL", "")
             self._close_transfer_pipe()
                 
-        # 2. Tắt cờ truyền tải
+        # 2. Tß║»t cß╗¥ truyß╗ün tß║úi
         self.transfer_in_progress = False
         self._send_cancelled = True
         
-        # 3. Đóng và xóa các file dở dang
+        # 3. ─É├│ng v├á x├│a c├íc file dß╗ƒ dang
         for filename, transfer in list(self.incoming_transfers.items()):
             if transfer.get("handle"):
                 try:
@@ -2171,24 +2122,24 @@ class ClipboardSyncManager:
             if transfer.get("path") and os.path.exists(transfer["path"]):
                 try:
                     os.remove(transfer["path"])
-                    print(f"[FileTransfer] Đã xóa file dở dang: {transfer['path']}")
+                    print(f"[FileTransfer] ─É├ú x├│a file dß╗ƒ dang: {transfer['path']}")
                 except Exception as e:
-                    print(f"[FileTransfer] Không thể xóa file dở dang: {e}")
+                    print(f"[FileTransfer] Kh├┤ng thß╗â x├│a file dß╗ƒ dang: {e}")
                     
         self.incoming_transfers.clear()
         
-        # Xóa các file đã tải xong trong batch hiện tại nếu bị hủy
+        # X├│a c├íc file ─æ├ú tß║úi xong trong batch hiß╗çn tß║íi nß║┐u bß╗ï hß╗ºy
         if hasattr(self, 'batch_paths') and self.batch_paths:
             for p in list(self.batch_paths):
                 if os.path.exists(p):
                     try:
                         os.remove(p)
-                        print(f"[FileTransfer] Đã xóa file đã hoàn thành của lô bị hủy: {p}")
+                        print(f"[FileTransfer] ─É├ú x├│a file ─æ├ú ho├án th├ánh cß╗ºa l├┤ bß╗ï hß╗ºy: {p}")
                     except Exception as e:
-                        print(f"[FileTransfer] Không thể xóa file đã hoàn thành: {e}")
+                        print(f"[FileTransfer] Kh├┤ng thß╗â x├│a file ─æ├ú ho├án th├ánh: {e}")
             self.batch_paths = []
         
-        # 4. Đóng progress dialog
+        # 4. ─É├│ng progress dialog
         if self.active_dialog:
             try:
                 self.active_dialog.on_cancel = None
@@ -2196,36 +2147,36 @@ class ClipboardSyncManager:
                 pass
         self.close_dialog()
             
-        # 5. Cập nhật trạng thái hiển thị
+        # 5. Cß║¡p nhß║¡t trß║íng th├íi hiß╗ân thß╗ï
         if self.app:
             try:
                 if hasattr(self.app, 'update_status'):
-                    self.app.after(0, lambda: self.app.update_status("Đã hủy truyền tải file."))
+                    self.app.after(0, lambda: self.app.update_status("─É├ú hß╗ºy truyß╗ün tß║úi file."))
             except:
                 pass
             
-        # 6. Mở khóa tiến trình để tiếp tục hoạt động bình thường
+        # 6. Mß╗ƒ kh├│a tiß║┐n tr├¼nh ─æß╗â tiß║┐p tß╗Ñc hoß║ít ─æß╗Öng b├¼nh th╞░ß╗¥ng
         self.transfer_done_event.set()
 
     def on_clipboard_changed(self):
         if not ENABLE_CLIPBOARD_SYNC or self.transfer_in_progress: return
         
-        # Tránh tự kích hoạt vòng lặp khi chính ứng dụng thiết lập delayed rendering
+        # Tr├ính tß╗▒ k├¡ch hoß║ít v├▓ng lß║╖p khi ch├¡nh ß╗⌐ng dß╗Ñng thiß║┐t lß║¡p delayed rendering
         try:
             user32 = ctypes.windll.user32
             user32.GetClipboardOwner.restype = ctypes.c_void_p
             owner = user32.GetClipboardOwner()
             if self.listener and self.listener.hwnd and owner == self.listener.hwnd:
-                log_debug("[on_clipboard_changed] Bỏ qua sự kiện thay đổi clipboard do chính mình sở hữu (delayed rendering).")
+                log_debug("[on_clipboard_changed] Bß╗Å qua sß╗▒ kiß╗çn thay ─æß╗òi clipboard do ch├¡nh m├¼nh sß╗ƒ hß╗»u (delayed rendering).")
                 return
         except Exception as e:
-            log_debug(f"[on_clipboard_changed] Lỗi kiểm tra GetClipboardOwner: {e}")
+            log_debug(f"[on_clipboard_changed] Lß╗ùi kiß╗âm tra GetClipboardOwner: {e}")
             
         threading.Thread(target=self._process_clipboard_change, daemon=True).start()
 
     def _process_clipboard_change(self):
         try:
-            time.sleep(0.2) # Chờ xíu để Windows thả file lock
+            time.sleep(0.2) # Chß╗¥ x├¡u ─æß╗â Windows thß║ú file lock
             owner_hwnd = None
             if self.app:
                 try: owner_hwnd = self.app.winfo_id()
@@ -2233,11 +2184,11 @@ class ClipboardSyncManager:
                 
             current_files = get_clipboard_files(owner_hwnd)
             if current_files:
-                # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
+                # Bß╗Å qua nß║┐u c├│ bß║Ñt kß╗│ file n├áo nß║▒m trong th╞░ mß╗Ñc tß║ím RemoteDesktopTransfers (─æß╗â tr├ính v├▓ng lß║╖p clipboard)
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                 temp_dir_abs = os.path.abspath(temp_dir).lower()
                 if any(os.path.abspath(f).lower().startswith(temp_dir_abs) for f in current_files):
-                    log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
+                    log_debug("[_process_clipboard_change] Bß╗Å qua v├¼ ph├ít hiß╗çn tß╗çp tin trong th╞░ mß╗Ñc tß║ím (tr├ính lß║╖p clipboard).")
                     return
                     
                 with self.lock:
@@ -2269,44 +2220,30 @@ class ClipboardSyncManager:
                                 })
                                 
                 if not metadata: return
-                if metadata:
-                    if self.active_sockets:
-                        print(f"[Clipboard] Đã gửi tín hiệu files_copied_meta cho {len(metadata)} file qua EventListener.")
-                        pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
-                        with self.lock:
-                            sockets_to_remove = []
-                            for s in list(self.active_sockets):
-                                try:
-                                    send_msg(s, pkt)
-                                except Exception:
-                                    sockets_to_remove.append(s)
-                            for s in sockets_to_remove:
-                                if s in self.active_sockets: self.active_sockets.remove(s)
-                    else:
-                        try:
-                            import win32file
-                            pipe_handle = win32file.CreateFile(
-                                r"\\.\pipe\RemoteDesktopClipboardUpPipe",
-                                win32file.GENERIC_WRITE, 0, None,
-                                win32file.OPEN_EXISTING, 0, None
-                            )
-                            win32file.WriteFile(pipe_handle, json.dumps(metadata).encode('utf-8'))
-                            win32file.CloseHandle(pipe_handle)
-                            log_debug("[_process_clipboard_change] Đã gửi metadata lên Service qua UpPipe.")
-                        except Exception as e:
-                            log_debug(f"[_process_clipboard_change] Không gửi được metadata lên Service: {e}")
+                if metadata and self.active_sockets:
+                    print(f"[Clipboard] ─É├ú gß╗¡i t├¡n hiß╗çu files_copied_meta cho {len(metadata)} file qua EventListener.")
+                    pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
+                    with self.lock:
+                        sockets_to_remove = []
+                        for s in list(self.active_sockets):
+                            try:
+                                send_msg(s, pkt)
+                            except Exception:
+                                sockets_to_remove.append(s)
+                        for s in sockets_to_remove:
+                            if s in self.active_sockets: self.active_sockets.remove(s)
             else:
-                # Nếu không phải copy file, kiểm tra xem có phải copy text không
+                # Nß║┐u kh├┤ng phß║úi copy file, kiß╗âm tra xem c├│ phß║úi copy text kh├┤ng
                 current_text = get_clipboard_text(owner_hwnd)
                 if current_text is not None:
-                    # Bỏ qua nếu trùng với text vừa nhận hoặc vừa gửi để tránh lặp vô tận
+                    # Bß╗Å qua nß║┐u tr├╣ng vß╗¢i text vß╗½a nhß║¡n hoß║╖c vß╗½a gß╗¡i ─æß╗â tr├ính lß║╖p v├┤ tß║¡n
                     if current_text == getattr(self, 'last_received_text', '') or current_text == getattr(self, 'last_sent_text', ''):
                         return
                         
                     self.last_sent_text = current_text
                     if self.active_sockets:
-                        log_debug(f"[Clipboard] Phát hiện text clipboard mới locally: {current_text[:50]}...")
-                        print(f"[Clipboard] Đang gửi text clipboard sang đối tác...")
+                        log_debug(f"[Clipboard] Ph├ít hiß╗çn text clipboard mß╗¢i locally: {current_text[:50]}...")
+                        print(f"[Clipboard] ─Éang gß╗¡i text clipboard sang ─æß╗æi t├íc...")
                         pkt = json.dumps({"type": "clipboard_text", "text": current_text}).encode('utf-8')
                         with self.lock:
                             sockets_to_remove = []
@@ -2321,22 +2258,22 @@ class ClipboardSyncManager:
             print(f"[FileTransfer] Monitor Error: {e}")
 
     def setup_delayed_rendering(self):
-        log_debug(f"[setup_delayed_rendering] Bắt đầu. self.listener={self.listener}")
+        log_debug(f"[setup_delayed_rendering] Bß║»t ─æß║ºu. self.listener={self.listener}")
         if self.listener and self.listener.hwnd:
             ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.listener.hwnd), 0x0400 + 101, 0, 0)
-            log_debug("[setup_delayed_rendering] Đã PostMessageW WM_SETUP_DELAYED_RENDERING")
+            log_debug("[setup_delayed_rendering] ─É├ú PostMessageW WM_SETUP_DELAYED_RENDERING")
         else:
-            log_debug("[setup_delayed_rendering] Lỗi: listener hoặc hwnd chưa sẵn sàng.")
+            log_debug("[setup_delayed_rendering] Lß╗ùi: listener hoß║╖c hwnd ch╞░a sß║╡n s├áng.")
 
     def _execute_setup_delayed_rendering(self):
         if not self.listener or not self.listener.hwnd:
-            log_debug("[_execute_setup_delayed_rendering] Lỗi: hwnd chưa sẵn sàng.")
+            log_debug("[_execute_setup_delayed_rendering] Lß╗ùi: hwnd ch╞░a sß║╡n s├áng.")
             return
             
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         opened = False
-        log_debug(f"[_execute_setup_delayed_rendering] Đang cố gắng OpenClipboard với HWND: {self.listener.hwnd}")
+        log_debug(f"[_execute_setup_delayed_rendering] ─Éang cß╗æ gß║»ng OpenClipboard vß╗¢i HWND: {self.listener.hwnd}")
         for _ in range(10):
             if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
                 opened = True
@@ -2344,14 +2281,14 @@ class ClipboardSyncManager:
             time.sleep(0.05)
             
         if opened:
-            log_debug("[_execute_setup_delayed_rendering] OpenClipboard thành công. Đang EmptyClipboard...")
+            log_debug("[_execute_setup_delayed_rendering] OpenClipboard th├ánh c├┤ng. ─Éang EmptyClipboard...")
             self.ignore_destroy_clipboard = True
             try:
                 user32.EmptyClipboard()
             finally:
                 self.ignore_destroy_clipboard = False
                 
-            # Đăng ký các format để tránh Clipboard History / Cloud Clipboard tự động quét gây mất delayed rendering
+            # ─É─âng k├╜ c├íc format ─æß╗â tr├ính Clipboard History / Cloud Clipboard tß╗▒ ─æß╗Öng qu├⌐t g├óy mß║Ñt delayed rendering
             cf_exclude = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
             cf_history = user32.RegisterClipboardFormatW("CanIncludeInClipboardHistory")
             cf_cloud = user32.RegisterClipboardFormatW("CanUploadToCloudClipboard")
@@ -2365,38 +2302,34 @@ class ClipboardSyncManager:
                         kernel32.GlobalUnlock(hMem)
                         if not user32.SetClipboardData(cf_format, hMem):
                             kernel32.GlobalFree(hMem)
-                            log_debug(f"[set_dword_data] Thất bại SetClipboardData cho format {cf_format}")
+                            log_debug(f"[set_dword_data] Thß║Ñt bß║íi SetClipboardData cho format {cf_format}")
                         else:
-                            log_debug(f"[set_dword_data] Đã thiết lập format {cf_format} = {value}")
+                            log_debug(f"[set_dword_data] ─É├ú thiß║┐t lß║¡p format {cf_format} = {value}")
                     else:
                         kernel32.GlobalFree(hMem)
                 else:
-                    log_debug("[set_dword_data] GlobalAlloc thất bại")
+                    log_debug("[set_dword_data] GlobalAlloc thß║Ñt bß║íi")
                             
             if cf_exclude: set_dword_data(cf_exclude, 1)
             if cf_history: set_dword_data(cf_history, 0)
             if cf_cloud: set_dword_data(cf_cloud, 0)
             
-            cf_drop_effect = user32.RegisterClipboardFormatW("Preferred DropEffect")
-            if cf_drop_effect:
-                set_dword_data(cf_drop_effect, 5) # 5 = DROPEFFECT_COPY
-            
-            res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
+            res = fn_SetClipboardData(15, None) # CF_HDROP vß╗¢i delayed rendering (None handle)
             err = ctypes.GetLastError()
-            log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
+            log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trß║ú vß╗ü: {res}, GetLastError: {err}")
             user32.CloseClipboard()
-            print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard và loại trừ Clipboard History.")
+            print("[Clipboard] ─É├ú thiß║┐t lß║¡p delayed rendering (CF_HDROP) tr├¬n Clipboard v├á loß║íi trß╗½ Clipboard History.")
         else:
             err = ctypes.GetLastError()
-            log_debug(f"[_execute_setup_delayed_rendering] OpenClipboard THẤT BẠI. GetLastError: {err}")
-            print("[Clipboard] Không thể OpenClipboard để thiết lập delayed rendering.")
+            log_debug(f"[_execute_setup_delayed_rendering] OpenClipboard THß║ñT Bß║áI. GetLastError: {err}")
+            print("[Clipboard] Kh├┤ng thß╗â OpenClipboard ─æß╗â thiß║┐t lß║¡p delayed rendering.")
 
     def lost_ownership(self):
         if getattr(self, 'ignore_destroy_clipboard', False):
-            log_debug("[lost_ownership] Bỏ qua WM_DESTROYCLIPBOARD vì tự thực hiện EmptyClipboard.")
+            log_debug("[lost_ownership] Bß╗Å qua WM_DESTROYCLIPBOARD v├¼ tß╗▒ thß╗▒c hiß╗çn EmptyClipboard.")
             return
         self.pending_remote_files = []
-        print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
+        print("[Clipboard] ─É├ú mß║Ñt quyß╗ün sß╗ƒ hß╗»u clipboard (ng╞░ß╗¥i d├╣ng copy dß╗» liß╗çu kh├íc).")
 
     def get_active_explorer_path(self):
         try:
@@ -2422,7 +2355,7 @@ class ClipboardSyncManager:
                     pass
                 return res
             
-            # 1. Cửa sổ đang mở Clipboard (chính xác nhất cho thao tác Paste)
+            # 1. Cß╗¡a sß╗ò ─æang mß╗ƒ Clipboard (ch├¡nh x├íc nhß║Ñt cho thao t├íc Paste)
             try:
                 hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
                 if hwnd_clip:
@@ -2430,7 +2363,7 @@ class ClipboardSyncManager:
                         if h not in hwnds_to_check: hwnds_to_check.append(h)
             except: pass
                 
-            # 2. Cửa sổ Foreground hiện tại
+            # 2. Cß╗¡a sß╗ò Foreground hiß╗çn tß║íi
             try:
                 hwnd_fg = win32gui.GetForegroundWindow()
                 if hwnd_fg:
@@ -2438,7 +2371,7 @@ class ClipboardSyncManager:
                         if h not in hwnds_to_check: hwnds_to_check.append(h)
             except: pass
                 
-            # 3. Cửa sổ nằm dưới con trỏ chuột (phòng trường hợp mất focus vào menu)
+            # 3. Cß╗¡a sß╗ò nß║▒m d╞░ß╗¢i con trß╗Å chuß╗Öt (ph├▓ng tr╞░ß╗¥ng hß╗úp mß║Ñt focus v├áo menu)
             try:
                 pt = wintypes.POINT()
                 if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
@@ -2473,7 +2406,7 @@ class ClipboardSyncManager:
                     except:
                         continue
         except Exception as e:
-            log_debug(f"[get_active_explorer_path] Lỗi COM: {e}")
+            log_debug(f"[get_active_explorer_path] Lß╗ùi COM: {e}")
         return None
 
     def show_classic_conflict_dialog(self, filename, source_info, dest_info, has_multiple=False):
@@ -2485,7 +2418,7 @@ class ClipboardSyncManager:
         
         self.gui_queue.put(("classic_overwrite_dialog", (filename, source_info, dest_info, has_multiple)))
         
-        # Chờ luồng GUI xử lý và người dùng phản hồi (bơm tin nhắn)
+        # Chß╗¥ luß╗ông GUI xß╗¡ l├╜ v├á ng╞░ß╗¥i d├╣ng phß║ún hß╗ôi (b╞ím tin nhß║»n)
         start_wait = time.time()
         msg = wintypes.MSG()
         while time.time() - start_wait < 300.0:
@@ -2509,23 +2442,54 @@ class ClipboardSyncManager:
         if not self.pending_remote_files:
             return
             
-
+        # Kiß╗âm tra nß║┐u l├á truy vß║Ñn tß╗½ menu chuß╗Öt phß║úi (context menu) th├¼ tr├ính tß║úi file thß╗▒c tß║┐ l├║c n├áy
+        is_menu_query = True
+        try:
+            user32 = ctypes.windll.user32
+            
+            # 1. Kiß╗âm tra ph├¡m tß║»t Ctrl+V hoß║╖c Shift+Insert
+            is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
+            is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
+            
+            if is_ctrl_v or is_shift_ins:
+                is_menu_query = False
+                log_debug("[render_format] Chß║Ñp nhß║¡n Paste tß╗½ ph├¡m tß║»t (Ctrl+V / Shift+Insert)")
+            else:
+                # 2. Kiß╗âm tra click chuß╗Öt tr├íi tß╗½ context menu hoß║╖c ribbon
+                time_since_lbutton = time.time() - getattr(self, 'last_lbutton_time', 0)
+                time_since_rbutton = time.time() - getattr(self, 'last_rbutton_time', 0)
+                
+                # Nß║┐u chuß╗Öt phß║úi vß╗½a ─æ╞░ß╗úc click gß║ºn ─æ├óy (< 1.5s) v├á xß║úy ra sau hoß║╖c ─æß╗ông thß╗¥i vß╗¢i chuß╗Öt tr├íi,
+                # ─æiß╗üu ─æ├│ c├│ ngh─⌐a l├á ng╞░ß╗¥i d├╣ng ─æang mß╗ƒ context menu (ch╞░a thß╗â click chß╗ìn Paste tß╗½ menu).
+                if time_since_rbutton < 1.5 and getattr(self, 'last_rbutton_time', 0) >= getattr(self, 'last_lbutton_time', 0):
+                    log_debug(f"[render_format] Tß╗½ chß╗æi Paste: ph├ít hiß╗çn ─æang mß╗ƒ context menu (rbutton={time_since_rbutton:.3f}s, rbutton >= lbutton)")
+                elif time_since_lbutton < 1.5:
+                    is_menu_query = False
+                    log_debug(f"[render_format] Chß║Ñp nhß║¡n Paste: time_since_lbutton={time_since_lbutton:.3f}s")
+                else:
+                    log_debug(f"[render_format] Tß╗½ chß╗æi Paste: kh├┤ng ph├ít hiß╗çn click chuß╗Öt tr├íi context menu (time_since_lbutton={time_since_lbutton:.3f}s)")
+                
+            if is_menu_query:
+                return
+        except Exception as e:
+            log_debug(f"[render_format] Lß╗ùi kiß╗âm tra context menu: {e}")
+            return
             
         if getattr(self, 'is_rendering', False):
-            log_debug("[render_format] Bỏ qua WM_RENDERFORMAT trùng lặp (đang render).")
+            log_debug("[render_format] Bß╗Å qua WM_RENDERFORMAT tr├╣ng lß║╖p (─æang render).")
             return
             
         self.is_rendering = True
-        self.transfer_in_progress = True # Đặt cờ truyền tải để chặn các sự kiện thay đổi clipboard trong quá trình render
+        self.transfer_in_progress = True # ─Éß║╖t cß╗¥ truyß╗ün tß║úi ─æß╗â chß║╖n c├íc sß╗▒ kiß╗çn thay ─æß╗òi clipboard trong qu├í tr├¼nh render
         try:
-            print("[Clipboard] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
-            log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
+            print("[Clipboard] Nhß║¡n WM_RENDERFORMAT. ─Éang bß║»t ─æß║ºu kiß╗âm tra tß╗çp tin ghi ─æ├¿...")
+            log_debug("[render_format] Nhß║¡n WM_RENDERFORMAT. ─Éang bß║»t ─æß║ºu kiß╗âm tra tß╗çp tin ghi ─æ├¿...")
             
-            # --- HIỂN THỊ DIALOG TIẾN TRÌNH NGAY LẬP TỨC ---
+            # --- HIß╗éN THß╗è DIALOG TIß║╛N TR├îNH NGAY Lß║¼P Tß╗¿C ---
             display_name = self.pending_remote_files[0].get("name") if self.pending_remote_files else "Files"
             total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
-            log_debug(f"[render_format] Hiển thị dialog truyền tải ngay lập tức: {display_name}, size={total_size}")
-            self.show_dialog("Đang tải file về...", display_name, total_size)
+            log_debug(f"[render_format] Hiß╗ân thß╗ï dialog truyß╗ün tß║úi ngay lß║¡p tß╗⌐c: {display_name}, size={total_size}")
+            self.show_dialog("─Éang tß║úi file vß╗ü...", display_name, total_size)
             if self.app and getattr(self.app, 'is_headless', False):
                 self._send_progress_signal("START", f"{display_name}|{total_size}")
             
@@ -2533,20 +2497,20 @@ class ClipboardSyncManager:
             self.batch_paths = []
             self.transfer_done_event.clear()
             
-            # Lấy thư mục đích hoạt động của Explorer (nơi người dùng chuột phải Paste)
+            # Lß║Ñy th╞░ mß╗Ñc ─æ├¡ch hoß║ít ─æß╗Öng cß╗ºa Explorer (n╞íi ng╞░ß╗¥i d├╣ng chuß╗Öt phß║úi Paste)
             dest_dir = self.get_active_explorer_path()
-            log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
+            log_debug(f"[render_format] Th╞░ mß╗Ñc ─æ├¡ch ph├ít hiß╗çn: {dest_dir}")
             
-            # Nếu có thư mục đích hợp lệ, tải file trực tiếp vào đó
-            # Nếu không, sử dụng thư mục tạm
+            # Nß║┐u c├│ th╞░ mß╗Ñc ─æ├¡ch hß╗úp lß╗ç, tß║úi file trß╗▒c tiß║┐p v├áo ─æ├│
+            # Nß║┐u kh├┤ng, sß╗¡ dß╗Ñng th╞░ mß╗Ñc tß║ím
             if dest_dir and os.path.isdir(dest_dir):
                 self.target_save_dir = dest_dir
-                log_debug(f"[render_format] Tải file trực tiếp vào thư mục đích: {dest_dir}")
+                log_debug(f"[render_format] Tß║úi file trß╗▒c tiß║┐p v├áo th╞░ mß╗Ñc ─æ├¡ch: {dest_dir}")
             else:
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                 os.makedirs(temp_dir, exist_ok=True)
                 self.target_save_dir = temp_dir
-                log_debug(f"[render_format] Không tìm thấy thư mục đích, sử dụng thư mục tạm: {temp_dir}")
+                log_debug(f"[render_format] Kh├┤ng t├¼m thß║Ñy th╞░ mß╗Ñc ─æ├¡ch, sß╗¡ dß╗Ñng th╞░ mß╗Ñc tß║ím: {temp_dir}")
             
             files_to_download = []
             files_to_replace = []
@@ -2559,7 +2523,7 @@ class ClipboardSyncManager:
                     dest_file_path = os.path.join(dest_dir, filename)
                     
                     if os.path.exists(dest_file_path):
-                        # File đã tồn tại ở thư mục đích
+                        # File ─æ├ú tß╗ôn tß║íi ß╗ƒ th╞░ mß╗Ñc ─æ├¡ch
                         if replace_all:
                             files_to_download.append(f)
                             files_to_replace.append(dest_file_path)
@@ -2575,7 +2539,7 @@ class ClipboardSyncManager:
                                 
                             has_multiple = len(self.pending_remote_files) > 1
                             choice = self.show_classic_conflict_dialog(filename, source_info, dest_info, has_multiple)
-                            log_debug(f"[render_format] Kết quả lựa chọn ghi đè cho {filename}: {choice}")
+                            log_debug(f"[render_format] Kß║┐t quß║ú lß╗▒a chß╗ìn ghi ─æ├¿ cho {filename}: {choice}")
                             
                             if choice == "replace":
                                 files_to_download.append(f)
@@ -2590,7 +2554,7 @@ class ClipboardSyncManager:
                                 skip_all = True
                                 continue
                             else: # cancel
-                                log_debug("[render_format] Hủy bỏ truyền tải từ hộp thoại ghi đè.")
+                                log_debug("[render_format] Hß╗ºy bß╗Å truyß╗ün tß║úi tß╗½ hß╗Öp thoß║íi ghi ─æ├¿.")
                                 self.close_dialog()
                                 if self.app and getattr(self.app, 'is_headless', False):
                                     self._send_progress_signal("CANCEL", "")
@@ -2603,7 +2567,7 @@ class ClipboardSyncManager:
                 files_to_download = list(self.pending_remote_files)
                 
             if not files_to_download:
-                log_debug("[render_format] Không có tệp tin nào được chọn để tải (người dùng bỏ qua tất cả).")
+                log_debug("[render_format] Kh├┤ng c├│ tß╗çp tin n├áo ─æ╞░ß╗úc chß╗ìn ─æß╗â tß║úi (ng╞░ß╗¥i d├╣ng bß╗Å qua tß║Ñt cß║ú).")
                 self.close_dialog()
                 if self.app and getattr(self.app, 'is_headless', False):
                     self._send_progress_signal("CANCEL", "")
@@ -2611,18 +2575,18 @@ class ClipboardSyncManager:
                 fn_SetClipboardData(15, None)
                 return
                 
-            # Đặt lại danh sách tệp tin thực tế cần tải
+            # ─Éß║╖t lß║íi danh s├ích tß╗çp tin thß╗▒c tß║┐ cß║ºn tß║úi
             self.pending_remote_files = files_to_download
             
-            # Xóa các file cần ghi đè TRƯỚC khi bắt đầu tải (để tránh xung đột ghi)
+            # X├│a c├íc file cß║ºn ghi ─æ├¿ TR╞»ß╗ÜC khi bß║»t ─æß║ºu tß║úi (─æß╗â tr├ính xung ─æß╗Öt ghi)
             for p in files_to_replace:
                 try: os.remove(p)
                 except: pass
             
-            # Yêu cầu truyền file thực tế từ đối tác
+            # Y├¬u cß║ºu truyß╗ün file thß╗▒c tß║┐ tß╗½ ─æß╗æi t├íc
             self.request_pending_files()
             
-            # Chờ nhận xong file (non-blocking message pump)
+            # Chß╗¥ nhß║¡n xong file (non-blocking message pump)
             succeeded = False
             start_time = time.time()
             msg = wintypes.MSG()
@@ -2639,10 +2603,10 @@ class ClipboardSyncManager:
                     time.sleep(0.01)
                     
             if succeeded and self.batch_paths:
-                print(f"[Clipboard] Tải thành công {len(self.batch_paths)} file vào: {self.target_save_dir}")
-                log_debug(f"[render_format] Tải thành công {len(self.batch_paths)} file. Đang nạp vào Clipboard...")
+                print(f"[Clipboard] Tß║úi th├ánh c├┤ng {len(self.batch_paths)} file v├áo: {self.target_save_dir}")
+                log_debug(f"[render_format] Tß║úi th├ánh c├┤ng {len(self.batch_paths)} file. ─Éang nß║íp v├áo Clipboard...")
                 
-                # Tạo HDROP trỏ đến các file đã tải (nằm trực tiếp tại thư mục đích)
+                # Tß║ío HDROP trß╗Å ─æß║┐n c├íc file ─æ├ú tß║úi (nß║▒m trß╗▒c tiß║┐p tß║íi th╞░ mß╗Ñc ─æ├¡ch)
                 hGlobal = create_hdrop_data(self.batch_paths)
                 if hGlobal:
                     self.ignore_destroy_clipboard = True
@@ -2650,21 +2614,21 @@ class ClipboardSyncManager:
                         res = fn_SetClipboardData(15, hGlobal)
                         if not res:
                             err = ctypes.GetLastError()
-                            log_debug(f"[render_format] Lỗi SetClipboardData: res={res}, GetLastError={err}")
+                            log_debug(f"[render_format] Lß╗ùi SetClipboardData: res={res}, GetLastError={err}")
                         else:
-                            log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. res={res}")
+                            log_debug(f"[render_format] ─É├ú nß║íp th├ánh c├┤ng CF_HDROP v├áo Clipboard. res={res}")
                     finally:
                         self.ignore_destroy_clipboard = False
                 else:
-                    log_debug("[render_format] Không tạo được hGlobal, hủy render.")
+                    log_debug("[render_format] Kh├┤ng tß║ío ─æ╞░ß╗úc hGlobal, hß╗ºy render.")
             else:
-                log_debug(f"[render_format] Tải file thất bại hoặc hết thời gian chờ. succeeded={succeeded}")
+                log_debug(f"[render_format] Tß║úi file thß║Ñt bß║íi hoß║╖c hß║┐t thß╗¥i gian chß╗¥. succeeded={succeeded}")
                 self.close_dialog()
                 if self.app and getattr(self.app, 'is_headless', False):
                     self._send_progress_signal("CANCEL", "")
                     self._close_transfer_pipe()
         except Exception as e:
-            log_debug(f"[render_format] Lỗi khi xử lý render format: {e}")
+            log_debug(f"[render_format] Lß╗ùi khi xß╗¡ l├╜ render format: {e}")
             self.close_dialog()
             if self.app and getattr(self.app, 'is_headless', False):
                 self._send_progress_signal("CANCEL", "")
@@ -2681,10 +2645,10 @@ class ClipboardSyncManager:
 
     def _process_send_requests(self, sock, files):
         self._send_cancelled = False
-        log_debug(f"[_process_send_requests] Khởi chạy gửi {len(files)} file...")
+        log_debug(f"[_process_send_requests] Khß╗ƒi chß║íy gß╗¡i {len(files)} file...")
         try:
             total_size = sum(f.get("size", 0) for f in files)
-            display_name = f"{len(files)} tệp tin" if len(files) > 1 else files[0].get("name", "Unknown")
+            display_name = f"{len(files)} tß╗çp tin" if len(files) > 1 else files[0].get("name", "Unknown")
             
             log_file_transfer(display_name, total_size)
             
@@ -2695,30 +2659,30 @@ class ClipboardSyncManager:
                 "display_name": display_name
             }).encode('utf-8')
             send_msg(sock, start_pkt)
-            log_debug(f"[_process_send_requests] Đã gửi batch_start. total_size={total_size}")
+            log_debug(f"[_process_send_requests] ─É├ú gß╗¡i batch_start. total_size={total_size}")
             
             total_sent = 0
             batch_start_time = time.time()
             for f in files:
                 if self._send_cancelled:
-                    log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
+                    log_debug(f"[_process_send_requests] Truyß╗ün tß║úi bß╗ï hß╗ºy ngang.")
                     break
                 filepath = f["path"]
                 filename = f["name"]
                 file_size = f["size"]
                 
-                log_debug(f"[_process_send_requests] Kiểm tra filepath: {filepath}")
+                log_debug(f"[_process_send_requests] Kiß╗âm tra filepath: {filepath}")
                 if not os.path.exists(filepath):
-                    log_debug(f"[_process_send_requests] File không tồn tại: {filepath}")
+                    log_debug(f"[_process_send_requests] File kh├┤ng tß╗ôn tß║íi: {filepath}")
                     continue
                     
                 f_start_pkt = json.dumps({"type": "file_start", "name": filename, "size": file_size}).encode('utf-8')
                 send_msg(sock, f_start_pkt)
-                log_debug(f"[_process_send_requests] Đã gửi file_start cho {filename}, size={file_size}")
+                log_debug(f"[_process_send_requests] ─É├ú gß╗¡i file_start cho {filename}, size={file_size}")
                 
                 try:
-                    # Giới hạn băng thông từ từ (Slow Start) để tránh quá tải mạng làm mất điều khiển với host
-                    # Bắt đầu từ 500 KB/s, mỗi giây tăng thêm 500 KB/s, tối đa 4 MB/s
+                    # Giß╗¢i hß║ín b─âng th├┤ng tß╗½ tß╗½ (Slow Start) ─æß╗â tr├ính qu├í tß║úi mß║íng l├ám mß║Ñt ─æiß╗üu khiß╗ân vß╗¢i host
+                    # Bß║»t ─æß║ºu tß╗½ 500 KB/s, mß╗ùi gi├óy t─âng th├¬m 500 KB/s, tß╗æi ─æa 4 MB/s
                     chunk_size = 256 * 1024
                     file_sent_bytes = 0
                     file_start_time = time.time()
@@ -2744,7 +2708,7 @@ class ClipboardSyncManager:
                             file_sent_bytes += len(chunk_data)
                             total_sent += len(chunk_data)
                             
-                            # Tính toán và điều tiết tốc độ gửi
+                            # T├¡nh to├ín v├á ─æiß╗üu tiß║┐t tß╗æc ─æß╗Ö gß╗¡i
                             target_time = file_sent_bytes / current_limit
                             actual_time = time.time() - file_start_time
                             if actual_time < target_time:
@@ -2758,48 +2722,48 @@ class ClipboardSyncManager:
                                         break
                                     time.sleep(0.05)
                                     
-                    log_debug(f"[_process_send_requests] Đã gửi xong dữ liệu cho {filename}")
+                    log_debug(f"[_process_send_requests] ─É├ú gß╗¡i xong dß╗» liß╗çu cho {filename}")
                 except Exception as e:
-                    print(f"[FileTransfer] Lỗi khi gửi file {filename}: {e}")
-                    log_debug(f"[_process_send_requests] Lỗi khi gửi file {filename}: {e}")
+                    print(f"[FileTransfer] Lß╗ùi khi gß╗¡i file {filename}: {e}")
+                    log_debug(f"[_process_send_requests] Lß╗ùi khi gß╗¡i file {filename}: {e}")
                     
                 if not self._send_cancelled:
                     send_msg(sock, json.dumps({"type": "file_end", "name": filename}).encode('utf-8'))
-                    log_debug(f"[_process_send_requests] Đã gửi file_end cho {filename}")
+                    log_debug(f"[_process_send_requests] ─É├ú gß╗¡i file_end cho {filename}")
                 
             if not self._send_cancelled:
                 send_msg(sock, json.dumps({"type": "batch_end"}).encode('utf-8'))
-                log_debug(f"[_process_send_requests] Đã gửi batch_end.")
+                log_debug(f"[_process_send_requests] ─É├ú gß╗¡i batch_end.")
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             print(f"Error processing send request: {e}")
-            log_debug(f"[_process_send_requests] Lỗi tổng quát:\n{tb}")
+            log_debug(f"[_process_send_requests] Lß╗ùi tß╗òng qu├ít:\n{tb}")
             try:
                 send_msg(sock, json.dumps({"type": "cancel_transfer"}).encode('utf-8'))
             except:
                 pass
         finally:
-            # Không đặt self.transfer_in_progress = False ở đây vì phía nhận (render_format) quản lý cờ này
-            log_debug(f"[_process_send_requests] Kết thúc hàm gửi file.")
+            # Kh├┤ng ─æß║╖t self.transfer_in_progress = False ß╗ƒ ─æ├óy v├¼ ph├¡a nhß║¡n (render_format) quß║ún l├╜ cß╗¥ n├áy
+            log_debug(f"[_process_send_requests] Kß║┐t th├║c h├ám gß╗¡i file.")
 
     def handle_received_packet(self, packet):
         ptype = packet.get("type")
         
-        # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại
+        # Nß║┐u ─æang hß╗ºy hoß║╖c ─æ├ú hß╗ºy nhß║¡n, bß╗Å qua c├íc g├│i tin li├¬n quan ─æß║┐n truyß╗ün l├┤ file hiß╗çn tß║íi
         if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
-            log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do tiến trình tải đã bị hủy.")
+            log_debug(f"[handle_received_packet] Bß╗Å qua g├│i tin {ptype} do tiß║┐n tr├¼nh tß║úi ─æ├ú bß╗ï hß╗ºy.")
             return
             
         if ptype == "cancel_transfer":
-            print("[FileTransfer] Nhận tín hiệu hủy truyền tải từ đối tác.")
+            print("[FileTransfer] Nhß║¡n t├¡n hiß╗çu hß╗ºy truyß╗ün tß║úi tß╗½ ─æß╗æi t├íc.")
             self.cancel_active_transfer(remote_triggered=True)
             return
             
         elif ptype == "clipboard_text":
             text = packet.get("text", "")
-            log_debug(f"[handle_received_packet] Nhận clipboard_text: {text[:50]}...")
-            print(f"[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
+            log_debug(f"[handle_received_packet] Nhß║¡n clipboard_text: {text[:50]}...")
+            print(f"[Clipboard] ─É├ú nhß║¡n ─æ╞░ß╗úc text clipboard tß╗½ remote. ─Éang cß║¡p nhß║¡t...")
             self.last_received_text = text
             self.ignore_destroy_clipboard = True
             try:
@@ -2809,9 +2773,9 @@ class ClipboardSyncManager:
                     except: pass
                 
                 if self.app and getattr(self.app, 'is_headless', False):
-                    # Gửi text qua Named Pipe cho Clipboard Agent
+                    # Gß╗¡i text qua Named Pipe cho Clipboard Agent
                     threading.Thread(target=self._send_to_pipe, args=("TEXT", text), daemon=True).start()
-                    log_debug("[handle_received_packet] HEADLESS: Đang gửi text qua Named Pipe cho Clipboard Agent.")
+                    log_debug("[handle_received_packet] HEADLESS: ─Éang gß╗¡i text qua Named Pipe cho Clipboard Agent.")
                 else:
                     set_clipboard_text(text, owner_hwnd)
             finally:
@@ -2822,11 +2786,11 @@ class ClipboardSyncManager:
             self._receive_cancelled = False
             self.pending_remote_files = packet.get("files", [])
             self.meta_arrival_time = time.time()
-            log_debug(f"[handle_received_packet] Nhận files_copied_meta. Số file: {len(self.pending_remote_files)}")
-            print(f"[Clipboard] Đã nhận được files_copied_meta. Số file: {len(self.pending_remote_files)}")
+            log_debug(f"[handle_received_packet] Nhß║¡n files_copied_meta. Sß╗æ file: {len(self.pending_remote_files)}")
+            print(f"[Clipboard] ─É├ú nhß║¡n ─æ╞░ß╗úc files_copied_meta. Sß╗æ file: {len(self.pending_remote_files)}")
             if not self.pending_remote_files: return
             
-            # --- HEADLESS MODE (SYSTEM/Service): Lưu file vào thư mục Public, KHÔNG động vào Clipboard ---
+            # --- HEADLESS MODE (SYSTEM/Service): L╞░u file v├áo th╞░ mß╗Ñc Public, KH├öNG ─æß╗Öng v├áo Clipboard ---
             if self.app and getattr(self.app, 'is_headless', False):
                 transfer_dir = HEADLESS_TRANSFER_DIR
                 try:
@@ -2837,17 +2801,17 @@ class ClipboardSyncManager:
                             try: os.remove(item_path)
                             except: pass
                 except Exception as e:
-                    log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục transfer: {e}")
+                    log_debug(f"[files_copied_meta] Lß╗ùi dß╗ìn dß║╣p th╞░ mß╗Ñc transfer: {e}")
                 self.target_save_dir = transfer_dir
                 
-                # Tự động yêu cầu gửi file ngay lập tức (không cần delayed rendering)
+                # Tß╗▒ ─æß╗Öng y├¬u cß║ºu gß╗¡i file ngay lß║¡p tß╗⌐c (kh├┤ng cß║ºn delayed rendering)
                 self.batch_paths = []
                 self.transfer_done_event.clear()
                 self.request_pending_files()
-                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã yêu cầu tải file về {transfer_dir}")
+                log_debug(f"[files_copied_meta] HEADLESS MODE: ─É├ú y├¬u cß║ºu tß║úi file vß╗ü {transfer_dir}")
                 return
             
-            # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
+            # --- GUI MODE (User): Sß╗¡ dß╗Ñng delayed rendering nh╞░ b├¼nh th╞░ß╗¥ng ---
             temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
             try:
                 os.makedirs(temp_dir, exist_ok=True)
@@ -2857,10 +2821,10 @@ class ClipboardSyncManager:
                         try: os.remove(item_path)
                         except: pass
             except Exception as e:
-                log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục tạm: {e}")
+                log_debug(f"[files_copied_meta] Lß╗ùi dß╗ìn dß║╣p th╞░ mß╗Ñc tß║ím: {e}")
             self.target_save_dir = temp_dir
             
-            # Đăng ký delayed rendering để Windows gửi WM_RENDERFORMAT khi người dùng Paste
+            # ─É─âng k├╜ delayed rendering ─æß╗â Windows gß╗¡i WM_RENDERFORMAT khi ng╞░ß╗¥i d├╣ng Paste
             self.setup_delayed_rendering()
             return
             
@@ -2879,8 +2843,8 @@ class ClipboardSyncManager:
             
             os.makedirs(self.target_save_dir, exist_ok=True)
             log_file_transfer(display_name, self.batch_total_size)
-            log_debug(f"[batch_start] Bắt đầu nhận batch, total_size={self.batch_total_size}, target_save_dir={self.target_save_dir}")
-            self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
+            log_debug(f"[batch_start] Bß║»t ─æß║ºu nhß║¡n batch, total_size={self.batch_total_size}, target_save_dir={self.target_save_dir}")
+            self.show_dialog("─Éang tß║úi file vß╗ü...", display_name, self.batch_total_size)
             if self.app and getattr(self.app, 'is_headless', False):
                 self._send_progress_signal("START", f"{display_name}|{self.batch_total_size}")
             
@@ -2888,7 +2852,7 @@ class ClipboardSyncManager:
             filename = packet.get("name", "")
             if not filename: return
             target_path = os.path.join(self.target_save_dir, filename)
-            log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path}")
+            log_debug(f"[file_start] Bß║»t ─æß║ºu nhß║¡n file: {filename}, target_path={target_path}")
 
             try:
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -2899,10 +2863,10 @@ class ClipboardSyncManager:
                     "skipped": False,
                     "pending": False,
                 }
-                log_debug(f"[file_start] Mở thành công file mới: {target_path}")
+                log_debug(f"[file_start] Mß╗ƒ th├ánh c├┤ng file mß╗¢i: {target_path}")
             except Exception as e:
-                print(f"[FileTransfer] Lỗi mở file mới {filename}: {e}")
-                log_debug(f"[file_start] Lỗi mở file mới {filename}: {e}")
+                print(f"[FileTransfer] Lß╗ùi mß╗ƒ file mß╗¢i {filename}: {e}")
+                log_debug(f"[file_start] Lß╗ùi mß╗ƒ file mß╗¢i {filename}: {e}")
 
         elif ptype == "file_chunk":
             filename = packet.get("name", "")
@@ -2932,22 +2896,22 @@ class ClipboardSyncManager:
                     if transfer.get("handle") is not None:
                         try:
                             transfer["handle"].close()
-                            log_debug(f"[file_end] Đóng handle file thành công cho: {filename}")
+                            log_debug(f"[file_end] ─É├│ng handle file th├ánh c├┤ng cho: {filename}")
                         except Exception as e:
-                            log_debug(f"[file_end] Lỗi đóng handle file {filename}: {e}")
+                            log_debug(f"[file_end] Lß╗ùi ─æ├│ng handle file {filename}: {e}")
                     
                     top_level_name = filename.replace('\\', '/').split('/')[0]
                     top_level_path = os.path.join(self.target_save_dir, top_level_name)
                     if top_level_path not in self.batch_paths:
                         self.batch_paths.append(top_level_path)
-                    log_debug(f"[file_end] Đã xử lý xong file: {filename}")
+                    log_debug(f"[file_end] ─É├ú xß╗¡ l├╜ xong file: {filename}")
                 
         elif ptype == "batch_end":
             self.close_dialog()
             self.transfer_done_event.set()
-            log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
+            log_debug(f"[batch_end] ─É├ú nhß║¡n xong to├án bß╗Ö file trong th╞░ mß╗Ñc tß║ím.")
             
-            # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
+            # --- HEADLESS MODE: Gß╗¡i ─æ╞░ß╗¥ng dß║½n file qua Named Pipe cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
                 if self.batch_paths:
                     self._send_progress_signal("PROGRESS", str(self.batch_total_size))
@@ -2956,7 +2920,7 @@ class ClipboardSyncManager:
                         files_str = "|".join(self.batch_paths)
                         self._send_progress_signal("FILES", files_str)
                     self._close_transfer_pipe()
-                    log_debug(f"[batch_end] HEADLESS: Đã gửi xong toàn bộ file qua transfer pipe.")
+                    log_debug(f"[batch_end] HEADLESS: ─É├ú gß╗¡i xong to├án bß╗Ö file qua transfer pipe.")
                 self.pending_remote_files = []
                 self.transfer_in_progress = False
 
@@ -3030,7 +2994,7 @@ def client_receiver_thread(sock, password):
                         client_pending_bbox = event.get("bbox")
                         continue
                 except Exception as je:
-                    print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
+                    print(f"[Client] Lß╗ùi giß║úi m├ú g├│i tin JSON: {je}")
                     pass
 
             import io
@@ -3048,7 +3012,7 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
+                with open("client_error.log", "a") as f: f.write(f"[Client] Lß╗ùi giß║úi m├ú ß║únh Pillow: {ie}\n")
         except Exception as e:
             with open("client_error.log", "a") as f: f.write(f"[Client] Receiver Error: {e}\n")
             client_running = False
@@ -3089,7 +3053,7 @@ def install_keyboard_hook(hwnd, send_event_fn):
                     vkCode = kbd.vkCode
                     
                     is_win_key = (vkCode == 0x5B or vkCode == 0x5C)
-                    is_menu_key = (vkCode == 0x5D)  # VK_APPS - phím Menu/Application (right-click keyboard key)
+                    is_menu_key = (vkCode == 0x5D)  # VK_APPS - ph├¡m Menu/Application (right-click keyboard key)
                     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
                     user32.GetAsyncKeyState.restype = ctypes.c_short
                     is_ctrl_esc = (vkCode == 0x1B and (user32.GetAsyncKeyState(0x11) & 0x8000))
@@ -3149,9 +3113,9 @@ def uninstall_keyboard_hook():
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
     global client_switching_desktop_countdown
     
-    # [FIX] Trong Windows, multiprocessing.Process khởi tạo tiến trình con mới hoàn toàn.
-    # Từ điển socket_passwords toàn cục bị trống, dẫn đến encrypt_payload mặc định dùng APP_KEY,
-    # gây ra lỗi InvalidTag khi Host giải mã dữ liệu clipboard/file.
+    # [FIX] Trong Windows, multiprocessing.Process khß╗ƒi tß║ío tiß║┐n tr├¼nh con mß╗¢i ho├án to├án.
+    # Tß╗½ ─æiß╗ân socket_passwords to├án cß╗Ñc bß╗ï trß╗æng, dß║½n ─æß║┐n encrypt_payload mß║╖c ─æß╗ïnh d├╣ng APP_KEY,
+    # g├óy ra lß╗ùi InvalidTag khi Host giß║úi m├ú dß╗» liß╗çu clipboard/file.
     if partner_pass:
         socket_passwords[sock] = partner_pass
         
@@ -3202,7 +3166,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             if os.path.exists(icon_path):
                 pygame.display.set_icon(pygame.image.load(icon_path))
         except Exception as e:
-            print(f"[App] Lỗi thiết lập icon cửa sổ pygame: {e}")
+            print(f"[App] Lß╗ùi thiß║┐t lß║¡p icon cß╗¡a sß╗ò pygame: {e}")
             
         try: btn_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
         except:
@@ -3244,15 +3208,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             t = threading.Thread(target=client_receiver_thread, args=(sock, partner_pass), daemon=True)
             t.start()
             
-            # Gắn kết socket vào trình quản lý Event Listener của Clipboard
+            # Gß║»n kß║┐t socket v├áo tr├¼nh quß║ún l├╜ Event Listener cß╗ºa Clipboard
             clipboard_sync_manager.add_socket(sock)
             # We moved pygame init outside
             
             import queue
             import collections
-            # Queue riêng cho sự kiện quan trọng (click, key, scroll) - KHÔNG bao giờ bị drop
+            # Queue ri├¬ng cho sß╗▒ kiß╗çn quan trß╗ìng (click, key, scroll) - KH├öNG bao giß╗¥ bß╗ï drop
             critical_queue = queue.Queue()
-            # Buffer mouse_move: chỉ giữ vị trí mới nhất, tránh làm đầy queue và mất click
+            # Buffer mouse_move: chß╗ë giß╗» vß╗ï tr├¡ mß╗¢i nhß║Ñt, tr├ính l├ám ─æß║ºy queue v├á mß║Ñt click
             _mouse_move_buf = {}
             _mouse_move_lock = threading.Lock()
             _mouse_move_has_new = threading.Event()
@@ -3266,14 +3230,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             send_msg(sock, json.dumps({"type": "ping"}).encode('utf-8'), partner_pass)
                             last_ping_time = now
 
-                        # Ưu tiên gửi sự kiện quan trọng (click/key/scroll) trước
+                        # ╞»u ti├¬n gß╗¡i sß╗▒ kiß╗çn quan trß╗ìng (click/key/scroll) tr╞░ß╗¢c
                         try:
                             event_dict = critical_queue.get_nowait()
                             send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
                             continue
                         except queue.Empty:
                             pass
-                        # Nếu không có sự kiện quan trọng, gửi mouse_move mới nhất nếu có
+                        # Nß║┐u kh├┤ng c├│ sß╗▒ kiß╗çn quan trß╗ìng, gß╗¡i mouse_move mß╗¢i nhß║Ñt nß║┐u c├│
                         if _mouse_move_has_new.wait(timeout=0.05):
                             with _mouse_move_lock:
                                 move = _mouse_move_buf.get("latest")
@@ -3285,17 +3249,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         
             threading.Thread(target=event_sender_thread, daemon=True).start()
             
-            # Khởi tạo kích thước viewer ban đầu cho Host biết
+            # Khß╗ƒi tß║ío k├¡ch th╞░ß╗¢c viewer ban ─æß║ºu cho Host biß║┐t
             def send_event(event_dict):
                 try:
                     evt_type = event_dict.get("type")
                     if evt_type == "mouse_move":
-                        # Chỉ giữ vị trí mới nhất, bỏ các vị trí cũ để không làm block click
+                        # Chß╗ë giß╗» vß╗ï tr├¡ mß╗¢i nhß║Ñt, bß╗Å c├íc vß╗ï tr├¡ c┼⌐ ─æß╗â kh├┤ng l├ám block click
                         with _mouse_move_lock:
                             _mouse_move_buf["latest"] = event_dict
                         _mouse_move_has_new.set()
                     else:
-                        # Click, key, scroll: KHÔNG bao giờ drop, đưa thẳng vào critical_queue
+                        # Click, key, scroll: KH├öNG bao giß╗¥ drop, ─æ╞░a thß║│ng v├áo critical_queue
                         critical_queue.put(event_dict)
                 except Exception:
                     pass
@@ -3329,7 +3293,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         except:
                             pass
     
-                # Cập nhật event loop của Tkinter ẩn để các hộp thoại (dialog truyền file) vẫn hoạt động trong subprocess
+                # Cß║¡p nhß║¡t event loop cß╗ºa Tkinter ß║⌐n ─æß╗â c├íc hß╗Öp thoß║íi (dialog truyß╗ün file) vß║½n hoß║ít ─æß╗Öng trong subprocess
                 try:
                     hidden_root.update()
                 except Exception:
@@ -3542,9 +3506,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     
                     elapsed_switching = pygame.time.get_ticks() - switching_start_tick
                     if elapsed_switching > 3000:
-                        text_msg = "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host..."
+                        text_msg = "M├án h├¼nh bß║úo mß║¡t (UAC / Lock Screen) ─æang hiß╗ân thß╗ï ß╗ƒ m├íy Host..."
                     else:
-                        text_msg = f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây..."
+                        text_msg = f"─Éang chuyß╗ân giao diß╗çn... Vui l├▓ng ─æß╗úi {current_countdown} gi├óy..."
                     
                     text_surf = msg_font.render(text_msg, True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
@@ -3611,7 +3575,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pass
                     
                     screen.fill((30, 30, 30))
-                    text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
+                    text_surf = msg_font.render(f"Mß║Ñt kß║┐t nß╗æi. ─Éang thß╗¡ kß║┐t nß╗æi lß║íi... {countdown} gi├óy...", True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                     screen.blit(text_surf, text_rect)
                     pygame.display.flip()
@@ -3697,19 +3661,19 @@ def get_desktop_name():
     return "default"
 
 def is_secure_desktop():
-    """Kiểm tra xem thread hiện tại có đang ở Secure Desktop (UAC/Winlogon) không.
-    Trả về True nếu đang ở Secure Desktop và KHÔNG thể chụp màn hình bình thường."""
+    """Kiß╗âm tra xem thread hiß╗çn tß║íi c├│ ─æang ß╗ƒ Secure Desktop (UAC/Winlogon) kh├┤ng.
+    Trß║ú vß╗ü True nß║┐u ─æang ß╗ƒ Secure Desktop v├á KH├öNG thß╗â chß╗Ñp m├án h├¼nh b├¼nh th╞░ß╗¥ng."""
     try:
-        # Mở Input Desktop với quyền đọc tối thiểu (DESKTOP_READOBJECTS = 0x0001)
+        # Mß╗ƒ Input Desktop vß╗¢i quyß╗ün ─æß╗ìc tß╗æi thiß╗âu (DESKTOP_READOBJECTS = 0x0001)
         hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0001)
         if not hdesk:
-            # Không mở được Input Desktop → đang bị Secure Desktop lock
+            # Kh├┤ng mß╗ƒ ─æ╞░ß╗úc Input Desktop ΓåÆ ─æang bß╗ï Secure Desktop lock
             return True
         name = ctypes.create_unicode_buffer(256)
         ctypes.windll.user32.GetUserObjectInformationW(hdesk, 2, name, ctypes.sizeof(name), None)
         ctypes.windll.user32.CloseDesktop(hdesk)
         desktop_name = name.value.lower()
-        # "default" là desktop bình thường; bất kỳ tên nào khác (vd: "winlogon", "secure") là Secure Desktop
+        # "default" l├á desktop b├¼nh th╞░ß╗¥ng; bß║Ñt kß╗│ t├¬n n├áo kh├íc (vd: "winlogon", "secure") l├á Secure Desktop
         return desktop_name not in ("default", "")
     except:
         return False
@@ -3940,15 +3904,15 @@ class UnifiedApp(tk.Tk):
             except Exception as e:
                 pass
         
-        # Thiết lập icon cho cửa sổ chính
+        # Thiß║┐t lß║¡p icon cho cß╗¡a sß╗ò ch├¡nh
         try:
             icon_path = os.path.join(app_dir, "app_icon.png")
             if os.path.exists(icon_path):
                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
                 self.iconphoto(True, icon_img)
-                self._app_icon_img = icon_img  # Giữ reference tránh GC
+                self._app_icon_img = icon_img  # Giß╗» reference tr├ính GC
         except Exception as e:
-            print(f"[App] Lỗi thiết lập icon cửa sổ: {e}")
+            print(f"[App] Lß╗ùi thiß║┐t lß║¡p icon cß╗¡a sß╗ò: {e}")
         
         # Register app instance to ClipboardSyncManager
         clipboard_sync_manager.register_app(self)
@@ -3983,7 +3947,7 @@ class UnifiedApp(tk.Tk):
             except Exception as e:
                 print(f"[Host] Failed to setup shutdown listener: {e}")
         
-        # Cờ trạng thái chống mở nhiều cửa sổ điều khiển cùng lúc
+        # Cß╗¥ trß║íng th├íi chß╗æng mß╗ƒ nhiß╗üu cß╗¡a sß╗ò ─æiß╗üu khiß╗ân c├╣ng l├║c
         self.is_client_connected = False
         
         # Load saved window position or center it
@@ -4017,9 +3981,9 @@ class UnifiedApp(tk.Tk):
                 tree = ET.ElementTree(root)
                 tree.write(new_xml_file, encoding="utf-8", xml_declaration=True)
                 os.remove(old_json_file)
-                print("[Migration] Đã chuyển đổi thành công danh sách máy tính sang XML mã hóa!")
+                print("[Migration] ─É├ú chuyß╗ân ─æß╗òi th├ánh c├┤ng danh s├ích m├íy t├¡nh sang XML m├ú h├│a!")
             except Exception as e:
-                print(f"[Migration] Lỗi chuyển đổi: {e}")
+                print(f"[Migration] Lß╗ùi chuyß╗ân ─æß╗òi: {e}")
         
         # Color Theme (Sleek Dark Mode)
         self.bg_color = "#1E1E24"
@@ -4129,17 +4093,17 @@ class UnifiedApp(tk.Tk):
                 if self.fixed_password:
                     self.save_fixed_password_to_xml(self.fixed_password)
                 os.remove("fixed_password.txt")
-                print("[Migration] Đã di trú mật khẩu cố định sang saved_computers.xml và xóa tệp cũ!")
+                print("[Migration] ─É├ú di tr├║ mß║¡t khß║⌐u cß╗æ ─æß╗ïnh sang saved_computers.xml v├á x├│a tß╗çp c┼⌐!")
             except Exception as e:
-                print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
+                print(f"[Config] Lß╗ùi di tr├║ mß║¡t khß║⌐u cß╗æ ─æß╗ïnh: {e}")
         else:
             self.fixed_password = self.load_fixed_password_from_xml()
-        self.pass_type_var = tk.StringVar(value="4 chữ số")
+        self.pass_type_var = tk.StringVar(value="4 chß╗» sß╗æ")
         self.server_socket = None
         self.running_server = True
         self.active_clients = {}
         self.active_viewers = []
-        self.current_ip = "Đang lấy IP..."
+        self.current_ip = "─Éang lß║Ñy IP..."
         self.local_ip = "127.0.0.1"
         self.ipv6 = None
         self.client_viewer_w = 1280
@@ -4156,7 +4120,7 @@ class UnifiedApp(tk.Tk):
         self.received_first_pong = False
         
         # Form variables
-        self.status_var = tk.StringVar(value="Đang kết nối tới mạng đăng ký...")
+        self.status_var = tk.StringVar(value="─Éang kß║┐t nß╗æi tß╗¢i mß║íng ─æ─âng k├╜...")
         self.partner_id_var = tk.StringVar()
         self.partner_pass_var = tk.StringVar()
         self.force_relay_var = tk.BooleanVar(value=False)
@@ -4174,7 +4138,7 @@ class UnifiedApp(tk.Tk):
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
         
-        # Bắt đầu polling Signaling status trên main thread (độ tin cậy cao hơn self.after từ background thread)
+        # Bß║»t ─æß║ºu polling Signaling status tr├¬n main thread (─æß╗Ö tin cß║¡y cao h╞ín self.after tß╗½ background thread)
         self.after(3000, self._poll_signaling_status)
         
         # Restore Event Listener for waking the GUI
@@ -4215,9 +4179,9 @@ class UnifiedApp(tk.Tk):
         
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Danh sách (Saved Computers)", command=self.show_saved_computers_dialog)
+        file_menu.add_command(label="Danh s├ích (Saved Computers)", command=self.show_saved_computers_dialog)
         file_menu.add_separator()
-        file_menu.add_command(label="Thoát (Exit)", command=self.destroy)
+        file_menu.add_command(label="Tho├ít (Exit)", command=self.destroy)
         menubar.add_cascade(label="File", menu=file_menu)
         
         # 2. Options Menu
@@ -4226,39 +4190,39 @@ class UnifiedApp(tk.Tk):
         # Submenu: Password type
         password_menu = tk.Menu(options_menu, tearoff=0)
         password_menu.add_radiobutton(
-            label="4 chữ số",
-            variable=self.pass_type_var, value="4 chữ số",
+            label="4 chß╗» sß╗æ",
+            variable=self.pass_type_var, value="4 chß╗» sß╗æ",
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="5 chữ số",
-            variable=self.pass_type_var, value="5 chữ số",
+            label="5 chß╗» sß╗æ",
+            variable=self.pass_type_var, value="5 chß╗» sß╗æ",
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="8 ký tự (chữ + số)",
-            variable=self.pass_type_var, value="8 ký tự (chữ + số)",
+            label="8 k├╜ tß╗▒ (chß╗» + sß╗æ)",
+            variable=self.pass_type_var, value="8 k├╜ tß╗▒ (chß╗» + sß╗æ)",
             command=self.refresh_password
         )
         password_menu.add_separator()
         password_menu.add_command(
-            label="Cài mật khẩu cố định...",
+            label="C├ái mß║¡t khß║⌐u cß╗æ ─æß╗ïnh...",
             command=self.open_set_fixed_password_dialog
         )
-        options_menu.add_cascade(label="Mật khẩu (Password)", menu=password_menu)
+        options_menu.add_cascade(label="Mß║¡t khß║⌐u (Password)", menu=password_menu)
         options_menu.add_separator()
         options_menu.add_checkbutton(
-            label="Chạy khi mở máy (Run on Startup)",
+            label="Chß║íy khi mß╗ƒ m├íy (Run on Startup)",
             variable=self.startup_var,
             command=self.toggle_startup
         )
         options_menu.add_command(
-            label="Cài Zalo / Điện thoại",
+            label="C├ái Zalo / ─Éiß╗çn thoß║íi",
             command=self.open_set_zalo_phone_dialog
         )
         options_menu.add_separator()
         options_menu.add_command(
-            label="Cài đặt máy chủ...",
+            label="C├ái ─æß║╖t m├íy chß╗º...",
             command=self.show_server_settings_dialog
         )
  
@@ -4267,7 +4231,7 @@ class UnifiedApp(tk.Tk):
         # 3. Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Zalo", command=self.open_zalo)
-        help_menu.add_command(label="Điện thoại", command=self.open_phone_dialog)
+        help_menu.add_command(label="─Éiß╗çn thoß║íi", command=self.open_phone_dialog)
         help_menu.add_command(label="About", command=self.show_about_dialog)
         menubar.add_cascade(label="Help", menu=help_menu)
         
@@ -4279,7 +4243,7 @@ class UnifiedApp(tk.Tk):
         header.pack(pady=(15, 5))
         
         # Sub-header
-        subheader = tk.Label(self, text="Điều khiển trực tuyến máy tính bằng HWID", font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+        subheader = tk.Label(self, text="─Éiß╗üu khiß╗ân trß╗▒c tuyß║┐n m├íy t├¡nh bß║▒ng HWID", font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
         subheader.pack(pady=(0, 15))
         
         # Main Panels Container
@@ -4290,10 +4254,10 @@ class UnifiedApp(tk.Tk):
         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.88)
         
-        lbl_allow = tk.Label(left_panel, text="CHO PHÉP ĐIỀU KHIỂN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_allow = tk.Label(left_panel, text="CHO PH├ëP ─ÉIß╗ÇU KHIß╗éN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
         
-        lbl_id = tk.Label(left_panel, text="Mã ID của bạn:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_id = tk.Label(left_panel, text="M├ú ID cß╗ºa bß║ín:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_id.pack(anchor=tk.W, padx=20)
         
         id_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -4302,10 +4266,10 @@ class UnifiedApp(tk.Tk):
         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
         self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_id_btn = tk.Button(id_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+        copy_id_btn = tk.Button(id_frame, text="≡ƒôï", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         
-        lbl_pass = tk.Label(left_panel, text="Mật khẩu kết nối:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_pass = tk.Label(left_panel, text="Mß║¡t khß║⌐u kß║┐t nß╗æi:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_pass.pack(anchor=tk.W, padx=20)
         
         pass_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -4314,35 +4278,35 @@ class UnifiedApp(tk.Tk):
         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_pass_btn = tk.Button(pass_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+        copy_pass_btn = tk.Button(pass_frame, text="≡ƒôï", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
         
-        refresh_btn = tk.Button(pass_frame, text="↻", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=self.refresh_password)
+        refresh_btn = tk.Button(pass_frame, text="Γå╗", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=self.refresh_password)
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
 
-        # Nhãn hiển thị trạng thái mật khẩu cố định
+        # Nh├ún hiß╗ân thß╗ï trß║íng th├íi mß║¡t khß║⌐u cß╗æ ─æß╗ïnh
         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=("Segoe UI", 8, "italic"), fg="#2ECC71", bg=self.card_color)
         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=(2, 0))
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
-        copy_all_btn = tk.Button(left_panel, text="📋 Sao chép cả ID & Mật khẩu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
+        copy_all_btn = tk.Button(left_panel, text="≡ƒôï Sao ch├⌐p cß║ú ID & Mß║¡t khß║⌐u", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.88)
         
-        lbl_control = tk.Label(right_panel, text="ĐIỀU KHIỂN ĐỐI TÁC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_control = tk.Label(right_panel, text="─ÉIß╗ÇU KHIß╗éN ─Éß╗ÉI T├üC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
         
-        lbl_p_id = tk.Label(right_panel, text="Nhập ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_id = tk.Label(right_panel, text="Nhß║¡p ID ─æß╗æi t├íc:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=4)
         self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
         
-        lbl_p_pass = tk.Label(right_panel, text="Nhập Mật khẩu đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_pass = tk.Label(right_panel, text="Nhß║¡p Mß║¡t khß║⌐u ─æß╗æi t├íc:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
@@ -4358,11 +4322,11 @@ class UnifiedApp(tk.Tk):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = tk.Button(btn_container, text="KẾT NỐI (CONNECT)", font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
+        self.connect_btn = tk.Button(btn_container, text="Kß║╛T Nß╗ÉI (CONNECT)", font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
-        self.add_partner_btn = tk.Button(btn_container, text="➕", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
+        self.add_partner_btn = tk.Button(btn_container, text="Γ₧ò", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
         # Attach Context Menus for Copy & Paste
@@ -4376,7 +4340,7 @@ class UnifiedApp(tk.Tk):
         self.lbl_status = tk.Label(status_bar, textvariable=self.status_var, font=("Segoe UI", 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W)
         self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
         
-        # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
+        # Khß╗ƒi chß║íy icon khay hß╗ç thß╗æng ngay khi bß║¡t ß╗⌐ng dß╗Ñng
         if not self.is_headless:
             self.setup_tray_icon()
         
@@ -4445,16 +4409,16 @@ class UnifiedApp(tk.Tk):
         
     def on_window_configure(self, event):
         try:
-            # Chỉ ghi lại tọa độ khi cửa sổ ở trạng thái hiển thị bình thường và đang được vẽ
+            # Chß╗ë ghi lß║íi tß╗ìa ─æß╗Ö khi cß╗¡a sß╗ò ß╗ƒ trß║íng th├íi hiß╗ân thß╗ï b├¼nh th╞░ß╗¥ng v├á ─æang ─æ╞░ß╗úc vß║╜
             if self.wm_state() == "normal" and self.winfo_ismapped():
                 geom = self.geometry()
-                # Kiểm tra tọa độ có hợp lệ không (tránh lưu tọa độ ảo khi Windows thu nhỏ)
+                # Kiß╗âm tra tß╗ìa ─æß╗Ö c├│ hß╗úp lß╗ç kh├┤ng (tr├ính l╞░u tß╗ìa ─æß╗Ö ß║úo khi Windows thu nhß╗Å)
                 if "+" in geom:
                     parts = geom.split("+")
                     if len(parts) >= 3:
                         x = int(parts[1])
                         y = int(parts[2])
-                        # Tránh lưu tọa độ ảo âm quá lớn
+                        # Tr├ính l╞░u tß╗ìa ─æß╗Ö ß║úo ├óm qu├í lß╗¢n
                         if x > -1000 and y > -1000:
                             self.last_normal_geometry = geom
         except Exception:
@@ -4471,7 +4435,7 @@ class UnifiedApp(tk.Tk):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(400 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
+        min_h = int(400 * scale) # T─âng chiß╗üu cao ─æß╗â hiß╗ân thß╗ï ─æß╗º n├║t bß║Ñm
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
@@ -4480,7 +4444,7 @@ class UnifiedApp(tk.Tk):
                     config = json.load(f)
                     geom = config.get("geometry")
                     if geom:
-                        # Bảo đảm kích thước luôn chính xác theo scale màn hình
+                        # Bß║úo ─æß║úm k├¡ch th╞░ß╗¢c lu├┤n ch├¡nh x├íc theo scale m├án h├¼nh
                         if "x" in geom:
                             parts = geom.split("+")[0].split("x")
                             if len(parts) == 2:
@@ -4511,12 +4475,12 @@ class UnifiedApp(tk.Tk):
 
     def save_window_position(self):
         try:
-            # Ưu tiên lấy tọa độ hoạt động bình thường cuối cùng được ghi nhận
+            # ╞»u ti├¬n lß║Ñy tß╗ìa ─æß╗Ö hoß║ít ─æß╗Öng b├¼nh th╞░ß╗¥ng cuß╗æi c├╣ng ─æ╞░ß╗úc ghi nhß║¡n
             geom = getattr(self, 'last_normal_geometry', None)
             if not geom:
                 geom = self.geometry()
                 
-            # Tránh lưu tọa độ ảo/thu nhỏ lỗi
+            # Tr├ính l╞░u tß╗ìa ─æß╗Ö ß║úo/thu nhß╗Å lß╗ùi
             if "+" in geom:
                 parts = geom.split("+")
                 if len(parts) >= 3:
@@ -4533,39 +4497,39 @@ class UnifiedApp(tk.Tk):
             print(f"[Config] Error saving window config: {e}")
 
     def copy_id_and_password(self):
-        text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
+        text = f'ID: {self.my_id_formatted}, mß║¡t khß║⌐u: {self.my_password}'
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.update_status("Đã sao chép cả ID & Mật khẩu!")
+        self.update_status("─É├ú sao ch├⌐p cß║ú ID & Mß║¡t khß║⌐u!")
 
     def copy_to_clipboard(self, text):
         self.clipboard_clear()
         self.clipboard_append(text.strip())
-        self.update_status(f"Đã sao chép vào bộ nhớ tạm: {text.strip()}")
+        self.update_status(f"─É├ú sao ch├⌐p v├áo bß╗Ö nhß╗¢ tß║ím: {text.strip()}")
 
     def make_context_menu(self, entry):
         menu = tk.Menu(entry, tearoff=0)
-        menu.add_command(label="Cắt (Cut)", command=lambda: entry.event_generate("<<Cut>>"))
-        menu.add_command(label="Sao chép (Copy)", command=lambda: entry.event_generate("<<Copy>>"))
-        menu.add_command(label="Dán (Paste)", command=lambda: entry.event_generate("<<Paste>>"))
-        menu.add_command(label="Chọn tất cả (Select All)", command=lambda: entry.event_generate("<<SelectAll>>"))
+        menu.add_command(label="Cß║»t (Cut)", command=lambda: entry.event_generate("<<Cut>>"))
+        menu.add_command(label="Sao ch├⌐p (Copy)", command=lambda: entry.event_generate("<<Copy>>"))
+        menu.add_command(label="D├ín (Paste)", command=lambda: entry.event_generate("<<Paste>>"))
+        menu.add_command(label="Chß╗ìn tß║Ñt cß║ú (Select All)", command=lambda: entry.event_generate("<<SelectAll>>"))
         
-        # Giữ tham chiếu mạnh (Strong Reference) tránh rác hệ thống làm mất menu
+        # Giß╗» tham chiß║┐u mß║ính (Strong Reference) tr├ính r├íc hß╗ç thß╗æng l├ám mß║Ñt menu
         entry.menu = menu
         
-        # Bắt chuột phải trên cả Windows (Button-3) và một số Touchpad/Mac (Button-2)
+        # Bß║»t chuß╗Öt phß║úi tr├¬n cß║ú Windows (Button-3) v├á mß╗Öt sß╗æ Touchpad/Mac (Button-2)
         entry.bind("<Button-3>", lambda e: entry.menu.post(e.x_root, e.y_root))
         entry.bind("<Button-2>", lambda e: entry.menu.post(e.x_root, e.y_root))
 
     def refresh_password(self):
         import string
         ptype = self.pass_type_var.get()
-        if ptype == "5 chữ số":
+        if ptype == "5 chß╗» sß╗æ":
             self.my_password = str(random.randint(10000, 99999))
-        elif ptype == "8 ký tự (chữ + số)":
+        elif ptype == "8 k├╜ tß╗▒ (chß╗» + sß╗æ)":
             chars = string.ascii_letters + string.digits
             self.my_password = ''.join(random.choices(chars, k=8))
-        else:  # Mặc định: 4 chữ số
+        else:  # Mß║╖c ─æß╗ïnh: 4 chß╗» sß╗æ
             self.my_password = str(random.randint(1000, 9999))
             
         # Write to session_pass.txt if service is active or we are headless
@@ -4587,9 +4551,9 @@ class UnifiedApp(tk.Tk):
             return
             
         dialog = tk.Toplevel(self)
-        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy ß╗ƒ g├│c tr├¬n b├¬n tr├íi m├án h├¼nh
         self.saved_computers_dialog = dialog
-        dialog.title("Danh sách Máy tính")
+        dialog.title("Danh s├ích M├íy t├¡nh")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -4601,38 +4565,38 @@ class UnifiedApp(tk.Tk):
         x = self.winfo_x() + (self.winfo_width() - w) // 2
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        dialog.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
 
         # Top title
-        lbl_title = tk.Label(dialog, text="DANH SÁCH MÁY TÍNH ĐÃ LƯU", font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text="DANH S├üCH M├üY T├ìNH ─É├â L╞»U", font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        # Thanh Tìm kiếm
+        # Thanh T├¼m kiß║┐m
         search_frame = tk.Frame(dialog, bg=self.bg_color)
         search_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
         
         search_inner = tk.Frame(search_frame, bg="#2A2A3D", highlightthickness=1, highlightbackground=self.divider_color)
         search_inner.pack(fill=tk.X)
         
-        lbl_search_icon = tk.Label(search_inner, text="🔍", font=("Segoe UI", 9), fg=self.text_gray, bg="#2A2A3D")
+        lbl_search_icon = tk.Label(search_inner, text="≡ƒöì", font=("Segoe UI", 9), fg=self.text_gray, bg="#2A2A3D")
         lbl_search_icon.pack(side=tk.LEFT, padx=(8, 5), pady=4)
         
         search_var = tk.StringVar()
         entry_search = tk.Entry(search_inner, textvariable=search_var, font=("Segoe UI", 9), fg=self.text_white, bg="#2A2A3D", bd=0, insertbackground=self.text_white)
         entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4, padx=(0, 8))
         
-        # Thiết lập Placeholder chuyên nghiệp
-        entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+        # Thiß║┐t lß║¡p Placeholder chuy├¬n nghiß╗çp
+        entry_search.insert(0, "T├¼m kiß║┐m theo t├¬n hoß║╖c ID...")
         entry_search.configure(fg=self.text_gray)
         
         def on_focus_in(event):
-            if entry_search.get() == "Tìm kiếm theo tên hoặc ID...":
+            if entry_search.get() == "T├¼m kiß║┐m theo t├¬n hoß║╖c ID...":
                 entry_search.delete(0, tk.END)
                 entry_search.configure(fg=self.text_white)
                 
         def on_focus_out(event):
             if entry_search.get() == "":
-                entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+                entry_search.insert(0, "T├¼m kiß║┐m theo t├¬n hoß║╖c ID...")
                 entry_search.configure(fg=self.text_gray)
                 
         entry_search.bind("<FocusIn>", on_focus_in)
@@ -4640,7 +4604,7 @@ class UnifiedApp(tk.Tk):
         
         def on_search_change(*args):
             val = search_var.get()
-            if val == "Tìm kiếm theo tên hoặc ID...":
+            if val == "T├¼m kiß║┐m theo t├¬n hoß║╖c ID...":
                 return
             refresh_list()
             
@@ -4652,7 +4616,7 @@ class UnifiedApp(tk.Tk):
         def save_computers(lst):
             self.save_saved_computers(lst)
 
-        # Container for the list (Sẽ pack ở cuối cùng sau khi đã pack bottom_frame để tránh bị đè/cắt nút)
+        # Container for the list (Sß║╜ pack ß╗ƒ cuß╗æi c├╣ng sau khi ─æ├ú pack bottom_frame ─æß╗â tr├ính bß╗ï ─æ├¿/cß║»t n├║t)
         list_container = tk.Frame(dialog, bg=self.card_color)
 
         # Canvas & Scrollbar for scrollable area
@@ -4689,12 +4653,12 @@ class UnifiedApp(tk.Tk):
         def connect_computer(item):
             self.partner_id_var.set(item["id"])
             self.partner_pass_var.set(item["password"])
-            # Giữ cửa sổ Danh sách Máy tính tiếp tục hiển thị theo yêu cầu người dùng
+            # Giß╗» cß╗¡a sß╗ò Danh s├ích M├íy t├¡nh tiß║┐p tß╗Ñc hiß╗ân thß╗ï theo y├¬u cß║ºu ng╞░ß╗¥i d├╣ng
             # Trigger connection immediately
             self.click_connect()
 
         def delete_computer(item):
-            if self.show_custom_question("Xóa máy tính", f"Bạn có chắc muốn xóa '{item['name']}' khỏi danh sách?", parent=dialog):
+            if self.show_custom_question("X├│a m├íy t├¡nh", f"Bß║ín c├│ chß║»c muß╗æn x├│a '{item['name']}' khß╗Åi danh s├ích?", parent=dialog):
                 computers = load_computers()
                 computers = [c for c in computers if not (c["id"] == item["id"] and c["name"] == item["name"])]
                 save_computers(computers)
@@ -4733,20 +4697,20 @@ class UnifiedApp(tk.Tk):
             self.status_dots_widgets.clear()
 
             query = search_var.get().strip().lower()
-            if query == "tìm kiếm theo tên hoặc id...":
+            if query == "t├¼m kiß║┐m theo t├¬n hoß║╖c id...":
                 query = ""
 
             computers = load_computers()
             
-            # 1. Sắp xếp danh sách (Online lên trên, sau đó theo tên)
+            # 1. Sß║»p xß║┐p danh s├ích (Online l├¬n tr├¬n, sau ─æ├│ theo t├¬n)
             computers.sort(key=lambda x: (not current_online.get(x["id"].replace(" ", ""), False), x["name"].lower()))
             
-            # 2. Lọc theo từ khóa tìm kiếm (tên hoặc ID)
+            # 2. Lß╗ìc theo tß╗½ kh├│a t├¼m kiß║┐m (t├¬n hoß║╖c ID)
             if query:
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
 
             if not computers:
-                txt = "Không tìm thấy máy tính phù hợp." if query else "Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới."
+                txt = "Kh├┤ng t├¼m thß║Ñy m├íy t├¡nh ph├╣ hß╗úp." if query else "Ch╞░a c├│ m├íy t├¡nh n├áo ─æ╞░ß╗úc l╞░u.\nBß║Ñm n├║t th├¬m b├¬n d╞░ß╗¢i ─æß╗â tß║ío mß╗¢i."
                 lbl_empty = tk.Label(scrollable_frame, text=txt, font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
                 lbl_empty.pack(pady=40, fill=tk.X, expand=True)
                 return
@@ -4766,7 +4730,7 @@ class UnifiedApp(tk.Tk):
                 title_frame.pack(fill=tk.X)
 
                 # Status dot: Unicode circle, initially Gray (checking)
-                dot_lbl = tk.Label(title_frame, text="●", font=("Segoe UI", 13, "bold"), fg="#8A8A9A", bg=self.bg_color)
+                dot_lbl = tk.Label(title_frame, text="ΓùÅ", font=("Segoe UI", 13, "bold"), fg="#8A8A9A", bg=self.bg_color)
                 dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
 
                 name_lbl = tk.Label(title_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color, anchor=tk.W)
@@ -4780,7 +4744,7 @@ class UnifiedApp(tk.Tk):
 
                 # Connect Button
                 connect_btn = tk.Button(
-                    actions_frame, text="Kết nối", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text="Kß║┐t nß╗æi", font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: connect_computer(c)
@@ -4789,7 +4753,7 @@ class UnifiedApp(tk.Tk):
 
                 # Edit Button
                 edit_btn = tk.Button(
-                    actions_frame, text="Sửa", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text="Sß╗¡a", font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg="#F39C12", activebackground="#D35400",
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list)
@@ -4798,7 +4762,7 @@ class UnifiedApp(tk.Tk):
 
                 # Delete Button
                 delete_btn = tk.Button(
-                    actions_frame, text="Xóa", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text="X├│a", font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg="#E05252", activebackground="#C0392B",
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: delete_computer(c)
@@ -4825,30 +4789,30 @@ class UnifiedApp(tk.Tk):
             def update_timer():
                 nonlocal seconds_left
                 if seconds_left > 0:
-                    btn_refresh.config(text=f"🔄 Làm mới ({seconds_left}s)")
+                    btn_refresh.config(text=f"≡ƒöä L├ám mß╗¢i ({seconds_left}s)")
                     seconds_left -= 1
                     if dialog.winfo_exists():
                         dialog.after(1000, update_timer)
                 else:
                     if dialog.winfo_exists():
                         btn_refresh.config(
-                            state="normal", text="🔄 Làm mới",
+                            state="normal", text="≡ƒöä L├ám mß╗¢i",
                             fg=self.text_white, bg="#2ECC71",
                             cursor="hand2"
                         )
                         
-            btn_refresh.config(state="disabled", text="🔄 Làm mới (30s)", bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
+            btn_refresh.config(state="disabled", text="≡ƒöä L├ám mß╗¢i (30s)", bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
             update_timer()
 
         btn_add = tk.Button(
-            bottom_frame, text="+ Thêm Mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text="+ Th├¬m Mß╗¢i", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=open_add_dialog
         )
         btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
 
         btn_refresh = tk.Button(
-            bottom_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text="≡ƒöä L├ám mß╗¢i", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
             command=lambda: [refresh_list(), start_refresh_cooldown()]
@@ -4856,13 +4820,13 @@ class UnifiedApp(tk.Tk):
         btn_refresh.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
         btn_close = tk.Button(
-            bottom_frame, text="Đóng", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text="─É├│ng", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=on_dialog_destroy
         )
         btn_close.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
 
-        # Pack list_container sau cùng để lấp đầy phần diện tích còn lại ở giữa Search Bar và Bottom Buttons!
+        # Pack list_container sau c├╣ng ─æß╗â lß║Ñp ─æß║ºy phß║ºn diß╗çn t├¡ch c├▓n lß║íi ß╗ƒ giß╗»a Search Bar v├á Bottom Buttons!
         list_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
 
         refresh_list()
@@ -4884,8 +4848,8 @@ class UnifiedApp(tk.Tk):
         parent = parent_win if parent_win else self
         
         add_win = tk.Toplevel(parent)
-        add_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        add_win.title("Thêm Máy tính")
+        add_win.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy
+        add_win.title("Th├¬m M├íy t├¡nh")
         add_win.resizable(False, False)
         add_win.configure(bg=self.bg_color)
         add_win.transient(parent)
@@ -4898,25 +4862,25 @@ class UnifiedApp(tk.Tk):
         ax = parent.winfo_x() + (parent.winfo_width() - aw) // 2
         ay = parent.winfo_y() + (parent.winfo_height() - ah) // 2
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
-        add_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        add_win.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
 
-        lbl_add_title = tk.Label(add_win, text="THÊM MÁY TÍNH MỚI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_add_title = tk.Label(add_win, text="TH├èM M├üY T├ìNH Mß╗ÜI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_add_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(add_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(add_win, text="T├¬n gß╗ìi gß╗úi nhß╗¢:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(add_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(add_win, text="ID ─æß╗æi t├íc:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         if initial_id:
             entry_comp_id.insert(0, initial_id)
 
-        lbl_comp_pass = tk.Label(add_win, text="Mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(add_win, text="Mß║¡t khß║⌐u:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -4935,13 +4899,13 @@ class UnifiedApp(tk.Tk):
             cpass = entry_comp_pass.get().strip()
 
             if not name or not cid or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=add_win)
+                self.show_custom_error("Lß╗ùi nhß║¡p liß╗çu", "Vui l├▓ng ─æiß╗ün ─æß║ºy ─æß╗º c├íc th├┤ng tin!", parent=add_win)
                 return
 
             computers = load_computers()
             for c in computers:
                 if c["id"] == cid and c["name"] == name:
-                    self.show_custom_error("Trùng lặp", "Máy tính này đã tồn tại trong danh sách!", parent=add_win)
+                    self.show_custom_error("Tr├╣ng lß║╖p", "M├íy t├¡nh n├áy ─æ├ú tß╗ôn tß║íi trong danh s├ích!", parent=add_win)
                     return
 
             computers.append({
@@ -4953,21 +4917,21 @@ class UnifiedApp(tk.Tk):
             if on_save:
                 on_save()
             if not parent_win:
-                self.show_custom_info("Thành công", f"Đã lưu máy tính '{name}' vào danh sách thành công!", parent=add_win)
+                self.show_custom_info("Th├ánh c├┤ng", f"─É├ú l╞░u m├íy t├¡nh '{name}' v├áo danh s├ích th├ánh c├┤ng!", parent=add_win)
             add_win.destroy()
 
         btn_add_frame = tk.Frame(add_win, bg=self.bg_color)
         btn_add_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_add_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text="L╞░u lß║íi", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_new
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_add_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text="Hß╗ºy bß╗Å", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
         )
@@ -4977,8 +4941,8 @@ class UnifiedApp(tk.Tk):
         parent = parent_win
         
         edit_win = tk.Toplevel(parent)
-        edit_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        edit_win.title("Sửa thông tin")
+        edit_win.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy
+        edit_win.title("Sß╗¡a th├┤ng tin")
         edit_win.resizable(False, False)
         edit_win.configure(bg=self.bg_color)
         edit_win.transient(parent)
@@ -4991,25 +4955,25 @@ class UnifiedApp(tk.Tk):
         ex = parent.winfo_x() + (parent.winfo_width() - ew) // 2
         ey = parent.winfo_y() + (parent.winfo_height() - eh) // 2
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
-        edit_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        edit_win.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
 
-        lbl_edit_title = tk.Label(edit_win, text="CẬP NHẬT THÔNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_edit_title = tk.Label(edit_win, text="Cß║¼P NHß║¼T TH├öNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_edit_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(edit_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(edit_win, text="T├¬n gß╗ìi gß╗úi nhß╗¢:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.insert(0, item["name"])
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(edit_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(edit_win, text="ID ─æß╗æi t├íc:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_comp_id.insert(0, item["id"])
 
-        lbl_comp_pass = tk.Label(edit_win, text="Mật khẩu mới:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(edit_win, text="Mß║¡t khß║⌐u mß╗¢i:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -5027,7 +4991,7 @@ class UnifiedApp(tk.Tk):
             cpass = entry_comp_pass.get().strip()
 
             if not name or not new_id or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=edit_win)
+                self.show_custom_error("Lß╗ùi nhß║¡p liß╗çu", "Vui l├▓ng ─æiß╗ün ─æß║ºy ─æß╗º c├íc th├┤ng tin!", parent=edit_win)
                 return
 
             computers = load_computers()
@@ -5046,20 +5010,20 @@ class UnifiedApp(tk.Tk):
                     on_save()
                 edit_win.destroy()
             else:
-                self.show_custom_error("Lỗi", "Không tìm thấy máy tính tương ứng để sửa!", parent=edit_win)
+                self.show_custom_error("Lß╗ùi", "Kh├┤ng t├¼m thß║Ñy m├íy t├¡nh t╞░╞íng ß╗⌐ng ─æß╗â sß╗¡a!", parent=edit_win)
 
         btn_edit_frame = tk.Frame(edit_win, bg=self.bg_color)
         btn_edit_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_edit_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text="L╞░u lß║íi", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_edit
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_edit_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text="Hß╗ºy bß╗Å", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
         )
@@ -5089,7 +5053,7 @@ class UnifiedApp(tk.Tk):
                             "password": cpass
                         })
             except Exception as e:
-                print(f"[Config] Lỗi tải XML: {e}")
+                print(f"[Config] Lß╗ùi tß║úi XML: {e}")
         return lst
 
     def save_saved_computers(self, lst):
@@ -5131,7 +5095,7 @@ class UnifiedApp(tk.Tk):
             tree = ET.ElementTree(root)
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
-            print(f"[Config] Lỗi lưu XML: {e}")
+            print(f"[Config] Lß╗ùi l╞░u XML: {e}")
 
     def load_fixed_password_from_xml(self):
         computers_file = "saved_computers.xml"
@@ -5144,7 +5108,7 @@ class UnifiedApp(tk.Tk):
                 if fixed_node is not None and fixed_node.text:
                     return decrypt_text(fixed_node.text)
             except Exception as e:
-                print(f"[Config] Lỗi đọc mật khẩu cố định từ XML: {e}")
+                print(f"[Config] Lß╗ùi ─æß╗ìc mß║¡t khß║⌐u cß╗æ ─æß╗ïnh tß╗½ XML: {e}")
         return ""
 
     def save_fixed_password_to_xml(self, password):
@@ -5200,7 +5164,7 @@ class UnifiedApp(tk.Tk):
             tree = ET.ElementTree(root)
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
-            print(f"[Config] Lỗi lưu XML: {e}")
+            print(f"[Config] Lß╗ùi l╞░u XML: {e}")
 
     def save_fixed_password(self, password):
         self.fixed_password = password
@@ -5217,7 +5181,7 @@ class UnifiedApp(tk.Tk):
                 if zalo_node is not None and zalo_node.text:
                     return zalo_node.text
             except Exception as e:
-                print(f"[Config] Lỗi đọc Zalo/Điện thoại từ XML: {e}")
+                print(f"[Config] Lß╗ùi ─æß╗ìc Zalo/─Éiß╗çn thoß║íi tß╗½ XML: {e}")
         return ""
 
     def save_zalo_phone_to_xml(self, value):
@@ -5273,11 +5237,11 @@ class UnifiedApp(tk.Tk):
             tree = ET.ElementTree(root)
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
-            print(f"[Config] Lỗi lưu Zalo/Điện thoại vào XML: {e}")
+            print(f"[Config] Lß╗ùi l╞░u Zalo/─Éiß╗çn thoß║íi v├áo XML: {e}")
 
     def open_set_zalo_phone_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Cài Zalo / Điện thoại")
+        dialog.title("C├ái Zalo / ─Éiß╗çn thoß║íi")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -5291,10 +5255,10 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CÀI ĐẶT ZALO / ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text="C├ÇI ─Éß║╢T ZALO / ─ÉIß╗åN THOß║áI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn."
+        desc_text = "Nhß║¡p sß╗æ ─æiß╗çn thoß║íi hoß║╖c li├¬n kß║┐t Zalo cß╗ºa bß║ín.\nClient ─æiß╗üu khiß╗ân m├íy bß║ín c├│ thß╗â click Help -> Zalo\n─æß╗â trß╗▒c tiß║┐p nhß║»n tin cho bß║ín."
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
@@ -5312,7 +5276,7 @@ class UnifiedApp(tk.Tk):
         def save_val():
             new_val = entry_val.get().strip()
             self.save_zalo_phone_to_xml(new_val)
-            self.show_custom_info("Thành công", "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!", parent=dialog)
+            self.show_custom_info("Th├ánh c├┤ng", "─É├ú l╞░u th├┤ng tin li├¬n hß╗ç Zalo / ─Éiß╗çn thoß║íi th├ánh c├┤ng!", parent=dialog)
             dialog.destroy()
 
         # Buttons
@@ -5320,14 +5284,14 @@ class UnifiedApp(tk.Tk):
         btn_frame.pack(fill=tk.X, padx=30, pady=5)
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="L╞░u lß║íi", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_val
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="Hß╗ºy bß╗Å", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -5335,7 +5299,7 @@ class UnifiedApp(tk.Tk):
 
     def show_server_settings_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Cài đặt Máy chủ (Signaling Server)")
+        dialog.title("C├ái ─æß║╖t M├íy chß╗º (Signaling Server)")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -5348,23 +5312,23 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CẤU HÌNH MÁY CHỦ SIGNALING", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text="Cß║ñU H├îNH M├üY CHß╗ª SIGNALING", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)"
+        desc_text = "Nhß║¡p danh s├ích t├¬n miß╗ün hoß║╖c IP m├íy chß╗º\n(C├ích nhau bß║▒ng dß║Ñu phß║⌐y ─æß╗â dß╗▒ ph├▓ng)"
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
         form_frame = tk.Frame(dialog, bg=self.bg_color)
         form_frame.pack(fill=tk.BOTH, expand=True, padx=30)
 
-        lbl_hosts = tk.Label(form_frame, text="Danh sách Máy chủ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_hosts = tk.Label(form_frame, text="Danh s├ích M├íy chß╗º:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_hosts.pack(anchor=tk.W)
         
         entry_hosts = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_hosts.pack(fill=tk.X, pady=(3, 10))
         
-        lbl_port = tk.Label(form_frame, text="Cổng kết nối (Port):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_port = tk.Label(form_frame, text="Cß╗òng kß║┐t nß╗æi (Port):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_port.pack(anchor=tk.W)
         
         entry_port = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
@@ -5382,13 +5346,13 @@ class UnifiedApp(tk.Tk):
             new_port_str = entry_port.get().strip()
             
             if not new_hosts_str or not new_port_str:
-                self.show_custom_error("Lỗi", "Vui lòng nhập đầy đủ thông tin!", parent=dialog)
+                self.show_custom_error("Lß╗ùi", "Vui l├▓ng nhß║¡p ─æß║ºy ─æß╗º th├┤ng tin!", parent=dialog)
                 return
                 
             try:
                 new_port = int(new_port_str)
             except ValueError:
-                self.show_custom_error("Lỗi", "Cổng kết nối (Port) phải là số!", parent=dialog)
+                self.show_custom_error("Lß╗ùi", "Cß╗òng kß║┐t nß╗æi (Port) phß║úi l├á sß╗æ!", parent=dialog)
                 return
                 
             global SIGNALING_SERVER_HOSTS, SIGNALING_SERVER_PORT
@@ -5406,23 +5370,23 @@ class UnifiedApp(tk.Tk):
                 with open('server.ini', 'w', encoding='utf-8') as f:
                     config.write(f)
                 
-                self.show_custom_info("Thành công", "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.", parent=dialog)
+                self.show_custom_info("Th├ánh c├┤ng", "─É├ú cß║¡p nhß║¡t m├íy chß╗º th├ánh c├┤ng!\nß╗¿ng dß╗Ñng sß║╜ sß╗¡ dß╗Ñng cß║Ñu h├¼nh mß╗¢i cho c├íc kß║┐t nß╗æi tiß║┐p theo.", parent=dialog)
                 dialog.destroy()
             except Exception as e:
-                self.show_custom_error("Lỗi", f"Không thể lưu file server.ini: {e}", parent=dialog)
+                self.show_custom_error("Lß╗ùi", f"Kh├┤ng thß╗â l╞░u file server.ini: {e}", parent=dialog)
 
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=30, pady=10)
         
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="L╞░u lß║íi", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_config
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
         
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="Hß╗ºy bß╗Å", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -5431,13 +5395,13 @@ class UnifiedApp(tk.Tk):
     def update_fixed_password_indicator(self):
         if hasattr(self, 'fixed_pass_indicator'):
             if self.fixed_password:
-                self.fixed_pass_indicator.config(text="● Mật khẩu cố định: Đang hoạt động")
+                self.fixed_pass_indicator.config(text="ΓùÅ Mß║¡t khß║⌐u cß╗æ ─æß╗ïnh: ─Éang hoß║ít ─æß╗Öng")
             else:
                 self.fixed_pass_indicator.config(text="")
 
     def open_set_fixed_password_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Mật khẩu cố định")
+        dialog.title("Mß║¡t khß║⌐u cß╗æ ─æß╗ïnh")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -5451,10 +5415,10 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text="C├ÇI ─Éß║╢T Mß║¼T KHß║¿U Cß╗É ─Éß╗èNH", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)"
+        desc_text = "─Éß║╖t mß║¡t khß║⌐u cß╗æ ─æß╗ïnh gi├║p ─æß╗æi t├íc kß║┐t nß╗æi v├áo\nm├íy cß╗ºa bß║ín m├á kh├┤ng cß║ºn hß╗Åi mß║¡t khß║⌐u ngß║½u nhi├¬n.\n(─Éß╗â trß╗æng ─æß╗â tß║»t t├¡nh n─âng n├áy)"
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
@@ -5476,7 +5440,7 @@ class UnifiedApp(tk.Tk):
                 entry_pass.config(show="*")
 
         chk_show = tk.Checkbutton(
-            dialog, text="Hiển thị mật khẩu", font=("Segoe UI", 8),
+            dialog, text="Hiß╗ân thß╗ï mß║¡t khß║⌐u", font=("Segoe UI", 8),
             variable=show_pass, onvalue=True, offvalue=False,
             command=toggle_password, bg=self.bg_color, fg=self.text_gray,
             activebackground=self.bg_color, activeforeground=self.text_white,
@@ -5490,9 +5454,9 @@ class UnifiedApp(tk.Tk):
             self.update_fixed_password_indicator()
             
             if new_pass:
-                self.show_custom_info("Thành công", "Đã lưu mật khẩu cố định thành công!", parent=dialog)
+                self.show_custom_info("Th├ánh c├┤ng", "─É├ú l╞░u mß║¡t khß║⌐u cß╗æ ─æß╗ïnh th├ánh c├┤ng!", parent=dialog)
             else:
-                self.show_custom_info("Thành công", "Đã tắt mật khẩu cố định thành công!", parent=dialog)
+                self.show_custom_info("Th├ánh c├┤ng", "─É├ú tß║»t mß║¡t khß║⌐u cß╗æ ─æß╗ïnh th├ánh c├┤ng!", parent=dialog)
             dialog.destroy()
 
         # Buttons
@@ -5500,14 +5464,14 @@ class UnifiedApp(tk.Tk):
         btn_frame.pack(fill=tk.X, padx=30, pady=(5, 10))
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="L╞░u lß║íi", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_password
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="Hß╗ºy bß╗Å", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -5574,7 +5538,7 @@ class UnifiedApp(tk.Tk):
                 except Exception as e:
                     print(f"[Startup] Warning: Could not set StartupApproved: {e}")
                 print(f"[Startup] Enabled run on startup: {exe_path}")
-                self.show_custom_info("Thành công", "Đã bật tính năng chạy khi mở máy thành công!")
+                self.show_custom_info("Th├ánh c├┤ng", "─É├ú bß║¡t t├¡nh n─âng chß║íy khi mß╗ƒ m├íy th├ánh c├┤ng!")
             else:
                 try:
                     winreg.DeleteValue(key, key_name)
@@ -5587,11 +5551,11 @@ class UnifiedApp(tk.Tk):
                     winreg.CloseKey(approved_key)
                 except Exception:
                     pass
-                self.show_custom_info("Thành công", "Đã tắt tính năng chạy khi mở máy thành công!")
+                self.show_custom_info("Th├ánh c├┤ng", "─É├ú tß║»t t├¡nh n─âng chß║íy khi mß╗ƒ m├íy th├ánh c├┤ng!")
             winreg.CloseKey(key)
         except Exception as e:
             print(f"[Startup] Failed to modify registry: {e}")
-            self.show_custom_error("Thất bại", f"Không thể thay đổi cài đặt Registry: {e}")
+            self.show_custom_error("Thß║Ñt bß║íi", f"Kh├┤ng thß╗â thay ─æß╗òi c├ái ─æß║╖t Registry: {e}")
             self.startup_var.set(not enabled)
 
 
@@ -5610,7 +5574,7 @@ class UnifiedApp(tk.Tk):
         elif len(self.active_viewers) > 1:
             # Multiple active sessions
             dialog = tk.Toplevel(self)
-            dialog.title("Liên hệ Zalo")
+            dialog.title("Li├¬n hß╗ç Zalo")
             dialog.resizable(False, False)
             dialog.configure(bg=self.bg_color)
             dialog.transient(self)
@@ -5624,13 +5588,13 @@ class UnifiedApp(tk.Tk):
             y = self.winfo_y() + (self.winfo_height() - h) // 2
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             
-            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title = tk.Label(dialog, text="CHß╗îN ─Éß╗ÉI T├üC ─Éß╗é LI├èN Hß╗å ZALO", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or "Kh├┤ng r├╡"
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else 'Kh├┤ng c├│ sß╗æ'})"
                 
                 def contact(val=p_val, name=c_name):
                     dialog.destroy()
@@ -5657,7 +5621,7 @@ class UnifiedApp(tk.Tk):
 
     def show_zalo_error_popup(self, comp_name=""):
         dialog = tk.Toplevel(self)
-        dialog.title("Liên hệ Zalo")
+        dialog.title("Li├¬n hß╗ç Zalo")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -5671,18 +5635,18 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "LIÊN HỆ ZALO"
+        title_text = "LI├èN Hß╗å ZALO"
         if comp_name:
             title_text = f"ZALO: {comp_name.upper()}"
             
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        lbl_phone = tk.Label(dialog, text="Chưa có liên lạc", font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
+        lbl_phone = tk.Label(dialog, text="Ch╞░a c├│ li├¬n lß║íc", font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
         lbl_phone.pack(pady=(5, 15))
 
         btn_ok = tk.Button(
-            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            dialog, text="─É├│ng", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -5701,7 +5665,7 @@ class UnifiedApp(tk.Tk):
         elif len(self.active_viewers) > 1:
             # Let them select which computer's phone number to view
             dialog = tk.Toplevel(self)
-            dialog.title("Chọn đối tác")
+            dialog.title("Chß╗ìn ─æß╗æi t├íc")
             dialog.resizable(False, False)
             dialog.configure(bg=self.bg_color)
             dialog.transient(self)
@@ -5715,13 +5679,13 @@ class UnifiedApp(tk.Tk):
             y = self.winfo_y() + (self.winfo_height() - h) // 2
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             
-            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title = tk.Label(dialog, text="CHß╗îN ─Éß╗ÉI T├üC XEM ─ÉIß╗åN THOß║áI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or "Kh├┤ng r├╡"
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else 'Kh├┤ng c├│ sß╗æ'})"
                 
                 def show_phone(val=p_val, name=c_name):
                     dialog.destroy()
@@ -5742,7 +5706,7 @@ class UnifiedApp(tk.Tk):
 
     def show_phone_number_popup(self, phone_val, comp_name=""):
         dialog = tk.Toplevel(self)
-        dialog.title("Điện thoại liên hệ")
+        dialog.title("─Éiß╗çn thoß║íi li├¬n hß╗ç")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -5756,71 +5720,71 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "SỐ ĐIỆN THOẠI LIÊN HỆ"
+        title_text = "Sß╗É ─ÉIß╗åN THOß║áI LI├èN Hß╗å"
         if comp_name:
-            title_text = f"ĐIỆN THOẠI: {comp_name.upper()}"
+            title_text = f"─ÉIß╗åN THOß║áI: {comp_name.upper()}"
             
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        display_text = phone_val if phone_val else "Chưa có liên lạc"
+        display_text = phone_val if phone_val else "Ch╞░a c├│ li├¬n lß║íc"
         lbl_phone = tk.Label(dialog, text=display_text, font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
         lbl_phone.pack(pady=(5, 15))
 
         btn_ok = tk.Button(
-            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            dialog, text="─É├│ng", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_ok.pack()
 
     def show_about_dialog(self):
-        # Tạo cửa sổ Toplevel mới đóng vai trò Modal
+        # Tß║ío cß╗¡a sß╗ò Toplevel mß╗¢i ─æ├│ng vai tr├▓ Modal
         about = tk.Toplevel(self)
         about.title("About")
         about.resizable(False, False)
         about.configure(bg=self.bg_color)
         
-        # Thiết lập thuộc tính Modal (nổi lên trên cửa sổ chính và chặn tương tác bên ngoài)
+        # Thiß║┐t lß║¡p thuß╗Öc t├¡nh Modal (nß╗òi l├¬n tr├¬n cß╗¡a sß╗ò ch├¡nh v├á chß║╖n t╞░╞íng t├íc b├¬n ngo├ái)
         about.transient(self)
         about.grab_set()
         
-        # Thiết kế giao diện premium cho dialog About
+        # Thiß║┐t kß║┐ giao diß╗çn premium cho dialog About
         title_label = tk.Label(about, text="Easy Remote Desktop", font=("Inter", 13, "bold"), fg=self.text_white, bg=self.bg_color)
         title_label.pack(pady=(15, 2))
         
         ai_label = tk.Label(about, text="AI Pro Version", font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
         ai_label.pack(pady=(0, 5))
         
-        contact_label = tk.Label(about, text="Liên hệ: Mr. Tuyến - 0941 261 771", font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
+        contact_label = tk.Label(about, text="Li├¬n hß╗ç: Mr. Tuyß║┐n - 0941 261 771", font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
         contact_label.pack(pady=(0, 15))
         
-        close_btn = tk.Button(about, text="Đóng", font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
+        close_btn = tk.Button(about, text="─É├│ng", font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
                               activeforeground=self.text_white, activebackground="#C04242",
                               bd=0, padx=25, pady=6, cursor="hand2", command=about.destroy)
         close_btn.pack(pady=(0, 15))
         
-        # Cập nhật layout để lấy kích thước hình học chính xác
+        # Cß║¡p nhß║¡t layout ─æß╗â lß║Ñy k├¡ch th╞░ß╗¢c h├¼nh hß╗ìc ch├¡nh x├íc
         about.update_idletasks()
         
-        # Kích thước cố định của dialog About
+        # K├¡ch th╞░ß╗¢c cß╗æ ─æß╗ïnh cß╗ºa dialog About
         dialog_w = 320
         dialog_h = 175
         
-        # Lấy thông số tọa độ và kích thước của cửa sổ chính UnifiedApp
+        # Lß║Ñy th├┤ng sß╗æ tß╗ìa ─æß╗Ö v├á k├¡ch th╞░ß╗¢c cß╗ºa cß╗¡a sß╗ò ch├¡nh UnifiedApp
         parent_x = self.winfo_x()
         parent_y = self.winfo_y()
         parent_w = self.winfo_width()
         parent_h = self.winfo_height()
         
-        # Tính toán tọa độ x, y để căn chính xác giữa cửa sổ chính
+        # T├¡nh to├ín tß╗ìa ─æß╗Ö x, y ─æß╗â c─ân ch├¡nh x├íc giß╗»a cß╗¡a sß╗ò ch├¡nh
         x = parent_x + (parent_w - dialog_w) // 2
         y = parent_y + (parent_h - dialog_h) // 2
         
-        # Áp dụng hình học hình chữ nhật căn giữa
+        # ├üp dß╗Ñng h├¼nh hß╗ìc h├¼nh chß╗» nhß║¡t c─ân giß╗»a
         about.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
         
-        # Khóa tương tác của luồng cho đến khi Modal đóng
+        # Kh├│a t╞░╞íng t├íc cß╗ºa luß╗ông cho ─æß║┐n khi Modal ─æ├│ng
         self.wait_window(about)
 
     def query_computer_status(self, clean_id):
@@ -5831,18 +5795,18 @@ class UnifiedApp(tk.Tk):
         sock = getattr(self, 'primary_signaling_socket', None)
         if sock:
             try:
-                print(f"[StatusQuery] Đang gửi yêu cầu kiểm tra trạng thái ID: {clean_id}")
+                print(f"[StatusQuery] ─Éang gß╗¡i y├¬u cß║ºu kiß╗âm tra trß║íng th├íi ID: {clean_id}")
                 req = json.dumps({"action": "check_online", "target": clean_id})
                 with self.signaling_lock:
                     send_msg(sock, req.encode('utf-8'), APP_KEY)
                 
-                # Sau 1.5s nếu đèn LED vẫn là màu xám (chưa có phản hồi) thì tự động chuyển sang màu đỏ (Offline)
+                # Sau 1.5s nß║┐u ─æ├¿n LED vß║½n l├á m├áu x├ím (ch╞░a c├│ phß║ún hß╗ôi) th├¼ tß╗▒ ─æß╗Öng chuyß╗ân sang m├áu ─æß╗Å (Offline)
                 self.after(1500, lambda cid=clean_id: self.check_and_default_offline(cid))
             except Exception as e:
-                print(f"[StatusQuery] Lỗi gửi yêu cầu status {clean_id}: {e}")
+                print(f"[StatusQuery] Lß╗ùi gß╗¡i y├¬u cß║ºu status {clean_id}: {e}")
                 self.update_saved_computer_status(clean_id, False)
         else:
-            print(f"[StatusQuery] Chưa kết nối Signaling, mặc định {clean_id} là Offline")
+            print(f"[StatusQuery] Ch╞░a kß║┐t nß╗æi Signaling, mß║╖c ─æß╗ïnh {clean_id} l├á Offline")
             self.update_saved_computer_status(clean_id, False)
 
     def check_and_default_offline(self, clean_id):
@@ -5851,7 +5815,7 @@ class UnifiedApp(tk.Tk):
             for dot_widget in widgets:
                 try:
                     if dot_widget.winfo_exists() and dot_widget.cget("fg") == "#8A8A9A":
-                        dot_widget.config(fg="#E05252")  # Đỏ (Offline)
+                        dot_widget.config(fg="#E05252")  # ─Éß╗Å (Offline)
                 except Exception:
                     pass
             if hasattr(self, '_reorder_saved_computers_func'):
@@ -5865,9 +5829,9 @@ class UnifiedApp(tk.Tk):
                 try:
                     if dot_widget.winfo_exists():
                         if is_online:
-                            dot_widget.config(fg="#00F5D4")  # Xanh ngọc (Cyan / Turquoise)
+                            dot_widget.config(fg="#00F5D4")  # Xanh ngß╗ìc (Cyan / Turquoise)
                         else:
-                            dot_widget.config(fg="#E05252")  # Đỏ (Crimson / Coral Red)
+                            dot_widget.config(fg="#E05252")  # ─Éß╗Å (Crimson / Coral Red)
                 except Exception:
                     pass
             if hasattr(self, '_reorder_saved_computers_func'):
@@ -5880,7 +5844,7 @@ class UnifiedApp(tk.Tk):
         p = parent if parent else self
         
         dialog = tk.Toplevel(p)
-        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy ß╗ƒ g├│c tr├¬n b├¬n tr├íi m├án h├¼nh
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
@@ -5895,14 +5859,14 @@ class UnifiedApp(tk.Tk):
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        dialog.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
         
         # Icon & Message side-by-side
-        icon_lbl = tk.Label(content_frame, text="ℹ", font=("Segoe UI", 22), fg=self.btn_color, bg=self.bg_color)
+        icon_lbl = tk.Label(content_frame, text="Γä╣", font=("Segoe UI", 22), fg=self.btn_color, bg=self.bg_color)
         icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
         
         msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
@@ -5919,7 +5883,7 @@ class UnifiedApp(tk.Tk):
         )
         btn_ok.pack(side=tk.RIGHT)
         
-        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        # ─Éß╗úi cho ─æß║┐n khi cß╗¡a sß╗ò Modal n├áy ─æ├│ng ─æß╗â ─æß╗ông bß╗Ö luß╗ông chß║╖n
         self.wait_window(dialog)
 
     def show_custom_error(self, title, message, parent=None):
@@ -5930,7 +5894,7 @@ class UnifiedApp(tk.Tk):
         p = parent if parent else self
         
         dialog = tk.Toplevel(p)
-        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy ß╗ƒ g├│c tr├¬n b├¬n tr├íi m├án h├¼nh
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
@@ -5944,14 +5908,14 @@ class UnifiedApp(tk.Tk):
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        dialog.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
         
         # Icon & Message side-by-side
-        icon_lbl = tk.Label(content_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color)
+        icon_lbl = tk.Label(content_frame, text="ΓÜá", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color)
         icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
         
         msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
@@ -5968,18 +5932,18 @@ class UnifiedApp(tk.Tk):
         )
         btn_ok.pack(side=tk.RIGHT)
         
-        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        # ─Éß╗úi cho ─æß║┐n khi cß╗¡a sß╗ò Modal n├áy ─æ├│ng ─æß╗â ─æß╗ông bß╗Ö luß╗ông chß║╖n
         self.wait_window(dialog)
 
     def _show_lan_error_dialog(self, public_ip=""):
         if getattr(self, 'is_headless', False):
-            print("[LAN Error] Kết nối LAN thất bại - Firewall có thể đang chặn kết nối.")
+            print("[LAN Error] Kß║┐t nß╗æi LAN thß║Ñt bß║íi - Firewall c├│ thß╗â ─æang chß║╖n kß║┐t nß╗æi.")
             return
         import tkinter as tk
 
         dialog = tk.Toplevel(self)
         dialog.withdraw()
-        dialog.title("Lỗi kết nối mạng LAN")
+        dialog.title("Lß╗ùi kß║┐t nß╗æi mß║íng LAN")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.attributes("-topmost", True)
@@ -5993,36 +5957,36 @@ class UnifiedApp(tk.Tk):
         dialog.geometry(f"{W}x420+{x}+{y}")
         dialog.deiconify()
 
-        # ── HEADER ──────────────────────────────────────────────
+        # ΓöÇΓöÇ HEADER ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         hdr = tk.Frame(dialog, bg="#C0392B", height=5)
         hdr.pack(fill=tk.X)
 
         title_frame = tk.Frame(dialog, bg=self.bg_color)
         title_frame.pack(fill=tk.X, padx=20, pady=(14, 0))
 
-        tk.Label(title_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(title_frame, text="ΓÜá", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
         title_col = tk.Frame(title_frame, bg=self.bg_color)
         title_col.pack(side=tk.LEFT, fill=tk.BOTH)
-        tk.Label(title_col, text="Kết nối mạng LAN thất bại", font=("Segoe UI", 12, "bold"),
+        tk.Label(title_col, text="Kß║┐t nß╗æi mß║íng LAN thß║Ñt bß║íi", font=("Segoe UI", 12, "bold"),
                  fg="#E05252", bg=self.bg_color, anchor="w").pack(anchor="w")
-        tk.Label(title_col, text="Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+        tk.Label(title_col, text="Cß║ú hai m├íy c├╣ng mß║íng nß╗Öi bß╗Ö nh╞░ng kh├┤ng kß║┐t nß╗æi ─æ╞░ß╗úc trß╗▒c tiß║┐p",
                  font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
 
-        # ── SEPARATOR ───────────────────────────────────────────
+        # ΓöÇΓöÇ SEPARATOR ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(12, 0))
 
-        # ── THÔNG TIN KỸ THUẬT ──────────────────────────────────
+        # ΓöÇΓöÇ TH├öNG TIN Kß╗╕ THUß║¼T ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         info_frame = tk.Frame(dialog, bg="#1A1A2A", bd=0, highlightthickness=1, highlightbackground="#2A2A4A")
         info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
 
-        tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
+        tk.Label(info_frame, text="≡ƒôï  Th├┤ng tin kß╗╣ thuß║¡t", font=("Segoe UI", 8, "bold"),
                  fg=self.btn_color, bg="#1A1A2A", anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
-            ("Public IP phát hiện", public_ip if public_ip else "N/A"),
-            ("Trạng thái",          "Cùng Public IP → cùng Router/Mạng nội bộ"),
-            ("Phương thức thử",     "Kết nối TCP trực tiếp qua Local IP (LAN)"),
-            ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
+            ("Public IP ph├ít hiß╗çn", public_ip if public_ip else "N/A"),
+            ("Trß║íng th├íi",          "C├╣ng Public IP ΓåÆ c├╣ng Router/Mß║íng nß╗Öi bß╗Ö"),
+            ("Ph╞░╞íng thß╗⌐c thß╗¡",     "Kß║┐t nß╗æi TCP trß╗▒c tiß║┐p qua Local IP (LAN)"),
+            ("Kß║┐t quß║ú",             "Γ¥î  Tß║Ñt cß║ú ─æß╗ïa chß╗ë LAN ─æß╗üu kh├┤ng phß║ún hß╗ôi"),
         ]
         for label, value in rows:
             row = tk.Frame(info_frame, bg="#1A1A2A")
@@ -6033,17 +5997,17 @@ class UnifiedApp(tk.Tk):
                      bg="#1A1A2A", anchor="w", wraplength=240, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X)
         tk.Frame(info_frame, bg="#1A1A2A", height=6).pack()
 
-        # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
-        tk.Label(dialog, text="🔧  Cách khắc phục", font=("Segoe UI", 9, "bold"),
+        # ΓöÇΓöÇ NGUY├èN NH├éN & C├üCH KHß║«C PHß╗ñC ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        tk.Label(dialog, text="≡ƒöº  C├ích khß║»c phß╗Ñc", font=("Segoe UI", 9, "bold"),
                  fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
 
         steps = [
-            ("1", "Kiểm tra Tường lửa Windows",
-             "Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network."),
-            ("2", "Kiểm tra phần mềm diệt virus / VPN",
-             "Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ."),
-            ("3", "Kiểm tra cổng mạng đang dùng",
-             f"Ứng dụng dùng cổng {BOUND_PORT}. Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall."),
+            ("1", "Kiß╗âm tra T╞░ß╗¥ng lß╗¡a Windows",
+             "V├áo Windows Defender Firewall ΓåÆ Allow an app ΓåÆ ─æß║úm bß║úo RemoteDesktopP2P.exe ─æ╞░ß╗úc ph├⌐p tr├¬n Private & Public network."),
+            ("2", "Kiß╗âm tra phß║ºn mß╗üm diß╗çt virus / VPN",
+             "Tß║»t tß║ím thß╗¥i c├íc phß║ºn mß╗üm Antivirus hoß║╖c VPN c├│ thß╗â ─æang chß║╖n kß║┐t nß╗æi nß╗Öi bß╗Ö."),
+            ("3", "Kiß╗âm tra cß╗òng mß║íng ─æang d├╣ng",
+             f"ß╗¿ng dß╗Ñng d├╣ng cß╗òng {BOUND_PORT}. ─Éß║úm bß║úo cß╗òng n├áy ch╞░a bß╗ï chiß║┐m hoß║╖c bß╗ï chß║╖n bß╗ƒi Firewall."),
         ]
         for num, title_step, desc in steps:
             sf = tk.Frame(dialog, bg=self.bg_color)
@@ -6058,12 +6022,12 @@ class UnifiedApp(tk.Tk):
             tk.Label(txt_col, text=desc, font=("Segoe UI", 8), fg=self.text_gray,
                      bg=self.bg_color, anchor="w", wraplength=360, justify=tk.LEFT).pack(anchor="w")
 
-        # ── BUTTON ──────────────────────────────────────────────
+        # ΓöÇΓöÇ BUTTON ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(10, 0))
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
         tk.Button(
-            btn_frame, text="Đã hiểu", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="─É├ú hiß╗âu", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#E05252", activebackground="#C0392B",
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
             command=dialog.destroy
@@ -6080,7 +6044,7 @@ class UnifiedApp(tk.Tk):
         p = parent if parent else self
         
         dialog = tk.Toplevel(p)
-        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.withdraw()  # ß║¿n ngay khi khß╗ƒi tß║ío ─æß╗â tr├ính bß╗ï nh├íy ß╗ƒ g├│c tr├¬n b├¬n tr├íi m├án h├¼nh
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
@@ -6094,14 +6058,14 @@ class UnifiedApp(tk.Tk):
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        dialog.deiconify()  # Chß╗ë hiß╗ân thß╗ï sau khi ─æ├ú t├¡nh to├ín c─ân giß╗»a ho├án hß║úo!
         
         # Content frame
         content_frame = tk.Frame(dialog, bg=self.bg_color)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 10))
         
         # Icon & Message side-by-side
-        icon_lbl = tk.Label(content_frame, text="❓", font=("Segoe UI", 22), fg="#F39C12", bg=self.bg_color)
+        icon_lbl = tk.Label(content_frame, text="Γ¥ô", font=("Segoe UI", 22), fg="#F39C12", bg=self.bg_color)
         icon_lbl.pack(side=tk.LEFT, padx=(0, 12))
         
         msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=230, justify=tk.LEFT)
@@ -6121,17 +6085,17 @@ class UnifiedApp(tk.Tk):
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
         
-        # Nút "Không"
+        # N├║t "Kh├┤ng"
         btn_no = tk.Button(
-            btn_frame, text="Không", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="Kh├┤ng", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#3A3A4A", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_no
         )
         btn_no.pack(side=tk.RIGHT, padx=(4, 0))
         
-        # Nút "Có"
+        # N├║t "C├│"
         btn_yes = tk.Button(
-            btn_frame, text="Có", font=("Segoe UI", 9, "bold"),
+            btn_frame, text="C├│", font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_yes
         )
@@ -6139,13 +6103,13 @@ class UnifiedApp(tk.Tk):
         
         dialog.protocol("WM_DELETE_WINDOW", on_no)
         
-        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        # ─Éß╗úi cho ─æß║┐n khi cß╗¡a sß╗ò Modal n├áy ─æ├│ng ─æß╗â ─æß╗ông bß╗Ö luß╗ông chß║╖n
         self.wait_window(dialog)
         return result[0]
 
     def update_status(self, text, is_error=False, blink=False, is_success=False):
         def _do_update():
-            self.status_var.set(f"Trạng thái: {text}")
+            self.status_var.set(f"Trß║íng th├íi: {text}")
             
             if not hasattr(self, 'lbl_status'):
                 return
@@ -6159,30 +6123,30 @@ class UnifiedApp(tk.Tk):
                 self._blink_status()
             elif is_error:
                 self.lbl_status.config(fg="#FF4D4D")
-            elif is_success or "thành công" in text.lower():
-                self.lbl_status.config(fg="#2ECC71")  # Xanh lục (Emerald Green)
+            elif is_success or "th├ánh c├┤ng" in text.lower():
+                self.lbl_status.config(fg="#2ECC71")  # Xanh lß╗Ñc (Emerald Green)
             else:
                 self.lbl_status.config(fg="#8A8A9A")
         
         self.after(0, _do_update)
 
     def _poll_signaling_status(self):
-        """Polling loop chạy trên main Tkinter thread - kiểm tra Signaling mỗi 3s và cập nhật status UI đáng tin cậy."""
+        """Polling loop chß║íy tr├¬n main Tkinter thread - kiß╗âm tra Signaling mß╗ùi 3s v├á cß║¡p nhß║¡t status UI ─æ├íng tin cß║¡y."""
         if not getattr(self, 'running_server', True):
             return
         try:
             current_status = self.status_var.get()
-            # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
+            # Chß╗ë update nß║┐u status ─æang ß╗ƒ c├íc trß║íng th├íi ch╞░a kß║┐t nß╗æi/─æang thß╗¡
             is_pending = any(kw in current_status for kw in [
-                "Không thể kết nối Signaling",
-                "Chưa kết nối Signaling",
-                "Đang kết nối Signaling",
-                "Đang thử lại",
-                "chế độ nền",
-                "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
+                "Kh├┤ng thß╗â kß║┐t nß╗æi Signaling",
+                "Ch╞░a kß║┐t nß╗æi Signaling",
+                "─Éang kß║┐t nß╗æi Signaling",
+                "─Éang thß╗¡ lß║íi",
+                "chß║┐ ─æß╗Ö nß╗ün",
+                "Sß║╡n s├áng kß║┐t nß╗æi",  # c┼⌐ng update nß║┐u ─æang sß║╡n s├áng m├á Signaling ch╞░a confirm
             ])
             if is_pending and getattr(self, 'signaling_sockets', {}):
-                self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối.")
+                self.update_status("Kß║┐t nß╗æi Signaling th├ánh c├┤ng! Sß║╡n s├áng kß║┐t nß╗æi.")
         except Exception:
             pass
         self.after(3000, self._poll_signaling_status)
@@ -6217,13 +6181,13 @@ class UnifiedApp(tk.Tk):
             winreg.CloseKey(key)
             print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
         except PermissionError:
-            # Không có quyền Admin → UAC vẫn sẽ dùng Secure Desktop → cảnh báo người dùng ở console/log
-            print("[Host] WARNING: No Admin rights → PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
+            # Kh├┤ng c├│ quyß╗ün Admin ΓåÆ UAC vß║½n sß║╜ d├╣ng Secure Desktop ΓåÆ cß║únh b├ío ng╞░ß╗¥i d├╣ng ß╗ƒ console/log
+            print("[Host] WARNING: No Admin rights ΓåÆ PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
         except Exception as e:
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
     def init_network_services(self):
-        # 0. Thử tự động thêm rule Tường lửa và cấu hình UAC (sẽ thành công nếu có quyền Admin)
+        # 0. Thß╗¡ tß╗▒ ─æß╗Öng th├¬m rule T╞░ß╗¥ng lß╗¡a v├á cß║Ñu h├¼nh UAC (sß║╜ th├ánh c├┤ng nß║┐u c├│ quyß╗ün Admin)
         self.configure_uac_registry()
         self.add_firewall_rule_for_app()
         
@@ -6233,15 +6197,15 @@ class UnifiedApp(tk.Tk):
             self.server_socket = None
             upnp_success = False
         else:
-            self.update_status("Đang khởi động Server lắng nghe...")
+            self.update_status("─Éang khß╗ƒi ─æß╗Öng Server lß║»ng nghe...")
             self.start_host_server()
             
             # 2. Try automatic UPnP Port Forwarding
-            self.update_status("Đang tự động cấu hình Router (UPnP)...")
+            self.update_status("─Éang tß╗▒ ─æß╗Öng cß║Ñu h├¼nh Router (UPnP)...")
             upnp_success = attempt_upnp_forward(BOUND_PORT)
         
         # 3. Get Public & Local IPs
-        self.update_status("Đang lấy thông vị trí mạng...")
+        self.update_status("─Éang lß║Ñy th├┤ng vß╗ï tr├¡ mß║íng...")
         print("[DEBUG] Calling get_public_ip()")
         self.current_ip = get_public_ip()
         print("[DEBUG] Returned from get_public_ip()")
@@ -6254,7 +6218,7 @@ class UnifiedApp(tk.Tk):
         print(f"[Host] Public IPv4: {self.current_ip}, IPv6: {self.ipv6}, Local IP: {self.local_ip}")
         
         # 4. Connect to real-time Signaling Server
-        self.update_status(f"Đang kết nối tới các Signaling Server...")
+        self.update_status(f"─Éang kß║┐t nß╗æi tß╗¢i c├íc Signaling Server...")
         self.signaling_sockets = {}
         self.primary_signaling_socket = None
         self.current_signaling_host = None
@@ -6268,24 +6232,24 @@ class UnifiedApp(tk.Tk):
         while timeout > 0 and not self.signaling_sockets:
             time.sleep(0.2)
             timeout -= 0.2
-            # Hiện thông báo đang chờ mỗi 2 giây
+            # Hiß╗çn th├┤ng b├ío ─æang chß╗¥ mß╗ùi 2 gi├óy
             elapsed = 8.0 - timeout
             if abs(elapsed - 2.0) < 0.1 or abs(elapsed - 5.0) < 0.1:
-                self.update_status(f"Đang kết nối Signaling Server... ({8 - int(timeout)}s)")
+                self.update_status(f"─Éang kß║┐t nß╗æi Signaling Server... ({8 - int(timeout)}s)")
             
         if self.signaling_sockets:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
+            suffix = " (Dß╗ïch vß╗Ñ hoß║ít ─æß╗Öng)" if getattr(self, "is_service_active", False) else ""
             if upnp_success:
-                self.update_status(f"Kết nối Signaling & Mở cổng Router thành công (Cổng {BOUND_PORT})!{suffix}")
+                self.update_status(f"Kß║┐t nß╗æi Signaling & Mß╗ƒ cß╗òng Router th├ánh c├┤ng (Cß╗òng {BOUND_PORT})!{suffix}")
             else:
-                self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.{suffix}")
+                self.update_status(f"Kß║┐t nß╗æi Signaling th├ánh c├┤ng (Cß╗òng {BOUND_PORT})! Sß║╡n s├áng kß║┐t nß╗æi.{suffix}")
         else:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
-            self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...{suffix}")
+            suffix = " (Dß╗ïch vß╗Ñ hoß║ít ─æß╗Öng)" if getattr(self, "is_service_active", False) else ""
+            self.update_status(f"Ch╞░a kß║┐t nß╗æi Signaling Server. ─Éang thß╗¡ lß║íi ß╗ƒ chß║┐ ─æß╗Ö nß╗ün...{suffix}")
 
 
     def signaling_maintainer_thread(self, host):
-        retry_delay = 2  # Bắt đầu retry nhanh (2s), tăng dần sau 3 lần thất bại
+        retry_delay = 2  # Bß║»t ─æß║ºu retry nhanh (2s), t─âng dß║ºn sau 3 lß║ºn thß║Ñt bß║íi
         fail_count = 0
         while self.running_server:
             sock = None
@@ -6322,10 +6286,10 @@ class UnifiedApp(tk.Tk):
                     if getattr(self, 'current_signaling_host', None) is None:
                         self.current_signaling_host = host
                         self.primary_signaling_socket = sock
-                    # Luôn cập nhật status khi kết nối thành công (kể cả lần đầu sau timeout hoặc sau reconnect)
-                    self.after(0, lambda: self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                    # Lu├┤n cß║¡p nhß║¡t status khi kß║┐t nß╗æi th├ánh c├┤ng (kß╗â cß║ú lß║ºn ─æß║ºu sau timeout hoß║╖c sau reconnect)
+                    self.after(0, lambda: self.update_status("Kß║┐t nß╗æi Signaling th├ánh c├┤ng! Sß║╡n s├áng kß║┐t nß╗æi."))
                 
-                # Reset counters khi kết nối thành công
+                # Reset counters khi kß║┐t nß╗æi th├ánh c├┤ng
                 fail_count = 0
                 retry_delay = 2
                 
@@ -6381,10 +6345,10 @@ class UnifiedApp(tk.Tk):
                             self.primary_signaling_socket = self.signaling_sockets[new_host]
                         else:
                             if self.running_server:
-                                self.after(0, lambda: self.update_status("Mất kết nối toàn bộ Signaling Server. Đang thử lại...", is_error=True, blink=True))
+                                self.after(0, lambda: self.update_status("Mß║Ñt kß║┐t nß╗æi to├án bß╗Ö Signaling Server. ─Éang thß╗¡ lß║íi...", is_error=True, blink=True))
             
             time.sleep(retry_delay)
-            # Tăng retry_delay sau 3 lần thất bại liên tiếp
+            # T─âng retry_delay sau 3 lß║ºn thß║Ñt bß║íi li├¬n tiß║┐p
             fail_count += 1
             if fail_count >= 3:
                 retry_delay = 5
@@ -6434,15 +6398,15 @@ class UnifiedApp(tk.Tk):
                 self.after(0, lambda t=target, o=online: self.update_saved_computer_status(t, o))
                 
         except Exception as e:
-            print(f"[Signaling] Lỗi xử lý tin nhắn từ {host}: {e}")
+            print(f"[Signaling] Lß╗ùi xß╗¡ l├╜ tin nhß║»n tß╗½ {host}: {e}")
 
     def punch_hole_to_client(self, c_ip, c_port):
-        # 0. Đợi Client thử kết nối mạng LAN trước (2.0 giây)
-        # Việc này giúp giữ listener mở để Client có thể kết nối nội bộ.
-        # Đồng thời đồng bộ thời gian đục lỗ (Simultaneous Open) với Client (Client timeout LAN là 2.0s)
+        # 0. ─Éß╗úi Client thß╗¡ kß║┐t nß╗æi mß║íng LAN tr╞░ß╗¢c (2.0 gi├óy)
+        # Viß╗çc n├áy gi├║p giß╗» listener mß╗ƒ ─æß╗â Client c├│ thß╗â kß║┐t nß╗æi nß╗Öi bß╗Ö.
+        # ─Éß╗ông thß╗¥i ─æß╗ông bß╗Ö thß╗¥i gian ─æß╗Ñc lß╗ù (Simultaneous Open) vß╗¢i Client (Client timeout LAN l├á 2.0s)
         time.sleep(2.0)
         
-        # 1. Tạm thời đóng server_socket để giải phóng port
+        # 1. Tß║ím thß╗¥i ─æ├│ng server_socket ─æß╗â giß║úi ph├│ng port
         if self.server_socket:
             try:
                 self.server_socket.close()
@@ -6471,7 +6435,7 @@ class UnifiedApp(tk.Tk):
         if not success_sock:
             print("[HolePunch] Host gave up trying to punch hole.")
             
-        # 2. Mở lại server_socket bất kể đục lỗ thành công hay thất bại
+        # 2. Mß╗ƒ lß║íi server_socket bß║Ñt kß╗â ─æß╗Ñc lß╗ù th├ánh c├┤ng hay thß║Ñt bß║íi
         try:
             try:
                 if hasattr(socket, 'AF_INET6'):
@@ -6488,13 +6452,13 @@ class UnifiedApp(tk.Tk):
                 self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.server_socket.bind(('0.0.0.0', BOUND_PORT))
             self.server_socket.listen(5)
-            print(f"[Host] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+            print(f"[Host] ─É├ú phß╗Ñc hß╗ôi TCP server lß║»ng nghe tr├¬n port {BOUND_PORT}")
         except Exception as e:
-            print(f"[Host] Cảnh báo: Không thể phục hồi server_socket: {e}")
+            print(f"[Host] Cß║únh b├ío: Kh├┤ng thß╗â phß╗Ñc hß╗ôi server_socket: {e}")
             
-        # 3. Bắt tay kết nối nếu thành công
+        # 3. Bß║»t tay kß║┐t nß╗æi nß║┐u th├ánh c├┤ng
         if success_sock:
-            # Khôi phục timeout về None (blocking) cho socket sau khi đục lỗ thành công
+            # Kh├┤i phß╗Ñc timeout vß╗ü None (blocking) cho socket sau khi ─æß╗Ñc lß╗ù th├ánh c├┤ng
             success_sock.settimeout(None)
             threading.Thread(target=self.handle_host_handshake, args=(success_sock, (c_ip, c_port)), daemon=True).start()
 
@@ -6540,8 +6504,8 @@ class UnifiedApp(tk.Tk):
                 continue
                 
         if not bound:
-            self.after(0, lambda: self.show_custom_error("Lỗi hệ thống", "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng."))
-            self.update_status("Lỗi khởi động Server")
+            self.after(0, lambda: self.show_custom_error("Lß╗ùi hß╗ç thß╗æng", "Kh├┤ng thß╗â chß║íy server! C├íc cß╗òng mß║íng ─æß╗üu bß╗ï chiß║┐m dß╗Ñng hoß║╖c bß╗ï chß║╖n bß╗ƒi T╞░ß╗¥ng lß╗¡a.\nVui l├▓ng kiß╗âm tra lß║íi cß║Ñu h├¼nh mß║íng hoß║╖c tß║»t bß╗¢t ß╗⌐ng dß╗Ñng chiß║┐m cß╗òng."))
+            self.update_status("Lß╗ùi khß╗ƒi ─æß╗Öng Server")
             return
             
         # Spawn the socket accept loop in a separate thread
@@ -6605,7 +6569,7 @@ class UnifiedApp(tk.Tk):
                 try:
                     err_info = json.dumps({
                         "status": "error",
-                        "message": "Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!"
+                        "message": "Sai mß║¡t khß║⌐u kß║┐t nß╗æi hoß║╖c dß╗» liß╗çu kh├┤ng hß╗úp lß╗ç!"
                     }).encode('utf-8')
                     send_msg(conn, err_info, APP_KEY)
                 except: pass
@@ -6627,31 +6591,31 @@ class UnifiedApp(tk.Tk):
                 print("[Host] Password matches! Accepting connection.")
                 socket_passwords[conn] = client_pass
                 
-                client_id = data.get("client_id", "Không rõ")
-                client_comp = data.get("computer_name", "Không rõ")
+                client_id = data.get("client_id", "Kh├┤ng r├╡")
+                client_comp = data.get("computer_name", "Kh├┤ng r├╡")
                 fmt_client_id = f"{client_id[:3]} {client_id[3:6]} {client_id[6:9]} {client_id[9:]}" if len(client_id) == 12 else client_id
                 
-                if client_comp != "Không rõ":
-                    msg_text = f"Máy tính [{client_comp}] đang điều khiển máy bạn"
+                if client_comp != "Kh├┤ng r├╡":
+                    msg_text = f"M├íy t├¡nh [{client_comp}] ─æang ─æiß╗üu khiß╗ân m├íy bß║ín"
                 else:
-                    msg_text = f"Máy tính có ID [{fmt_client_id}] đang điều khiển máy bạn"
+                    msg_text = f"M├íy t├¡nh c├│ ID [{fmt_client_id}] ─æang ─æiß╗üu khiß╗ân m├íy bß║ín"
                     
-                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
+                self.after(0, lambda: self.show_custom_info("Kß║┐t nß╗æi tß╗½ xa", msg_text))
                 
                 self.wake_display()
                 
-                # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa
+                # Tß║»t Nagle's algorithm (TCP_NODELAY) ─æß╗â giß║úm ─æß╗Ö trß╗à tß╗æi ─æa
                 try:
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except Exception as e:
-                    print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Host: {e}")
+                    print(f"[TCP_NODELAY] Lß╗ùi thiß║┐t lß║¡p TCP_NODELAY tr├¬n Host: {e}")
                 
-                # Cấu hình TCP Keep-Alive bảo vệ kết nối đục lỗ khỏi bị đóng bởi Firewall/Router
+                # Cß║Ñu h├¼nh TCP Keep-Alive bß║úo vß╗ç kß║┐t nß╗æi ─æß╗Ñc lß╗ù khß╗Åi bß╗ï ─æ├│ng bß╗ƒi Firewall/Router
                 try:
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     conn.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
                 except Exception as e:
-                    print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Host: {e}")
+                    print(f"[KeepAlive] Lß╗ùi cß║Ñu h├¼nh Keep-Alive tr├¬n Host: {e}")
                 
                 # Get resolution safely
                 with mss.mss() as sct:
@@ -6707,7 +6671,7 @@ class UnifiedApp(tk.Tk):
                         if bw_msg:
                             bw_data = json.loads(bw_msg.decode('utf-8'))
                             if bw_data.get("action") == "speed_test_bw_req":
-                                dummy_size = 1572864 # 1.5 MB để nới rộng TCP Window
+                                dummy_size = 1572864 # 1.5 MB ─æß╗â nß╗¢i rß╗Öng TCP Window
                                 send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'), client_pass)
                                 conn.sendall(b'\x00' * dummy_size)
                             
@@ -6732,7 +6696,7 @@ class UnifiedApp(tk.Tk):
                 self.active_clients[addr] = client_state
                 
                 addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
-                self.update_status(f"Đang dùng máy chủ {addrs_str}")
+                self.update_status(f"─Éang d├╣ng m├íy chß╗º {addrs_str}")
                 
                 t_sender = threading.Thread(target=self.host_sender_thread, args=(conn, monitor, client_state, client_pass), daemon=True)
                 t_receiver = threading.Thread(target=self.host_receiver_thread, args=(conn, client_state, client_pass), daemon=True)
@@ -6740,7 +6704,7 @@ class UnifiedApp(tk.Tk):
                 t_sender.start()
                 t_receiver.start()
                 
-                # Khởi chạy luồng đồng bộ Clipboard File cho Host
+                # Khß╗ƒi chß║íy luß╗ông ─æß╗ông bß╗Ö Clipboard File cho Host
                 clipboard_sync_manager.add_socket(conn)
                 
                 try:
@@ -6751,16 +6715,16 @@ class UnifiedApp(tk.Tk):
                     clipboard_sync_manager.remove_socket(conn)
                     set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
                     
-                    print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
+                    print(f"[Host] ─É├ú ─æ├│ng kß║┐t nß╗æi vß╗¢i Client {addr[0]}:{addr[1]}.")
                     
                     if addr in self.active_clients:
                         del self.active_clients[addr]
                         
                     if self.active_clients:
                         addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
-                        self.update_status(f"Đang bị điều khiển bởi {addrs_str}")
+                        self.update_status(f"─Éang bß╗ï ─æiß╗üu khiß╗ân bß╗ƒi {addrs_str}")
                     else:
-                        self.update_status(f"Đã đóng kết nối với Client {addr[0]} lúc {time.strftime('%H:%M:%S')} (Sẵn sàng kết nối)")
+                        self.update_status(f"─É├ú ─æ├│ng kß║┐t nß╗æi vß╗¢i Client {addr[0]} l├║c {time.strftime('%H:%M:%S')} (Sß║╡n s├áng kß║┐t nß╗æi)")
                         
                     try:
                         force_close_socket(conn)
@@ -6770,7 +6734,7 @@ class UnifiedApp(tk.Tk):
                 print("[Host] Password mismatch!")
                 err_info = json.dumps({
                     "status": "error",
-                    "message": "Sai mật khẩu kết nối!"
+                    "message": "Sai mß║¡t khß║⌐u kß║┐t nß╗æi!"
                 }).encode('utf-8')
                 send_msg(conn, err_info, client_pass)
                 force_close_socket(conn)
@@ -6780,7 +6744,7 @@ class UnifiedApp(tk.Tk):
             try:
                 err_info = json.dumps({
                     "status": "error",
-                    "message": f"Lỗi xảy ra trên máy Host:\n{e}"
+                    "message": f"Lß╗ùi xß║úy ra tr├¬n m├íy Host:\n{e}"
                 }).encode('utf-8')
                 send_msg(conn, err_info, locals().get('client_pass'))
             except:
@@ -6970,13 +6934,13 @@ class UnifiedApp(tk.Tk):
                             ema = client_state["send_ema"]
                             
                             if ema > 0.35:
-                                # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
+                                # Mß║íng chß║¡m: Chß╗ë giß║úm chß║Ñt l╞░ß╗úng ß║únh, hß║ín chß║┐ b├│p scale ─æß╗â tr├ính vß╗í khß╗æi pixel
                                 quality = max(max(35, base_quality - 20), quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
                                 if ema > 0.6:
                                     dyn_scale = max(res_scale, dyn_scale - 0.05)
                             elif ema < 0.20:
-                                # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
+                                # Ph╞░╞íng ├ín 2: Dynamic Scaling m╞░ß╗út h╞ín (v╞░ß╗út qua giß╗¢i hß║ín ban ─æß║ºu nß║┐u mß║íng tß╗æt)
                                 quality = min(98, quality + 1)
                                 sleep_time = max(1.0 / 60, sleep_time - 0.005)
                                 dyn_scale = min(1.0, dyn_scale + 0.02)
@@ -6989,19 +6953,19 @@ class UnifiedApp(tk.Tk):
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
                             
-                            # Thử fallback sang monitors[0] một lần duy nhất.
-                            # KHÔNG dùng continue vì nếu monitors[0] cũng fail → vòng lặp vô tận.
+                            # Thß╗¡ fallback sang monitors[0] mß╗Öt lß║ºn duy nhß║Ñt.
+                            # KH├öNG d├╣ng continue v├¼ nß║┐u monitors[0] c┼⌐ng fail ΓåÆ v├▓ng lß║╖p v├┤ tß║¡n.
                             if len(sct.monitors) > 1 and dynamic_monitor != sct.monitors[0]:
                                 print("[Host] Falling back to sct.monitors[0] (Virtual Screen) - one-shot attempt")
                                 dynamic_monitor = sct.monitors[0]
                                 try:
                                     img2 = sct.grab(dynamic_monitor)
-                                    # Fallback thành công: cập nhật dynamic_monitor và tiếp tục
+                                    # Fallback th├ánh c├┤ng: cß║¡p nhß║¡t dynamic_monitor v├á tiß║┐p tß╗Ñc
                                     img = img2
                                 except Exception:
-                                    pass  # Fallback cũng fail → rơi xuống break bên dưới
+                                    pass  # Fallback c┼⌐ng fail ΓåÆ r╞íi xuß╗æng break b├¬n d╞░ß╗¢i
                                 else:
-                                    continue  # Fallback thành công → tiếp tục inner loop
+                                    continue  # Fallback th├ánh c├┤ng ΓåÆ tiß║┐p tß╗Ñc inner loop
                                 
                             try:
                                 signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
@@ -7028,14 +6992,14 @@ class UnifiedApp(tk.Tk):
     def host_receiver_thread(self, conn, client_state, password):
         print("[Host] Started Input Receiver Thread.")
         import select
-        # Cache để tránh gọi OpenInputDesktop/SetThreadDesktop mỗi vòng lặp
+        # Cache ─æß╗â tr├ính gß╗ìi OpenInputDesktop/SetThreadDesktop mß╗ùi v├▓ng lß║╖p
         _last_desk_check_time = 0.0
         _last_desk_name = None
-        _DESK_CHECK_INTERVAL = 0.5  # Chỉ kiểm tra desktop mỗi 0.5 giây
+        _DESK_CHECK_INTERVAL = 0.5  # Chß╗ë kiß╗âm tra desktop mß╗ùi 0.5 gi├óy
         last_recv_time = time.time()
         while client_state.get("running", False):
             try:
-                # Chờ 2 giây, nếu không có gói tin nào thì nhả hết phím modifier để chống kẹt
+                # Chß╗¥ 2 gi├óy, nß║┐u kh├┤ng c├│ g├│i tin n├áo th├¼ nhß║ú hß║┐t ph├¡m modifier ─æß╗â chß╗æng kß║╣t
                 r, _, _ = select.select([conn], [], [], 2.0)
                 if not r:
                     self.host_release_all_modifiers()
@@ -7045,15 +7009,15 @@ class UnifiedApp(tk.Tk):
                         break
                     continue
 
-                # Chỉ kiểm tra/chuyển desktop khi có gói tin đến VÀ đã qua interval
-                # Điều này tránh overhead khi mouse_move liên tục và tránh SetThreadDesktop
-                # gọi quá nhiều lần (có thể fail nếu hook đã được gắn vào thread)
+                # Chß╗ë kiß╗âm tra/chuyß╗ân desktop khi c├│ g├│i tin ─æß║┐n V├Ç ─æ├ú qua interval
+                # ─Éiß╗üu n├áy tr├ính overhead khi mouse_move li├¬n tß╗Ñc v├á tr├ính SetThreadDesktop
+                # gß╗ìi qu├í nhiß╗üu lß║ºn (c├│ thß╗â fail nß║┐u hook ─æ├ú ─æ╞░ß╗úc gß║»n v├áo thread)
                 now = time.monotonic()
                 if now - _last_desk_check_time >= _DESK_CHECK_INTERVAL:
                     _last_desk_check_time = now
                     try:
                         import ctypes as _ct
-                        # Lấy tên desktop hiện tại để phát hiện thay đổi (UAC/Winlogon)
+                        # Lß║Ñy t├¬n desktop hiß╗çn tß║íi ─æß╗â ph├ít hiß╗çn thay ─æß╗òi (UAC/Winlogon)
                         _buf = _ct.create_unicode_buffer(256)
                         _hd_cur = _ct.windll.user32.GetThreadDesktop(_ct.windll.kernel32.GetCurrentThreadId())
                         _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
@@ -7061,23 +7025,23 @@ class UnifiedApp(tk.Tk):
 
                         _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, 0x02000000)
                         if _hdesk_new:
-                            # Lấy tên của input desktop mới
+                            # Lß║Ñy t├¬n cß╗ºa input desktop mß╗¢i
                             _buf2 = _ct.create_unicode_buffer(256)
                             _ct.windll.user32.GetUserObjectInformationW(_hdesk_new, 2, _buf2, _ct.sizeof(_buf2), None)
                             _new_name = _buf2.value.lower() if _buf2.value else None
 
                             if _new_name != _last_desk_name:
-                                # Desktop đã thay đổi → switch thread sang desktop mới
+                                # Desktop ─æ├ú thay ─æß╗òi ΓåÆ switch thread sang desktop mß╗¢i
                                 if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
                                     _last_desk_name = _new_name
                                     print(f"[Host] Switched input desktop: {_last_desk_name}")
-                                    # Đóng handle cũ sau khi switch thành công
+                                    # ─É├│ng handle c┼⌐ sau khi switch th├ánh c├┤ng
                                     if hasattr(self, '_last_hdesk') and self._last_hdesk:
                                         _ct.windll.user32.CloseDesktop(self._last_hdesk)
                                     self._last_hdesk = _hdesk_new
                                     _hdesk_new = None  # Prevent double-close below
-                                # else: SetThreadDesktop thất bại → giữ nguyên desktop cũ
-                            # Đóng handle nếu không được lưu lại (không có thay đổi hoặc switch fail)
+                                # else: SetThreadDesktop thß║Ñt bß║íi ΓåÆ giß╗» nguy├¬n desktop c┼⌐
+                            # ─É├│ng handle nß║┐u kh├┤ng ─æ╞░ß╗úc l╞░u lß║íi (kh├┤ng c├│ thay ─æß╗òi hoß║╖c switch fail)
                             if _hdesk_new:
                                 _ct.windll.user32.CloseDesktop(_hdesk_new)
                     except Exception:
@@ -7250,14 +7214,14 @@ class UnifiedApp(tk.Tk):
         partner_pass = self.partner_pass_var.get().strip()
         
         if not partner_id or len(partner_id) < 12:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!")
+            self.show_custom_error("Lß╗ùi", "Vui l├▓ng nhß║¡p m├ú ID ─æß╗æi t├íc hß╗úp lß╗ç (12 chß╗» sß╗æ)!")
             return
             
         if not partner_pass:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu đối tác!")
+            self.show_custom_error("Lß╗ùi", "Vui l├▓ng nhß║¡p mß║¡t khß║⌐u ─æß╗æi t├íc!")
             return
             
-        self.update_status("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...")
+        self.update_status("─Éang t├¼m ─æß╗ïa chß╗ë IP cß╗ºa ─æß╗æi t├íc tr├¬n dß╗ïch vß╗Ñ danh bß║í...")
         self.connect_btn.config(state=tk.DISABLED)
         
         # Connect inside background thread to prevent UI freezing
@@ -7265,9 +7229,9 @@ class UnifiedApp(tk.Tk):
         
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
         if partner_id == getattr(self, "my_id_clean", ""):
-            self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
+            self.after(0, lambda: self.show_custom_info("Th├┤ng b├ío", "Bß║ín kh├┤ng thß╗â kß║┐t nß╗æi tß╗¢i ch├¡nh bß║ín :-)"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            self.update_status("Kết nối bị hủy.")
+            self.update_status("Kß║┐t nß╗æi bß╗ï hß╗ºy.")
             return
             
         # Clean up dead viewer processes first
@@ -7282,7 +7246,7 @@ class UnifiedApp(tk.Tk):
                 
         if existing_viewer and reconnect_queue is None:
             print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
-            self.update_status(f"Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...")
+            self.update_status(f"─Éang hiß╗ân thß╗ï cß╗¡a sß╗ò ─æiß╗üu khiß╗ân ─æ├ú kß║┐t nß╗æi cß╗ºa {partner_id}...")
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             # Write blink signal file
             import tempfile
@@ -7295,8 +7259,8 @@ class UnifiedApp(tk.Tk):
             return
 
         if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-            self.update_status("Chưa kết nối Signaling Server!")
-            self.after(0, lambda: self.show_custom_error("Lỗi", "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS."))
+            self.update_status("Ch╞░a kß║┐t nß╗æi Signaling Server!")
+            self.after(0, lambda: self.show_custom_error("Lß╗ùi", "Ch╞░a kß║┐t nß╗æi ─æß║┐n Server B├ío hiß╗çu. Vui l├▓ng kiß╗âm tra lß║íi mß║íng hoß║╖c VPS."))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
 
@@ -7308,7 +7272,7 @@ class UnifiedApp(tk.Tk):
             "local_port": BOUND_PORT
         }) + '\n'
         
-        # Thử tìm đối tác trên tất cả các server đang kết nối
+        # Thß╗¡ t├¼m ─æß╗æi t├íc tr├¬n tß║Ñt cß║ú c├íc server ─æang kß║┐t nß╗æi
         sockets_to_try = []
         with self.signaling_lock:
             if getattr(self, 'primary_signaling_socket', None):
@@ -7318,7 +7282,7 @@ class UnifiedApp(tk.Tk):
                     sockets_to_try.append(sock)
                     
         success = False
-        self.update_status("Đang tìm và chờ đối tác phản hồi...")
+        self.update_status("─Éang t├¼m v├á chß╗¥ ─æß╗æi t├íc phß║ún hß╗ôi...")
         
         for sock in sockets_to_try:
             self.pending_connection_info = None
@@ -7339,14 +7303,14 @@ class UnifiedApp(tk.Tk):
                 
         if not success:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                self.update_status(f"Mß║Ñt kß║┐t nß╗æi. ─Éang thß╗¡ kß║┐t nß╗æi lß║íi lß║ºn {retry_count + 1}/30...")
                 time.sleep(2)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
                 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status("Sß║╡n s├áng kß║┐t nß╗æi")
             if not reconnect_queue:
-                self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
+                self.after(0, lambda: self.show_custom_error("Lß╗ùi", "Kh├┤ng thß╗â t├¼m thß║Ñy hoß║╖c ─æß╗æi t├íc ─æang Offline / Tß╗½ chß╗æi kß║┐t nß╗æi."))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
@@ -7366,7 +7330,7 @@ class UnifiedApp(tk.Tk):
         handshake_done = False
         cached_res_payload = None
         
-        # 1. Try local IP first (LAN) (Chỉ thử nếu không ép buộc Relay)
+        # 1. Try local IP first (LAN) (Chß╗ë thß╗¡ nß║┐u kh├┤ng ├⌐p buß╗Öc Relay)
         if not self.force_relay_var.get() and local_ip:
             ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
             ports_to_try = [local_port]
@@ -7374,10 +7338,10 @@ class UnifiedApp(tk.Tk):
                 if p not in ports_to_try:
                     ports_to_try.append(p)
                     
-            self.update_status(f"Đang quét kết nối nội bộ (LAN)...")
+            self.update_status(f"─Éang qu├⌐t kß║┐t nß╗æi nß╗Öi bß╗Ö (LAN)...")
             import select
             
-            # Quét tuần tự từng port (ưu tiên local_port trước) để tránh lỗi dính Kaspersky/ứng dụng rác ở port 12345
+            # Qu├⌐t tuß║ºn tß╗▒ tß╗½ng port (╞░u ti├¬n local_port tr╞░ß╗¢c) ─æß╗â tr├ính lß╗ùi d├¡nh Kaspersky/ß╗⌐ng dß╗Ñng r├íc ß╗ƒ port 12345
             for p in ports_to_try:
                 if connected: break
                 sockets = []
@@ -7388,7 +7352,7 @@ class UnifiedApp(tk.Tk):
                     except Exception: pass
                     sockets.append((s, ip, p))
                 
-                # Chờ tối đa 0.4s cho mỗi port
+                # Chß╗¥ tß╗æi ─æa 0.4s cho mß╗ùi port
                 end_time = time.time() + 0.4
                 while time.time() < end_time and not connected:
                     timeout = max(0.05, end_time - time.time())
@@ -7402,8 +7366,8 @@ class UnifiedApp(tk.Tk):
                                     w_sock.getpeername()
                                     w_sock.setblocking(True)
                                     
-                                    # Kểm tra handshake ngay để xác minh đây có phải Host thật không
-                                    # (Tránh trường hợp VM NAT hay proxy tự động nhận TCP rồi reset)
+                                    # Kß╗âm tra handshake ngay ─æß╗â x├íc minh ─æ├óy c├│ phß║úi Host thß║¡t kh├┤ng
+                                    # (Tr├ính tr╞░ß╗¥ng hß╗úp VM NAT hay proxy tß╗▒ ─æß╗Öng nhß║¡n TCP rß╗ôi reset)
                                     w_sock.settimeout(2.0)
                                     try:
                                         socket_passwords[w_sock] = partner_pass
@@ -7431,28 +7395,28 @@ class UnifiedApp(tk.Tk):
                     except: pass
                     if connected: break
                     
-                # Đóng các socket không dùng tới trong batch này
+                # ─É├│ng c├íc socket kh├┤ng d├╣ng tß╗¢i trong batch n├áy
                 for s_tuple in sockets:
                     if s_tuple[0] != sock: force_close_socket(s_tuple[0])
                 
-        # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
+        # 2. Kß╗╣ thuß║¡t ─æß╗Ñc lß╗ù T╞░ß╗¥ng lß╗¡a (TCP Hole Punching) (Chß╗ë thß╗¡ nß║┐u kh├┤ng ├⌐p buß╗Öc Relay)
         if not self.force_relay_var.get() and not connected:
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                self.update_status("Sẵn sàng kết nối")
+                self.update_status("Sß║╡n s├áng kß║┐t nß╗æi")
                 self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
-            self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
+            self.update_status(f"─Éang ─æß╗Ñc lß╗ù T╞░ß╗¥ng lß╗¡a (TCP Hole Punching) tß╗¢i {public_ip}:{port}...")
             print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
             
-            # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
+            # Tß║ím thß╗¥i ─æ├│ng server_socket b├¬n Client ─æß╗â nh╞░ß╗¥ng port cho outbound connect
             if getattr(self, 'server_socket', None):
                 try:
                     self.server_socket.close()
                 except: pass
             
-            # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
+            # Li├¬n tß╗Ñc spam kß║┐t nß╗æi cß╗▒c nhanh ─æß╗â ─æß╗Ñc lß╗ù (20 lß║ºn, mß╗ùi lß║ºn 100ms)
             for _ in range(20):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -7470,7 +7434,7 @@ class UnifiedApp(tk.Tk):
                     force_close_socket(sock)
                     time.sleep(0.1)
                     
-            # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
+            # Mß╗ƒ lß║íi server_socket bß║Ñt kß╗â ─æß╗Ñc lß╗ù th├ánh c├┤ng hay thß║Ñt bß║íi
             try:
                 try:
                     if hasattr(socket, 'AF_INET6'):
@@ -7487,15 +7451,15 @@ class UnifiedApp(tk.Tk):
                     self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     self.server_socket.bind(('0.0.0.0', BOUND_PORT))
                 self.server_socket.listen(5)
-                print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+                print(f"[Client] ─É├ú phß╗Ñc hß╗ôi TCP server lß║»ng nghe tr├¬n port {BOUND_PORT}")
             except Exception as e:
-                print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
+                print(f"[Client] Cß║únh b├ío: Kh├┤ng thß╗â phß╗Ñc hß╗ôi server_socket: {e}")
 
         if not connected:
-            self.update_status("Sẵn sàng kết nối")
-            self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
-                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
-                f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
+            self.update_status("Sß║╡n s├áng kß║┐t nß╗æi")
+            self.after(0, lambda: self.show_custom_error("Lß╗ùi kß║┐t nß╗æi", 
+                f"Kß╗╣ thuß║¡t ─Éß╗Ñc Lß╗ù T╞░ß╗¥ng Lß╗¡a (Hole Punching) thß║Ñt bß║íi!\n\n"
+                f"L├╜ do: Kh├┤ng thß╗â thiß║┐t lß║¡p kß║┐t nß╗æi trß╗▒c tiß║┐p P2P tß╗¢i ─æß╗æi t├íc."
             ))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock: force_close_socket(sock)
@@ -7504,18 +7468,18 @@ class UnifiedApp(tk.Tk):
         # Connection succeeded, proceed with handshake
         sock.settimeout(None) # Reset back to blocking
         
-        # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa cho cả đo tốc độ và điều khiển
+        # Tß║»t Nagle's algorithm (TCP_NODELAY) ─æß╗â giß║úm ─æß╗Ö trß╗à tß╗æi ─æa cho cß║ú ─æo tß╗æc ─æß╗Ö v├á ─æiß╗üu khiß╗ân
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception as e:
-            print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+            print(f"[TCP_NODELAY] Lß╗ùi thiß║┐t lß║¡p TCP_NODELAY tr├¬n Client: {e}")
             
-        # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
+        # Cß║Ñu h├¼nh TCP Keep-Alive bß║úo vß╗ç kß║┐t nß╗æi khß╗Åi bß╗ï ─æ├│ng bß╗ƒi Firewall/Router
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
         except Exception as e:
-            print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
+            print(f"[KeepAlive] Lß╗ùi cß║Ñu h├¼nh Keep-Alive tr├¬n Client: {e}")
             
         try:
             if not handshake_done:
@@ -7533,8 +7497,8 @@ class UnifiedApp(tk.Tk):
                 # Read verification response (allow APP_KEY fallback to receive error messages)
                 res_msg = recv_msg(sock, [partner_pass, APP_KEY])
                 if not res_msg:
-                    self.update_status("Sẵn sàng kết nối")
-                    self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                    self.update_status("Sß║╡n s├áng kß║┐t nß╗æi")
+                    self.after(0, lambda: self.show_custom_error("Lß╗ùi", "─Éß╗æi t├íc ngß║»t kß║┐t nß╗æi ─æß╗Öt ngß╗Öt!"))
                     self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                     force_close_socket(sock)
                     return
@@ -7551,16 +7515,16 @@ class UnifiedApp(tk.Tk):
                 is_domain = res.get("is_domain", False)
                 
                 # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
-                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                self.update_status("─Éang kiß╗âm tra chß║Ñt l╞░ß╗úng mß║íng (Ping & B─âng th├┤ng) lß║ºn 1/2...")
                 net_class = "medium"
-                net_class_viet = "Trung bình (Medium)"
+                net_class_viet = "Trung b├¼nh (Medium)"
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
-                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                            self.update_status("─Éang kiß╗âm tra chß║Ñt l╞░ß╗úng mß║íng (Ping & B─âng th├┤ng) lß║ºn 2/2...")
                         # 1. Ping / Latency test
                         rtts = []
                         for _ in range(3):
@@ -7585,7 +7549,7 @@ class UnifiedApp(tk.Tk):
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
                                 dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = 1048576 # 1 MB warm-up để vượt qua TCP slow-start
+                                warm_size = 1048576 # 1 MB warm-up ─æß╗â v╞░ß╗út qua TCP slow-start
                                 measure_size = dummy_size - warm_size
                                 
                                 warm_data = b''
@@ -7620,18 +7584,18 @@ class UnifiedApp(tk.Tk):
                         bandwidth = best_run[1]
                                                                         
                     # 3. Network quality classification
-                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 10ms.
-                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 50 - 100ms.
-                    # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
+                    # - Tß╗æt (High-speed): B─âng th├┤ng > 20 Mbps, Ping < 10ms.
+                    # - Trung b├¼nh (Medium): B─âng th├┤ng 5 - 20 Mbps, Ping 50 - 100ms.
+                    # - Yß║┐u (Low-speed): B─âng th├┤ng < 5 Mbps hoß║╖c Ping > 100ms.
                     if bandwidth > 20.0 and avg_ping < 10.0:
                         net_class = "high"
-                        net_class_viet = "Tốt (High-speed)"
+                        net_class_viet = "Tß╗æt (High-speed)"
                     elif bandwidth < 5.0 or avg_ping > 50.0:
                         net_class = "low"
-                        net_class_viet = "Yếu (Low-speed)"
+                        net_class_viet = "Yß║┐u (Low-speed)"
                     else:
                         net_class = "medium"
-                        net_class_viet = "Trung bình (Medium)"
+                        net_class_viet = "Trung b├¼nh (Medium)"
                         
                     # 4. Report speed test results to Host
                     send_msg(sock, json.dumps({
@@ -7641,7 +7605,7 @@ class UnifiedApp(tk.Tk):
                         "bandwidth": bandwidth
                     }).encode('utf-8'), partner_pass)
                     
-                    status_text = f"Đo tốc độ (Lớn nhất 2 lần): Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
+                    status_text = f"─Éo tß╗æc ─æß╗Ö (Lß╗¢n nhß║Ñt 2 lß║ºn): Ping {avg_ping:.1f}ms, B─âng th├┤ng {bandwidth:.2f} Mbps. Chß║Ñt l╞░ß╗úng: {net_class_viet}."
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
                     time.sleep(0.5)
@@ -7657,9 +7621,9 @@ class UnifiedApp(tk.Tk):
                         }).encode('utf-8'), partner_pass)
                     except: pass
                     
-                # Pygame window sẽ mở đúng với độ phân giải thật của host. 
-                # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
-                self.update_status("Kết nối thành công! Đang khởi động màn hình...")
+                # Pygame window sß║╜ mß╗ƒ ─æ├║ng vß╗¢i ─æß╗Ö ph├ón giß║úi thß║¡t cß╗ºa host. 
+                # (K├¡ch th╞░ß╗¢c ß║únh thß╗▒c tß║┐ truyß╗ün qua mß║íng vß║½n sß║╜ ─æ╞░ß╗úc n├⌐n lß║íi bß╗ƒi dyn_scale ß╗ƒ ph├¡a Host)
+                self.update_status("Kß║┐t nß╗æi th├ánh c├┤ng! ─Éang khß╗ƒi ─æß╗Öng m├án h├¼nh...")
                 if reconnect_queue:
                     try:
                         if viewer_pid and sys.platform == "win32":
@@ -7675,17 +7639,17 @@ class UnifiedApp(tk.Tk):
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
-                msg = res.get("message", "Sai mật khẩu!")
-                self.update_status("Bị từ chối kết nối")
+                msg = res.get("message", "Sai mß║¡t khß║⌐u!")
+                self.update_status("Bß╗ï tß╗½ chß╗æi kß║┐t nß╗æi")
                 if reconnect_queue:
                     reconnect_queue.put("FAILED")
-                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                self.after(0, lambda: self.show_custom_error("Tß╗½ chß╗æi kß║┐t nß╗æi", f"Kß║┐t nß╗æi bß╗ï tß╗½ chß╗æi:\n{msg}"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                self.update_status(f"Mß║Ñt kß║┐t nß╗æi. ─Éang thß╗¡ kß║┐t nß╗æi lß║íi lß║ºn {retry_count + 1}/30...")
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
@@ -7693,11 +7657,11 @@ class UnifiedApp(tk.Tk):
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status("Sß║╡n s├áng kß║┐t nß╗æi")
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
             else:
-                self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
+                self.after(0, lambda err=str(e): self.show_custom_error("Lß╗ùi bß║»t tay", f"Lß╗ùi x├íc thß╗▒c handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
@@ -7733,7 +7697,7 @@ class UnifiedApp(tk.Tk):
                             msg = req_queue.get(timeout=1.0)
                             if msg == "RECONNECT_REQUEST":
                                 print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
-                                self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
+                                self.after(0, lambda: self.update_status(f"─Éang tß╗▒ ─æß╗Öng kß║┐t nß╗æi lß║íi..."))
                                 threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
                             else:
                                 req_queue.put(msg)
@@ -7747,25 +7711,25 @@ class UnifiedApp(tk.Tk):
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
-            self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
-            print(f"[Client] Đã mở tiến trình điều khiển cho {computer_name or 'đối tác'}")
+            self.update_status("─É├ú mß╗ƒ mß╗Öt cß╗¡a sß╗ò ─æiß╗üu khiß╗ân mß╗¢i (Sß║╡n s├áng kß║┐t nß╗æi)")
+            print(f"[Client] ─É├ú mß╗ƒ tiß║┐n tr├¼nh ─æiß╗üu khiß╗ân cho {computer_name or '─æß╗æi t├íc'}")
             
         except Exception as e:
-            print(f"[Client] Lỗi khởi chạy tiến trình điều khiển: {e}")
+            print(f"[Client] Lß╗ùi khß╗ƒi chß║íy tiß║┐n tr├¼nh ─æiß╗üu khiß╗ân: {e}")
             self.connect_btn.config(state=tk.NORMAL)
             try: force_close_socket(sock)
             except: pass
             
     def on_close_window(self):
-        # Lưu tọa độ hiện tại trước khi ẩn cửa sổ
+        # L╞░u tß╗ìa ─æß╗Ö hiß╗çn tß║íi tr╞░ß╗¢c khi ß║⌐n cß╗¡a sß╗ò
         self.save_window_position()
         
-        # Nếu tùy chọn "Chạy khi mở máy" được bật thì thu nhỏ xuống system tray
+        # Nß║┐u t├╣y chß╗ìn "Chß║íy khi mß╗ƒ m├íy" ─æ╞░ß╗úc bß║¡t th├¼ thu nhß╗Å xuß╗æng system tray
         if getattr(self, 'startup_var', None) and self.startup_var.get():
             self.withdraw()
             print("[Tray] App minimized to system tray.")
         else:
-            # Nếu không, đóng hoàn toàn ứng dụng
+            # Nß║┐u kh├┤ng, ─æ├│ng ho├án to├án ß╗⌐ng dß╗Ñng
             self.destroy()
 
     def setup_tray_icon(self):
@@ -7773,14 +7737,14 @@ class UnifiedApp(tk.Tk):
             return
             
         try:
-            # Tải icon từ file png nếu tồn tại, ngược lại vẽ icon mặc định
+            # Tß║úi icon tß╗½ file png nß║┐u tß╗ôn tß║íi, ng╞░ß╗úc lß║íi vß║╜ icon mß║╖c ─æß╗ïnh
             icon_path = os.path.join(app_dir, "app_icon.png")
             image = None
             if os.path.exists(icon_path):
                 try:
                     image = Image.open(icon_path)
                 except Exception as e:
-                    print(f"[Tray] Không thể mở file app_icon.png: {e}")
+                    print(f"[Tray] Kh├┤ng thß╗â mß╗ƒ file app_icon.png: {e}")
             
             if image is None:
                 image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
@@ -7789,8 +7753,8 @@ class UnifiedApp(tk.Tk):
                 dc.ellipse((16, 16, 48, 48), fill="#00ADB5")
             
             menu = pystray.Menu(
-                item('Hiện (Show)', self.show_gui_from_tray, default=True),
-                item('Thoát (Exit)', self.exit_from_tray)
+                item('Hiß╗çn (Show)', self.show_gui_from_tray, default=True),
+                item('Tho├ít (Exit)', self.exit_from_tray)
             )
             
             self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, "Easy Remote Desktop", menu)
@@ -7904,11 +7868,11 @@ class UnifiedApp(tk.Tk):
 
 def run_clipboard_agent_mode():
     """
-    Chế độ Clipboard Agent: Chạy ở quyền User thường.
-    Lắng nghe Named Pipe từ Service/headless app để nhận đường dẫn file
-    và nạp vào Clipboard hệ thống.
+    Chß║┐ ─æß╗Ö Clipboard Agent: Chß║íy ß╗ƒ quyß╗ün User th╞░ß╗¥ng.
+    Lß║»ng nghe Named Pipe tß╗½ Service/headless app ─æß╗â nhß║¡n ─æ╞░ß╗¥ng dß║½n file
+    v├á nß║íp v├áo Clipboard hß╗ç thß╗æng.
     
-    Kiến trúc: App Headless (SYSTEM) -> Named Pipe -> App ClipboardAgent (User) -> Clipboard
+    Kiß║┐n tr├║c: App Headless (SYSTEM) -> Named Pipe -> App ClipboardAgent (User) -> Clipboard
     """
     import logging
     import queue
@@ -7935,8 +7899,8 @@ def run_clipboard_agent_mode():
             pass
 
     agent_print("=" * 60)
-    agent_print(f"[ClipboardAgent] Khởi động. PID: {os.getpid()}")
-    agent_print(f"[ClipboardAgent] Thư mục ứng dụng: {app_dir}")
+    agent_print(f"[ClipboardAgent] Khß╗ƒi ─æß╗Öng. PID: {os.getpid()}")
+    agent_print(f"[ClipboardAgent] Th╞░ mß╗Ñc ß╗⌐ng dß╗Ñng: {app_dir}")
     agent_print("=" * 60)
 
     pipe_name = CLIPBOARD_PIPE_NAME
@@ -7946,7 +7910,7 @@ def run_clipboard_agent_mode():
         while True:
             pipe_handle = None
             try:
-                agent_print(f"[ClipboardAgent] Đang chờ kết nối tới Pipe: {pipe_name}")
+                agent_print(f"[ClipboardAgent] ─Éang chß╗¥ kß║┐t nß╗æi tß╗¢i Pipe: {pipe_name}")
                 while True:
                     try:
                         pipe_handle = win32file.CreateFile(
@@ -7962,7 +7926,7 @@ def run_clipboard_agent_mode():
                     except Exception:
                         time.sleep(0.5)
 
-                agent_print(f"[ClipboardAgent] Đã kết nối thành công tới Pipe.")
+                agent_print(f"[ClipboardAgent] ─É├ú kß║┐t nß╗æi th├ánh c├┤ng tß╗¢i Pipe.")
 
                 try:
                     win32pipe.SetNamedPipeHandleState(
@@ -7972,7 +7936,7 @@ def run_clipboard_agent_mode():
                         None
                     )
                 except Exception as se:
-                    agent_print(f"[ClipboardAgent] Cảnh báo SetNamedPipeHandleState: {se}. Tiếp tục ở chế độ byte mode.")
+                    agent_print(f"[ClipboardAgent] Cß║únh b├ío SetNamedPipeHandleState: {se}. Tiß║┐p tß╗Ñc ß╗ƒ chß║┐ ─æß╗Ö byte mode.")
 
                 buffer = bytearray()
                 while True:
@@ -7986,7 +7950,7 @@ def run_clipboard_agent_mode():
                                 del buffer[:idx + 1]
                                 msg = msg_bytes.decode("utf-8").strip()
                                 if msg:
-                                    agent_print(f"[ClipboardAgent] Nhận tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
+                                    agent_print(f"[ClipboardAgent] Nhß║¡n tin nhß║»n tß╗½ Pipe (─æß╗Ö d├ái {len(msg)}): {msg[:100]}...")
                                     if msg.startswith("TEXT:"):
                                         gui_queue.put(("text", msg[5:]))
                                     elif msg.startswith("START:"):
@@ -8006,20 +7970,20 @@ def run_clipboard_agent_mode():
                                     else:
                                         gui_queue.put(("files", msg))
                         else:
-                            agent_print(f"[ClipboardAgent] ReadFile trả về mã lỗi: {hr}")
+                            agent_print(f"[ClipboardAgent] ReadFile trß║ú vß╗ü m├ú lß╗ùi: {hr}")
                             break
                     except Exception as read_err:
                         err_code = getattr(read_err, 'winerror', 0)
                         if err_code == 109:
-                            agent_print("[ClipboardAgent] Pipe bị ngắt. Đang kết nối lại...")
+                            agent_print("[ClipboardAgent] Pipe bß╗ï ngß║»t. ─Éang kß║┐t nß╗æi lß║íi...")
                             break
                         elif err_code == 234:
                             continue
                         else:
-                            agent_print(f"[ClipboardAgent] Lỗi đọc Pipe: {read_err}")
+                            agent_print(f"[ClipboardAgent] Lß╗ùi ─æß╗ìc Pipe: {read_err}")
                             break
             except Exception as e:
-                agent_print(f"[ClipboardAgent] Lỗi kết nối Pipe: {e}")
+                agent_print(f"[ClipboardAgent] Lß╗ùi kß║┐t nß╗æi Pipe: {e}")
             finally:
                 if pipe_handle is not None:
                     try:
@@ -8028,20 +7992,20 @@ def run_clipboard_agent_mode():
                         pass
             time.sleep(0.1)
 
-    # Khởi tạo Tkinter GUI
+    # Khß╗ƒi tß║ío Tkinter GUI
     root = tk.Tk()
     root.withdraw()
     
     active_dialog = None
     
     def trigger_cancel():
-        agent_print("[ClipboardAgent] Người dùng ấn Hủy truyền tải.")
+        agent_print("[ClipboardAgent] Ng╞░ß╗¥i d├╣ng ß║Ñn Hß╗ºy truyß╗ün tß║úi.")
         try:
             h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, "Global\\AntigravityP2P_CancelTransfer_Event")
             win32event.SetEvent(h_event)
             win32api.CloseHandle(h_event)
         except Exception as e:
-            agent_print(f"[ClipboardAgent] Không thể gửi sự kiện hủy: {e}")
+            agent_print(f"[ClipboardAgent] Kh├┤ng thß╗â gß╗¡i sß╗▒ kiß╗çn hß╗ºy: {e}")
 
     def poll_gui_queue():
         nonlocal active_dialog
@@ -8049,22 +8013,22 @@ def run_clipboard_agent_mode():
             try:
                 action, val = gui_queue.get_nowait()
                 if action == "text":
-                    agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
+                    agent_print(f"[ClipboardAgent] ─Éang nß║íp text v├áo Clipboard...")
                     set_clipboard_text(val)
                 elif action == "files":
                     paths = [p for p in val.split("|") if os.path.exists(p)]
                     if paths:
                         set_clipboard_files(paths)
-                        agent_print(f"[ClipboardAgent] Đã nạp {len(paths)} file vào Clipboard.")
+                        agent_print(f"[ClipboardAgent] ─É├ú nß║íp {len(paths)} file v├áo Clipboard.")
                     else:
-                        agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard.")
+                        agent_print(f"[ClipboardAgent] File kh├┤ng tß╗ôn tß║íi ─æß╗â nß║íp clipboard.")
                 elif action == "start":
                     display_name, total_size = val
                     if active_dialog:
                         try: active_dialog.destroy()
                         except: pass
                     active_dialog = ProgressDialog(
-                        root, "Đang tải file về...", display_name, total_size,
+                        root, "─Éang tß║úi file vß╗ü...", display_name, total_size,
                         on_cancel=trigger_cancel
                     )
                 elif action == "progress":
@@ -8088,7 +8052,7 @@ def run_clipboard_agent_mode():
             except queue.Empty:
                 break
             except Exception as e:
-                agent_print(f"[ClipboardAgent] Lỗi xử lý hàng đợi GUI: {e}")
+                agent_print(f"[ClipboardAgent] Lß╗ùi xß╗¡ l├╜ h├áng ─æß╗úi GUI: {e}")
         root.after(50, poll_gui_queue)
 
     t = threading.Thread(target=pipe_listener_loop, daemon=True)
@@ -8107,12 +8071,12 @@ if __name__ == '__main__':
     is_headless = "--headless" in sys.argv
     is_clipboard_agent = "--clipboard-agent" in sys.argv
     
-    # --- Chế độ Clipboard Agent: Chỉ lắng nghe Pipe và nạp Clipboard, thoát sớm ---
+    # --- Chß║┐ ─æß╗Ö Clipboard Agent: Chß╗ë lß║»ng nghe Pipe v├á nß║íp Clipboard, tho├ít sß╗¢m ---
     if is_clipboard_agent:
         if sys.platform == "win32":
             import win32event, win32api, winerror
             
-            # Mutex riêng cho Clipboard Agent (index 3) để tránh chạy trùng
+            # Mutex ri├¬ng cho Clipboard Agent (index 3) ─æß╗â tr├ính chß║íy tr├╣ng
             try:
                 sid = ctypes.c_ulong()
                 ctypes.windll.kernel32.ProcessIdToSessionId(
@@ -8135,7 +8099,7 @@ if __name__ == '__main__':
         except:
             pass
         
-        run_clipboard_agent_mode()  # Vòng lặp vô tận, không return
+        run_clipboard_agent_mode()  # V├▓ng lß║╖p v├┤ tß║¡n, kh├┤ng return
         sys.exit(0)
     
 
@@ -8178,8 +8142,8 @@ if __name__ == '__main__':
             
             if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
                 # Topmost native message dialog
-                msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
-                msg_title = "Thông báo"
+                msg_text = "ß╗¿ng dß╗Ñng P2P Remote Desktop ─æang chß║íy ß╗ƒ khay hß╗ç thß╗æng"
+                msg_title = "Th├┤ng b├ío"
                 # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
                 ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
                 

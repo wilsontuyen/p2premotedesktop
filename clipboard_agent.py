@@ -42,7 +42,7 @@ def log_print(msg):
 PIPE_NAME = r"\\.\pipe\RemoteDesktopClipboardPipe"
 
 
-def set_clipboard_files(file_path):
+def set_clipboard_files(paths):
     """
     Nạp đường dẫn file vào Clipboard hệ thống theo chuẩn CF_HDROP.
     Sử dụng win32clipboard (pywin32).
@@ -50,12 +50,15 @@ def set_clipboard_files(file_path):
     try:
         import win32clipboard
 
-        if not os.path.exists(file_path):
-            log_print(f"[Agent] File không tồn tại, bỏ qua: {file_path}")
+        if isinstance(paths, str):
+            paths = [paths]
+            
+        valid_paths = [os.path.abspath(p) for p in paths if os.path.exists(p)]
+        if not valid_paths:
+            log_print(f"[Agent] Các file không tồn tại, bỏ qua.")
             return False
 
-        abs_path = os.path.abspath(file_path)
-        log_print(f"[Agent] Đang nạp file vào Clipboard: {abs_path}")
+        log_print(f"[Agent] Đang nạp {len(valid_paths)} file vào Clipboard: {valid_paths[0]}...")
 
         # Retry loop để chờ ứng dụng khác nhả khóa Clipboard
         opened = False
@@ -74,18 +77,18 @@ def set_clipboard_files(file_path):
         try:
             win32clipboard.EmptyClipboard()
             # SetClipboardFiles nhận một tuple chứa các đường dẫn file
-            win32clipboard.SetClipboardFiles((abs_path,))
+            win32clipboard.SetClipboardFiles(tuple(valid_paths))
             
-            # Đặt Preferred DropEffect là 2 (DROPEFFECT_MOVE) để file bị di chuyển thay vì copy
+            # Đặt Preferred DropEffect là 5 (DROPEFFECT_COPY) để copy
             try:
                 cf_drop_effect = win32clipboard.RegisterClipboardFormat("Preferred DropEffect")
                 import struct
-                # Đóng gói giá trị 2 (DWORD)
-                win32clipboard.SetClipboardData(cf_drop_effect, struct.pack("I", 2))
+                # Đóng gói giá trị 5 (DWORD)
+                win32clipboard.SetClipboardData(cf_drop_effect, struct.pack("I", 5))
             except Exception as e:
                 log_print(f"[Agent] Không thể đặt Preferred DropEffect: {e}")
                 
-            log_print(f"[Agent] Đã nạp thành công file vào Clipboard: {abs_path}")
+            log_print(f"[Agent] Đã nạp thành công {len(valid_paths)} file vào Clipboard.")
             return True
         finally:
             win32clipboard.CloseClipboard()
@@ -202,6 +205,8 @@ def pipe_listener_loop(gui_queue):
                                     gui_queue.put(("end", None))
                                 elif msg.startswith("CANCEL"):
                                     gui_queue.put(("cancel", None))
+                                elif msg.startswith("FILES:"):
+                                    gui_queue.put(("files", msg[6:]))
                                 elif msg.startswith("FILE:"):
                                     gui_queue.put(("file", msg[5:]))
                                 else:
@@ -274,9 +279,15 @@ def main():
                     set_clipboard_text(val)
                 elif action == "file":
                     if os.path.exists(val):
-                        set_clipboard_files(val)
+                        set_clipboard_files([val])
                     else:
                         log_print(f"[Agent] File không tồn tại để nạp clipboard: {val}")
+                elif action == "files":
+                    paths = [p for p in val.split("|") if os.path.exists(p)]
+                    if paths:
+                        set_clipboard_files(paths)
+                    else:
+                        log_print(f"[Agent] File không tồn tại để nạp clipboard.")
                 elif action == "start":
                     display_name, total_size = val
                     if active_dialog:
