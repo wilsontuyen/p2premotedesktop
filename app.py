@@ -4064,7 +4064,7 @@ class UnifiedApp(tk.Tk):
                 with open(self.config_file, "r") as f:
                     config = json.load(f)
                     saved_theme = config.get("theme")
-                    if saved_theme in ["light", "dark", "gray", "pink", "custom"]:
+                    if saved_theme in ["light", "dark", "gray", "pink", "crystal", "custom"]:
                         self.current_theme.set(saved_theme)
             except Exception as e:
                 pass
@@ -4084,6 +4084,12 @@ class UnifiedApp(tk.Tk):
         self.btn_cancel_fg = pal.get("btn_cancel_fg", "#FFFFFF")
 
         self.config(bg=self.bg_color)
+        
+        if self._last_applied_theme == "crystal":
+            try:
+                self.attributes("-alpha", 0.88)
+            except:
+                pass
         
         # Host State Variables
         self.my_id_clean, self.my_id_formatted = get_hwid()
@@ -4320,6 +4326,7 @@ class UnifiedApp(tk.Tk):
         theme_menu.add_radiobutton(label="Tối", variable=self.current_theme, value="dark", command=self.change_theme)
         theme_menu.add_radiobutton(label="Xám", variable=self.current_theme, value="gray", command=self.change_theme)
         theme_menu.add_radiobutton(label="Hồng", variable=self.current_theme, value="pink", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Pha lê", variable=self.current_theme, value="crystal", command=self.change_theme)
         theme_menu.add_separator()
         theme_menu.add_radiobutton(label="Tùy chỉnh", variable=self.current_theme, value="custom", command=self.change_theme)
         options_menu.add_cascade(label="Giao diện", menu=theme_menu)
@@ -4613,6 +4620,20 @@ class UnifiedApp(tk.Tk):
                 "divider_color": "#FFC0CB",
                 "btn_cancel_bg": "#3A3A4A",
                 "btn_cancel_fg": "#FF69B4"
+            }
+        elif theme_name == "crystal":
+            return {
+                "bg_color": "#E0F7FA",
+                "card_color": "#B2EBF2",
+                "text_white": "#006064",
+                "text_gray": "#00838F",
+                "btn_color": "#00BCD4",
+                "btn_hover": "#26C6DA",
+                "entry_bg": "#E0F7FA",
+                "entry_fg": "#006064",
+                "divider_color": "#80DEEA",
+                "btn_cancel_bg": "#80DEEA",
+                "btn_cancel_fg": "#006064"
             }
         elif theme_name == "custom":
             custom_pal = {
