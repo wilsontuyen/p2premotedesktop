@@ -3503,6 +3503,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         screen.fill((82, 89, 98))
                     elif pygame_theme == "pink":
                         screen.fill((255, 240, 245))
+                    elif pygame_theme == "crystal":
+                        screen.fill((224, 247, 250))
                     else:
                         screen.fill((30, 30, 30))
                     
@@ -3539,6 +3541,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         cad_bg_color = (255, 105, 180) if cad_is_hover else (255, 182, 193)
                         cad_text_color = (255, 255, 255)
                         cad_border_color = (255, 105, 180)
+                    elif pygame_theme == "crystal":
+                        cad_bg_color = (38, 198, 218) if cad_is_hover else (0, 188, 212)
+                        cad_text_color = (255, 255, 255)
+                        cad_border_color = (128, 222, 234)
                     else:
                         cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
                         cad_text_color = (255, 255, 255)
