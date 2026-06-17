@@ -4090,7 +4090,7 @@ class UnifiedApp(tk.Tk):
                 self.attributes("-alpha", 0.88)
             except:
                 pass
-        
+
         # Host State Variables
         self.my_id_clean, self.my_id_formatted = get_hwid()
         
@@ -4353,10 +4353,12 @@ class UnifiedApp(tk.Tk):
         
         # Main Panels Container
         container = tk.Frame(self, bg=self.bg_color)
+        self._main_container = container
         container.pack(fill=tk.BOTH, expand=True, padx=20)
         
         # LEFT PANEL: Allow Remote Control
         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+        self._left_panel = left_panel
         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.88)
         
         lbl_allow = tk.Label(left_panel, text="CHO PHÉP ĐIỀU KHIỂN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
@@ -4366,6 +4368,7 @@ class UnifiedApp(tk.Tk):
         lbl_id.pack(anchor=tk.W, padx=20)
         
         id_frame = tk.Frame(left_panel, bg=self.card_color)
+        self._id_frame = id_frame
         id_frame.pack(fill=tk.X, padx=20, pady=(5, 12))
         
         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
@@ -4378,6 +4381,7 @@ class UnifiedApp(tk.Tk):
         lbl_pass.pack(anchor=tk.W, padx=20)
         
         pass_frame = tk.Frame(left_panel, bg=self.card_color)
+        self._pass_frame = pass_frame
         pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
         
         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
@@ -4400,6 +4404,7 @@ class UnifiedApp(tk.Tk):
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+        self._right_panel = right_panel
         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.88)
         
         lbl_control = tk.Label(right_panel, text="ĐIỀU KHIỂN ĐỐI TÁC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
@@ -4635,6 +4640,7 @@ class UnifiedApp(tk.Tk):
                 "btn_cancel_bg": "#80DEEA",
                 "btn_cancel_fg": "#006064"
             }
+
         elif theme_name == "custom":
             custom_pal = {
                 "bg_color": "#1E1E24",
@@ -4695,11 +4701,23 @@ class UnifiedApp(tk.Tk):
         # We restart the application to apply the theme cleanly without glitches
         import sys, subprocess
         
-        # Launch new instance
-        if getattr(sys, 'frozen', False):
-            subprocess.Popen([sys.executable] + sys.argv[1:])
-        else:
-            subprocess.Popen([sys.executable] + sys.argv)
+        # Clean existing delay arguments
+        args = sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv
+        clean_args = []
+        i = 0
+        while i < len(args):
+            if args[i] == "--delay-startup":
+                i += 2
+            else:
+                clean_args.append(args[i])
+                i += 1
+                
+        # Launch new instance with 2 seconds delay via internal argument
+        flags = 0
+        if sys.platform == "win32":
+            flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            
+        subprocess.Popen([sys.executable] + clean_args + ["--delay-startup", "2.0"], creationflags=flags)
             
         # Close current instance gracefully
         try:
@@ -4708,8 +4726,20 @@ class UnifiedApp(tk.Tk):
         except:
             pass
             
-        self.destroy()
-        sys.exit(0)
+        try:
+            if hasattr(self, 'tray_icon') and self.tray_icon:
+                self.tray_icon.visible = False
+                self.tray_icon.stop()
+        except:
+            pass
+            
+        try:
+            self.destroy()
+        except:
+            pass
+            
+        import os
+        os._exit(0)
 
     def save_window_position(self):
         try:
@@ -8308,7 +8338,9 @@ if __name__ == '__main__':
     
     import sys
     import ctypes
+    import time
     
+
     is_headless = "--headless" in sys.argv
     is_clipboard_agent = "--clipboard-agent" in sys.argv
     
@@ -8379,25 +8411,36 @@ if __name__ == '__main__':
         else:
             # GUI client uses mutex index 2
             mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{session_id}_{desktop_name}"
-            mutex = win32event.CreateMutex(None, False, mutex_name)
             
-            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-                # Topmost native message dialog
-                msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
-                msg_title = "Thông báo"
-                # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
-                ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
-                
-                # Signal restore event to primary GUI instance
-                restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
-                try:
-                    h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, restore_event_name)
-                    if h_event:
-                        win32event.SetEvent(h_event)
-                        win32api.CloseHandle(h_event)
-                except Exception as e:
-                    print(f"Failed to signal restore event: {e}")
-                sys.exit(0)
+            is_delay = "--delay-startup" in sys.argv
+            wait_time = 0
+            while True:
+                mutex = win32event.CreateMutex(None, False, mutex_name)
+                if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                    if is_delay and wait_time < 100:
+                        win32api.CloseHandle(mutex)
+                        time.sleep(0.1)
+                        wait_time += 1
+                        continue
+                    else:
+                        # Topmost native message dialog
+                        msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
+                        msg_title = "Thông báo"
+                        # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
+                        ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
+                        
+                        # Signal restore event to primary GUI instance
+                        restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+                        try:
+                            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, restore_event_name)
+                            if h_event:
+                                win32event.SetEvent(h_event)
+                                win32api.CloseHandle(h_event)
+                        except Exception as e:
+                            print(f"Failed to signal restore event: {e}")
+                        sys.exit(0)
+                else:
+                    break
     if sys.platform == "win32":
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
