@@ -2654,6 +2654,13 @@ class ClipboardSyncManager:
                             log_debug(f"[render_format] Lỗi SetClipboardData: res={res}, GetLastError={err}")
                         else:
                             log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. res={res}")
+                            # --- NGĂN CHẶN BOUNCE-BACK ---
+                            # Explorer có thể tự động lấy ownership và cập nhật clipboard sau khi paste.
+                            # Đánh dấu các file này để _process_clipboard_change bỏ qua.
+                            if hasattr(self, 'lock'):
+                                with self.lock:
+                                    self.last_current_files = [os.path.abspath(p) for p in self.batch_paths if os.path.exists(p)]
+                                    self.last_files_time = time.time()
                     finally:
                         self.ignore_destroy_clipboard = False
                 else:
