@@ -9,6 +9,14 @@ import struct
 import configparser
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
+LOG_CHECKONLINE = 1
+LOG_ALL = 1
+
+_orig_print = print
+def print(*args, **kwargs):
+    if LOG_ALL:
+        _orig_print(*args, **kwargs)
+
 APP_KEY = "q3tu0y7j"
 send_nonce_counter = 0
 send_counter_lock = threading.Lock()
@@ -359,7 +367,8 @@ def handle_client(conn, addr):
                 target = req.get("target")
                 with clients_lock:
                     is_online = target in clients
-                print(f"[Signal] Yêu cầu check_online ID: {target} -> Kết quả: {'ONLINE' if is_online else 'OFFLINE'}")
+                if LOG_CHECKONLINE:
+                    print(f"[Signal] Yêu cầu check_online ID: {target} -> Kết quả: {'ONLINE' if is_online else 'OFFLINE'}")
                 res_msg = json.dumps({
                     "action": "online_status",
                     "target": target,
@@ -403,6 +412,7 @@ def handle_client(conn, addr):
                 print(f"[-] Client ngắt kết nối: {addr} (ID: {hwid})")
 
 def load_config():
+    global LOG_CHECKONLINE, LOG_ALL
     config = configparser.ConfigParser()
     # Thử đọc cả 2 tên file để tương thích
     ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signaling_server.ini')
@@ -419,6 +429,15 @@ def load_config():
                 host = config['server'].get('host', host)
                 try:
                     port = config['server'].getint('port', port)
+                except ValueError:
+                    pass
+            if 'Log' in config:
+                try:
+                    LOG_CHECKONLINE = config['Log'].getint('checkonline', 1)
+                except ValueError:
+                    pass
+                try:
+                    LOG_ALL = config['Log'].getint('all', 1)
                 except ValueError:
                     pass
         except Exception as e:
