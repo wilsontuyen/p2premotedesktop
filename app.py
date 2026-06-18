@@ -3020,7 +3020,8 @@ def client_receiver_thread(sock, password):
                             pass
                         continue
                     elif evt_type == "switching_desktop":
-                        client_switching_desktop_countdown = 10
+                        if client_switching_desktop_countdown <= 0:
+                            client_switching_desktop_countdown = 10
                         continue
                     elif evt_type == "host_shutdown":
                         print("[Client] Received host_shutdown. Exiting viewer immediately.")
@@ -3773,10 +3774,17 @@ def check_desktop_change():
     """
     try:
         import ctypes
-        # 1. Try to open the active input desktop
-        h_input = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0001) # DESKTOP_READOBJECTS
+        # Try multiple access levels to open the Input Desktop.
+        # SYSTEM processes (headless agent) can access Secure Desktop with higher rights.
+        # Cascade: GENERIC_ALL (0x02000000) -> GENERIC_READ (0x80000000) -> DESKTOP_READOBJECTS (0x0001)
+        h_input = None
+        for access_mask in [0x02000000, 0x80000000, 0x0001]:
+            h_input = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
+            if h_input:
+                break
+        
         if not h_input:
-            # Cannot open input desktop -> we are blocked
+            # Cannot open input desktop with ANY access level -> truly blocked
             return False, True
             
         # Get active input desktop name
@@ -7045,22 +7053,29 @@ class UnifiedApp(tk.Tk):
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 2000)
         except: pass
 
+        _last_switching_signal_time = 0
         while client_state.get("running", False):
             try:
                 # Early check for desktop status
                 needs_switch, is_blocked = check_desktop_change()
                 if is_blocked:
-                    print("[Host] Secure Desktop detected and cannot be accessed. Pausing screen capture...")
-                    try:
-                        signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                        send_msg(conn, signal, password)
-                    except:
-                        pass
+                    # Throttle: only send switching_desktop signal once every 12 seconds
+                    # to avoid resetting the client's countdown timer in an infinite loop
+                    now = time.time()
+                    if now - _last_switching_signal_time >= 12:
+                        print("[Host] Secure Desktop detected and cannot be accessed. Signaling client...")
+                        try:
+                            signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                            send_msg(conn, signal, password)
+                        except:
+                            pass
+                        _last_switching_signal_time = now
                     time.sleep(0.5)
                     continue
 
                 # Switch thread to active Input Desktop if needed
                 if needs_switch:
+                    _last_switching_signal_time = 0  # Reset throttle so next block event signals immediately
                     print("[Host] Desktop change detected. Switching thread desktop...")
                     try:
                         hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
@@ -7090,11 +7105,14 @@ class UnifiedApp(tk.Tk):
                             if inner_is_blocked or inner_needs_switch:
                                 if inner_is_blocked:
                                     print("[Host] Secure Desktop appeared mid-session and blocked. Signaling client...")
-                                    try:
-                                        signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                                        send_msg(conn, signal, password)
-                                    except:
-                                        pass
+                                    now = time.time()
+                                    if now - _last_switching_signal_time >= 12:
+                                        try:
+                                            signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                                            send_msg(conn, signal, password)
+                                        except:
+                                            pass
+                                        _last_switching_signal_time = now
                                     time.sleep(0.5)
                                 else:
                                     print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
