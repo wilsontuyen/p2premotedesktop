@@ -1890,13 +1890,24 @@ class ClipboardSyncManager:
         try:
             hr, data = win32file.ReadFile(pipe_handle, 65536)
             if hr == 0 and data:
-                metadata = json.loads(data.decode('utf-8'))
-                if metadata and self.active_sockets:
-                    pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
-                    with self.lock:
-                        for s in list(self.active_sockets):
-                            try: send_msg(s, pkt)
-                            except: pass
+                raw = data.decode('utf-8').strip()
+                # Clipboard Agent gửi REQUEST_FILES khi người dùng thực hiện Paste
+                if raw == "REQUEST_FILES":
+                    log_debug("[_handle_uppipe_client] Nhận REQUEST_FILES từ Clipboard Agent. Bắt đầu tải file...")
+                    print("[Clipboard] Clipboard Agent yêu cầu tải file (người dùng đã Paste).")
+                    if self.pending_remote_files:
+                        threading.Thread(target=self.request_pending_files, daemon=True).start()
+                    else:
+                        log_debug("[_handle_uppipe_client] Không có pending_remote_files để tải.")
+                else:
+                    # Metadata file do Clipboard Agent gửi lên (copy file từ phía user)
+                    metadata = json.loads(raw)
+                    if metadata and self.active_sockets:
+                        pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
+                        with self.lock:
+                            for s in list(self.active_sockets):
+                                try: send_msg(s, pkt)
+                                except: pass
         except Exception as e:
             log_debug(f"[_handle_uppipe_client] Lỗi: {e}")
         finally:
@@ -2522,13 +2533,14 @@ class ClipboardSyncManager:
             print("[Clipboard] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             
-            # --- HIỂN THỊ DIALOG TIẾN TRÌNH NGAY LẬP TỨC ---
+            # --- HIỂN THỊ DIALOG TIẾN TRÌNH (chỉ GUI mode) ---
             display_name = self.pending_remote_files[0].get("name") if self.pending_remote_files else "Files"
             total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
-            log_debug(f"[render_format] Hiển thị dialog truyền tải ngay lập tức: {display_name}, size={total_size}")
-            self.show_dialog("Đang tải file về...", display_name, total_size)
-            if self.app and getattr(self.app, 'is_headless', False):
-                self._send_progress_signal("START", f"{display_name}|{total_size}")
+            log_debug(f"[render_format] Hiển thị dialog truyền tải: {display_name}, size={total_size}")
+            # render_format chỉ chạy trong GUI mode (WM_RENDERFORMAT từ ClipboardEventListener)
+            # HEADLESS mode xử lý dialog riêng trong Clipboard Agent (WM_RENDERFORMAT của agent)
+            if not (self.app and getattr(self.app, 'is_headless', False)):
+                self.show_dialog("Đang tải file về...", display_name, total_size)
             
             self._receive_cancelled = False
             self.batch_paths = []
@@ -2834,7 +2846,7 @@ class ClipboardSyncManager:
             print(f"[Clipboard] Đã nhận được files_copied_meta. Số file: {len(self.pending_remote_files)}")
             if not self.pending_remote_files: return
             
-            # --- HEADLESS MODE (SYSTEM/Service): Lưu file vào thư mục Public, KHÔNG động vào Clipboard ---
+            # --- HEADLESS MODE (SYSTEM/Service): Tải file ngay lập tức, đặt vào clipboard im lặng ---
             if self.app and getattr(self.app, 'is_headless', False):
                 transfer_dir = HEADLESS_TRANSFER_DIR
                 try:
@@ -2847,12 +2859,12 @@ class ClipboardSyncManager:
                 except Exception as e:
                     log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục transfer: {e}")
                 self.target_save_dir = transfer_dir
-                
-                # Tự động yêu cầu gửi file ngay lập tức (không cần delayed rendering)
                 self.batch_paths = []
                 self.transfer_done_event.clear()
+                # Tải file ngay (không chờ Paste), im lặng — không hiện dialog, không gửi PENDING.
+                # Khi xong, batch_end sẽ gửi FILES: tới agent để đặt vào clipboard.
                 self.request_pending_files()
-                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã yêu cầu tải file về {transfer_dir}")
+                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã yêu cầu tải file về {transfer_dir} (im lặng)")
                 return
             
             # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
@@ -2888,9 +2900,11 @@ class ClipboardSyncManager:
             os.makedirs(self.target_save_dir, exist_ok=True)
             log_file_transfer(display_name, self.batch_total_size)
             log_debug(f"[batch_start] Bắt đầu nhận batch, total_size={self.batch_total_size}, target_save_dir={self.target_save_dir}")
-            self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
-            if self.app and getattr(self.app, 'is_headless', False):
-                self._send_progress_signal("START", f"{display_name}|{self.batch_total_size}")
+            # GUI mode: hiện dialog khi bắt đầu nhận
+            # HEADLESS mode: KHÔNG gửi START ở đây — Clipboard Agent đã hiện dialog ngay
+            # khi WM_RENDERFORMAT (tức là đúng lúc user Paste), tránh hiện dialog trùng.
+            if not (self.app and getattr(self.app, 'is_headless', False)):
+                self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
             
         elif ptype == "file_start":
             filename = packet.get("name", "")
@@ -2958,13 +2972,10 @@ class ClipboardSyncManager:
             # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
                 if self.batch_paths:
-                    self._send_progress_signal("PROGRESS", str(self.batch_total_size))
-                    self._send_progress_signal("END", "")
-                    if self.batch_paths:
-                        files_str = "|".join(self.batch_paths)
-                        self._send_progress_signal("FILES", files_str)
+                    files_str = "|".join(self.batch_paths)
+                    self._send_progress_signal("FILES", files_str)
                     self._close_transfer_pipe()
-                    log_debug(f"[batch_end] HEADLESS: Đã gửi xong toàn bộ file qua transfer pipe.")
+                    log_debug(f"[batch_end] HEADLESS: Đã gửi FILES tới agent: {files_str[:100]}")
                 self.pending_remote_files = []
                 self.transfer_in_progress = False
 
@@ -8255,22 +8266,21 @@ def run_clipboard_agent_mode():
                                     agent_print(f"[ClipboardAgent] Nhận tin nhắn từ Pipe (độ dài {len(msg)}): {msg[:100]}...")
                                     if msg.startswith("TEXT:"):
                                         gui_queue.put(("text", msg[5:]))
-                                    elif msg.startswith("START:"):
-                                        parts = msg[6:].split("|")
-                                        display_name = parts[0]
-                                        total_size = int(parts[1]) if len(parts) > 1 else 0
-                                        gui_queue.put(("start", (display_name, total_size)))
-                                    elif msg.startswith("PROGRESS:"):
-                                        received = int(msg[9:])
-                                        gui_queue.put(("progress", received))
-                                    elif msg.startswith("END"):
-                                        gui_queue.put(("end", None))
-                                    elif msg.startswith("CANCEL"):
-                                        gui_queue.put(("cancel", None))
                                     elif msg.startswith("FILES:"):
-                                        gui_queue.put(("files", msg[6:]))
+                                        # Nhận file paths từ host (im lặng, không dialog).
+                                        # Đặt trực tiếp vào clipboard để user có thể Paste.
+                                        paths_str = msg[6:]
+                                        paths = [p for p in paths_str.split("|") if os.path.exists(p)]
+                                        if paths:
+                                            try:
+                                                set_clipboard_files(paths)
+                                                agent_print(f"[ClipboardAgent] Đã đặt {len(paths)} file vào Clipboard (im lặng).")
+                                            except Exception as e:
+                                                agent_print(f"[ClipboardAgent] Lỗi đặt file vào Clipboard: {e}")
+                                        else:
+                                            agent_print(f"[ClipboardAgent] FILES: không có file hợp lệ.")
                                     else:
-                                        gui_queue.put(("files", msg))
+                                        agent_print(f"[ClipboardAgent] Bỏ qua tin nhắn không nhận dạng: {msg[:50]}")
                         else:
                             agent_print(f"[ClipboardAgent] ReadFile trả về mã lỗi: {hr}")
                             break
@@ -8299,15 +8309,208 @@ def run_clipboard_agent_mode():
     root.withdraw()
     
     active_dialog = None
-    
+
+    # -----------------------------------------------------------------------
+    # Delayed-rendering Win32 cho HEADLESS mode
+    # -----------------------------------------------------------------------
+    # Khi host gửi PENDING:, agent tạo cửa sổ ẩn và trở thành chủ sở hữu clipboard
+    # với dạng delayed render (CF_HDROP = NULL). Windows sẽ gửi WM_RENDERFORMAT
+    # đúng lúc người dùng thực sự Paste, lúc đó agent mới yêu cầu host tải file.
+    # -----------------------------------------------------------------------
+    import ctypes
+    from ctypes import wintypes
+
+    CF_HDROP        = 15
+    WM_RENDERFORMAT = 0x0305
+    WM_RENDERALLFORMATS = 0x0306
+    WM_DESTROYCLIPBOARD = 0x0307
+    WM_USER_SETUP_DELAYED = 0x0400 + 201  # tin nhắn nội bộ để setup từ luồng khác
+
+    _agent_hwnd = None              # HWND cửa sổ ẩn của agent
+    _pending_info = {}              # {'display_name': ..., 'total_size': ...}
+    _files_ready_event = threading.Event()  # set khi host gửi FILES: xong
+    _files_ready_paths = []        # các đưỜng dẫn file đã download
+    _ignore_destroy = False        # tránh phản ứng WM_DESTROYCLIPBOARD do chính mình gây ra
+    _is_rendering = False          # chống race condition WM_RENDERFORMAT
+
+    def _send_request_files_to_host():
+        """Gửi cỗi REQUEST_FILES cho host qua UpPipe."""
+        import win32file
+        try:
+            pipe_handle = win32file.CreateFile(
+                r"\\.\pipe\RemoteDesktopClipboardUpPipe",
+                win32file.GENERIC_WRITE, 0, None,
+                win32file.OPEN_EXISTING, 0, None
+            )
+            win32file.WriteFile(pipe_handle, b"REQUEST_FILES")
+            win32file.CloseHandle(pipe_handle)
+            agent_print("[ClipboardAgent] Đã gửi REQUEST_FILES tới host.")
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] Lỗi gửi REQUEST_FILES: {e}")
+
+    def _execute_agent_delayed_rendering(hwnd):
+        """Chạy trong WndProc thread: mở clipboard, đăng ký deferred CF_HDROP."""
+        nonlocal _ignore_destroy
+        try:
+            _ignore_destroy = True
+            user32 = ctypes.windll.user32
+            if user32.OpenClipboard(hwnd):
+                user32.EmptyClipboard()
+                # SetClipboardData với NULL = hứa cung cấp dữ liệu khi được yêu cầu
+                user32.SetClipboardData(CF_HDROP, None)
+                user32.CloseClipboard()
+                agent_print("[ClipboardAgent] Đã setup delayed rendering CF_HDROP.")
+            else:
+                err = ctypes.GetLastError()
+                agent_print(f"[ClipboardAgent] OpenClipboard thất bại khi setup. Err={err}")
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] Lỗi setup delayed rendering: {e}")
+        finally:
+            _ignore_destroy = False
+
+    def _agent_wndproc(hwnd, msg, wparam, lparam):
+        """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
+        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy
+
+        if msg == WM_USER_SETUP_DELAYED:
+            _execute_agent_delayed_rendering(hwnd)
+            return 0
+
+        if msg == WM_RENDERFORMAT and wparam == CF_HDROP:
+            if _is_rendering:
+                agent_print("[ClipboardAgent] WM_RENDERFORMAT trùng lặp, bỏ qua.")
+                return 0
+            _is_rendering = True
+            agent_print("[ClipboardAgent] Nhận WM_RENDERFORMAT → người dùng đã Paste. Bắt đầu tải file...")
+            try:
+                # Hiển thị dialog qua gui_queue ngay lập tức
+                info = _pending_info.copy()
+                gui_queue.put(("start", (info.get("display_name", "Files"), info.get("total_size", 0))))
+
+                # Yêu cầu host bắt đầu gửi file
+                _files_ready_event.clear()
+                _files_ready_paths.clear()
+                _send_request_files_to_host()
+
+                # Chờ host download xong (tối đa 600 giây, pump Win32 messages)
+                user32 = ctypes.windll.user32
+                m = wintypes.MSG()
+                deadline = time.time() + 600.0
+                while time.time() < deadline:
+                    if _files_ready_event.is_set():
+                        break
+                    if user32.PeekMessageW(ctypes.byref(m), 0, 0, 0, 1):
+                        user32.TranslateMessage(ctypes.byref(m))
+                        user32.DispatchMessageW(ctypes.byref(m))
+                    else:
+                        time.sleep(0.01)
+
+                if _files_ready_event.is_set() and _files_ready_paths:
+                    # Tạo HDROP thực sự và nạp vào clipboard
+                    hGlobal = create_hdrop_data(_files_ready_paths)
+                    if hGlobal:
+                        _ignore_destroy = True
+                        try:
+                            if user32.OpenClipboard(hwnd):
+                                res = ctypes.windll.user32.SetClipboardData(CF_HDROP, hGlobal)
+                                user32.CloseClipboard()
+                                agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res}")
+                        except Exception as e:
+                            agent_print(f"[ClipboardAgent] Lỗi SetClipboardData: {e}")
+                        finally:
+                            _ignore_destroy = False
+                    gui_queue.put(("end", None))
+                else:
+                    agent_print("[ClipboardAgent] Hết thời gian chờ file hoặc bị hủy.")
+                    gui_queue.put(("cancel", None))
+            except Exception as e:
+                agent_print(f"[ClipboardAgent] Lỗi xử lý WM_RENDERFORMAT: {e}")
+                gui_queue.put(("cancel", None))
+            finally:
+                _is_rendering = False
+            return 0
+
+        if msg == WM_DESTROYCLIPBOARD and not _ignore_destroy:
+            # Clipboard bị xóa bởi app khác → hủy trạng thái pending
+            if _pending_info:
+                agent_print("[ClipboardAgent] WM_DESTROYCLIPBOARD → hủy pending.")
+                _pending_info.clear()
+                _files_ready_event.set()  # unlock nếu đang chờ
+                _files_ready_paths.clear()
+            return 0
+
+        return ctypes.windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _create_agent_window():
+        """Tạo hidden Win32 window cho agent, chạy trong luồng riêng với message loop."""
+        nonlocal _agent_hwnd
+        WNDPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_void_p, ctypes.c_uint,
+            ctypes.c_size_t, ctypes.c_size_t
+        )
+        _wndproc_ref = WNDPROC(_agent_wndproc)
+
+        class WNDCLASSEXW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize",        wintypes.UINT),
+                ("style",         wintypes.UINT),
+                ("lpfnWndProc",   WNDPROC),
+                ("cbClsExtra",    ctypes.c_int),
+                ("cbWndExtra",    ctypes.c_int),
+                ("hInstance",     wintypes.HINSTANCE),
+                ("hIcon",         wintypes.HANDLE),
+                ("hCursor",       wintypes.HANDLE),
+                ("hbrBackground", wintypes.HANDLE),
+                ("lpszMenuName",  wintypes.LPCWSTR),
+                ("lpszClassName", wintypes.LPCWSTR),
+                ("hIconSm",       wintypes.HANDLE),
+            ]
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        cls_name = "AntigravityClipboardAgentWnd"
+        wc = WNDCLASSEXW()
+        wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
+        wc.lpfnWndProc = _wndproc_ref
+        wc.hInstance = kernel32.GetModuleHandleW(None)
+        wc.lpszClassName = cls_name
+        user32.RegisterClassExW(ctypes.byref(wc))
+
+        hwnd = user32.CreateWindowExW(
+            0, cls_name, "ClipboardAgent",
+            0, 0, 0, 0, 0,
+            ctypes.c_void_p(-3),  # HWND_MESSAGE
+            None, wc.hInstance, None
+        )
+        _agent_hwnd = hwnd
+        agent_print(f"[ClipboardAgent] Window ẩn đã tạo. HWND={hwnd}")
+
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+
+    threading.Thread(target=_create_agent_window, daemon=True, name="AgentWin32MsgLoop").start()
+    time.sleep(0.1)  # Chờ window khởi tạo
+
     def trigger_cancel():
-        agent_print("[ClipboardAgent] Người dùng ấn Hủy truyền tải.")
+        """Giải phóng luồng chờ WM_RENDERFORMAT và xóa trạng thái pending."""
+        nonlocal _pending_info
+        _files_ready_paths.clear()
+        _pending_info.clear()
+        _files_ready_event.set()  # unlock nếu đang chờ trong WM_RENDERFORMAT
+        agent_print("[ClipboardAgent] Đã hủy trạng thái pending.")
+
+    def trigger_cancel_win32():
+        """Nút Hủy trong dialog → gửi Win32 Event để host service dừng gửi."""
         try:
             h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, "Global\\AntigravityP2P_CancelTransfer_Event")
             win32event.SetEvent(h_event)
             win32api.CloseHandle(h_event)
         except Exception as e:
             agent_print(f"[ClipboardAgent] Không thể gửi sự kiện hủy: {e}")
+        trigger_cancel()
 
     def poll_gui_queue():
         nonlocal active_dialog
@@ -8318,12 +8521,36 @@ def run_clipboard_agent_mode():
                     agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
                     set_clipboard_text(val)
                 elif action == "files":
+                    # Được gửi bởi luồng WM_RENDERFORMAT (cũ giữ lại cho trường hợp khác)
                     paths = [p for p in val.split("|") if os.path.exists(p)]
                     if paths:
                         set_clipboard_files(paths)
                         agent_print(f"[ClipboardAgent] Đã nạp {len(paths)} file vào Clipboard.")
                     else:
                         agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard.")
+                elif action == "pending":
+                    # Host gửi PENDING: → setup delayed rendering nếu window đã sẵn sàng
+                    display_name, total_size = val
+                    _pending_info["display_name"] = display_name
+                    _pending_info["total_size"] = total_size
+                    _files_ready_event.clear()
+                    _files_ready_paths.clear()
+                    agent_print(f"[ClipboardAgent] Nhận PENDING: '{display_name}' ({total_size} bytes). Đang setup delayed rendering...")
+                    if _agent_hwnd:
+                        ctypes.windll.user32.PostMessageW(
+                            ctypes.c_void_p(_agent_hwnd),
+                            WM_USER_SETUP_DELAYED, 0, 0
+                        )
+                    else:
+                        agent_print("[ClipboardAgent] HWND chưa sẵn sàng, bỏ qua PENDING.")
+                elif action == "files_ready":
+                    # Cầu hiệu nội bộ: luồng WM_RENDERFORMAT đã nhận FILES: từ host
+                    paths_str = val
+                    paths = [p for p in paths_str.split("|") if p]
+                    _files_ready_paths.clear()
+                    _files_ready_paths.extend(paths)
+                    _files_ready_event.set()
+                    agent_print(f"[ClipboardAgent] files_ready: {len(paths)} file đã sẵn sàng.")
                 elif action == "start":
                     display_name, total_size = val
                     if active_dialog:
@@ -8331,7 +8558,7 @@ def run_clipboard_agent_mode():
                         except: pass
                     active_dialog = ProgressDialog(
                         root, "Đang tải file về...", display_name, total_size,
-                        on_cancel=trigger_cancel
+                        on_cancel=trigger_cancel_win32
                     )
                 elif action == "progress":
                     if active_dialog:
@@ -8356,6 +8583,7 @@ def run_clipboard_agent_mode():
             except Exception as e:
                 agent_print(f"[ClipboardAgent] Lỗi xử lý hàng đợi GUI: {e}")
         root.after(50, poll_gui_queue)
+
 
     t = threading.Thread(target=pipe_listener_loop, daemon=True)
     t.start()
