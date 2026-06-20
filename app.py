@@ -487,6 +487,11 @@ def _get_socket_send_lock(sock):
         return lock
 
 def get_crypto_key(password):
+    if not isinstance(password, str):
+        if isinstance(password, (list, tuple)) and password:
+            password = password[0]
+        else:
+            password = str(password)
     return hashlib.sha256(password.encode('utf-8')).digest()
 
 def encrypt_payload(data_bytes, password):
@@ -537,6 +542,7 @@ def force_close_socket(sock):
     # Clean up per-socket lock to prevent memory leaks
     with _socket_send_locks_meta:
         _socket_send_locks.pop(sock, None)
+    socket_passwords.pop(sock, None)
 
 def send_msg(sock, data_bytes, password=None):
     if password is None:
@@ -3906,13 +3912,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
                             print("[Client] Received shared socket. Resuming session!")
                             sock = socket.fromshare(new_sock[1])
+                            if partner_pass:
+                                socket_passwords[sock] = partner_pass
                             break # Break inner wait loop, outer loop will continue
                         elif hasattr(new_sock, 'fileno'):
                             print("[Client] Received new socket. Resuming session!")
                             sock = new_sock
+                            if partner_pass:
+                                socket_passwords[sock] = partner_pass
                             break # Break inner wait loop, outer loop will continue
-                    except:
-                        pass
+                    except Exception as re_err:
+                        print(f"[Client] Lỗi nhận diện socket tái kết nối: {re_err}")
                     
                     screen.fill((30, 30, 30))
                     text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
@@ -8984,8 +8994,19 @@ if __name__ == '__main__':
                 session_id = 1
                 
             mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{session_id}"
-            mutex = win32event.CreateMutex(None, False, mutex_name)
-            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            try:
+                mutex = win32event.CreateMutex(None, False, mutex_name)
+            except Exception as e:
+                # Fallback to Local namespace if Global access is denied (common for non-admin users)
+                mutex_name = f"Local\\AntigravityP2PClipboardAgentMutex_{session_id}"
+                try:
+                    mutex = win32event.CreateMutex(None, False, mutex_name)
+                except Exception as ex:
+                    # If even Local fails, print warning but proceed
+                    print(f"[ClipboardAgent] Error creating Local mutex: {ex}", flush=True)
+                    mutex = None
+            
+            if mutex and win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
                 sys.exit(0)
         
         # Redirect stdout/stderr cho clipboard agent mode

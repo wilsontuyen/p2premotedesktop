@@ -554,9 +554,12 @@ def main():
                     clipboard_agent_pid = None
 
                 clipboard_agent_running = False
-                mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                mutex_name_global = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                mutex_name_session = f"Session\\{active_session_id}\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                
+                # Check Global Mutex
                 try:
-                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
+                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_global)
                     win32api.CloseHandle(h_mutex)
                     clipboard_agent_running = True
                 except Exception as e:
@@ -564,6 +567,17 @@ def main():
                     if err_code != 2:
                         clipboard_agent_running = True
                         
+                # Check Session Mutex fallback
+                if not clipboard_agent_running:
+                    try:
+                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_session)
+                        win32api.CloseHandle(h_mutex)
+                        clipboard_agent_running = True
+                    except Exception as e:
+                        err_code = getattr(e, 'winerror', 0)
+                        if err_code != 2:
+                            clipboard_agent_running = True
+                            
                 if not clipboard_agent_running:
                     if clipboard_agent_pid and is_process_alive(clipboard_agent_pid):
                         log(f"Mutex của Clipboard Agent chưa sẵn sàng nhưng tiến trình {clipboard_agent_pid} vẫn đang khởi động. Chờ đợi...")
