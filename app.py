@@ -61,6 +61,13 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
+if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
+    try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except: pass
+if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):
+    try: sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except: pass
+
 def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -69,6 +76,20 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
 sys.excepthook = handle_exception
+
+import builtins
+_orig_print = builtins.print
+def print_with_timestamp(*args, **kwargs):
+    timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+    if args:
+        first_arg = str(args[0])
+        if first_arg.startswith("[202") and first_arg.find("]") < 25:
+            _orig_print(*args, **kwargs)
+            return
+    msg = " ".join(str(arg) for arg in args)
+    _orig_print(f"{timestamp} {msg}", **kwargs)
+
+print = print_with_timestamp
 
 # Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
 if getattr(sys, 'frozen', False):
@@ -930,6 +951,61 @@ if ENABLE_CLIPBOARD_SYNC:
         print(f"[Clipboard] Lỗi cấu hình dynamic ctypes signatures: {e}")
 
 
+def set_clipboard_dword_format(cf_format, value):
+    try:
+        kernel32 = ctypes.windll.kernel32
+        hMem = fn_GlobalAlloc(0x0002, 4) # GMEM_MOVEABLE = 0x0002
+        if hMem:
+            ptr = fn_GlobalLock(hMem)
+            if ptr:
+                ctypes.memmove(ptr, ctypes.byref(wintypes.DWORD(value)), 4)
+                fn_GlobalUnlock(hMem)
+                if not fn_SetClipboardData(cf_format, hMem):
+                    fn_GlobalFree(hMem)
+                    msg = f"[set_dword_data] Thất bại SetClipboardData cho format {cf_format}"
+                    if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+                    log_debug(msg)
+                    return False
+                else:
+                    msg = f"[set_dword_data] Đã thiết lập format {cf_format} = {value}"
+                    if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+                    log_debug(msg)
+                    return True
+            else:
+                fn_GlobalFree(hMem)
+                msg = f"[set_dword_data] GlobalLock thất bại cho format {cf_format}"
+                if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+                log_debug(msg)
+        else:
+            msg = f"[set_dword_data] GlobalAlloc thất bại cho format {cf_format}"
+            if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+            log_debug(msg)
+    except Exception as e:
+        msg = f"[set_dword_data] Lỗi thiết lập format {cf_format}: {e}"
+        if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+        log_debug(msg)
+    return False
+
+def setup_clipboard_exclusions():
+    try:
+        user32 = ctypes.windll.user32
+        user32.RegisterClipboardFormatW.argtypes = [ctypes.c_wchar_p]
+        user32.RegisterClipboardFormatW.restype = wintypes.UINT
+        cf_exclude = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
+        cf_history = user32.RegisterClipboardFormatW("CanIncludeInClipboardHistory")
+        cf_cloud = user32.RegisterClipboardFormatW("CanUploadToCloudClipboard")
+        cf_drop_effect = user32.RegisterClipboardFormatW("Preferred DropEffect")
+        
+        if cf_exclude: set_clipboard_dword_format(cf_exclude, 1)
+        if cf_history: set_clipboard_dword_format(cf_history, 0)
+        if cf_cloud: set_clipboard_dword_format(cf_cloud, 0)
+        if cf_drop_effect: set_clipboard_dword_format(cf_drop_effect, 5) # DROPEFFECT_COPY
+    except Exception as e:
+        msg = f"[setup_clipboard_exclusions] Lỗi: {e}"
+        if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
+        log_debug(msg)
+
+
 def get_clipboard_files(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return []
     paths = []
@@ -937,7 +1013,7 @@ def get_clipboard_files(owner_hwnd=None):
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
         # Retry loop để chờ ứng dụng khác (ví dụ Explorer) nhả khóa Clipboard
-        for _ in range(10):
+        for _ in range(30):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
                 break
@@ -998,7 +1074,7 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
         
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        for _ in range(10):
+        for _ in range(30):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
                 break
@@ -1022,7 +1098,7 @@ def get_clipboard_text(owner_hwnd=None):
     try:
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        for _ in range(10):
+        for _ in range(30):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
                 break
@@ -1065,7 +1141,7 @@ def set_clipboard_text(text, owner_hwnd=None):
         
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        for _ in range(10):
+        for _ in range(30):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
                 break
@@ -1813,6 +1889,117 @@ def create_named_pipe_with_everyone_dacl():
     return pipe_handle
 
 
+def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time):
+    """
+    Kiểm tra xem yêu cầu WM_RENDERFORMAT hiện tại có phải là do menu chuột phải (context menu)
+    hoặc tiến trình quét tự động trong nền truy vấn hay không, hay là thao tác Paste thực tế.
+    Trả về True nếu là truy vấn menu/nền (cần từ chối tải file thực tế lúc này),
+    Trả về False nếu là thao tác Paste thực sự.
+    """
+    user32 = ctypes.windll.user32
+    from ctypes import wintypes
+    
+    t_now = time.time()
+    time_since_lbutton = t_now - last_lbutton
+    time_since_rbutton = t_now - last_rbutton
+    meta_age = t_now - meta_arrival_time
+    
+    # 0. Nếu cửa sổ hiện hành là chính Remote Desktop Viewer hoặc GUI của app,
+    # bất kỳ truy vấn clipboard nào cũng chỉ có thể là do hệ thống/nền tự quét sau khi copy,
+    # chứ không thể là thao tác Paste thực tế của người dùng lên máy client.
+    try:
+        import win32gui
+        hwnd_fg = win32gui.GetForegroundWindow()
+        if hwnd_fg:
+            title = win32gui.GetWindowText(hwnd_fg)
+            if title and ("Remote Desktop" in title or "Easy Remote" in title):
+                log_debug(f"[check_is_menu_query] Tra ve True: Cua so hien hanh la Remote Desktop ({title})")
+                return True
+    except Exception as e:
+        pass
+        
+    # 1. Kiểm tra xem cửa sổ menu (#32768) có tồn tại không (dù ẩn hay hiện)
+    hwnd_menu = user32.FindWindowW("#32768", None)
+    if hwnd_menu:
+        log_debug(f"[check_is_menu_query] Tra ve True: Cua so menu (#32768) dang ton tai")
+        return True
+        
+    # 2. Kiểm tra Menu Loop qua GetGUIThreadInfo
+    try:
+        class RECT_SIMPLE(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long)
+            ]
+        class GUITHREADINFO_SIMPLE(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("flags", ctypes.c_ulong),
+                ("hwndActive", ctypes.c_void_p),
+                ("hwndFocus", ctypes.c_void_p),
+                ("hwndCapture", ctypes.c_void_p),
+                ("hwndMenuOwner", ctypes.c_void_p),
+                ("hwndMoveSize", ctypes.c_void_p),
+                ("hwndCaret", ctypes.c_void_p),
+                ("rcCaret", RECT_SIMPLE)
+            ]
+        
+        user32.GetOpenClipboardWindow.restype = ctypes.c_void_p
+        hwnd_clip = user32.GetOpenClipboardWindow()
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        hwnd_fg = user32.GetForegroundWindow()
+        
+        for hwnd_check in (hwnd_clip, hwnd_fg):
+            if hwnd_check:
+                pid = wintypes.DWORD()
+                tid = user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd_check), ctypes.byref(pid))
+                gui_info = GUITHREADINFO_SIMPLE()
+                gui_info.cbSize = ctypes.sizeof(GUITHREADINFO_SIMPLE)
+                if user32.GetGUIThreadInfo(tid, ctypes.byref(gui_info)):
+                    # GUI_INMENULOOP = 0x04, GUI_POPUPMENUMODE = 0x10, GUI_SYSTEMMENUMODE = 0x08
+                    if gui_info.flags & (0x04 | 0x10 | 0x08):
+                        log_debug(f"[check_is_menu_query] Tra ve True: Phat hien Menu Loop tu GetGUIThreadInfo flags={gui_info.flags}")
+                        return True
+    except Exception as e:
+        pass
+
+    # 3. Kiểm tra phím tắt Ctrl+V hoặc Shift+Insert hoặc phím Enter (chọn mục menu bằng bàn phím)
+    # VK_CONTROL = 0x11, VK_V = 0x56, VK_SHIFT = 0x10, VK_INSERT = 0x2D, VK_RETURN = 0x0D
+    is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
+    is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
+    is_enter = (user32.GetAsyncKeyState(0x0D) & 0x8000)
+    if is_ctrl_v or is_shift_ins or is_enter:
+        log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan (ctrl_v={is_ctrl_v}, shift_ins={is_shift_ins}, enter={is_enter})")
+        return False
+
+    # 4. Nếu vừa click chuột trái (trong vòng 1.0 giây) VÀ click chuột trái này xảy ra SAU click chuột phải cuối cùng,
+    # VÀ click chuột trái này xảy ra SAU khi nhận metadata (để tránh nhận nhầm click "Copy" trên Host).
+    if time_since_lbutton < 1.0 and (last_lbutton > last_rbutton) and (last_lbutton >= meta_arrival_time):
+        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai gan day va sau click chuot phai (lbutton_age={time_since_lbutton:.3f}s, last_l={last_lbutton:.3f}, last_r={last_rbutton:.3f}, meta_arrival={meta_arrival_time:.3f})")
+        return False
+        
+    # 5. Nếu chuột phải vừa được click gần đây (< 1.5s)
+    if time_since_rbutton < 1.5:
+        log_debug(f"[check_is_menu_query] Tra ve True: Vua click chuot phai gan day (age={time_since_rbutton:.3f}s)")
+        return True
+        
+    # 6. Nếu metadata vừa mới nhận được (< 1.5s) và không có phím tắt/chuột trái hoạt động,
+    # đó có thể là do công cụ tự động quét clipboard trong nền.
+    if meta_age < 1.5:
+        log_debug(f"[check_is_menu_query] Tra ve True: Metadata vua moi nhan (age={meta_age:.3f}s)")
+        return True
+        
+    # 7. Fallback: Nếu không có click chuột trái gần đây (> 5.0 giây), mặc định coi là nền quét
+    if time_since_lbutton > 5.0:
+        log_debug(f"[check_is_menu_query] Tra ve True: Fallback vi time_since_lbutton={time_since_lbutton:.3f}s > 5.0s")
+        return True
+        
+    log_debug(f"[check_is_menu_query] Tra ve False: Mac dinh (lbutton_age={time_since_lbutton:.3f}s, rbutton_age={time_since_rbutton:.3f}s)")
+    return False
+
+
 class ClipboardSyncManager:
     def __init__(self):
         import queue
@@ -2144,7 +2331,13 @@ class ClipboardSyncManager:
             user32 = ctypes.windll.user32
             owner = user32.GetClipboardOwner()
             if self.listener and self.listener.hwnd and owner == self.listener.hwnd:
-                if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
+                opened = False
+                for _ in range(30):
+                    if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
+                        opened = True
+                        break
+                    time.sleep(0.05)
+                if opened:
                     self.ignore_destroy_clipboard = True
                     try:
                         user32.EmptyClipboard()
@@ -2152,6 +2345,8 @@ class ClipboardSyncManager:
                         self.ignore_destroy_clipboard = False
                     user32.CloseClipboard()
                     log_debug("[cancel_active_transfer] Đã giải phóng/xóa clipboard sở hữu bởi app.")
+                else:
+                    log_debug("[cancel_active_transfer] Thất bại OpenClipboard để giải phóng clipboard.")
         except Exception as e:
             log_debug(f"[cancel_active_transfer] Lỗi khi giải phóng clipboard: {e}")
         
@@ -2226,11 +2421,18 @@ class ClipboardSyncManager:
             user32 = ctypes.windll.user32
             user32.GetClipboardOwner.restype = ctypes.c_void_p
             owner = user32.GetClipboardOwner()
+            if owner:
+                buffer = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(ctypes.c_void_p(owner), buffer, 256)
+                class_name = buffer.value
+                if class_name in ("AntigravityClipboardAgentWnd", "HiddenClipboardListener"):
+                    log_debug(f"[on_clipboard_changed] Bỏ qua sự kiện thay đổi clipboard do cửa sổ lớp {class_name} sở hữu (delayed rendering).")
+                    return
             if self.listener and self.listener.hwnd and owner == self.listener.hwnd:
-                log_debug("[on_clipboard_changed] Bỏ qua sự kiện thay đổi clipboard do chính mình sở hữu (delayed rendering).")
+                log_debug("[on_clipboard_changed] Bỏ qua sự kiện thay đổi clipboard do chính mình sở hữu (listener hwnd).")
                 return
         except Exception as e:
-            log_debug(f"[on_clipboard_changed] Lỗi kiểm tra GetClipboardOwner: {e}")
+            log_debug(f"[on_clipboard_changed] Lỗi kiểm tra GetClassName/GetClipboardOwner: {e}")
             
         threading.Thread(target=self._process_clipboard_change, daemon=True).start()
 
@@ -2349,7 +2551,7 @@ class ClipboardSyncManager:
         kernel32 = ctypes.windll.kernel32
         opened = False
         log_debug(f"[_execute_setup_delayed_rendering] Đang cố gắng OpenClipboard với HWND: {self.listener.hwnd}")
-        for _ in range(10):
+        for _ in range(30):
             if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
                 opened = True
                 break
@@ -2363,35 +2565,8 @@ class ClipboardSyncManager:
             finally:
                 self.ignore_destroy_clipboard = False
                 
-            # Đăng ký các format để tránh Clipboard History / Cloud Clipboard tự động quét gây mất delayed rendering
-            cf_exclude = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
-            cf_history = user32.RegisterClipboardFormatW("CanIncludeInClipboardHistory")
-            cf_cloud = user32.RegisterClipboardFormatW("CanUploadToCloudClipboard")
-            
-            def set_dword_data(cf_format, value):
-                hMem = kernel32.GlobalAlloc(0x0002, 4) # GMEM_MOVEABLE = 0x0002
-                if hMem:
-                    ptr = kernel32.GlobalLock(hMem)
-                    if ptr:
-                        ctypes.memmove(ptr, ctypes.byref(wintypes.DWORD(value)), 4)
-                        kernel32.GlobalUnlock(hMem)
-                        if not user32.SetClipboardData(cf_format, hMem):
-                            kernel32.GlobalFree(hMem)
-                            log_debug(f"[set_dword_data] Thất bại SetClipboardData cho format {cf_format}")
-                        else:
-                            log_debug(f"[set_dword_data] Đã thiết lập format {cf_format} = {value}")
-                    else:
-                        kernel32.GlobalFree(hMem)
-                else:
-                    log_debug("[set_dword_data] GlobalAlloc thất bại")
-                            
-            if cf_exclude: set_dword_data(cf_exclude, 1)
-            if cf_history: set_dword_data(cf_history, 0)
-            if cf_cloud: set_dword_data(cf_cloud, 0)
-            
-            cf_drop_effect = user32.RegisterClipboardFormatW("Preferred DropEffect")
-            if cf_drop_effect:
-                set_dword_data(cf_drop_effect, 5) # 5 = DROPEFFECT_COPY
+            # Thiết lập các format loại trừ Clipboard History và Cloud Clipboard
+            setup_clipboard_exclusions()
             
             res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
             err = ctypes.GetLastError()
@@ -2519,6 +2694,24 @@ class ClipboardSyncManager:
             return
             
         if not self.pending_remote_files:
+            return
+            
+        # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
+        last_l = getattr(self, 'last_lbutton_time', 0.0)
+        last_r = getattr(self, 'last_rbutton_time', 0.0)
+        meta_time = getattr(self, 'meta_arrival_time', 0.0)
+        is_menu = check_is_menu_query(last_l, last_r, meta_time)
+        if is_menu:
+            log_debug("[render_format] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+            dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
+            if dummy_h:
+                fn_SetClipboardData(15, dummy_h)
+            
+            # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
+            def re_setup():
+                time.sleep(0.2)
+                self.setup_delayed_rendering()
+            threading.Thread(target=re_setup, daemon=True).start()
             return
             
 
@@ -2673,6 +2866,43 @@ class ClipboardSyncManager:
                                 with self.lock:
                                     self.last_current_files = [os.path.abspath(p) for p in self.batch_paths if os.path.exists(p)]
                                     self.last_files_time = time.time()
+                                    
+                            # Lưu lại clipboard sequence number ngay sau khi SetClipboardData thành công
+                            seq_after = ctypes.windll.user32.GetClipboardSequenceNumber()
+                            
+                            # Tự động xóa clipboard sau khi truyền tải hoàn tất để tránh bounce-back & kẹt dữ liệu cũ (được tinh chỉnh bảo mật)
+                            def delayed_clear():
+                                time.sleep(2.0)
+                                try:
+                                    # 1. Kiểm tra xem dữ liệu clipboard hiện tại có bị thay thế không (ví dụ: copy n + 1)
+                                    if ctypes.windll.user32.GetClipboardSequenceNumber() != seq_after:
+                                        log_debug("[render_format] Bỏ qua dọn dẹp clipboard vì dữ liệu đã thay đổi (ngăn mất dữ liệu copy n+1).")
+                                        return
+                                        
+                                    # 2. Kiểm tra xem ứng dụng còn sở hữu clipboard hay không
+                                    owner = ctypes.windll.user32.GetClipboardOwner()
+                                    if self.listener and self.listener.hwnd and owner != self.listener.hwnd:
+                                        log_debug("[render_format] Bỏ qua dọn dẹp clipboard vì ứng dụng không còn sở hữu clipboard.")
+                                        return
+                                        
+                                    log_debug("[render_format] Đang dọn dẹp clipboard sau khi truyền tải hoàn tất...")
+                                    opened = False
+                                    for _ in range(30):
+                                        if fn_OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
+                                            opened = True
+                                            break
+                                        time.sleep(0.05)
+                                    if opened:
+                                        try:
+                                            self.ignore_destroy_clipboard = True
+                                            fn_EmptyClipboard()
+                                        finally:
+                                            self.ignore_destroy_clipboard = False
+                                            fn_CloseClipboard()
+                                        log_debug("[render_format] Đã dọn dẹp clipboard thành công.")
+                                except Exception as e:
+                                    log_debug(f"[render_format] Lỗi dọn dẹp clipboard: {e}")
+                            threading.Thread(target=delayed_clear, daemon=True).start()
                     finally:
                         self.ignore_destroy_clipboard = False
                 else:
@@ -2690,7 +2920,7 @@ class ClipboardSyncManager:
                 self._send_progress_signal("CANCEL", "")
                 self._close_transfer_pipe()
         finally:
-            if not is_menu_query:
+            if not is_menu:
                 self.pending_remote_files = []
             self.transfer_in_progress = False
             self.is_rendering = False
@@ -2701,6 +2931,7 @@ class ClipboardSyncManager:
 
     def _process_send_requests(self, sock, files):
         self._send_cancelled = False
+        self.transfer_in_progress = True
         log_debug(f"[_process_send_requests] Khởi chạy gửi {len(files)} file...")
         try:
             total_size = sum(f.get("size", 0) for f in files)
@@ -2800,7 +3031,7 @@ class ClipboardSyncManager:
             except:
                 pass
         finally:
-            # Không đặt self.transfer_in_progress = False ở đây vì phía nhận (render_format) quản lý cờ này
+            self.transfer_in_progress = False
             log_debug(f"[_process_send_requests] Kết thúc hàm gửi file.")
 
     def handle_received_packet(self, packet):
@@ -2846,7 +3077,7 @@ class ClipboardSyncManager:
             print(f"[Clipboard] Đã nhận được files_copied_meta. Số file: {len(self.pending_remote_files)}")
             if not self.pending_remote_files: return
             
-            # --- HEADLESS MODE (SYSTEM/Service): Tải file ngay lập tức, đặt vào clipboard im lặng ---
+            # --- HEADLESS MODE (SYSTEM/Service): Gửi PENDING cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
                 transfer_dir = HEADLESS_TRANSFER_DIR
                 try:
@@ -2861,10 +3092,18 @@ class ClipboardSyncManager:
                 self.target_save_dir = transfer_dir
                 self.batch_paths = []
                 self.transfer_done_event.clear()
-                # Tải file ngay (không chờ Paste), im lặng — không hiện dialog, không gửi PENDING.
-                # Khi xong, batch_end sẽ gửi FILES: tới agent để đặt vào clipboard.
-                self.request_pending_files()
-                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã yêu cầu tải file về {transfer_dir} (im lặng)")
+                
+                # Gửi PENDING: tới agent để nó chờ Paste và hiện dialog, thay vì tải ngay im lặng.
+                total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
+                display_name = "Files"
+                if self.pending_remote_files:
+                    display_name = self.pending_remote_files[0].get("name", "Files")
+                    if len(self.pending_remote_files) > 1:
+                        display_name += f" and {len(self.pending_remote_files) - 1} others"
+                        
+                msg = f"{display_name}|{total_size}"
+                threading.Thread(target=self._send_to_pipe, args=("PENDING", msg), daemon=True).start()
+                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã gửi PENDING tới Agent để chờ Paste.")
                 return
             
             # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
@@ -2981,7 +3220,11 @@ class ClipboardSyncManager:
 
 
 
-clipboard_sync_manager = ClipboardSyncManager()
+is_agent_process = "--clipboard-agent" in sys.argv or (sys.argv and "clipboard_agent" in sys.argv[0])
+if not is_agent_process:
+    clipboard_sync_manager = ClipboardSyncManager()
+else:
+    clipboard_sync_manager = None
 
 
 
@@ -8196,20 +8439,35 @@ def run_clipboard_agent_mode():
     import win32api
     
     log_path = os.path.join(app_dir, "clipboard_agent.log")
-    logging.basicConfig(
-        filename=log_path,
-        level=logging.DEBUG,
-        format="[%(asctime)s] [PID %(process)d] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
     agent_log = logging.getLogger("clipboard_agent")
+    agent_log.setLevel(logging.DEBUG)
+    
+    # Xoá các handler cũ nếu có để tránh ghi lặp
+    for h in list(agent_log.handlers):
+        agent_log.removeHandler(h)
+        
+    formatter = logging.Formatter("[%(asctime)s] [PID %(process)d] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    
+    # Ghi file với UTF-8
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(formatter)
+    agent_log.addHandler(fh)
+    
+    # Chỉ ghi ra console nếu stdout không phải là chính file log đó (tránh lặp 2 dòng trong file)
+    is_stdout_log = False
+    try:
+        if sys.stdout and hasattr(sys.stdout, 'name'):
+            is_stdout_log = (os.path.abspath(sys.stdout.name) == os.path.abspath(log_path))
+    except:
+        pass
+        
+    if not is_stdout_log and sys.stdout:
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(formatter)
+        agent_log.addHandler(sh)
 
     def agent_print(msg):
         agent_log.info(msg)
-        try:
-            print(msg)
-        except:
-            pass
 
     agent_print("=" * 60)
     agent_print(f"[ClipboardAgent] Khởi động. PID: {os.getpid()}")
@@ -8267,18 +8525,20 @@ def run_clipboard_agent_mode():
                                     if msg.startswith("TEXT:"):
                                         gui_queue.put(("text", msg[5:]))
                                     elif msg.startswith("FILES:"):
-                                        # Nhận file paths từ host (im lặng, không dialog).
-                                        # Đặt trực tiếp vào clipboard để user có thể Paste.
-                                        paths_str = msg[6:]
-                                        paths = [p for p in paths_str.split("|") if os.path.exists(p)]
-                                        if paths:
-                                            try:
-                                                set_clipboard_files(paths)
-                                                agent_print(f"[ClipboardAgent] Đã đặt {len(paths)} file vào Clipboard (im lặng).")
-                                            except Exception as e:
-                                                agent_print(f"[ClipboardAgent] Lỗi đặt file vào Clipboard: {e}")
-                                        else:
-                                            agent_print(f"[ClipboardAgent] FILES: không có file hợp lệ.")
+                                        gui_queue.put(("files_ready", msg[6:]))
+                                    elif msg.startswith("PENDING:"):
+                                        parts = msg[8:].split("|", 1)
+                                        display_name = parts[0]
+                                        total_size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                                        gui_queue.put(("pending", (display_name, total_size)))
+                                    elif msg.startswith("PROGRESS:"):
+                                        try:
+                                            val = int(msg[9:])
+                                            gui_queue.put(("progress", val))
+                                        except:
+                                            pass
+                                    elif msg.startswith("CANCEL:"):
+                                        gui_queue.put(("pipe_cancel", None))
                                     else:
                                         agent_print(f"[ClipboardAgent] Bỏ qua tin nhắn không nhận dạng: {msg[:50]}")
                         else:
@@ -8317,7 +8577,6 @@ def run_clipboard_agent_mode():
     # với dạng delayed render (CF_HDROP = NULL). Windows sẽ gửi WM_RENDERFORMAT
     # đúng lúc người dùng thực sự Paste, lúc đó agent mới yêu cầu host tải file.
     # -----------------------------------------------------------------------
-    import ctypes
     from ctypes import wintypes
 
     CF_HDROP        = 15
@@ -8332,6 +8591,25 @@ def run_clipboard_agent_mode():
     _files_ready_paths = []        # các đưỜng dẫn file đã download
     _ignore_destroy = False        # tránh phản ứng WM_DESTROYCLIPBOARD do chính mình gây ra
     _is_rendering = False          # chống race condition WM_RENDERFORMAT
+    
+    _agent_last_lbutton_time = 0.0
+    _agent_last_rbutton_time = 0.0
+    _agent_meta_arrival_time = 0.0
+
+    def _agent_mouse_poll_loop():
+        nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time
+        user32 = ctypes.windll.user32
+        while True:
+            try:
+                if user32.GetAsyncKeyState(0x01) & 0x8000:
+                    _agent_last_lbutton_time = time.time()
+                if user32.GetAsyncKeyState(0x02) & 0x8000:
+                    _agent_last_rbutton_time = time.time()
+            except:
+                pass
+            time.sleep(0.05)
+            
+    threading.Thread(target=_agent_mouse_poll_loop, daemon=True, name="AgentMousePoll").start()
 
     def _send_request_files_to_host():
         """Gửi cỗi REQUEST_FILES cho host qua UpPipe."""
@@ -8354,15 +8632,25 @@ def run_clipboard_agent_mode():
         try:
             _ignore_destroy = True
             user32 = ctypes.windll.user32
-            if user32.OpenClipboard(hwnd):
+            opened = False
+            for _ in range(30):
+                if user32.OpenClipboard(hwnd):
+                    opened = True
+                    break
+                time.sleep(0.05)
+            if opened:
                 user32.EmptyClipboard()
+                
+                # Thiết lập loại trừ Clipboard History và Cloud Clipboard
+                setup_clipboard_exclusions()
+                
                 # SetClipboardData với NULL = hứa cung cấp dữ liệu khi được yêu cầu
-                user32.SetClipboardData(CF_HDROP, None)
+                res = fn_SetClipboardData(CF_HDROP, None)
                 user32.CloseClipboard()
-                agent_print("[ClipboardAgent] Đã setup delayed rendering CF_HDROP.")
+                agent_print(f"[ClipboardAgent] Đã setup delayed rendering CF_HDROP. res={res}")
             else:
                 err = ctypes.GetLastError()
-                agent_print(f"[ClipboardAgent] OpenClipboard thất bại khi setup. Err={err}")
+                agent_print(f"[ClipboardAgent] OpenClipboard thất bại khi setup (10 lần). Err={err}")
         except Exception as e:
             agent_print(f"[ClipboardAgent] Lỗi setup delayed rendering: {e}")
         finally:
@@ -8370,7 +8658,7 @@ def run_clipboard_agent_mode():
 
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
-        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy
+        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time
 
         if msg == WM_USER_SETUP_DELAYED:
             _execute_agent_delayed_rendering(hwnd)
@@ -8380,6 +8668,26 @@ def run_clipboard_agent_mode():
             if _is_rendering:
                 agent_print("[ClipboardAgent] WM_RENDERFORMAT trùng lặp, bỏ qua.")
                 return 0
+                
+            # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
+            is_menu = check_is_menu_query(_agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time)
+            if is_menu:
+                agent_print("[ClipboardAgent] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+                dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
+                if dummy_h:
+                    ctypes.windll.user32.SetClipboardData(CF_HDROP, dummy_h)
+                
+                # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
+                def re_setup_agent():
+                    time.sleep(0.2)
+                    if _agent_hwnd:
+                        ctypes.windll.user32.PostMessageW(
+                            ctypes.c_void_p(_agent_hwnd),
+                            WM_USER_SETUP_DELAYED, 0, 0
+                        )
+                threading.Thread(target=re_setup_agent, daemon=True).start()
+                return 0
+
             _is_rendering = True
             agent_print("[ClipboardAgent] Nhận WM_RENDERFORMAT → người dùng đã Paste. Bắt đầu tải file...")
             try:
@@ -8411,10 +8719,49 @@ def run_clipboard_agent_mode():
                     if hGlobal:
                         _ignore_destroy = True
                         try:
-                            if user32.OpenClipboard(hwnd):
-                                res = ctypes.windll.user32.SetClipboardData(CF_HDROP, hGlobal)
-                                user32.CloseClipboard()
-                                agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res}")
+                            # Lưu ý: Clipboard đã được mở sẵn bởi chương trình Paste khi gửi WM_RENDERFORMAT.
+                            # Không được gọi OpenClipboard/CloseClipboard ở đây.
+                            res = fn_SetClipboardData(CF_HDROP, hGlobal)
+                            agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res}")
+                            
+                            # Lưu lại clipboard sequence number ngay sau khi SetClipboardData thành công
+                            seq_after = user32.GetClipboardSequenceNumber()
+                            
+                            # Tự động xóa clipboard sau khi truyền tải hoàn tất để tránh bounce-back & kẹt dữ liệu cũ (được tinh chỉnh bảo mật)
+                            def delayed_clear_agent():
+                                time.sleep(2.0)
+                                try:
+                                    # 1. Kiểm tra xem dữ liệu clipboard hiện tại có bị thay thế không (ví dụ: copy n + 1)
+                                    if user32.GetClipboardSequenceNumber() != seq_after:
+                                        agent_print("[ClipboardAgent] Bỏ qua dọn dẹp clipboard vì dữ liệu đã thay đổi (ngăn mất dữ liệu copy n+1).")
+                                        return
+                                        
+                                    # 2. Kiểm tra xem agent còn sở hữu clipboard hay không
+                                    owner = user32.GetClipboardOwner()
+                                    if owner != hwnd:
+                                        agent_print("[ClipboardAgent] Bỏ qua dọn dẹp clipboard vì agent không còn sở hữu clipboard.")
+                                        return
+                                        
+                                    agent_print("[ClipboardAgent] Đang dọn dẹp clipboard sau khi truyền tải hoàn tất...")
+                                    opened = False
+                                    for _ in range(30):
+                                        if user32.OpenClipboard(hwnd):
+                                            opened = True
+                                            break
+                                        time.sleep(0.05)
+                                    if opened:
+                                        nonlocal _ignore_destroy
+                                        try:
+                                            _ignore_destroy = True
+                                            user32.EmptyClipboard()
+                                        finally:
+                                            _ignore_destroy = False
+                                            user32.CloseClipboard()
+                                        agent_print("[ClipboardAgent] Đã dọn dẹp clipboard thành công.")
+                                except Exception as e:
+                                    agent_print(f"[ClipboardAgent] Lỗi dọn dẹp clipboard: {e}")
+                            threading.Thread(target=delayed_clear_agent, daemon=True).start()
+                            
                         except Exception as e:
                             agent_print(f"[ClipboardAgent] Lỗi SetClipboardData: {e}")
                         finally:
@@ -8457,17 +8804,31 @@ def run_clipboard_agent_mode():
                 ("lpfnWndProc",   WNDPROC),
                 ("cbClsExtra",    ctypes.c_int),
                 ("cbWndExtra",    ctypes.c_int),
-                ("hInstance",     wintypes.HINSTANCE),
-                ("hIcon",         wintypes.HANDLE),
-                ("hCursor",       wintypes.HANDLE),
-                ("hbrBackground", wintypes.HANDLE),
+                ("hInstance",     ctypes.c_void_p),
+                ("hIcon",         ctypes.c_void_p),
+                ("hCursor",       ctypes.c_void_p),
+                ("hbrBackground", ctypes.c_void_p),
                 ("lpszMenuName",  wintypes.LPCWSTR),
                 ("lpszClassName", wintypes.LPCWSTR),
-                ("hIconSm",       wintypes.HANDLE),
+                ("hIconSm",       ctypes.c_void_p),
             ]
 
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
+
+        # Định nghĩa kiểu dữ liệu chuẩn Win32 API cho môi trường 64-bit
+        kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+
+        user32.RegisterClassExW.argtypes = [ctypes.c_void_p]
+        user32.RegisterClassExW.restype = wintypes.ATOM
+
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_uint, wintypes.LPCWSTR, wintypes.LPCWSTR,
+            ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+        ]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
 
         cls_name = "AntigravityClipboardAgentWnd"
         wc = WNDCLASSEXW()
@@ -8513,7 +8874,7 @@ def run_clipboard_agent_mode():
         trigger_cancel()
 
     def poll_gui_queue():
-        nonlocal active_dialog
+        nonlocal active_dialog, _agent_meta_arrival_time
         while not gui_queue.empty():
             try:
                 action, val = gui_queue.get_nowait()
@@ -8535,6 +8896,7 @@ def run_clipboard_agent_mode():
                     _pending_info["total_size"] = total_size
                     _files_ready_event.clear()
                     _files_ready_paths.clear()
+                    _agent_meta_arrival_time = time.time()
                     agent_print(f"[ClipboardAgent] Nhận PENDING: '{display_name}' ({total_size} bytes). Đang setup delayed rendering...")
                     if _agent_hwnd:
                         ctypes.windll.user32.PostMessageW(
@@ -8543,6 +8905,9 @@ def run_clipboard_agent_mode():
                         )
                     else:
                         agent_print("[ClipboardAgent] HWND chưa sẵn sàng, bỏ qua PENDING.")
+                elif action == "pipe_cancel":
+                    agent_print("[ClipboardAgent] Nhận tín hiệu CANCEL từ Pipe. Đang hủy...")
+                    trigger_cancel()
                 elif action == "files_ready":
                     # Cầu hiệu nội bộ: luồng WM_RENDERFORMAT đã nhận FILES: từ host
                     paths_str = val

@@ -57,9 +57,9 @@ def configure_uac_registry():
         winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
         winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
         winreg.CloseKey(key)
-        log("Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
+        log("Đã cấu hình thành công Registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
     except Exception as e:
-        log(f"Failed to configure registry: {e}")
+        log(f"Thất bại khi cấu hình Registry: {e}")
 
 def get_active_session_id():
     try:
@@ -68,7 +68,7 @@ def get_active_session_id():
             if s['State'] == 0:  # WTSActive
                 return s['SessionId']
     except Exception as e:
-        log(f"Error enumerating WTS sessions: {e}")
+        log(f"Lỗi liệt kê các session WTS: {e}")
     # Fallback
     return win32ts.WTSGetActiveConsoleSessionId()
 
@@ -79,7 +79,7 @@ def is_logon_ui_running(session_id):
             if p[0] == session_id and p[2].lower() == "logonui.exe":
                 return True
     except Exception as e:
-        log(f"Error checking LogonUI: {e}")
+        log(f"Lỗi kiểm tra LogonUI: {e}")
     return False
 
 def find_winlogon_pid(session_id):
@@ -89,7 +89,7 @@ def find_winlogon_pid(session_id):
             if p[0] == session_id and p[2].lower() == "winlogon.exe":
                 return p[1]
     except Exception as e:
-        log(f"Error enumerating processes: {e}")
+        log(f"Lỗi liệt kê các tiến trình: {e}")
     return None
 
 def get_executable_to_run():
@@ -105,17 +105,17 @@ def get_executable_to_run():
     ]
     for c in candidates:
         if os.path.exists(c):
-            log(f"Found compiled executable for agent: {c}")
+            log(f"Đã tìm thấy file thực thi biên dịch của Agent: {c}")
             return c, f'"{c}" --headless'
 
     # Fallback to source
     python_exe = os.path.join(app_dir, ".venv", "Scripts", "python.exe")
     app_py = os.path.join(app_dir, "app.py")
     if os.path.exists(python_exe) and os.path.exists(app_py):
-        log(f"Fallback to Python source execution for agent using: {python_exe}")
+        log(f"Sử dụng nguồn Python dự phòng để chạy Agent bằng: {python_exe}")
         return python_exe, f'"{python_exe}" "{app_py}" --headless'
 
-    log("Error: No executable or source app.py found!")
+    log("Lỗi: Không tìm thấy file thực thi hoặc file nguồn app.py!")
     return None, None
 
 def spawn_agent(session_id, is_logged_in, is_screen_locked):
@@ -131,7 +131,7 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
     # and control administrative apps / UAC prompts without permission blocks.
     winlogon_pid = find_winlogon_pid(session_id)
     if not winlogon_pid:
-        log(f"winlogon.exe not found in session {session_id}. Cannot run agent.")
+        log(f"Không tìm thấy winlogon.exe trong session {session_id}. Không thể chạy Agent.")
         return None
 
     try:
@@ -156,12 +156,12 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
         # Target appropriate initial desktop based on active state
         if is_screen_locked:
             desktop = "winsta0\\winlogon"
-            log(f"Targeting lock screen desktop (Winlogon) for session {session_id} using SYSTEM token")
+            log(f"Đang nhắm tới desktop màn hình khóa (Winlogon) cho session {session_id} bằng token SYSTEM")
         else:
             desktop = "winsta0\\default"
-            log(f"Targeting default user desktop for session {session_id} using SYSTEM token")
+            log(f"Đang nhắm tới desktop người dùng mặc định cho session {session_id} bằng token SYSTEM")
     except Exception as e:
-        log(f"Failed to acquire Winlogon token: {e}")
+        log(f"Thất bại khi lấy token Winlogon: {e}")
         return None
 
     if h_token:
@@ -194,10 +194,10 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
             win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
 
-            log(f"Agent successfully spawned with PID {dwProcessId} on {desktop}")
+            log(f"Đã khởi chạy Agent thành công với PID {dwProcessId} trên desktop {desktop}")
             return dwProcessId
         except Exception as e:
-            log(f"CreateProcessAsUser failed: {e}")
+            log(f"CreateProcessAsUser thất bại: {e}")
     return None
 
 def spawn_clipboard_agent(session_id):
@@ -216,7 +216,7 @@ def spawn_clipboard_agent(session_id):
     try:
         h_user_token = win32ts.WTSQueryUserToken(session_id)
     except Exception as e:
-        log(f"Failed to query user token for Clipboard Agent (session {session_id}): {e}")
+        log(f"Thất bại khi truy vấn token người dùng cho Clipboard Agent (session {session_id}): {e}")
         return None
 
     if h_user_token:
@@ -248,10 +248,10 @@ def spawn_clipboard_agent(session_id):
             win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
 
-            log(f"Clipboard Agent spawned with PID {dwProcessId} on winsta0\\default (User privilege)")
+            log(f"Đã khởi chạy Clipboard Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
             return dwProcessId
         except Exception as e:
-            log(f"CreateProcessAsUser for Clipboard Agent failed: {e}")
+            log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
     return None
 
 def trigger_sas_system():
@@ -265,9 +265,9 @@ def trigger_sas_system():
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE)
         winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
         winreg.CloseKey(key)
-        log("Configured SoftwareSASGeneration = 3 in registry.")
+        log("Đã cấu hình SoftwareSASGeneration = 3 trong Registry.")
     except Exception as e:
-        log(f"Error configuring SoftwareSASGeneration in service: {e}")
+        log(f"Lỗi khi cấu hình SoftwareSASGeneration trong service: {e}")
 
     try:
         h_process = win32api.GetCurrentProcess()
@@ -284,18 +284,18 @@ def trigger_sas_system():
         if privs:
             win32security.AdjustTokenPrivileges(h_token, False, privs)
         win32api.CloseHandle(h_token)
-        log("Adjusted token privileges for SeTcbPrivilege in service.")
+        log("Đã điều chỉnh đặc quyền token cho SeTcbPrivilege trong service.")
     except Exception as priv_err:
-        log(f"Failed to adjust privilege in Service: {priv_err}")
+        log(f"Thất bại khi điều chỉnh đặc quyền trong Service: {priv_err}")
 
     try:
         sas_dll = ctypes.windll.LoadLibrary("sas.dll")
         sas_dll.SendSAS.argtypes = [ctypes.c_int]
         sas_dll.SendSAS.restype = None
         sas_dll.SendSAS(0)
-        log("SendSAS(0) executed successfully from Session 0 Service.")
+        log("SendSAS(0) thực thi thành công từ Service Session 0.")
     except Exception as e:
-        log(f"Error calling SendSAS in service: {e}")
+        log(f"Lỗi khi gọi SendSAS trong service: {e}")
 
 def spawn_taskmgr_system():
     try:
@@ -305,7 +305,7 @@ def spawn_taskmgr_system():
 
         is_screen_locked = is_logon_ui_running(active_session_id)
         if is_screen_locked:
-            log("Screen is locked, skipping Task Manager spawn.")
+            log("Màn hình đang khóa, bỏ qua việc chạy Task Manager.")
             return
 
         desktop = "winsta0\\default"
@@ -329,7 +329,7 @@ def spawn_taskmgr_system():
         try:
             h_user_token = win32ts.WTSQueryUserToken(active_session_id)
         except Exception as e:
-            log(f"Failed to query user token for Task Manager (session {active_session_id}): {e}")
+            log(f"Thất bại khi truy vấn token người dùng cho Task Manager (session {active_session_id}): {e}")
             return
 
         try:
@@ -340,7 +340,7 @@ def spawn_taskmgr_system():
                     win32api.CloseHandle(h_user_token)
                     h_user_token = linked_token
         except Exception as e:
-            log(f"Failed to get linked token: {e}")
+            log(f"Thất bại khi lấy linked token: {e}")
 
         if h_user_token:
             h_token_dup = win32security.DuplicateTokenEx(
@@ -374,9 +374,9 @@ def spawn_taskmgr_system():
             win32api.CloseHandle(h_process)
             win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
-            log(f"Task Manager successfully spawned with PID {dwProcessId} on {desktop} as SYSTEM")
+            log(f"Đã khởi chạy thành công Task Manager với PID {dwProcessId} trên desktop {desktop} dưới quyền SYSTEM")
     except Exception as e:
-        log(f"Failed to spawn Task Manager: {e}")
+        log(f"Thất bại khi chạy Task Manager: {e}")
 
 def service_events_listener_thread():
     # Setup security attributes with NULL DACL to allow user processes to trigger
@@ -391,24 +391,24 @@ def service_events_listener_thread():
         h_sas_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_SAS_Event")
         h_taskmgr_event = win32event.CreateEvent(sa, False, False, "Global\\AntigravityP2P_TaskMgr_Event")
     except Exception as e:
-        log(f"Failed to create events: {e}")
+        log(f"Thất bại khi tạo event: {e}")
         return
 
-    log("Service Events Listener Thread started and waiting...")
+    log("Luồng lắng nghe sự kiện của Service đã khởi động và đang chờ...")
     handles = [h_sas_event, h_taskmgr_event]
     while True:
         rc = win32event.WaitForMultipleObjects(handles, False, win32event.INFINITE)
         if rc == win32event.WAIT_OBJECT_0:
-            log("Received SAS event signal from Agent. Triggering SendSAS.")
+            log("Nhận được tín hiệu sự kiện SAS từ Agent. Đang kích hoạt SendSAS.")
             trigger_sas_system()
         elif rc == win32event.WAIT_OBJECT_0 + 1:
-            log("Received TaskMgr event signal from Agent. Triggering Task Manager.")
+            log("Nhận được tín hiệu sự kiện TaskMgr từ Agent. Đang kích hoạt Task Manager.")
             spawn_taskmgr_system()
 
 def terminate_process_with_pid(pid):
     if not pid:
         return
-    log(f"Attempting to terminate process {pid}")
+    log(f"Đang cố gắng dừng tiến trình {pid}")
     try:
         h_process_self = win32api.GetCurrentProcess()
         h_token_self = win32security.OpenProcessToken(
@@ -418,26 +418,26 @@ def terminate_process_with_pid(pid):
         win32security.AdjustTokenPrivileges(h_token_self, False, privs)
         win32api.CloseHandle(h_token_self)
     except Exception as e:
-        log(f"Failed to enable SeDebugPrivilege for termination: {e}")
+        log(f"Thất bại khi kích hoạt SeDebugPrivilege để dừng tiến trình: {e}")
 
     success = False
     try:
         h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, pid)
         win32api.TerminateProcess(h_proc, 0)
         win32api.CloseHandle(h_proc)
-        log(f"Terminated process {pid} via Windows API.")
+        log(f"Đã dừng tiến trình {pid} qua Windows API.")
         success = True
     except Exception as e:
-        log(f"Failed to kill agent {pid} via Windows API: {e}")
+        log(f"Không thể dừng Agent {pid} qua Windows API: {e}")
 
     if not success:
         try:
             import subprocess
             subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log(f"Terminated process {pid} via taskkill.")
+            log(f"Đã dừng tiến trình {pid} qua lệnh taskkill.")
             success = True
         except Exception as e:
-            log(f"Failed to kill agent {pid} via taskkill: {e}")
+            log(f"Không thể dừng Agent {pid} qua lệnh taskkill: {e}")
 
 def is_process_alive(pid):
     """Check if a process with the given PID is still running."""
@@ -450,23 +450,23 @@ def is_process_alive(pid):
             win32api.CloseHandle(h_proc)
             # STILL_ACTIVE = 259
             if exit_code != 259:
-                log(f"[DEBUG] Process {pid} exited with code: {exit_code}")
+                log(f"[DEBUG] Tiến trình {pid} đã thoát với mã: {exit_code}")
             return exit_code == 259
     except Exception:
         pass
     return False
 
 def main():
-    log("Easy Remote Desktop Agent service loop started.")
+    log("Vòng lặp service Easy Remote Desktop Agent bắt đầu chạy.")
     configure_uac_registry()
     
     # Clean up any lingering agent processes
     try:
         import subprocess
         subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        log("Cleaned up lingering RemoteDesktopP2P.exe processes.")
+        log("Đã dọn dẹp các tiến trình RemoteDesktopP2P.exe còn sót lại.")
     except Exception as e:
-        log(f"Error cleaning up processes on startup: {e}")
+        log(f"Lỗi khi dọn dẹp tiến trình lúc khởi động: {e}")
 
     # Start Service Events Listener thread
     import threading
@@ -503,7 +503,7 @@ def main():
             session_changed = (last_session_id is not None and last_session_id != active_session_id)
 
             if session_changed:
-                log(f"Session ID changed from {last_session_id} to {active_session_id}. Killing agent to switch session.")
+                log(f"Session ID đã thay đổi từ {last_session_id} sang {active_session_id}. Đang tắt Agent để chuyển session.")
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
@@ -515,7 +515,7 @@ def main():
 
             # Check if the current agent process has died on its own
             if current_agent_pid and not is_process_alive(current_agent_pid):
-                log(f"Agent PID {current_agent_pid} is no longer running. Will respawn.")
+                log(f"Agent với PID {current_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                 current_agent_pid = None
 
             # Check if agent is running using Mutex (check BOTH desktops)
@@ -539,13 +539,20 @@ def main():
                         break
 
             if not agent_running:
-                log(f"No agent mutex found for session {active_session_id}. Spawning new agent. (LoggedIn={is_logged_in}, Locked={is_screen_locked})")
-                pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
-                if pid:
-                    current_agent_pid = pid
+                if current_agent_pid and is_process_alive(current_agent_pid):
+                    log(f"Mutex của Agent chưa sẵn sàng nhưng tiến trình {current_agent_pid} vẫn đang khởi động. Chờ đợi...")
+                else:
+                    log(f"Không tìm thấy Mutex của Agent cho session {active_session_id}. Đang khởi chạy Agent mới (LoggedIn={is_logged_in}, Locked={is_screen_locked})")
+                    pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
+                    if pid:
+                        current_agent_pid = pid
 
             # Spawn or check Clipboard Agent (only when user is logged in and not locked)
             if is_logged_in and not is_screen_locked:
+                if clipboard_agent_pid and not is_process_alive(clipboard_agent_pid):
+                    log(f"Clipboard Agent với PID {clipboard_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
+                    clipboard_agent_pid = None
+
                 clipboard_agent_running = False
                 mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
                 try:
@@ -558,16 +565,21 @@ def main():
                         clipboard_agent_running = True
                         
                 if not clipboard_agent_running:
-                    log(f"No Clipboard Agent mutex found for session {active_session_id}. Spawning new Clipboard Agent.")
-                    clipboard_agent_pid = spawn_clipboard_agent(active_session_id)
+                    if clipboard_agent_pid and is_process_alive(clipboard_agent_pid):
+                        log(f"Mutex của Clipboard Agent chưa sẵn sàng nhưng tiến trình {clipboard_agent_pid} vẫn đang khởi động. Chờ đợi...")
+                    else:
+                        log(f"Không tìm thấy Mutex của Clipboard Agent cho session {active_session_id}. Đang khởi chạy Clipboard Agent mới.")
+                        pid = spawn_clipboard_agent(active_session_id)
+                        if pid:
+                            clipboard_agent_pid = pid
             else:
                 if clipboard_agent_pid:
-                    log(f"User logged out or locked. Terminating Clipboard Agent.")
+                    log(f"Người dùng đã đăng xuất hoặc màn hình bị khóa. Đang tắt Clipboard Agent.")
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
 
         except Exception as e:
-            log(f"Error in main loop: {e}\n{traceback.format_exc()}")
+            log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")
 
         time.sleep(1)
 
