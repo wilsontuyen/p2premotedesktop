@@ -1015,34 +1015,38 @@ def setup_clipboard_exclusions():
 def get_clipboard_files(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return []
     paths = []
+    
+    # 1. Mở Clipboard trước
+    hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+    opened = False
+    for _ in range(30):
+        if fn_OpenClipboard(hwnd_arg):
+            opened = True
+            break
+        time.sleep(0.05)
+        
+    if not opened:
+        print("[Clipboard] Lỗi: Không thể mở clipboard (đang bị khóa).")
+        return []
+
+    # 2. Dùng try...finally để đảm bảo chắc chắn CloseClipboard được gọi
     try:
-        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
-        opened = False
-        # Retry loop để chờ ứng dụng khác (ví dụ Explorer) nhả khóa Clipboard
-        for _ in range(30):
-            if fn_OpenClipboard(hwnd_arg):
-                opened = True
-                break
-            time.sleep(0.05)
-            
-        if opened:
-            try:
-                if fn_IsClipboardFormatAvailable(CF_HDROP):
-                    hGlobal = fn_GetClipboardData(CF_HDROP)
-                    if hGlobal:
-                        count = fn_DragQueryFileW(hGlobal, 0xFFFFFFFF, None, 0)
-                        for i in range(count):
-                            length = fn_DragQueryFileW(hGlobal, i, None, 0)
-                            if length > 0:
-                                buffer = ctypes.create_unicode_buffer(length + 1)
-                                fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
-                                paths.append(buffer.value)
-            finally:
-                fn_CloseClipboard()
-        else:
-            print("[Clipboard] Lỗi: OpenClipboard thất bại do bị khóa bởi tiến trình khác.")
+        if fn_IsClipboardFormatAvailable(CF_HDROP):
+            hGlobal = fn_GetClipboardData(CF_HDROP)
+            if hGlobal:
+                count = fn_DragQueryFileW(hGlobal, 0xFFFFFFFF, None, 0)
+                for i in range(count):
+                    length = fn_DragQueryFileW(hGlobal, i, None, 0)
+                    if length > 0:
+                        buffer = ctypes.create_unicode_buffer(length + 1)
+                        fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
+                        paths.append(buffer.value)
     except Exception as e:
-        print(f"[Clipboard] Lỗi đọc clipboard Win32: {e}")
+        print(f"[Clipboard] Lỗi xử lý dữ liệu: {e}")
+    finally:
+        # CHỖ NÀY QUAN TRỌNG: Phải đóng dù có lỗi hay không
+        fn_CloseClipboard()
+
     return [os.path.abspath(p) for p in paths if os.path.exists(p)]
 
 def create_hdrop_data(file_paths):
@@ -1089,7 +1093,9 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
         if opened:
             try:
                 fn_EmptyClipboard()
-                fn_SetClipboardData(CF_HDROP, hGlobal)
+                res = fn_SetClipboardData(CF_HDROP, hGlobal)
+                if not res:
+                    fn_GlobalFree(hGlobal)
             finally:
                 fn_CloseClipboard()
         else:
@@ -1102,6 +1108,14 @@ def get_clipboard_text(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return None
     text = None
     try:
+        user32 = ctypes.windll.user32
+        owner = user32.GetClipboardOwner()
+        if owner:
+            cls_buffer = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(owner, cls_buffer, 256)
+            if cls_buffer.value in ("AntigravityClipboardAgentWnd", "AntigravityClipboardSyncWnd"):
+                return None
+                
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
         for _ in range(30):
@@ -2047,7 +2061,7 @@ class ClipboardSyncManager:
         self._pipe_lock = threading.Lock()
         
         # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
-        threading.Thread(target=self._start_uppipe_server, daemon=True).start()
+        pass
 
     def _start_uppipe_server(self):
         import win32pipe, win32file, win32security
@@ -2085,13 +2099,30 @@ class ClipboardSyncManager:
             if hr == 0 and data:
                 raw = data.decode('utf-8').strip()
                 # Clipboard Agent gửi REQUEST_FILES khi người dùng thực hiện Paste
-                if raw == "REQUEST_FILES":
+                if raw.startswith("REQUEST_FILES"):
                     log_debug("[_handle_uppipe_client] Nhận REQUEST_FILES từ Clipboard Agent. Bắt đầu tải file...")
                     print("[Clipboard] Clipboard Agent yêu cầu tải file (người dùng đã Paste).")
-                    if self.pending_remote_files:
+                    
+                    parts = raw.split("|", 1)
+                    requested_files = []
+                    if len(parts) > 1 and parts[1].strip():
+                        try:
+                            import json
+                            requested_files = json.loads(parts[1])
+                        except Exception as e:
+                            log_debug(f"[_handle_uppipe_client] Lỗi parse requested_files: {e}")
+                            
+                    if not requested_files:
+                        requested_files = self.pending_remote_files
+                        
+                    if requested_files:
+                        self.pending_remote_files = requested_files
                         threading.Thread(target=self.request_pending_files, daemon=True).start()
                     else:
                         log_debug("[_handle_uppipe_client] Không có pending_remote_files để tải.")
+                        if self.app and getattr(self.app, 'is_headless', False):
+                            self._send_progress_signal("CANCEL", "")
+                            self._close_transfer_pipe()
                 else:
                     # Metadata file do Clipboard Agent gửi lên (copy file từ phía user)
                     metadata = json.loads(raw)
@@ -2113,6 +2144,7 @@ class ClipboardSyncManager:
         self.poll_gui_queue()
         if getattr(self.app, 'is_headless', False):
             threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
+            threading.Thread(target=self._start_uppipe_server, daemon=True).start()
 
     def _cancel_listener_thread(self):
         import win32event
@@ -2154,10 +2186,21 @@ class ClipboardSyncManager:
                     log_debug("[_send_progress_signal] Lỗi: Không tạo được Named Pipe.")
                     return
                 log_debug("[_send_progress_signal] Đang chờ Clipboard Agent kết nối...")
-                win32pipe.ConnectNamedPipe(self._transfer_pipe, None)
+                
+                try:
+                    win32pipe.ConnectNamedPipe(self._transfer_pipe, None)
+                except Exception as ce:
+                    if getattr(ce, 'winerror', 0) == 535 or (len(ce.args) > 0 and ce.args[0] == 535):
+                        log_debug("[_send_progress_signal] Client đã kết nối trước khi ConnectNamedPipe được gọi.")
+                    else:
+                        raise
+                        
                 log_debug("[_send_progress_signal] Clipboard Agent đã kết nối.")
             except Exception as e:
                 log_debug(f"[_send_progress_signal] Lỗi tạo/kết nối Pipe: {e}")
+                if getattr(self, '_transfer_pipe', None) is not None and self._transfer_pipe != -1:
+                    try: win32file.CloseHandle(self._transfer_pipe)
+                    except: pass
                 self._transfer_pipe = None
                 return
                 
@@ -2207,7 +2250,13 @@ class ClipboardSyncManager:
 
             log_debug(f"[_send_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
             # Chờ Agent kết nối (blocking call)
-            win32pipe.ConnectNamedPipe(pipe_handle, None)
+            try:
+                win32pipe.ConnectNamedPipe(pipe_handle, None)
+            except Exception as ce:
+                if getattr(ce, 'winerror', 0) == 535 or (len(ce.args) > 0 and ce.args[0] == 535):
+                    log_debug("[_send_to_pipe] Client đã kết nối trước khi ConnectNamedPipe được gọi.")
+                else:
+                    raise
             log_debug(f"[_send_to_pipe] Agent đã kết nối. Đang gửi {data_type}...")
 
             # Gửi dữ liệu dưới dạng "TYPE:payload" encoded in UTF-8
@@ -2444,7 +2493,7 @@ class ClipboardSyncManager:
 
     def _process_clipboard_change(self):
         try:
-            time.sleep(0.2) # Chờ xíu để Windows thả file lock
+            time.sleep(0.05) # Chờ xíu để Windows thả file lock (giảm delay)
             owner_hwnd = None
             if self.app:
                 try: owner_hwnd = self.app.winfo_id()
@@ -2461,7 +2510,10 @@ class ClipboardSyncManager:
                     return
                     
                 with self.lock:
-                    if current_files == getattr(self, 'last_current_files', []) and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
+                    current_files_lower = [os.path.abspath(f).lower() for f in current_files]
+                    last_files_lower = [os.path.abspath(f).lower() for f in getattr(self, 'last_current_files', [])]
+                    
+                    if current_files_lower == last_files_lower and (time.time() - getattr(self, 'last_files_time', 0)) < 2.0:
                         return
                     self.last_current_files = current_files
                     self.last_files_time = time.time()
@@ -2505,8 +2557,14 @@ class ClipboardSyncManager:
                     else:
                         try:
                             import win32file
+                            pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
+                            try:
+                                import win32pipe
+                                win32pipe.WaitNamedPipe(pipe_name, 5000)
+                            except Exception:
+                                pass
                             pipe_handle = win32file.CreateFile(
-                                r"\\.\pipe\RemoteDesktopClipboardUpPipe",
+                                pipe_name,
                                 win32file.GENERIC_WRITE, 0, None,
                                 win32file.OPEN_EXISTING, 0, None
                             )
@@ -2588,7 +2646,7 @@ class ClipboardSyncManager:
         if getattr(self, 'ignore_destroy_clipboard', False):
             log_debug("[lost_ownership] Bỏ qua WM_DESTROYCLIPBOARD vì tự thực hiện EmptyClipboard.")
             return
-        self.pending_remote_files = []
+        # self.pending_remote_files = []  # Đã gỡ bỏ để tránh mất metadata khi có race condition
         print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
 
     def get_active_explorer_path(self):
@@ -2863,6 +2921,7 @@ class ClipboardSyncManager:
                         if not res:
                             err = ctypes.GetLastError()
                             log_debug(f"[render_format] Lỗi SetClipboardData: res={res}, GetLastError={err}")
+                            fn_GlobalFree(hGlobal)
                         else:
                             log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. res={res}")
                             # --- NGĂN CHẶN BOUNCE-BACK ---
@@ -2875,40 +2934,7 @@ class ClipboardSyncManager:
                                     
                             # Lưu lại clipboard sequence number ngay sau khi SetClipboardData thành công
                             seq_after = ctypes.windll.user32.GetClipboardSequenceNumber()
-                            
-                            # Tự động xóa clipboard sau khi truyền tải hoàn tất để tránh bounce-back & kẹt dữ liệu cũ (được tinh chỉnh bảo mật)
-                            def delayed_clear():
-                                time.sleep(2.0)
-                                try:
-                                    # 1. Kiểm tra xem dữ liệu clipboard hiện tại có bị thay thế không (ví dụ: copy n + 1)
-                                    if ctypes.windll.user32.GetClipboardSequenceNumber() != seq_after:
-                                        log_debug("[render_format] Bỏ qua dọn dẹp clipboard vì dữ liệu đã thay đổi (ngăn mất dữ liệu copy n+1).")
-                                        return
-                                        
-                                    # 2. Kiểm tra xem ứng dụng còn sở hữu clipboard hay không
-                                    owner = ctypes.windll.user32.GetClipboardOwner()
-                                    if self.listener and self.listener.hwnd and owner != self.listener.hwnd:
-                                        log_debug("[render_format] Bỏ qua dọn dẹp clipboard vì ứng dụng không còn sở hữu clipboard.")
-                                        return
-                                        
-                                    log_debug("[render_format] Đang dọn dẹp clipboard sau khi truyền tải hoàn tất...")
-                                    opened = False
-                                    for _ in range(30):
-                                        if fn_OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
-                                            opened = True
-                                            break
-                                        time.sleep(0.05)
-                                    if opened:
-                                        try:
-                                            self.ignore_destroy_clipboard = True
-                                            fn_EmptyClipboard()
-                                        finally:
-                                            self.ignore_destroy_clipboard = False
-                                            fn_CloseClipboard()
-                                        log_debug("[render_format] Đã dọn dẹp clipboard thành công.")
-                                except Exception as e:
-                                    log_debug(f"[render_format] Lỗi dọn dẹp clipboard: {e}")
-                            threading.Thread(target=delayed_clear, daemon=True).start()
+                            log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. seq_after={seq_after} (Bỏ dọn dẹp để hỗ trợ copy liên tiếp)")
                     finally:
                         self.ignore_destroy_clipboard = False
                 else:
@@ -2926,10 +2952,9 @@ class ClipboardSyncManager:
                 self._send_progress_signal("CANCEL", "")
                 self._close_transfer_pipe()
         finally:
-            if not is_menu:
-                self.pending_remote_files = []
             self.transfer_in_progress = False
             self.is_rendering = False
+            self.ignore_destroy_clipboard = False
 
     def request_pending_files(self):
         if not self.pending_remote_files or not self.sock: return
@@ -3107,26 +3132,36 @@ class ClipboardSyncManager:
                     if len(self.pending_remote_files) > 1:
                         display_name += f" and {len(self.pending_remote_files) - 1} others"
                         
-                msg = f"{display_name}|{total_size}"
+                msg_dict = {
+                    "display_name": display_name,
+                    "total_size": total_size,
+                    "files": self.pending_remote_files
+                }
+                import json
+                msg = json.dumps(msg_dict)
                 threading.Thread(target=self._send_to_pipe, args=("PENDING", msg), daemon=True).start()
                 log_debug(f"[files_copied_meta] HEADLESS MODE: Đã gửi PENDING tới Agent để chờ Paste.")
                 return
             
             # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
             temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
-            try:
-                os.makedirs(temp_dir, exist_ok=True)
-                for item in os.listdir(temp_dir):
-                    item_path = os.path.join(temp_dir, item)
-                    if os.path.isfile(item_path):
-                        try: os.remove(item_path)
-                        except: pass
-            except Exception as e:
-                log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục tạm: {e}")
             self.target_save_dir = temp_dir
             
-            # Đăng ký delayed rendering để Windows gửi WM_RENDERFORMAT khi người dùng Paste
+            # Đăng ký delayed rendering NGAY LẬP TỨC để sáng nút Paste sớm nhất có thể
             self.setup_delayed_rendering()
+            
+            # Dọn dẹp thư mục tạm trong luồng nền để không block việc sáng nút Paste
+            def cleanup_temp():
+                try:
+                    os.makedirs(temp_dir, exist_ok=True)
+                    for item in os.listdir(temp_dir):
+                        item_path = os.path.join(temp_dir, item)
+                        if os.path.isfile(item_path):
+                            try: os.remove(item_path)
+                            except: pass
+                except Exception as e:
+                    log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục tạm: {e}")
+            threading.Thread(target=cleanup_temp, daemon=True).start()
             return
             
         elif ptype == "request_files":
@@ -3141,6 +3176,7 @@ class ClipboardSyncManager:
             display_name = packet.get("display_name", "Files")
             
             self.transfer_in_progress = True
+            self._receive_cancelled = False
             
             os.makedirs(self.target_save_dir, exist_ok=True)
             log_file_transfer(display_name, self.batch_total_size)
@@ -3219,10 +3255,19 @@ class ClipboardSyncManager:
                 if self.batch_paths:
                     files_str = "|".join(self.batch_paths)
                     self._send_progress_signal("FILES", files_str)
-                    self._close_transfer_pipe()
                     log_debug(f"[batch_end] HEADLESS: Đã gửi FILES tới agent: {files_str[:100]}")
-                self.pending_remote_files = []
-                self.transfer_in_progress = False
+                    
+                    if hasattr(self, 'lock'):
+                        with self.lock:
+                            self.last_current_files = [os.path.abspath(p) for p in self.batch_paths if os.path.exists(p)]
+                            self.last_files_time = time.time()
+                else:
+                    self._send_progress_signal("CANCEL", "")
+                    log_debug("[batch_end] HEADLESS: batch_paths trống, đã gửi CANCEL tới agent.")
+                self._close_transfer_pipe()
+                
+            # self.pending_remote_files = [] # Bỏ clear để tránh race condition ở lần copy N+1
+            self.transfer_in_progress = False
 
 
 
@@ -8537,10 +8582,12 @@ def run_clipboard_agent_mode():
                                     elif msg.startswith("FILES:"):
                                         gui_queue.put(("files_ready", msg[6:]))
                                     elif msg.startswith("PENDING:"):
-                                        parts = msg[8:].split("|", 1)
-                                        display_name = parts[0]
-                                        total_size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                                        gui_queue.put(("pending", (display_name, total_size)))
+                                        try:
+                                            import json
+                                            info = json.loads(msg[8:])
+                                            gui_queue.put(("pending", info))
+                                        except Exception as e:
+                                            agent_print(f"[ClipboardAgent] Lỗi parse PENDING JSON: {e}")
                                     elif msg.startswith("PROGRESS:"):
                                         try:
                                             val = int(msg[9:])
@@ -8621,16 +8668,25 @@ def run_clipboard_agent_mode():
             
     threading.Thread(target=_agent_mouse_poll_loop, daemon=True, name="AgentMousePoll").start()
 
-    def _send_request_files_to_host():
-        """Gửi cỗi REQUEST_FILES cho host qua UpPipe."""
-        import win32file
+    def _send_request_files_to_host(files_to_request=None):
+        """Gửi chuỗi REQUEST_FILES cho host qua UpPipe."""
+        import win32file, json
+        pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
         try:
+            import win32pipe
+            try:
+                win32pipe.WaitNamedPipe(pipe_name, 5000)
+            except Exception as e:
+                pass
             pipe_handle = win32file.CreateFile(
-                r"\\.\pipe\RemoteDesktopClipboardUpPipe",
+                pipe_name,
                 win32file.GENERIC_WRITE, 0, None,
                 win32file.OPEN_EXISTING, 0, None
             )
-            win32file.WriteFile(pipe_handle, b"REQUEST_FILES")
+            msg = "REQUEST_FILES"
+            if files_to_request:
+                msg += "|" + json.dumps(files_to_request)
+            win32file.WriteFile(pipe_handle, msg.encode('utf-8'))
             win32file.CloseHandle(pipe_handle)
             agent_print("[ClipboardAgent] Đã gửi REQUEST_FILES tới host.")
         except Exception as e:
@@ -8639,6 +8695,10 @@ def run_clipboard_agent_mode():
     def _execute_agent_delayed_rendering(hwnd):
         """Chạy trong WndProc thread: mở clipboard, đăng ký deferred CF_HDROP."""
         nonlocal _ignore_destroy
+        if not _pending_info:
+            agent_print("[ClipboardAgent] Không có pending_info, bỏ qua setup delayed rendering.")
+            return
+            
         try:
             _ignore_destroy = True
             user32 = ctypes.windll.user32
@@ -8671,7 +8731,8 @@ def run_clipboard_agent_mode():
         nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time
 
         if msg == WM_USER_SETUP_DELAYED:
-            _execute_agent_delayed_rendering(hwnd)
+            if _pending_info:
+                _execute_agent_delayed_rendering(hwnd)
             return 0
 
         if msg == WM_RENDERFORMAT and wparam == CF_HDROP:
@@ -8690,7 +8751,7 @@ def run_clipboard_agent_mode():
                 # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
                 def re_setup_agent():
                     time.sleep(0.2)
-                    if _agent_hwnd:
+                    if _agent_hwnd and _pending_info:
                         ctypes.windll.user32.PostMessageW(
                             ctypes.c_void_p(_agent_hwnd),
                             WM_USER_SETUP_DELAYED, 0, 0
@@ -8708,7 +8769,7 @@ def run_clipboard_agent_mode():
                 # Yêu cầu host bắt đầu gửi file
                 _files_ready_event.clear()
                 _files_ready_paths.clear()
-                _send_request_files_to_host()
+                _send_request_files_to_host(info.get("files", []))
 
                 # Chờ host download xong (tối đa 600 giây, pump Win32 messages)
                 user32 = ctypes.windll.user32
@@ -8732,51 +8793,17 @@ def run_clipboard_agent_mode():
                             # Lưu ý: Clipboard đã được mở sẵn bởi chương trình Paste khi gửi WM_RENDERFORMAT.
                             # Không được gọi OpenClipboard/CloseClipboard ở đây.
                             res = fn_SetClipboardData(CF_HDROP, hGlobal)
-                            agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res}")
-                            
-                            # Lưu lại clipboard sequence number ngay sau khi SetClipboardData thành công
-                            seq_after = user32.GetClipboardSequenceNumber()
-                            
-                            # Tự động xóa clipboard sau khi truyền tải hoàn tất để tránh bounce-back & kẹt dữ liệu cũ (được tinh chỉnh bảo mật)
-                            def delayed_clear_agent():
-                                time.sleep(2.0)
-                                try:
-                                    # 1. Kiểm tra xem dữ liệu clipboard hiện tại có bị thay thế không (ví dụ: copy n + 1)
-                                    if user32.GetClipboardSequenceNumber() != seq_after:
-                                        agent_print("[ClipboardAgent] Bỏ qua dọn dẹp clipboard vì dữ liệu đã thay đổi (ngăn mất dữ liệu copy n+1).")
-                                        return
-                                        
-                                    # 2. Kiểm tra xem agent còn sở hữu clipboard hay không
-                                    owner = user32.GetClipboardOwner()
-                                    if owner != hwnd:
-                                        agent_print("[ClipboardAgent] Bỏ qua dọn dẹp clipboard vì agent không còn sở hữu clipboard.")
-                                        return
-                                        
-                                    agent_print("[ClipboardAgent] Đang dọn dẹp clipboard sau khi truyền tải hoàn tất...")
-                                    opened = False
-                                    for _ in range(30):
-                                        if user32.OpenClipboard(hwnd):
-                                            opened = True
-                                            break
-                                        time.sleep(0.05)
-                                    if opened:
-                                        nonlocal _ignore_destroy
-                                        try:
-                                            _ignore_destroy = True
-                                            user32.EmptyClipboard()
-                                        finally:
-                                            _ignore_destroy = False
-                                            user32.CloseClipboard()
-                                        agent_print("[ClipboardAgent] Đã dọn dẹp clipboard thành công.")
-                                except Exception as e:
-                                    agent_print(f"[ClipboardAgent] Lỗi dọn dẹp clipboard: {e}")
-                            threading.Thread(target=delayed_clear_agent, daemon=True).start()
+                            if not res:
+                                fn_GlobalFree(hGlobal)
+                            agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res} (Bỏ dọn dẹp để hỗ trợ copy liên tiếp)")
                             
                         except Exception as e:
                             agent_print(f"[ClipboardAgent] Lỗi SetClipboardData: {e}")
+                            fn_GlobalFree(hGlobal)
                         finally:
                             _ignore_destroy = False
                     gui_queue.put(("end", None))
+                    agent_print("[ClipboardAgent] Đã nạp data thực thành công.")
                 else:
                     agent_print("[ClipboardAgent] Hết thời gian chờ file hoặc bị hủy.")
                     gui_queue.put(("cancel", None))
@@ -8785,6 +8812,7 @@ def run_clipboard_agent_mode():
                 gui_queue.put(("cancel", None))
             finally:
                 _is_rendering = False
+                _pending_info.clear()
             return 0
 
         if msg == WM_DESTROYCLIPBOARD and not _ignore_destroy:
@@ -8901,9 +8929,10 @@ def run_clipboard_agent_mode():
                         agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard.")
                 elif action == "pending":
                     # Host gửi PENDING: → setup delayed rendering nếu window đã sẵn sàng
-                    display_name, total_size = val
-                    _pending_info["display_name"] = display_name
-                    _pending_info["total_size"] = total_size
+                    info = val
+                    _pending_info.update(info)
+                    display_name = info.get("display_name", "Files")
+                    total_size = info.get("total_size", 0)
                     _files_ready_event.clear()
                     _files_ready_paths.clear()
                     _agent_meta_arrival_time = time.time()

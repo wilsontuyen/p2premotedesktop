@@ -1,109 +1,146 @@
-import re
+import codecs
 
-with open('app.py', 'r', encoding='utf-8') as f:
+with open('d:/Data/AG/remote_desktop/app.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
-# Replace _wndproc in ClipboardEventListener
-old_wndproc = '''    def _wndproc(self, hwnd, msg, wparam, lparam):
-        WM_CLIPBOARDUPDATE = 0x031D
-        WM_RENDERFORMAT = 0x0305
-        WM_DESTROYCLIPBOARD = 0x0307
-        WM_SETUP_DELAYED_RENDERING = 0x0400 + 101
-        
-        if msg == WM_CLIPBOARDUPDATE:
-            log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
-            self.callback()
-            return 0
-        elif msg == WM_RENDERFORMAT:
-            log_debug(f"[WndProc] Nhận WM_RENDERFORMAT. wparam={wparam}")
-            if wparam == 15: # CF_HDROP
-                if self.manager:
-                    self.manager.render_format(15)
-                return 0
-        elif msg == WM_DESTROYCLIPBOARD:
-            log_debug(f"[WndProc] Nhận WM_DESTROYCLIPBOARD")
-            if self.manager:
-                self.manager.lost_ownership()
-            return 0
-        elif msg == WM_SETUP_DELAYED_RENDERING:
-            log_debug(f"[WndProc] Nhận WM_SETUP_DELAYED_RENDERING. Đang tiến hành thiết lập delayed rendering...")
-            if self.manager:
-                self.manager._execute_setup_delayed_rendering()
-            return 0
-            
-        try:
-            return ctypes.windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
-        except:
-            return 0'''
+# Edit 1: _handle_uppipe_client
+old1 = '''                if raw == "REQUEST_FILES":
+                    log_debug("[_handle_uppipe_client] Nhận REQUEST_FILES từ Clipboard Agent. Bắt đầu tải file...")
+                    print("[Clipboard] Clipboard Agent yêu cầu tải file (người dùng đã Paste).")
+                    if self.pending_remote_files:
+                        threading.Thread(target=self.request_pending_files, daemon=True).start()
+                    else:
+                        log_debug("[_handle_uppipe_client] Không có pending_remote_files để tải.")
+                        if self.app and getattr(self.app, 'is_headless', False):
+                            self._send_progress_signal("CANCEL", "")
+                            self._close_transfer_pipe()'''
+new1 = '''                if raw.startswith("REQUEST_FILES"):
+                    log_debug("[_handle_uppipe_client] Nhận REQUEST_FILES từ Clipboard Agent. Bắt đầu tải file...")
+                    print("[Clipboard] Clipboard Agent yêu cầu tải file (người dùng đã Paste).")
+                    
+                    parts = raw.split("|", 1)
+                    requested_files = []
+                    if len(parts) > 1 and parts[1].strip():
+                        try:
+                            import json
+                            requested_files = json.loads(parts[1])
+                        except Exception as e:
+                            log_debug(f"[_handle_uppipe_client] Lỗi parse requested_files: {e}")
+                            
+                    if not requested_files:
+                        requested_files = self.pending_remote_files
+                        
+                    if requested_files:
+                        self.pending_remote_files = requested_files
+                        threading.Thread(target=self.request_pending_files, daemon=True).start()
+                    else:
+                        log_debug("[_handle_uppipe_client] Không có pending_remote_files để tải.")
+                        if self.app and getattr(self.app, 'is_headless', False):
+                            self._send_progress_signal("CANCEL", "")
+                            self._close_transfer_pipe()'''
 
-new_wndproc = '''    def _wndproc(self, hwnd, msg, wparam, lparam):
-        WM_CLIPBOARDUPDATE = 0x031D
-        WM_USER_SHNOTIFY = 0x0400 + 102
-        
-        if msg == WM_CLIPBOARDUPDATE:
-            log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
-            self.callback()
-            return 0
-        elif msg == WM_USER_SHNOTIFY:
+# Edit 2: files_copied_meta PENDING
+old2 = '''                msg = f"{display_name}|{total_size}"
+                threading.Thread(target=self._send_to_pipe, args=("PENDING", msg), daemon=True).start()
+                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã gửi PENDING tới Agent để chờ Paste.")'''
+new2 = '''                msg_dict = {
+                    "display_name": display_name,
+                    "total_size": total_size,
+                    "files": self.pending_remote_files
+                }
+                import json
+                msg = json.dumps(msg_dict)
+                threading.Thread(target=self._send_to_pipe, args=("PENDING", msg), daemon=True).start()
+                log_debug(f"[files_copied_meta] HEADLESS MODE: Đã gửi PENDING tới Agent để chờ Paste.")'''
+
+# Edit 3: PENDING in Agent _agent_pipe_listener
+old3 = '''                elif ptype == "PENDING":
+                    agent_print("[ClipboardAgent] Nhận PENDING từ Host qua Named Pipe.")
+                    parts = payload.split("|")
+                    display_name = parts[0]
+                    total_size = int(parts[1]) if len(parts) > 1 else 0
+                    gui_queue.put(("pending", (display_name, total_size)))'''
+new3 = '''                elif ptype == "PENDING":
+                    agent_print("[ClipboardAgent] Nhận PENDING từ Host qua Named Pipe.")
+                    try:
+                        import json
+                        info = json.loads(payload)
+                        display_name = info.get("display_name", "Files")
+                        total_size = info.get("total_size", 0)
+                        files = info.get("files", [])
+                    except Exception:
+                        parts = payload.split("|")
+                        display_name = parts[0]
+                        total_size = int(parts[1]) if len(parts) > 1 else 0
+                        files = []
+                    gui_queue.put(("pending", (display_name, total_size, files)))'''
+
+# Edit 4: _send_request_files_to_host definition
+old4 = '''    def _send_request_files_to_host():
+        """Gửi cờ REQUEST_FILES cho host qua UpPipe."""
+        import win32file
+        pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
+        try:
+            import win32pipe
             try:
-                from win32com.shell import shell, shellcon
-                import threading
-                pidl, event, _ = shell.SHChangeNotification_Lock(wparam, lparam)
-                if event == shellcon.SHCNE_CREATE:
-                    path = shell.SHGetPathFromIDList(pidl[0])
-                    if isinstance(path, bytes): path = path.decode('utf-8')
-                    if self.manager:
-                        threading.Thread(target=self.manager.handle_shnotify_create, args=(path,), daemon=True).start()
-                shell.SHChangeNotification_Unlock(wparam)
+                win32pipe.WaitNamedPipe(pipe_name, 5000)
             except Exception as e:
                 pass
-            return 0
-            
+            pipe_handle = win32file.CreateFile(
+                pipe_name,
+                win32file.GENERIC_WRITE, 0, None,
+                win32file.OPEN_EXISTING, 0, None
+            )
+            win32file.WriteFile(pipe_handle, b"REQUEST_FILES")'''
+new4 = '''    def _send_request_files_to_host(files_to_request):
+        """Gửi cờ REQUEST_FILES cho host qua UpPipe."""
+        import win32file
+        pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
         try:
-            return ctypes.windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
-        except:
-            return 0'''
-
-content = content.replace(old_wndproc, new_wndproc)
-
-# Inject SHChangeNotifyRegister into _run
-old_run_listen = '''            add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
-            
-            msg = wintypes.MSG()'''
-
-new_run_listen = '''            add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
-            
+            import win32pipe
             try:
-                from win32com.shell import shell, shellcon
-                pidl = shell.SHGetSpecialFolderLocation(0, shellcon.CSIDL_DESKTOP)
-                self.notify_id = shell.SHChangeNotifyRegister(
-                    self.hwnd, 
-                    shellcon.SHCNRF_InterruptLevel | shellcon.SHCNRF_ShellLevel, 
-                    shellcon.SHCNE_CREATE, 
-                    0x0400 + 102, 
-                    (pidl, True)
-                )
+                win32pipe.WaitNamedPipe(pipe_name, 5000)
             except Exception as e:
-                print(f"[Listener] SHChangeNotifyRegister Error: {e}")
-                
-            msg = wintypes.MSG()'''
+                pass
+            pipe_handle = win32file.CreateFile(
+                pipe_name,
+                win32file.GENERIC_WRITE, 0, None,
+                win32file.OPEN_EXISTING, 0, None
+            )
+            import json
+            msg = "REQUEST_FILES|" + json.dumps(files_to_request)
+            win32file.WriteFile(pipe_handle, msg.encode('utf-8'))'''
 
-content = content.replace(old_run_listen, new_run_listen)
+# Edit 5: call _send_request_files_to_host
+old5 = '''                # Yêu cầu host bắt đầu gửi file
+                _files_ready_event.clear()
+                _files_ready_paths.clear()
+                _send_request_files_to_host()'''
+new5 = '''                # Yêu cầu host bắt đầu gửi file
+                _files_ready_event.clear()
+                _files_ready_paths.clear()
+                _send_request_files_to_host(info.get("files", []))'''
 
-# Clean up _run destroy
-old_destroy = '''            user32.RemoveClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            user32.DestroyWindow(ctypes.c_void_p(self.hwnd))'''
+# Edit 6: poll_gui_queue pending
+old6 = '''                elif action == "pending":
+                    # Host gửi PENDING:   setup delayed rendering nếu window đã sẵn sàng
+                    display_name, total_size = val
+                    _pending_info["display_name"] = display_name
+                    _pending_info["total_size"] = total_size'''
+new6 = '''                elif action == "pending":
+                    # Host gửi PENDING:   setup delayed rendering nếu window đã sẵn sàng
+                    display_name, total_size, files = val
+                    _pending_info["display_name"] = display_name
+                    _pending_info["total_size"] = total_size
+                    _pending_info["files"] = files'''
 
-new_destroy = '''            try:
-                from win32com.shell import shell
-                if hasattr(self, 'notify_id'): shell.SHChangeNotifyDeregister(self.notify_id)
-            except: pass
-            user32.RemoveClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            user32.DestroyWindow(ctypes.c_void_p(self.hwnd))'''
-content = content.replace(old_destroy, new_destroy)
+content = content.replace(old1, new1)
+content = content.replace(old2, new2)
+content = content.replace(old3, new3)
+content = content.replace(old4, new4)
+content = content.replace(old5, new5)
+content = content.replace(old6, new6)
 
-with open('app.py', 'w', encoding='utf-8') as f:
+with open('d:/Data/AG/remote_desktop/app.py', 'w', encoding='utf-8') as f:
     f.write(content)
-print('Patch 1 done')
+print('Done replacing.')
