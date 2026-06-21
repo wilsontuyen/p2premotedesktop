@@ -2,15 +2,22 @@
 AppName=Easy Remote Desktop
 AppVersion=AI Pro Version
 AppPublisher=P2P Remote Desktop
+AppCopyright=Copyright (C) 2026 P2P Remote Desktop
+VersionInfoVersion=1.0.0.0
+VersionInfoTextVersion=AI Pro Version
+VersionInfoCompany=P2P Remote Desktop
+VersionInfoDescription=Easy Remote Desktop Installer
+VersionInfoProductName=Easy Remote Desktop
+VersionInfoCopyright=Copyright (C) 2026 P2P Remote Desktop
 DefaultDirName={autopf}\Easy Remote Desktop
 DisableDirPage=no
 UsePreviousAppDir=no
 DefaultGroupName=Easy Remote Desktop
 PrivilegesRequired=admin
 OutputDir=.
-OutputBaseFilename=setup
-Compression=lzma
-SolidCompression=yes
+OutputBaseFilename=EasyRemoteDesktop_Installer
+Compression=zip
+SolidCompression=no
 SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\RemoteDesktopP2P.exe
 DisableProgramGroupPage=yes
@@ -77,3 +84,4 @@ begin
     Exec('taskkill.exe', '/F /IM RemoteDesktopP2P.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
+
