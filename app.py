@@ -1267,6 +1267,7 @@ def get_file_icon_as_image(file_name, size="large"):
 class ClassicCopyDialog(tk.Toplevel):
     def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
         super().__init__(parent)
+        self.withdraw()
         self.title("Copy File")
         self.geometry("520x420")
         self.resizable(False, False)
@@ -1295,6 +1296,7 @@ class ClassicCopyDialog(tk.Toplevel):
         x = (ws - w) // 2
         y = (hs - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
+        self.deiconify()
         
         self.grab_set()
         
@@ -1483,6 +1485,7 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
+        self.withdraw()
         self.title("Truyền tải File")
         self.resizable(False, False)
         self.configure(bg="#1E1E24")
@@ -1562,6 +1565,7 @@ class ProgressDialog(tk.Toplevel):
             y = parent_y + (parent_h - dialog_h) // 2
             
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        self.deiconify()
         
     def trigger_cancel(self):
         try:
@@ -3557,6 +3561,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
             import tkinter as tk
             hidden_root = tk.Tk()
+            hidden_root.attributes('-alpha', 0.0)
             try:
                 icon_path = os.path.join(app_dir, "app_icon.png")
                 if os.path.exists(icon_path):
@@ -8487,11 +8492,12 @@ def run_clipboard_agent_mode():
     """
     import logging
     import queue
-    import tkinter as tk
     import win32file
     import win32pipe
     import win32event
     import win32api
+    import time
+    import tkinter as tk
     
     log_path = os.path.join(app_dir, "clipboard_agent.log")
     agent_log = logging.getLogger("clipboard_agent")
@@ -8623,6 +8629,7 @@ def run_clipboard_agent_mode():
 
     # Khởi tạo Tkinter GUI
     root = tk.Tk()
+    root.attributes('-alpha', 0.0) # Tránh nháy cửa sổ
     root.withdraw()
     
     active_dialog = None
@@ -8987,7 +8994,6 @@ def run_clipboard_agent_mode():
             except Exception as e:
                 agent_print(f"[ClipboardAgent] Lỗi xử lý hàng đợi GUI: {e}")
         root.after(50, poll_gui_queue)
-
 
     t = threading.Thread(target=pipe_listener_loop, daemon=True)
     t.start()
