@@ -146,6 +146,15 @@ def log_debug(msg):
     except:
         pass
 
+def log_activity(msg):
+    try:
+        timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+        filepath = os.path.join(app_dir, "activity_log.txt")
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(f"{timestamp} - {msg}\n")
+    except Exception as e:
+        print(f"[Log] Lỗi ghi activity_log.txt: {e}")
+
 # Pygame CE drop-in compatibility
 # In pygame-ce, it is still imported as pygame.
 
@@ -2375,6 +2384,11 @@ class ClipboardSyncManager:
         self._receive_cancelled = True
         self._send_cancelled = True
         
+        try:
+            if hasattr(self, 'batch_display_name'):
+                log_activity(f"Truyền file: {self.batch_display_name} - Thất bại")
+        except: pass
+        
         if not getattr(self, 'transfer_in_progress', False) and not getattr(self, 'incoming_transfers', {}):
             if not getattr(self, 'pending_remote_files', []):
                 return
@@ -2971,6 +2985,7 @@ class ClipboardSyncManager:
         try:
             total_size = sum(f.get("size", 0) for f in files)
             display_name = f"{len(files)} tệp tin" if len(files) > 1 else files[0].get("name", "Unknown")
+            self.batch_display_name = display_name
             
             log_file_transfer(display_name, total_size)
             
@@ -3056,11 +3071,16 @@ class ClipboardSyncManager:
             if not self._send_cancelled:
                 send_msg(sock, json.dumps({"type": "batch_end"}).encode('utf-8'))
                 log_debug(f"[_process_send_requests] Đã gửi batch_end.")
+                try: log_activity(f"Truyền file: {self.batch_display_name} - {total_size} byte - Thành công")
+                except: pass
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             print(f"Error processing send request: {e}")
             log_debug(f"[_process_send_requests] Lỗi tổng quát:\n{tb}")
+            try:
+                log_activity(f"Truyền file: {self.batch_display_name} - {total_size} byte - Thất bại")
+            except: pass
             try:
                 send_msg(sock, json.dumps({"type": "cancel_transfer"}).encode('utf-8'))
             except:
@@ -3178,6 +3198,7 @@ class ClipboardSyncManager:
             self.batch_received = 0
             self.batch_paths = []
             display_name = packet.get("display_name", "Files")
+            self.batch_display_name = display_name
             
             self.transfer_in_progress = True
             self._receive_cancelled = False
@@ -3253,6 +3274,8 @@ class ClipboardSyncManager:
             self.close_dialog()
             self.transfer_done_event.set()
             log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
+            try: log_activity(f"Nhận file: {self.batch_display_name} - {self.batch_total_size} byte - Thành công")
+            except: pass
             
             # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
@@ -3466,6 +3489,9 @@ def uninstall_keyboard_hook():
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
     global client_switching_desktop_countdown
+    
+    try: log_activity(f"Bắt đầu điều khiển ID {partner_id} ({computer_name})")
+    except: pass
     
     # [FIX] Trong Windows, multiprocessing.Process khởi tạo tiến trình con mới hoàn toàn.
     # Từ điển socket_passwords toàn cục bị trống, dẫn đến encrypt_payload mặc định dùng APP_KEY,
@@ -3999,6 +4025,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
         uninstall_keyboard_hook()
         pygame.quit()
+        try: log_activity(f"Ngừng điều khiển ID {partner_id} ({computer_name})")
+        except: pass
         if exit_due_to_disconnect:
             print("[Client] Viewer exited due to disconnect. Exit code 99.")
             import sys
@@ -7206,6 +7234,9 @@ class UnifiedApp(tk.Tk):
                 else:
                     msg_text = f"Máy tính có ID [{fmt_client_id}] đang điều khiển máy bạn"
                     
+                try: log_activity(f"Chấp nhận kết nối từ ID {fmt_client_id} ({client_comp})")
+                except: pass
+                    
                 self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
                 
                 self.wake_display()
@@ -7322,6 +7353,8 @@ class UnifiedApp(tk.Tk):
                     set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
+                    try: log_activity(f"Ngắt kết nối với ID {fmt_client_id} ({client_comp})")
+                    except: pass
                     
                     if addr in self.active_clients:
                         del self.active_clients[addr]
