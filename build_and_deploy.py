@@ -158,6 +158,33 @@ def main():
     except Exception as e:
         log(f"Warning: Failed to create zip archive: {e}")
 
+    # Build Inno Setup Installer
+    log("Building Installer via Inno Setup...")
+    iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    if not os.path.exists(iscc_path):
+        iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
+    
+    if os.path.exists(iscc_path):
+        iss_file = os.path.join(workspace_dir, "installer.iss")
+        if os.path.exists(iss_file):
+            cmd = f'"{iscc_path}" "{iss_file}"'
+            if not run_cmd(cmd):
+                log("WARNING: Inno Setup build failed.")
+            else:
+                log("Successfully built setup.exe using Inno Setup.")
+        else:
+            log("WARNING: installer.iss not found. Skipping installer build.")
+    else:
+        # Fallback to checking if iscc is in PATH
+        cmd = f'iscc "{os.path.join(workspace_dir, "installer.iss")}"'
+        try:
+            if not run_cmd(cmd):
+                log("WARNING: Inno Setup build failed.")
+            else:
+                log("Successfully built setup.exe using Inno Setup.")
+        except Exception:
+            log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
+
     # 6. Deploy to D:\Apps\P2P
     log("Ensuring all running instances are terminated right before deployment to release file locks...")
     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

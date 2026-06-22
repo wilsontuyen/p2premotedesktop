@@ -3738,9 +3738,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
 
                 # Calculate floating button rectangle dynamically
-                min_btn_w, min_btn_h = 40, 30
-                cad_btn_w, cad_btn_h = 145, 30
-                close_btn_w, close_btn_h = 40, 30
+                min_btn_w, min_btn_h = 40, 22
+                cad_btn_w, cad_btn_h = 145, 22
+                close_btn_w, close_btn_h = 40, 22
                 
                 is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
                 show_buttons = not is_switching
@@ -3752,9 +3752,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 start_x = (window_w - total_w) // 2
                 
                 if show_buttons:
-                    min_btn_rect = pygame.Rect(start_x, 5, min_btn_w, min_btn_h)
-                    cad_btn_rect = pygame.Rect(start_x + min_btn_w + 10, 5, cad_btn_w, cad_btn_h)
-                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 5, close_btn_w, close_btn_h)
+                    min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
+                    cad_btn_rect = pygame.Rect(start_x + min_btn_w + 10, 0, cad_btn_w, cad_btn_h)
+                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 0, close_btn_w, close_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
@@ -7158,6 +7158,37 @@ class UnifiedApp(tk.Tk):
                 time.sleep(0.1)
                 continue
                 
+    def show_host_connection_border(self):
+        try:
+            if hasattr(self, 'host_border_win') and self.host_border_win:
+                try: self.host_border_win.destroy()
+                except: pass
+                
+            import tkinter as tk
+            self.host_border_win = tk.Toplevel(self)
+            self.host_border_win.attributes("-fullscreen", True)
+            self.host_border_win.attributes("-topmost", True)
+            self.host_border_win.attributes("-alpha", 0.8)
+            self.host_border_win.attributes("-transparentcolor", "black")
+            self.host_border_win.configure(bg="black")
+            self.host_border_win.overrideredirect(True)
+            
+            canvas = tk.Canvas(self.host_border_win, bg="black", highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            w = self.winfo_screenwidth()
+            h = self.winfo_screenheight()
+            canvas.create_rectangle(0, 0, w, h, outline="#FF69B4", width=10)
+        except Exception as e:
+            print(f"[Host] Lỗi tạo viền hồng kết nối: {e}")
+
+    def hide_host_connection_border(self):
+        try:
+            if hasattr(self, 'host_border_win') and self.host_border_win:
+                self.host_border_win.destroy()
+                self.host_border_win = None
+        except Exception as e:
+            pass
+
     def wake_display(self):
         try:
             import ctypes
@@ -7238,6 +7269,7 @@ class UnifiedApp(tk.Tk):
                 except: pass
                     
                 self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
+                self.after(0, self.show_host_connection_border)
                 
                 self.wake_display()
                 
@@ -7364,6 +7396,7 @@ class UnifiedApp(tk.Tk):
                         self.update_status(f"Đang bị điều khiển bởi {addrs_str}")
                     else:
                         self.update_status(f"Đã đóng kết nối với Client {addr[0]} lúc {time.strftime('%H:%M:%S')} (Sẵn sàng kết nối)")
+                        self.after(0, self.hide_host_connection_border)
                         
                     try:
                         force_close_socket(conn)
