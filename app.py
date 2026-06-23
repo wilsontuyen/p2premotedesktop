@@ -7026,6 +7026,12 @@ class UnifiedApp(tk.Tk):
                 print(f"[Signaling] Error on {host}: {res.get('message')}")
                 self.pending_connection_info = "error"
                 
+            elif action == "relay_request":
+                session_id = res.get("session_id")
+                relay_host = res.get("relay_host") or host
+                print(f"[Signaling] Nhận yêu cầu trung chuyển (RELAY) via {host}. Đang kết nối làm Host...")
+                threading.Thread(target=self.start_relay_host, args=(session_id, relay_host), daemon=True).start()
+                
             elif action == "online_status":
                 target = res.get("target")
                 online = res.get("online", False)
@@ -7033,6 +7039,24 @@ class UnifiedApp(tk.Tk):
                 
         except Exception as e:
             print(f"[Signaling] Lỗi xử lý tin nhắn từ {host}: {e}")
+
+    def start_relay_host(self, session_id, specific_host=None):
+        try:
+            print(f"[Relay] Host đang kết nối tới Relay Server cho session: {session_id}")
+            host_to_connect = specific_host if specific_host else SIGNALING_SERVER_HOSTS[0]
+            
+            relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            relay_sock.settimeout(5.0)
+            relay_sock.connect((host_to_connect, SIGNALING_SERVER_PORT))
+            relay_sock.settimeout(None)
+            
+            header = f"RELAY_HOST:{session_id}\n"
+            relay_sock.sendall(header.encode('utf-8'))
+            
+            # Truyền hình ảnh qua kết nối Relay
+            threading.Thread(target=self.handle_host_handshake, args=(relay_sock, (host_to_connect, SIGNALING_SERVER_PORT)), daemon=True).start()
+        except Exception as e:
+            print(f"[Relay] Host kết nối Relay Server thất bại: {e}")
 
     def punch_hole_to_client(self, c_ip, c_port):
         # 0. Đợi Client thử kết nối mạng LAN trước (2.0 giây)
@@ -7238,6 +7262,7 @@ class UnifiedApp(tk.Tk):
                     }).encode('utf-8')
                     send_msg(conn, err_info, APP_KEY)
                 except: pass
+                time.sleep(0.5)
                 try: force_close_socket(conn)
                 except: pass
                 socket_passwords.pop(conn, None)
@@ -7409,6 +7434,7 @@ class UnifiedApp(tk.Tk):
                     "message": "Sai mật khẩu kết nối!"
                 }).encode('utf-8')
                 send_msg(conn, err_info, client_pass)
+                time.sleep(0.5)
                 force_close_socket(conn)
                 socket_passwords.pop(conn, None)
         except Exception as e:
@@ -7421,6 +7447,7 @@ class UnifiedApp(tk.Tk):
                 send_msg(conn, err_info, locals().get('client_pass'))
             except:
                 pass
+            time.sleep(0.5)
             force_close_socket(conn)
             socket_passwords.pop(conn, None)
             
@@ -8138,14 +8165,49 @@ class UnifiedApp(tk.Tk):
                 print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
 
         if not connected:
-            self.update_status("Sẵn sàng kết nối")
-            self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
-                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
-                f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
-            ))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if sock: force_close_socket(sock)
-            return
+            display_host = getattr(self, 'current_signaling_host', None) or 'Relay'
+            print("[Client] Hole punching failed. Attempting Relay fallback...")
+            self.update_status("Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...")
+            
+            try:
+                relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
+                relay_req = json.dumps({
+                    "action": "relay_request",
+                    "target": partner_id,
+                    "session_id": relay_session_id,
+                    "relay_host": getattr(self, 'current_signaling_host', None)
+                })
+                
+                with self.signaling_lock:
+                    if self.primary_signaling_socket:
+                        try:
+                            send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
+                        except Exception as e:
+                            print(f"[Client] Gửi relay_request thất bại: {e}")
+                
+                # 2. Connect to Relay Server
+                host_to_connect = getattr(self, 'current_signaling_host', None) or SIGNALING_SERVER_HOSTS[0]
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5.0)
+                sock.connect((host_to_connect, SIGNALING_SERVER_PORT))
+                sock.settimeout(None)
+                
+                header = f"RELAY_CLIENT:{relay_session_id}\n"
+                sock.sendall(header.encode('utf-8'))
+                
+                connected = True
+                print("[Client] Relay connection established successfully!")
+                self.update_status("Đã kết nối qua Relay Server!")
+            except Exception as e:
+                print(f"[Client] Relay fallback failed: {e}")
+                self.update_status("Sẵn sàng kết nối")
+                self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
+                    f"Kỹ thuật Đục Lỗ Tường Lửa & Server Trung Chuyển ({display_host}) đều thất bại!\n\n"
+                    f"Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau."
+                ))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                if sock: force_close_socket(sock)
+                return
                 
         # Connection succeeded, proceed with handshake
         sock.settimeout(None) # Reset back to blocking
