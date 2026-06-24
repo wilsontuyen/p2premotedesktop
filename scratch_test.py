@@ -1767,12 +1767,9 @@ class ClipboardEventListener:
             if user32.GetAsyncKeyState(0x02) & 0x8000:
                 if self.manager:
                     self.manager.last_rbutton_time = time.time()
-            if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
+            if user32.FindWindowW("#32768", None):
                 if self.manager:
-                    self.manager.last_ctrl_v_time = time.time()
-            if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
-                if self.manager:
-                    self.manager.last_ctrl_v_time = time.time()
+                    self.manager.last_menu_time = time.time()
             time.sleep(0.05)
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
@@ -1928,7 +1925,7 @@ def create_named_pipe_with_everyone_dacl():
     return pipe_handle
 
 
-def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl_v=0.0):
+def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_menu_time=0.0):
     """
     Kiểm tra xem yêu cầu WM_RENDERFORMAT hiện tại có phải là do menu chuột phải (context menu)
     hoặc tiến trình quét tự động trong nền truy vấn hay không, hay là thao tác Paste thực tế.
@@ -2009,31 +2006,16 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
     is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
     is_enter = (user32.GetAsyncKeyState(0x0D) & 0x8000)
-    if is_ctrl_v or is_shift_ins or is_enter or (t_now - last_ctrl_v < 2.0):
-        log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan hoac luu gan day")
+    if is_ctrl_v or is_shift_ins or is_enter:
+        log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan (ctrl_v={is_ctrl_v}, shift_ins={is_shift_ins}, enter={is_enter})")
         return False
-
-    # 4. Nếu vừa click chuột trái (trong vòng 1.5 giây) VÀ click chuột trái này xảy ra SAU click chuột phải cuối cùng,
-    # VÀ click chuột trái này xảy ra SAU khi nhận metadata (để tránh nhận nhầm click "Copy" trên Host).
-    if time_since_lbutton < 1.5 and (last_lbutton > last_rbutton) and (last_lbutton >= meta_arrival_time):
-        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai gan day va sau click chuot phai (lbutton_age={time_since_lbutton:.3f}s)")
+    time_since_menu = t_now - last_menu_time
+    if time_since_menu < 1.5 and time_since_lbutton < 1.5:
+        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai sau khi menu dong")
         return False
         
-    # 5. Nếu chuột phải vừa được click gần đây (< 1.5s)
-    if time_since_rbutton < 1.5:
-        log_debug(f"[check_is_menu_query] Tra ve True: Vua click chuot phai gan day (age={time_since_rbutton:.3f}s)")
-        return True
-        
-    # 6. Nếu metadata vừa mới nhận được (< 1.5s) và không có phím tắt/chuột trái hoạt động,
-    # đó có thể là do công cụ tự động quét clipboard trong nền.
-    if meta_age < 1.5:
-        log_debug(f"[check_is_menu_query] Tra ve True: Metadata vua moi nhan (age={meta_age:.3f}s)")
-        return True
-        
-    # 7. Fallback: Mặc định nếu không có dấu hiệu rõ ràng của Paste, coi là nền quét
-    log_debug(f"[check_is_menu_query] Tra ve True: Mac dinh coi la nen (lbutton_age={time_since_lbutton:.3f}s, rbutton_age={time_since_rbutton:.3f}s)")
+    log_debug(f"[check_is_menu_query] Tra ve True: Mac dinh coi la nen hoac truy van tu dong")
     return True
-
 
 class ClipboardSyncManager:
     def __init__(self):
@@ -2049,7 +2031,7 @@ class ClipboardSyncManager:
         self.overwrite_choice = None
         self.last_rbutton_time = 0
         self.last_lbutton_time = 0
-        self.last_ctrl_v_time = 0
+        self.last_menu_time = 0
         if ENABLE_CLIPBOARD_SYNC:
             self.listener = ClipboardEventListener(self.on_clipboard_changed, self)
         else:
@@ -2785,20 +2767,8 @@ class ClipboardSyncManager:
         last_l = getattr(self, 'last_lbutton_time', 0.0)
         last_r = getattr(self, 'last_rbutton_time', 0.0)
         meta_time = getattr(self, 'meta_arrival_time', 0.0)
-        last_ctrl_v = getattr(self, 'last_ctrl_v_time', 0.0)
-        is_menu = check_is_menu_query(last_l, last_r, meta_time, last_ctrl_v)
-        if is_menu:
-            log_debug("[render_format] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
-            dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
-            if dummy_h:
-                fn_SetClipboardData(15, dummy_h)
-            
-            # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
-            def re_setup():
-                time.sleep(0.2)
-                self.setup_delayed_rendering()
-            threading.Thread(target=re_setup, daemon=True).start()
-            return
+        last_m = getattr(self, "last_menu_time", 0.0)
+    
             
 
             
@@ -3111,6 +3081,7 @@ class ClipboardSyncManager:
             log_debug(f"[handle_received_packet] Nhận clipboard_text: {text[:50]}...")
             print(f"[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
             self.last_received_text = text
+            self.last_sent_text = text
             self.ignore_destroy_clipboard = True
             try:
                 owner_hwnd = None
@@ -8790,11 +8761,11 @@ def run_clipboard_agent_mode():
     
     _agent_last_lbutton_time = 0.0
     _agent_last_rbutton_time = 0.0
-    _agent_last_ctrl_v_time = 0.0
+    _agent_last_menu_time = 0.0
     _agent_meta_arrival_time = 0.0
 
     def _agent_mouse_poll_loop():
-        nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time
+        nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_menu_time
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -8802,10 +8773,8 @@ def run_clipboard_agent_mode():
                     _agent_last_lbutton_time = time.time()
                 if user32.GetAsyncKeyState(0x02) & 0x8000:
                     _agent_last_rbutton_time = time.time()
-                if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
-                    _agent_last_ctrl_v_time = time.time()
-                if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
-                    _agent_last_ctrl_v_time = time.time()
+                if user32.FindWindowW("#32768", None):
+                    _agent_last_menu_time = time.time()
             except:
                 pass
             time.sleep(0.05)
@@ -8885,23 +8854,7 @@ def run_clipboard_agent_mode():
                 return 0
                 
             # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
-            is_menu = check_is_menu_query(_agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_last_ctrl_v_time)
-            if is_menu:
-                agent_print("[ClipboardAgent] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
-                dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
-                if dummy_h:
-                    ctypes.windll.user32.SetClipboardData(CF_HDROP, dummy_h)
-                
-                # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
-                def re_setup_agent():
-                    time.sleep(0.2)
-                    if _agent_hwnd and _pending_info:
-                        ctypes.windll.user32.PostMessageW(
-                            ctypes.c_void_p(_agent_hwnd),
-                            WM_USER_SETUP_DELAYED, 0, 0
-                        )
-                threading.Thread(target=re_setup_agent, daemon=True).start()
-                return 0
+         0
 
             _is_rendering = True
             agent_print("[ClipboardAgent] Nhận WM_RENDERFORMAT → người dùng đã Paste. Bắt đầu tải file...")
