@@ -7188,31 +7188,82 @@ class UnifiedApp(tk.Tk):
                 
     def show_host_connection_border(self):
         try:
-            if hasattr(self, 'host_border_win') and self.host_border_win:
-                try: self.host_border_win.destroy()
-                except: pass
-                
-            import tkinter as tk
-            self.host_border_win = tk.Toplevel(self)
-            self.host_border_win.attributes("-fullscreen", True)
-            self.host_border_win.attributes("-topmost", True)
-            self.host_border_win.attributes("-alpha", 0.8)
-            self.host_border_win.attributes("-transparentcolor", "black")
-            self.host_border_win.configure(bg="black")
-            self.host_border_win.overrideredirect(True)
+            self.hide_host_connection_border()
             
-            canvas = tk.Canvas(self.host_border_win, bg="black", highlightthickness=0)
-            canvas.pack(fill="both", expand=True)
+            import tkinter as tk
+            self.host_border_wins = []
+            
             w = self.winfo_screenwidth()
             h = self.winfo_screenheight()
-            canvas.create_rectangle(0, 0, w, h, outline="#FF69B4", width=10)
+            self._last_border_w = w
+            self._last_border_h = h
+            
+            thickness = 5
+            color = "#FF69B4"
+            
+            rects = [
+                (0, 0, w, thickness),           # top
+                (0, h - thickness, w, thickness), # bottom
+                (0, 0, thickness, h),           # left
+                (w - thickness, 0, thickness, h)  # right
+            ]
+            
+            for x, y, rw, rh in rects:
+                win = tk.Toplevel(self)
+                win.overrideredirect(True)
+                win.attributes("-topmost", True)
+                win.attributes("-alpha", 0.8)
+                win.configure(bg=color)
+                win.geometry(f"{rw}x{rh}+{x}+{y}")
+                win.update_idletasks()
+                try:
+                    import ctypes
+                    hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+                    if not hwnd:
+                        hwnd = win.winfo_id()
+                    style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
+                    ctypes.windll.user32.SetWindowLongW(hwnd, -20, style | 0x00000020)
+                except:
+                    pass
+                self.host_border_wins.append(win)
+                
+            if not getattr(self, '_tracking_border_res', False):
+                self._tracking_border_res = True
+                self._check_border_resolution()
+                
         except Exception as e:
             print(f"[Host] Lỗi tạo viền hồng kết nối: {e}")
 
+    def _check_border_resolution(self):
+        if not getattr(self, '_tracking_border_res', False):
+            return
+            
+        try:
+            current_w = self.winfo_screenwidth()
+            current_h = self.winfo_screenheight()
+            last_w = getattr(self, '_last_border_w', 0)
+            last_h = getattr(self, '_last_border_h', 0)
+            
+            if current_w != last_w or current_h != last_h:
+                if getattr(self, 'host_border_wins', None):
+                    self.show_host_connection_border()
+                    return
+        except Exception:
+            pass
+            
+        self.after(2000, self._check_border_resolution)
+
     def hide_host_connection_border(self):
         try:
+            self._tracking_border_res = False
+            if hasattr(self, 'host_border_wins'):
+                for win in self.host_border_wins:
+                    try: win.destroy()
+                    except: pass
+                self.host_border_wins = []
             if hasattr(self, 'host_border_win') and self.host_border_win:
-                self.host_border_win.destroy()
+                try: self.host_border_win.destroy()
+                except: pass
                 self.host_border_win = None
         except Exception as e:
             pass
