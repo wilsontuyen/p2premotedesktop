@@ -3744,6 +3744,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 # Calculate floating button rectangle dynamically
                 min_btn_w, min_btn_h = 40, 22
                 cad_btn_w, cad_btn_h = 145, 22
+                rec_btn_w, rec_btn_h = 30, 22
                 close_btn_w, close_btn_h = 40, 22
                 
                 is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
@@ -3751,22 +3752,25 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
                 total_w = 0
                 if show_buttons:
-                    total_w = min_btn_w + 10 + cad_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + cad_btn_w + 10 + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
                 if show_buttons:
                     min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
                     cad_btn_rect = pygame.Rect(start_x + min_btn_w + 10, 0, cad_btn_w, cad_btn_h)
-                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 0, close_btn_w, close_btn_h)
+                    rec_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 0, rec_btn_w, rec_btn_h)
+                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10 + rec_btn_w + 10, 0, close_btn_w, close_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    rec_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
 
                 mx, my = pygame.mouse.get_pos()
                 min_is_hover = min_btn_rect.collidepoint(mx, my) if show_buttons else False
                 cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
+                rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_buttons else False
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
      
                 for event in pygame.event.get():
@@ -3782,7 +3786,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -3800,6 +3804,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
                                 send_event({"type": "trigger_sas"})
                             continue
+                        if show_buttons and rec_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                import cv2 as _cv2
+                                import os as _os
+                                import datetime as _datetime
+                                state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
+                                
+                                state['is_recording'] = not state['is_recording']
+                                if state['is_recording']:
+                                    print("[Client] Started recording viewer...")
+                                    c_name = computer_name if computer_name else "host"
+                                    # Replace invalid chars from computer name
+                                    c_name = "".join([c if c.isalnum() else "_" for c in c_name])
+                                    filename = f"{c_name}_{_datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
+                                    videos_dir = _os.path.join(_os.path.expanduser('~'), 'Videos')
+                                    _os.makedirs(videos_dir, exist_ok=True)
+                                    filepath = _os.path.join(videos_dir, filename)
+                                    
+                                    fourcc = _cv2.VideoWriter_fourcc(*'mp4v')
+                                    state['writer'] = _cv2.VideoWriter(filepath, fourcc, 20.0, (host_w, host_h))
+                                else:
+                                    print("[Client] Stopped recording viewer.")
+                                    if state['writer']:
+                                        state['writer'].release()
+                                        state['writer'] = None
+                                        
+                                globals()['viewer_record_state'] = state
+                            continue
+
                         if show_buttons and close_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Close Button Clicked. Exiting viewer.")
@@ -3844,6 +3877,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                     scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
                     screen.blit(scaled_surf, (0, 0))
+                    
+                    state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
+                    if state['is_recording'] and state['writer']:
+                        try:
+                            import cv2 as _cv2
+                            import numpy as _np
+                            frame_arr = _np.array(frame_to_draw)
+                            bgr_frame = _cv2.cvtColor(frame_arr, _cv2.COLOR_RGB2BGR)
+                            state['writer'].write(bgr_frame)
+                        except Exception as e:
+                            print(f"[Client] Recording error: {e}")
                 else:
                     if pygame_theme == "light":
                         screen.fill((240, 240, 245))
@@ -3905,6 +3949,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
                     screen.blit(cad_text_surf, cad_text_rect)
                     
+                    # Record button (Red circle)
+                    state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
+                    rec_bg_color = (80, 80, 80) if rec_is_hover else (50, 50, 50)
+                    if pygame_theme == "light" or pygame_theme == "crystal":
+                        rec_bg_color = (220, 220, 235) if rec_is_hover else (245, 245, 255)
+                    
+                    pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, cad_border_color, rec_btn_rect, width=1, border_radius=4)
+                    
+                    try:
+                        windings_font = pygame.font.SysFont("Wingdings", 14)
+                        icon_char = "n" if state['is_recording'] else "l"
+                        rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
+                        rec_text_rect = rec_text_surf.get_rect(center=rec_btn_rect.center)
+                        screen.blit(rec_text_surf, rec_text_rect)
+                    except:
+                        if state['is_recording']:
+                            pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+                        else:
+                            pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
+                        
+                    if state['is_recording']:
+                        import time as _time
+                        if int(_time.time() * 2) % 2 == 0:
+                            # Make the icon dim to simulate blinking
+                            dim_surf = pygame.Surface(rec_btn_rect.size, pygame.SRCALPHA)
+                            dim_surf.fill((0, 0, 0, 128))
+                            screen.blit(dim_surf, rec_btn_rect.topleft)
+
                     # Close button (Red X)
                     close_bg_color = (255, 77, 77) if close_is_hover else (204, 0, 0)
                     close_border_color = (255, 255, 255)
@@ -3962,6 +4035,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 clock.tick(60)
                 
             uninstall_keyboard_hook()
+            
+            state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
+            if state['writer']:
+                state['writer'].release()
+                state['writer'] = None
+                state['is_recording'] = False
+                globals()['viewer_record_state'] = state
             
             if exit_due_to_disconnect and reconnect_queue:
                 countdown = 90
@@ -8561,6 +8641,8 @@ class UnifiedApp(tk.Tk):
             print("[Tray] System tray icon started successfully.")
         except Exception as e:
             print(f"[Tray] Failed to initialize system tray icon: {e}")
+
+
 
     def show_gui_from_tray(self, icon=None, item=None):
         self.after(0, self._restore_window)
