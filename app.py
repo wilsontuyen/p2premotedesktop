@@ -877,6 +877,7 @@ except Exception as e:
 
 # Cấu hình bật/tắt đồng bộ Clipboard để phòng tránh cảnh báo Heuristic của phần mềm diệt virus khi không cần thiết
 ENABLE_CLIPBOARD_SYNC = True
+last_clipboard_set_time = 0.0
 
 # Native Windows Win32 Clipboard structures & APIs
 CF_HDROP = 15
@@ -1105,6 +1106,9 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
                 res = fn_SetClipboardData(CF_HDROP, hGlobal)
                 if not res:
                     fn_GlobalFree(hGlobal)
+                else:
+                    global last_clipboard_set_time
+                    last_clipboard_set_time = time.time()
             finally:
                 fn_CloseClipboard()
         else:
@@ -1183,6 +1187,8 @@ def set_clipboard_text(text, owner_hwnd=None):
                 if not res:
                     fn_GlobalFree(hGlobal)
                     return False
+                global last_clipboard_set_time
+                last_clipboard_set_time = time.time()
                 return True
             finally:
                 fn_CloseClipboard()
@@ -1856,6 +1862,24 @@ class ClipboardEventListener:
             add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
             log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
             
+            EVENT_SYSTEM_FOREGROUND = 0x0003
+            WINEVENT_OUTOFCONTEXT = 0x0000
+            WINEVENTPROC = ctypes.WINFUNCTYPE(
+                None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND,
+                wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD
+            )
+            
+            def wineventproc(hWinEventHook, event, hwnd, idObject, idChild, dwEventThread, dwmsEventTime):
+                if event == EVENT_SYSTEM_FOREGROUND:
+                    if self.manager and hasattr(self.manager, 'on_foreground_changed'):
+                        self.manager.on_foreground_changed(hwnd)
+
+            self.wineventproc_c = WINEVENTPROC(wineventproc)
+            hook = user32.SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+                None, self.wineventproc_c, 0, 0, WINEVENT_OUTOFCONTEXT
+            )
+            
             msg = wintypes.MSG()
             while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
                 user32.TranslateMessage(ctypes.byref(msg))
@@ -1932,38 +1956,63 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     """
     Kiểm tra xem yêu cầu WM_RENDERFORMAT hiện tại có phải là do menu chuột phải (context menu)
     hoặc tiến trình quét tự động trong nền truy vấn hay không, hay là thao tác Paste thực tế.
-    Trả về True nếu là truy vấn menu/nền (cần từ chối tải file thực tế lúc này),
-    Trả về False nếu là thao tác Paste thực sự.
+    Trả về 'MENU', 'BACKGROUND', hoặc False.
     """
     user32 = ctypes.windll.user32
     from ctypes import wintypes
     
+    # 0. CHẶN TUYỆT ĐỐI CÁC TIẾN TRÌNH QUÉT CLIPBOARD CỦA MÁY ẢO/REMOTE DESKTOP KHÁC
+    try:
+        user32.GetOpenClipboardWindow.restype = wintypes.HWND
+        hwnd_clip = user32.GetOpenClipboardWindow()
+        if hwnd_clip:
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd_clip, ctypes.byref(pid))
+            import psutil
+            proc_name = psutil.Process(pid.value).name().lower()
+            if proc_name in ("vmtoolsd.exe", "vboxtray.exe", "rdpclip.exe", "mstsc.exe", "vncviewer.exe", "teamviewer.exe", "anydesk.exe"):
+                log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Phat hien {proc_name} dang mo clipboard")
+                return "BACKGROUND"
+    except Exception as e:
+        pass
+        
     t_now = time.time()
     time_since_lbutton = t_now - last_lbutton
     time_since_rbutton = t_now - last_rbutton
     meta_age = t_now - meta_arrival_time
     
-    # 0. Nếu cửa sổ hiện hành là chính Remote Desktop Viewer hoặc GUI của app,
-    # bất kỳ truy vấn clipboard nào cũng chỉ có thể là do hệ thống/nền tự quét sau khi copy,
-    # chứ không thể là thao tác Paste thực tế của người dùng lên máy client.
+    # --- 1. KIỂM TRA THAO TÁC PASTE RÕ RÀNG (Ưu tiên cao nhất) ---
+    # Phím tắt Ctrl+V hoặc Shift+Insert hoặc phím Enter
+    is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
+    is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
+    is_enter = (user32.GetAsyncKeyState(0x0D) & 0x8000)
+    if is_ctrl_v or is_shift_ins or is_enter or (t_now - last_ctrl_v < 2.0):
+        log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan")
+        return False
+
+    # Chuột trái nhấp vào "Paste" trong Context Menu
+    if time_since_lbutton < 1.5 and (last_lbutton > last_rbutton) and (last_lbutton >= meta_arrival_time):
+        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai (chon Paste)")
+        return False
+
+    # --- 2. LOẠI TRỪ CỬA SỔ GUI CỦA APP ---
     try:
         import win32gui
         hwnd_fg = win32gui.GetForegroundWindow()
         if hwnd_fg:
             title = win32gui.GetWindowText(hwnd_fg)
             if title and ("Remote Desktop" in title or "Easy Remote" in title):
-                log_debug(f"[check_is_menu_query] Tra ve True: Cua so hien hanh la Remote Desktop ({title})")
-                return True
+                log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Cua so hien hanh la Remote Desktop ({title})")
+                return "BACKGROUND"
     except Exception as e:
         pass
         
-    # 1. Kiểm tra xem cửa sổ menu (#32768) có tồn tại không (dù ẩn hay hiện)
+    # --- 3. KIỂM TRA CỬA SỔ MENU (CONTEXT MENU) ---
     hwnd_menu = user32.FindWindowW("#32768", None)
-    if hwnd_menu:
-        log_debug(f"[check_is_menu_query] Tra ve True: Cua so menu (#32768) dang ton tai")
-        return True
+    if hwnd_menu and user32.IsWindowVisible(hwnd_menu):
+        log_debug(f"[check_is_menu_query] Tra ve MENU: Cua so menu (#32768) dang ton tai")
+        return "MENU"
         
-    # 2. Kiểm tra Menu Loop qua GetGUIThreadInfo
     try:
         class RECT_SIMPLE(ctypes.Structure):
             _fields_ = [
@@ -1997,42 +2046,25 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
                 gui_info = GUITHREADINFO_SIMPLE()
                 gui_info.cbSize = ctypes.sizeof(GUITHREADINFO_SIMPLE)
                 if user32.GetGUIThreadInfo(tid, ctypes.byref(gui_info)):
-                    # GUI_INMENULOOP = 0x04, GUI_POPUPMENUMODE = 0x10, GUI_SYSTEMMENUMODE = 0x08
                     if gui_info.flags & (0x04 | 0x10 | 0x08):
-                        log_debug(f"[check_is_menu_query] Tra ve True: Phat hien Menu Loop tu GetGUIThreadInfo flags={gui_info.flags}")
-                        return True
+                        log_debug(f"[check_is_menu_query] Tra ve MENU: Phat hien Menu Loop tu GetGUIThreadInfo flags={gui_info.flags}")
+                        return "MENU"
     except Exception as e:
         pass
-
-    # 3. Kiểm tra phím tắt Ctrl+V hoặc Shift+Insert hoặc phím Enter (chọn mục menu bằng bàn phím)
-    # VK_CONTROL = 0x11, VK_V = 0x56, VK_SHIFT = 0x10, VK_INSERT = 0x2D, VK_RETURN = 0x0D
-    is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
-    is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
-    is_enter = (user32.GetAsyncKeyState(0x0D) & 0x8000)
-    if is_ctrl_v or is_shift_ins or is_enter or (t_now - last_ctrl_v < 2.0):
-        log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan hoac luu gan day")
-        return False
-
-    # 4. Nếu vừa click chuột trái (trong vòng 1.5 giây) VÀ click chuột trái này xảy ra SAU click chuột phải cuối cùng,
-    # VÀ click chuột trái này xảy ra SAU khi nhận metadata (để tránh nhận nhầm click "Copy" trên Host).
-    if time_since_lbutton < 1.5 and (last_lbutton > last_rbutton) and (last_lbutton >= meta_arrival_time):
-        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai gan day va sau click chuot phai (lbutton_age={time_since_lbutton:.3f}s)")
-        return False
         
     # 5. Nếu chuột phải vừa được click gần đây (< 1.5s)
     if time_since_rbutton < 1.5:
-        log_debug(f"[check_is_menu_query] Tra ve True: Vua click chuot phai gan day (age={time_since_rbutton:.3f}s)")
-        return True
+        log_debug(f"[check_is_menu_query] Tra ve MENU: Vua click chuot phai gan day (age={time_since_rbutton:.3f}s)")
+        return "MENU"
         
-    # 6. Nếu metadata vừa mới nhận được (< 1.5s) và không có phím tắt/chuột trái hoạt động,
-    # đó có thể là do công cụ tự động quét clipboard trong nền.
+    # 6. Nếu metadata vừa mới nhận được (< 1.5s)
     if meta_age < 1.5:
-        log_debug(f"[check_is_menu_query] Tra ve True: Metadata vua moi nhan (age={meta_age:.3f}s)")
-        return True
+        log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Metadata vua moi nhan (age={meta_age:.3f}s)")
+        return "BACKGROUND"
         
-    # 7. Fallback: Mặc định nếu không có dấu hiệu rõ ràng của Paste, coi là nền quét
-    log_debug(f"[check_is_menu_query] Tra ve True: Mac dinh coi la nen (lbutton_age={time_since_lbutton:.3f}s, rbutton_age={time_since_rbutton:.3f}s)")
-    return True
+    # 7. Fallback: Mặc định coi là nền
+    log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Mac dinh coi la nen")
+    return "BACKGROUND"
 
 
 class ClipboardSyncManager:
@@ -2489,8 +2521,26 @@ class ClipboardSyncManager:
         # 6. Mở khóa tiến trình để tiếp tục hoạt động bình thường
         self.transfer_done_event.set()
 
-    def on_clipboard_changed(self):
+    def on_foreground_changed(self, hwnd):
+        # Hàm này được gọi khi cửa sổ đang active (foreground) thay đổi
+        # Nếu chúng ta đang chạy ở mode Client (có Pygame Viewer)
+        if getattr(self, 'pygame_hwnd', None) and hwnd == self.pygame_hwnd:
+            log_debug("[on_foreground_changed] Cửa sổ Host Viewer vừa được kích hoạt! Kiểm tra đồng bộ Clipboard...")
+            # Ném clipboard cho host nếu có thay đổi
+            self.on_clipboard_changed(force_sync=True)
+
+    def on_clipboard_changed(self, force_sync=False):
         if not ENABLE_CLIPBOARD_SYNC or self.transfer_in_progress: return
+        
+        # Nếu đang ở Client Mode, kiểm tra xem cửa sổ hiện tại có phải là Viewer không
+        # Nếu không phải Viewer (người dùng đang xài máy thật) -> giữ lại, không gửi cho Host!
+        if getattr(self, 'pygame_hwnd', None) and not force_sync:
+            user32 = ctypes.windll.user32
+            user32.GetForegroundWindow.restype = ctypes.c_void_p
+            fg_hwnd = user32.GetForegroundWindow()
+            if fg_hwnd != self.pygame_hwnd:
+                log_debug("[on_clipboard_changed] Bỏ qua vì đang thao tác ngoài cửa sổ Host Viewer (Giữ clipboard cho máy thật).")
+                return
         
         # Tránh tự kích hoạt vòng lặp khi chính ứng dụng thiết lập delayed rendering
         try:
@@ -2510,7 +2560,29 @@ class ClipboardSyncManager:
         except Exception as e:
             log_debug(f"[on_clipboard_changed] Lỗi kiểm tra GetClassName/GetClipboardOwner: {e}")
             
-        threading.Thread(target=self._process_clipboard_change, daemon=True).start()
+        global last_clipboard_set_time
+        if time.time() - last_clipboard_set_time < 0.5:
+            log_debug("[on_clipboard_changed] Bỏ qua vì app vừa mới set clipboard.")
+            return
+
+        with self.lock:
+            if hasattr(self, '_clipboard_timer') and self._clipboard_timer:
+                try:
+                    self._clipboard_timer.cancel()
+                except:
+                    pass
+            self._clipboard_timer = threading.Timer(0.2, self._process_clipboard_change_debounced)
+            self._clipboard_timer.daemon = True
+            self._clipboard_timer.start()
+
+    def _process_clipboard_change_debounced(self):
+        if getattr(self, '_is_processing_clipboard', False):
+            return
+        self._is_processing_clipboard = True
+        try:
+            self._process_clipboard_change()
+        finally:
+            self._is_processing_clipboard = False
 
     def _process_clipboard_change(self):
         try:
@@ -2654,6 +2726,9 @@ class ClipboardSyncManager:
             setup_clipboard_exclusions()
             
             res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
+            if res:
+                global last_clipboard_set_time
+                last_clipboard_set_time = time.time()
             err = ctypes.GetLastError()
             log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
             user32.CloseClipboard()
@@ -2787,8 +2862,8 @@ class ClipboardSyncManager:
         meta_time = getattr(self, 'meta_arrival_time', 0.0)
         last_ctrl_v = getattr(self, 'last_ctrl_v_time', 0.0)
         is_menu = check_is_menu_query(last_l, last_r, meta_time, last_ctrl_v)
-        if is_menu:
-            log_debug("[render_format] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+        if is_menu == "MENU":
+            log_debug("[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
             dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
             if dummy_h:
                 fn_SetClipboardData(15, dummy_h)
@@ -2798,6 +2873,9 @@ class ClipboardSyncManager:
                 time.sleep(0.2)
                 self.setup_delayed_rendering()
             threading.Thread(target=re_setup, daemon=True).start()
+            return
+        elif is_menu == "BACKGROUND":
+            log_debug("[render_format] Phát hiện truy vấn nền (VM Tools, clipboard monitor). Bỏ qua hoàn toàn.")
             return
             
 
@@ -3096,6 +3174,16 @@ class ClipboardSyncManager:
     def handle_received_packet(self, packet):
         ptype = packet.get("type")
         
+        # Chặn nhận clipboard từ Host nếu cửa sổ Client Viewer không được kích hoạt
+        if ptype in ("clipboard_text", "files_copied_meta"):
+            if getattr(self, 'pygame_hwnd', None):
+                user32 = ctypes.windll.user32
+                user32.GetForegroundWindow.restype = ctypes.c_void_p
+                fg_hwnd = user32.GetForegroundWindow()
+                if fg_hwnd != self.pygame_hwnd:
+                    log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do cửa sổ Viewer không được kích hoạt (Giữ clipboard cho máy thật).")
+                    return
+                    
         # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại
         if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
             log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do tiến trình tải đã bị hủy.")
@@ -3545,7 +3633,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         hwnd = None
         try: hwnd = pygame.display.get_wm_info().get("window")
         except: pass
-        
+        if hwnd and clipboard_sync_manager:
+            clipboard_sync_manager.pygame_hwnd = hwnd
         import tempfile
         blink_file = ""
         if partner_id:
@@ -3737,6 +3826,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         try: hwnd = pygame.display.get_wm_info().get("window")
                         except: pass
                         if hwnd:
+                            if clipboard_sync_manager: clipboard_sync_manager.pygame_hwnd = hwnd
                             install_keyboard_hook(hwnd, send_event)
 
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
@@ -3885,6 +3975,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             import numpy as _np
                             frame_arr = _np.array(frame_to_draw)
                             bgr_frame = _cv2.cvtColor(frame_arr, _cv2.COLOR_RGB2BGR)
+                            
+                            # Draw beautiful anti-aliased mouse cursor overlay for recording
+                            mx, my = pygame.mouse.get_pos()
+                            if pygame.mouse.get_focused() and 0 <= mx <= window_w and 0 <= my <= window_h:
+                                hx = int(mx * (w / window_w)) if window_w else 0
+                                hy = int(my * (h / window_h)) if window_h else 0
+                                pts = _np.array([
+                                    [hx, hy], [hx, hy + 17], [hx + 4, hy + 13],
+                                    [hx + 9, hy + 23], [hx + 12, hy + 21],
+                                    [hx + 7, hy + 11], [hx + 14, hy + 11]
+                                ], _np.int32)
+                                _cv2.fillPoly(bgr_frame, [pts], (255, 255, 255), lineType=_cv2.LINE_AA)
+                                _cv2.polylines(bgr_frame, [pts], True, (0, 0, 0), 1, lineType=_cv2.LINE_AA)
+                                
                             state['writer'].write(bgr_frame)
                         except Exception as e:
                             print(f"[Client] Recording error: {e}")
@@ -8245,59 +8349,59 @@ class UnifiedApp(tk.Tk):
                 
         # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
         if not self.force_relay_var.get() and not connected:
+            do_hole_punch = True
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                self.update_status("Sẵn sàng kết nối")
-                self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                return
-            self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
-            print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
-            
-            # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
-            if getattr(self, 'server_socket', None):
+                do_hole_punch = False
+                
+            if do_hole_punch:
+                self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
+                print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
+                
+                # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
+                if getattr(self, 'server_socket', None):
+                    try:
+                        self.server_socket.close()
+                    except: pass
+                
+                # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
+                for _ in range(20):
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    try:
+                        sock.bind(('0.0.0.0', BOUND_PORT))
+                    except:
+                        pass
+                    sock.settimeout(0.5)
+                    try:
+                        sock.connect((public_ip, port))
+                        connected = True
+                        print(f"[Client] Hole punch successful to {public_ip}:{port}!")
+                        break
+                    except Exception:
+                        force_close_socket(sock)
+                        time.sleep(0.1)
+                        
+                # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
                 try:
-                    self.server_socket.close()
-                except: pass
-            
-            # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
-            for _ in range(20):
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind(('0.0.0.0', BOUND_PORT))
-                except:
-                    pass
-                sock.settimeout(0.5)
-                try:
-                    sock.connect((public_ip, port))
-                    connected = True
-                    print(f"[Client] Hole punch successful to {public_ip}:{port}!")
-                    break
-                except Exception:
-                    force_close_socket(sock)
-                    time.sleep(0.1)
-                    
-            # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
-            try:
-                try:
-                    if hasattr(socket, 'AF_INET6'):
-                        self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                    try:
+                        if hasattr(socket, 'AF_INET6'):
+                            self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                                try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                                except: pass
+                            self.server_socket.bind(("", BOUND_PORT))
+                        else:
+                            raise Exception("No IPv6")
+                    except Exception:
+                        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
-                            try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-                            except: pass
-                        self.server_socket.bind(("", BOUND_PORT))
-                    else:
-                        raise Exception("No IPv6")
-                except Exception:
-                    self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    self.server_socket.bind(('0.0.0.0', BOUND_PORT))
-                self.server_socket.listen(5)
-                print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
-            except Exception as e:
-                print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
+                        self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+                    self.server_socket.listen(5)
+                    print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+                except Exception as e:
+                    print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
 
         if not connected:
             display_host = getattr(self, 'current_signaling_host', None) or 'Relay'
@@ -9019,8 +9123,8 @@ def run_clipboard_agent_mode():
                 
             # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
             is_menu = check_is_menu_query(_agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_last_ctrl_v_time)
-            if is_menu:
-                agent_print("[ClipboardAgent] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+            if is_menu == "MENU":
+                agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
                 dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
                 if dummy_h:
                     ctypes.windll.user32.SetClipboardData(CF_HDROP, dummy_h)
@@ -9034,6 +9138,9 @@ def run_clipboard_agent_mode():
                             WM_USER_SETUP_DELAYED, 0, 0
                         )
                 threading.Thread(target=re_setup_agent, daemon=True).start()
+                return 0
+            elif is_menu == "BACKGROUND":
+                agent_print("[ClipboardAgent] Phát hiện truy vấn nền (VM Tools). Bỏ qua hoàn toàn.")
                 return 0
 
             _is_rendering = True
@@ -9195,12 +9302,12 @@ def run_clipboard_agent_mode():
                 action, val = gui_queue.get_nowait()
                 if action == "text":
                     agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
-                    set_clipboard_text(val)
+                    set_clipboard_text(val, owner_hwnd=_agent_hwnd)
                 elif action == "files":
                     # Được gửi bởi luồng WM_RENDERFORMAT (cũ giữ lại cho trường hợp khác)
                     paths = [p for p in val.split("|") if os.path.exists(p)]
                     if paths:
-                        set_clipboard_files(paths)
+                        set_clipboard_files(paths, owner_hwnd=_agent_hwnd)
                         agent_print(f"[ClipboardAgent] Đã nạp {len(paths)} file vào Clipboard.")
                     else:
                         agent_print(f"[ClipboardAgent] File không tồn tại để nạp clipboard.")
