@@ -163,6 +163,12 @@ PORTS_TO_TRY = [12345, 12346, 12347, 12348, 12349]
 BOUND_PORT = 12345
 APP_KEY = "q3tu0y7j"
 
+# LAN Discovery (UDP Broadcast) - Cho phép các máy trong cùng mạng LAN tự phát hiện nhau
+LAN_DISCOVERY_PORT = 12399
+LAN_BEACON_INTERVAL = 5  # Gửi beacon mỗi 5 giây
+LAN_OFFLINE_TIMEOUT = 15  # Coi là offline nếu không nhận beacon trong 15 giây
+LAN_APP_SIGNATURE = hashlib.sha256(b"EasyRemoteDesktop_LAN_v1").hexdigest()[:16]
+
 # Host Controllers
 mouse = MouseController()
 keyboard = KeyboardController()
@@ -4787,6 +4793,11 @@ class UnifiedApp(tk.Tk):
         self.force_relay_var = tk.BooleanVar(value=False)
         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
         
+        # LAN Discovery State - Lưu trữ các máy phát hiện được trong mạng LAN
+        # Key: hwid, Value: {computer_name, local_ip, port, last_seen}
+        self.lan_peers = {}
+        self.lan_peers_lock = threading.Lock()
+        
         # Register Trace for Auto-Formatting Partner ID
         self.id_trace_id = self.partner_id_var.trace_add("write", self.format_partner_id)
         
@@ -4841,6 +4852,7 @@ class UnifiedApp(tk.Tk):
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Danh sách (Saved Computers)", command=self.show_saved_computers_dialog)
+        file_menu.add_command(label="📡 Quét mạng LAN (LAN Discovery)", command=self.show_lan_computers_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Thoát (Exit)", command=self.destroy)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -4927,7 +4939,7 @@ class UnifiedApp(tk.Tk):
         # LEFT PANEL: Allow Remote Control
         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._left_panel = left_panel
-        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.88)
+        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
         
         lbl_allow = tk.Label(left_panel, text="CHO PHÉP ĐIỀU KHIỂN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
@@ -4973,7 +4985,7 @@ class UnifiedApp(tk.Tk):
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._right_panel = right_panel
-        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.88)
+        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
         
         lbl_control = tk.Label(right_panel, text="ĐIỀU KHIỂN ĐỐI TÁC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
@@ -5006,6 +5018,10 @@ class UnifiedApp(tk.Tk):
         # Add button with a blue "+"
         self.add_partner_btn = tk.Button(btn_container, text="➕", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+        # LAN Discovery button - Quét máy trong mạng nội bộ
+        lan_btn = tk.Button(right_panel, text="📡 Quét mạng LAN (LAN Only)", font=("Segoe UI", 9), fg=self.text_white, bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
+        lan_btn.pack(padx=20, fill=tk.X, pady=(8, 0))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
@@ -5113,7 +5129,7 @@ class UnifiedApp(tk.Tk):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(400 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
+        min_h = int(430 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
@@ -7025,6 +7041,431 @@ class UnifiedApp(tk.Tk):
         except Exception as e:
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
+    # ==================== LAN DISCOVERY (UDP Broadcast) ====================
+    def start_lan_discovery(self):
+        """Khởi chạy 2 luồng: beacon broadcaster và beacon listener cho LAN Discovery."""
+        threading.Thread(target=self._lan_beacon_sender, daemon=True).start()
+        threading.Thread(target=self._lan_beacon_listener, daemon=True).start()
+        threading.Thread(target=self._lan_peer_cleanup, daemon=True).start()
+        print("[LAN Discovery] Started beacon sender, listener and cleanup threads.")
+
+    def _lan_beacon_sender(self):
+        """Phát UDP broadcast beacon mỗi LAN_BEACON_INTERVAL giây."""
+        import platform
+        while getattr(self, 'running_server', True):
+            try:
+                beacon = json.dumps({
+                    "sig": LAN_APP_SIGNATURE,
+                    "hwid": self.my_id_clean,
+                    "computer_name": platform.node(),
+                    "port": BOUND_PORT,
+                    "local_ip": getattr(self, 'local_ip', get_local_ip()),
+                }).encode('utf-8')
+                
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.settimeout(1.0)
+                try:
+                    sock.sendto(beacon, ('255.255.255.255', LAN_DISCOVERY_PORT))
+                except Exception:
+                    pass
+                # Gửi thêm tới các subnet broadcast cụ thể (hỗ trợ router chặn global broadcast)
+                try:
+                    local_ips = getattr(self, 'local_ip', '').split(',')
+                    for lip in local_ips:
+                        lip = lip.strip()
+                        if lip and not lip.startswith('127.'):
+                            parts = lip.split('.')
+                            if len(parts) == 4:
+                                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                                sock.sendto(beacon, (subnet_broadcast, LAN_DISCOVERY_PORT))
+                except Exception:
+                    pass
+                sock.close()
+            except Exception as e:
+                print(f"[LAN Discovery] Beacon send error: {e}")
+            time.sleep(LAN_BEACON_INTERVAL)
+
+    def _lan_beacon_listener(self):
+        """Lắng nghe UDP broadcast beacon từ các máy khác trong LAN."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            sock.bind(('', LAN_DISCOVERY_PORT))
+        except Exception as e:
+            print(f"[LAN Discovery] Cannot bind UDP listener on port {LAN_DISCOVERY_PORT}: {e}")
+            return
+        sock.settimeout(2.0)
+        
+        while getattr(self, 'running_server', True):
+            try:
+                data, addr = sock.recvfrom(4096)
+                try:
+                    beacon = json.loads(data.decode('utf-8'))
+                except Exception:
+                    continue
+                    
+                # Xác thực beacon
+                if beacon.get("sig") != LAN_APP_SIGNATURE:
+                    continue
+                    
+                peer_hwid = beacon.get("hwid", "")
+                # Bỏ qua chính mình
+                if peer_hwid == self.my_id_clean:
+                    continue
+                    
+                peer_info = {
+                    "computer_name": beacon.get("computer_name", "Unknown"),
+                    "local_ip": beacon.get("local_ip", addr[0]),
+                    "port": int(beacon.get("port", 12345)),
+                    "last_seen": time.time(),
+                    "source_ip": addr[0],
+                }
+                
+                with self.lan_peers_lock:
+                    is_new = peer_hwid not in self.lan_peers
+                    self.lan_peers[peer_hwid] = peer_info
+                    
+                if is_new:
+                    fmt_id = f"{peer_hwid[:3]} {peer_hwid[3:6]} {peer_hwid[6:9]} {peer_hwid[9:]}" if len(peer_hwid) == 12 else peer_hwid
+                    print(f"[LAN Discovery] Phát hiện máy mới: {peer_info['computer_name']} ({fmt_id}) tại {peer_info['local_ip']}:{peer_info['port']}")
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if getattr(self, 'running_server', True):
+                    print(f"[LAN Discovery] Listener error: {e}")
+                time.sleep(1)
+
+    def _lan_peer_cleanup(self):
+        """Xóa các peer đã offline (không gửi beacon trong LAN_OFFLINE_TIMEOUT giây)."""
+        while getattr(self, 'running_server', True):
+            time.sleep(5)
+            now = time.time()
+            with self.lan_peers_lock:
+                expired = [hwid for hwid, info in self.lan_peers.items() 
+                          if now - info["last_seen"] > LAN_OFFLINE_TIMEOUT]
+                for hwid in expired:
+                    name = self.lan_peers[hwid].get("computer_name", "")
+                    del self.lan_peers[hwid]
+                    print(f"[LAN Discovery] Peer offline: {name} ({hwid})")
+
+    def show_lan_computers_dialog(self):
+        """Hiển thị dialog danh sách các máy tính phát hiện được trong mạng LAN."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Máy tính trong mạng LAN")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        w, h = 520, 440
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        # Title
+        lbl_title = tk.Label(dialog, text="📡 MÁY TÍNH TRONG MẠNG LAN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 5))
+        
+        lbl_desc = tk.Label(dialog, text="Kết nối trực tiếp không qua Signaling Server", font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
+        lbl_desc.pack(pady=(0, 10))
+
+        # Scrollable list frame
+        list_outer = tk.Frame(dialog, bg=self.entry_bg, bd=1, relief=tk.SUNKEN)
+        list_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+
+        canvas = tk.Canvas(list_outer, bg=self.entry_bg, highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL, command=canvas.yview)
+        scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
+
+        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Status label
+        status_label = tk.Label(dialog, text="", font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
+        status_label.pack(pady=(0, 5))
+
+        def connect_to_peer(hwid, peer_info):
+            """Mở dialog nhập mật khẩu rồi kết nối trực tiếp qua LAN."""
+            pass_dialog = tk.Toplevel(dialog)
+            pass_dialog.title(f"Kết nối tới {peer_info['computer_name']}")
+            pass_dialog.resizable(False, False)
+            pass_dialog.configure(bg=self.bg_color)
+            pass_dialog.transient(dialog)
+            pass_dialog.grab_set()
+
+            pw, ph = 360, 200
+            px = dialog.winfo_x() + (dialog.winfo_width() - pw) // 2
+            py = dialog.winfo_y() + (dialog.winfo_height() - ph) // 2
+            pass_dialog.geometry(f"{pw}x{ph}+{px}+{py}")
+
+            fmt_id = f"{hwid[:3]} {hwid[3:6]} {hwid[6:9]} {hwid[9:]}" if len(hwid) == 12 else hwid
+            tk.Label(pass_dialog, text=f"Máy: {peer_info['computer_name']}", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color).pack(pady=(15, 2))
+            tk.Label(pass_dialog, text=f"ID: {fmt_id}  •  IP: {peer_info['local_ip']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color).pack(pady=(0, 10))
+
+            tk.Label(pass_dialog, text="Nhập mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).pack(anchor=tk.W, padx=30)
+            pass_var = tk.StringVar()
+            pass_entry = tk.Entry(pass_dialog, textvariable=pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
+            pass_entry.pack(padx=30, fill=tk.X, pady=(3, 15))
+            pass_entry.focus()
+
+            def do_connect():
+                password = pass_var.get().strip()
+                if not password:
+                    self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu!", parent=pass_dialog)
+                    return
+                pass_dialog.destroy()
+                dialog.destroy()
+                # Kết nối trực tiếp qua LAN
+                self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
+                self.connect_btn.config(state=tk.DISABLED)
+                threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, password), daemon=True).start()
+
+            pass_entry.bind("<Return>", lambda e: do_connect())
+            pass_entry.bind("<KP_Enter>", lambda e: do_connect())
+
+            btn_frame = tk.Frame(pass_dialog, bg=self.bg_color)
+            btn_frame.pack(fill=tk.X, padx=30, pady=(0, 15))
+            tk.Button(btn_frame, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+        def refresh_list():
+            # Xóa danh sách cũ
+            for w in scroll_frame.winfo_children():
+                w.destroy()
+
+            with self.lan_peers_lock:
+                peers = dict(self.lan_peers)
+
+            if not peers:
+                tk.Label(scroll_frame, text="Không tìm thấy máy tính nào trong mạng LAN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.", font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                status_label.config(text="Đang quét... (0 máy)")
+            else:
+                status_label.config(text=f"Tìm thấy {len(peers)} máy trong mạng LAN")
+                for hwid, info in sorted(peers.items(), key=lambda x: x[1].get("computer_name", "")):
+                    row = tk.Frame(scroll_frame, bg=self.card_color, bd=0)
+                    row.pack(fill=tk.X, padx=5, pady=3)
+
+                    # Status dot (green = online)
+                    age = time.time() - info["last_seen"]
+                    dot_color = "#2ECC71" if age < LAN_OFFLINE_TIMEOUT else "#FF4D4D"
+                    tk.Label(row, text="●", font=("Segoe UI", 10), fg=dot_color, bg=self.card_color).pack(side=tk.LEFT, padx=(10, 5))
+
+                    # Connect button (Pack first to ensure it's not pushed out by long IP strings)
+                    btn = tk.Button(row, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
+                    btn.pack(side=tk.RIGHT, padx=10, pady=5)
+
+                    # Info
+                    info_frame = tk.Frame(row, bg=self.card_color)
+                    info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=5)
+                    
+                    fmt_id = f"{hwid[:3]} {hwid[3:6]} {hwid[6:9]} {hwid[9:]}" if len(hwid) == 12 else hwid
+                    
+                    # Shorten IP display if there are multiple IPs
+                    ip_str = info['local_ip']
+                    ip_list = [ip.strip() for ip in ip_str.split(',') if ip.strip()]
+                    display_ip = f"{ip_list[0]} (+{len(ip_list)-1})" if len(ip_list) > 1 else (ip_list[0] if ip_list else ip_str)
+                    
+                    lbl_name = tk.Label(info_frame, text=info["computer_name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
+                    lbl_name.pack(fill=tk.X)
+                    lbl_details = tk.Label(info_frame, text=f"ID: {fmt_id}  •  IP: {display_ip}:{info['port']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
+                    lbl_details.pack(fill=tk.X)
+                    
+                    # Bind double click
+                    def on_row_double_click(e, h=hwid, i=info):
+                        connect_to_peer(h, i)
+                    
+                    for w in [row, info_frame, lbl_name, lbl_details]:
+                        w.bind("<Double-1>", on_row_double_click)
+                        w.config(cursor="hand2")
+
+        refresh_list()
+
+        # Auto refresh mỗi 3 giây
+        auto_refresh_id = [None]
+        def auto_refresh():
+            if dialog.winfo_exists():
+                refresh_list()
+                auto_refresh_id[0] = dialog.after(3000, auto_refresh)
+        auto_refresh_id[0] = dialog.after(3000, auto_refresh)
+
+        def on_dialog_close():
+            if auto_refresh_id[0]:
+                dialog.after_cancel(auto_refresh_id[0])
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except: pass
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
+
+        # Bottom buttons
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+        tk.Button(btn_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, pady=4, padx=10, cursor="hand2", command=refresh_list).pack(side=tk.LEFT)
+        tk.Button(btn_frame, text="Đóng", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, padx=15, cursor="hand2", command=on_dialog_close).pack(side=tk.RIGHT)
+
+    def _connect_lan_direct(self, hwid, peer_info, password):
+        """Kết nối TCP trực tiếp tới máy trong LAN (không qua Signaling Server)."""
+        import platform
+        ip = peer_info["local_ip"]
+        port = peer_info["port"]
+        
+        # Thử kết nối tới tất cả IP nếu có nhiều
+        ips_to_try = [i.strip() for i in ip.split(',') if i.strip()]
+        # Thêm source_ip nếu khác
+        source_ip = peer_info.get("source_ip", "")
+        if source_ip and source_ip not in ips_to_try:
+            ips_to_try.append(source_ip)
+            
+        sock = None
+        connected = False
+        
+        for try_ip in ips_to_try:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3.0)
+                s.connect((try_ip, port))
+                s.settimeout(None)
+                sock = s
+                connected = True
+                print(f"[LAN Direct] Connected to {try_ip}:{port}")
+                break
+            except Exception as e:
+                print(f"[LAN Direct] Failed to connect to {try_ip}:{port}: {e}")
+                try: s.close()
+                except: pass
+                continue
+
+        if not connected or not sock:
+            self.update_status("Kết nối LAN thất bại!")
+            self.after(0, lambda: self.show_custom_error("Lỗi kết nối LAN", f"Không thể kết nối tới {peer_info['computer_name']} ({ip}:{port}).\nKiểm tra Tường lửa (Firewall) hoặc đảm bảo máy đích đang chạy ứng dụng."))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            return
+
+        # Sử dụng lại flow handshake hiện có
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except: pass
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
+        except: pass
+
+        try:
+            socket_passwords[sock] = password
+            hs_data = json.dumps({"password": password, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+            send_msg(sock, hs_data, password)
+            
+            res_msg = recv_msg(sock, [password, APP_KEY])
+            if not res_msg:
+                self.update_status("Sẵn sàng kết nối")
+                self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                force_close_socket(sock)
+                return
+
+            res = json.loads(res_msg.decode('utf-8'))
+            
+            if res.get("status") == "ok":
+                host_w = res.get("width")
+                host_h = res.get("height")
+                computer_name = res.get("computer_name", "")
+                zalo_phone = res.get("zalo_phone", "")
+                is_domain = res.get("is_domain", False)
+                partner_id = hwid
+
+                # Speed test (same flow as regular connect)
+                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                net_class = "medium"
+                avg_ping = 50.0
+                bandwidth = 10.0
+                try:
+                    runs = []
+                    for run_idx in range(2):
+                        if run_idx > 0:
+                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                        rtts = []
+                        for _ in range(3):
+                            t0 = time.time()
+                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), password)
+                            pong_msg = recv_msg(sock, password)
+                            if pong_msg:
+                                pong_data = json.loads(pong_msg.decode('utf-8'))
+                                if pong_data.get("action") == "speed_test_pong":
+                                    rtts.append(time.time() - t0)
+                            time.sleep(0.05)
+                        run_ping = (sum(rtts) / len(rtts)) * 1000.0 if rtts else 50.0
+                        
+                        run_bw = 10.0
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'), password)
+                        bw_start_msg = recv_msg(sock, password)
+                        if bw_start_msg:
+                            bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
+                            if bw_start_data.get("action") == "speed_test_bw_start":
+                                dummy_size = bw_start_data.get("size", 1572864)
+                                warm_size = 1048576
+                                measure_size = dummy_size - warm_size
+                                warm_data = b''
+                                while len(warm_data) < warm_size:
+                                    chunk = sock.recv(warm_size - len(warm_data))
+                                    if not chunk: break
+                                    warm_data += chunk
+                                t_start = time.time()
+                                measured_data = b''
+                                while len(measured_data) < measure_size:
+                                    chunk = sock.recv(measure_size - len(measured_data))
+                                    if not chunk: break
+                                    measured_data += chunk
+                                t_end = time.time()
+                                duration = t_end - t_start
+                                total_len = len(warm_data) + len(measured_data)
+                                if duration > 0 and total_len == dummy_size:
+                                    run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
+                        runs.append((run_ping, run_bw))
+                        if run_idx == 0: time.sleep(0.2)
+                    if runs:
+                        best_run = max(runs, key=lambda x: x[1])
+                        avg_ping = best_run[0]
+                        bandwidth = best_run[1]
+                    if bandwidth > 20.0 and avg_ping < 10.0:
+                        net_class = "high"
+                    elif bandwidth < 5.0 or avg_ping > 50.0:
+                        net_class = "low"
+                    send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": net_class, "ping": avg_ping, "bandwidth": bandwidth}).encode('utf-8'), password)
+                    print(f"[LAN Direct] Speed: Ping {avg_ping:.1f}ms, BW {bandwidth:.2f} Mbps, Class: {net_class}")
+                except Exception as ste:
+                    print(f"[LAN Direct] Speed test error: {ste}")
+                    try:
+                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": "medium", "ping": 50.0, "bandwidth": 10.0}).encode('utf-8'), password)
+                    except: pass
+
+                self.update_status("Kết nối LAN thành công! Đang khởi động màn hình...")
+                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password)
+            else:
+                msg = res.get("message", "Sai mật khẩu!")
+                self.update_status("Bị từ chối kết nối")
+                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                force_close_socket(sock)
+                socket_passwords.pop(sock, None)
+        except Exception as e:
+            self.update_status("Sẵn sàng kết nối")
+            self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay LAN", f"Lỗi xác thực handshake:\n{err}"))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            if sock:
+                force_close_socket(sock)
+                socket_passwords.pop(sock, None)
+
     def init_network_services(self):
         # 0. Thử tự động thêm rule Tường lửa và cấu hình UAC (sẽ thành công nếu có quyền Admin)
         self.configure_uac_registry()
@@ -7085,6 +7526,9 @@ class UnifiedApp(tk.Tk):
         else:
             suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
             self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...{suffix}")
+
+        # 5. Start LAN Discovery (UDP Broadcast) - Phát hiện máy trong mạng nội bộ
+        self.start_lan_discovery()
 
 
     def signaling_maintainer_thread(self, host):
