@@ -379,29 +379,30 @@ def send_input_keyboard_event(key_name, pressed):
             char_upper = key_name.upper()
             if ('A' <= char_upper <= 'Z') or ('0' <= char_upper <= '9'):
                 vk = ord(char_upper)
+            else:
+                # Try to resolve VK code for punctuation/symbol characters via VkKeyScanW
+                # This enables Vietnamese IME (Unikey) to process keys like [, ], ;, ', etc.
+                vk_scan = ctypes.windll.user32.VkKeyScanW(ord(key_name))
+                if vk_scan != -1 and (vk_scan & 0xFF) != 0:
+                    vk = vk_scan & 0xFF  # Low byte = VK code
                 
         # Check if any shortcut modifier is held down based on tracked remote state
         is_modifier = bool(_remote_modifier_keys)
-            
-        use_unicode = (len(key_name) == 1) and not is_modifier
         
-        if use_unicode:
-            # Use KEYEVENTF_UNICODE for reliable character injection (vital for password boxes in Winlogon/Server)
-            inp = INPUT()
-            inp.type = INPUT_KEYBOARD
-            flags = 0x0004 # KEYEVENTF_UNICODE
-            if not pressed:
-                flags |= KEYEVENTF_KEYUP
-            inp.union.ki = KEYBDINPUT(0, ord(key_name), flags, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-            return
-            
         if vk is not None:
+            # Use VK code + hardware scan code for all keys that have a VK mapping.
+            # This is critical for Vietnamese IME (Unikey/Telex/VNI) compatibility:
+            # Unikey hooks WM_KEYDOWN/WM_KEYUP messages and needs real VK codes
+            # to detect key sequences (e.g. a+a -> â, o+w -> ơ).
+            # KEYEVENTF_UNICODE bypasses keyboard hooks so Unikey cannot intercept it.
             inp = INPUT()
             inp.type = INPUT_KEYBOARD
             flags = 0
             if not pressed:
                 flags |= KEYEVENTF_KEYUP
+                
+            # Get hardware scan code from VK for maximum compatibility
+            scan = ctypes.windll.user32.MapVirtualKeyW(vk, 0)  # MAPVK_VK_TO_VSC
                 
             # Check for extended keys
             extended_vks = [
@@ -419,7 +420,17 @@ def send_input_keyboard_event(key_name, pressed):
             if vk in extended_vks:
                 flags |= KEYEVENTF_EXTENDEDKEY
                 
-            inp.union.ki = KEYBDINPUT(vk, 0, flags, 0, None)
+            inp.union.ki = KEYBDINPUT(vk, scan, flags, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        elif len(key_name) == 1 and not is_modifier:
+            # Fallback: Use KEYEVENTF_UNICODE only for characters without a VK code
+            # (e.g. pre-composed Unicode characters, emoji, special symbols)
+            inp = INPUT()
+            inp.type = INPUT_KEYBOARD
+            flags = KEYEVENTF_UNICODE
+            if not pressed:
+                flags |= KEYEVENTF_KEYUP
+            inp.union.ki = KEYBDINPUT(0, ord(key_name), flags, 0, None)
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Keyboard injection failed: {e}")
@@ -3943,8 +3954,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         
                         char_to_send = key_name
                         if event.type == pygame.KEYDOWN:
-                            if hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
-                                if key_name not in ['delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
+                            # For a-z and 0-9, always send raw key_name (not event.unicode)
+                            # so host-side Vietnamese IME (Unikey) can compose characters.
+                            # Using event.unicode would send client-IME-processed characters,
+                            # bypassing the host-side Unikey entirely.
+                            if len(key_name) == 1 and (key_name.isalpha() or key_name.isdigit()):
+                                char_to_send = key_name  # Raw key, let host IME handle it
+                            elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
+                                if key_name not in ['space', 'delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
                                     char_to_send = event.unicode
                             active_unicode_map[event.key] = char_to_send
                         else:
