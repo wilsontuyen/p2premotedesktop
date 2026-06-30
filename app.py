@@ -3632,6 +3632,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         client_max_h = info.current_h - 100
         
         ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
+        
+        # [Tùy chỉnh Android] Thu nhỏ màn hình mặc định nếu là thiết bị di động (màn hình dọc)
+        if host_h > host_w:
+            max_portrait_height = min(900, client_max_h) # Giới hạn chiều cao tối đa khoảng 900px
+            if host_h * ratio > max_portrait_height:
+                ratio = max_portrait_height / host_h
+                
         window_w = int(host_w * ratio)
         window_h = int(host_h * ratio)
         
@@ -7152,12 +7159,16 @@ class UnifiedApp(tk.Tk):
 
     def show_lan_computers_dialog(self):
         """Hiển thị dialog danh sách các máy tính phát hiện được trong mạng LAN."""
+        if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
+            self.lan_computers_dialog.lift()
+            self.lan_computers_dialog.focus_force()
+            return
+            
         dialog = tk.Toplevel(self)
+        self.lan_computers_dialog = dialog
         dialog.title("Máy tính trong mạng LAN")
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
-        dialog.transient(self)
-        dialog.grab_set()
 
         w, h = 520, 440
         x = self.winfo_x() + (self.winfo_width() - w) // 2
@@ -7224,7 +7235,8 @@ class UnifiedApp(tk.Tk):
                     self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu!", parent=pass_dialog)
                     return
                 pass_dialog.destroy()
-                dialog.destroy()
+                # Giữ cửa sổ LAN hiển thị theo yêu cầu người dùng
+                # dialog.destroy() 
                 # Kết nối trực tiếp qua LAN
                 self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
                 self.connect_btn.config(state=tk.DISABLED)
@@ -7290,13 +7302,13 @@ class UnifiedApp(tk.Tk):
 
         refresh_list()
 
-        # Auto refresh mỗi 3 giây
+        # Auto refresh mỗi 5 giây
         auto_refresh_id = [None]
         def auto_refresh():
             if dialog.winfo_exists():
                 refresh_list()
-                auto_refresh_id[0] = dialog.after(3000, auto_refresh)
-        auto_refresh_id[0] = dialog.after(3000, auto_refresh)
+                auto_refresh_id[0] = dialog.after(5000, auto_refresh)
+        auto_refresh_id[0] = dialog.after(5000, auto_refresh)
 
         def on_dialog_close():
             if auto_refresh_id[0]:
