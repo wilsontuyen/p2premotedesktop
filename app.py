@@ -3498,9 +3498,9 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
+                with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
         except Exception as e:
-            with open("client_error.log", "a") as f: f.write(f"[Client] Receiver Error: {e}\n")
+            with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"[Client] Receiver Error: {e}\n")
             client_running = False
             break
 
@@ -3612,7 +3612,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         pygame_theme = "dark"
         try:
             import json, os
-            with open("window_config.json", "r") as f:
+            with open("window_config.json", "r", encoding="utf-8") as f:
                 cfg = json.load(f)
                 pygame_theme = cfg.get("theme", "dark")
         except:
@@ -4642,7 +4642,7 @@ class UnifiedApp(tk.Tk):
         self.current_theme = tk.StringVar(value="dark")
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, "r") as f:
+                with open(self.config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
                     saved_theme = config.get("theme")
                     if saved_theme in ["light", "dark", "gray", "pink", "crystal", "custom"]:
@@ -5252,7 +5252,7 @@ class UnifiedApp(tk.Tk):
                 if not os.path.exists(ini_path):
                     config = configparser.ConfigParser()
                     config['COLORS'] = custom_pal
-                    with open(ini_path, 'w') as configfile:
+                    with open(ini_path, 'w', encoding="utf-8") as configfile:
                         config.write(configfile)
                 else:
                     config = configparser.ConfigParser()
@@ -5352,7 +5352,7 @@ class UnifiedApp(tk.Tk):
             config_data = {"geometry": geom}
             if hasattr(self, 'current_theme'):
                 config_data["theme"] = self.current_theme.get()
-            with open(self.config_file, "w") as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f)
             print(f"[Config] Saved window position & theme: {geom}")
         except Exception as e:
@@ -8396,7 +8396,7 @@ class UnifiedApp(tk.Tk):
                             break  # Break inner loop to recreate mss.mss()
                         except Exception as e:
                             import traceback
-                            with open("host_error.log", "a") as f:
+                            with open("host_error.log", "a", encoding="utf-8") as f:
                                 f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
                             client_state["running"] = False
                             try:
@@ -9005,7 +9005,7 @@ class UnifiedApp(tk.Tk):
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
                                 dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = 1048576 # 1 MB warm-up để vượt qua TCP slow-start
+                                warm_size = min(1048576, int(dummy_size * 0.3)) # Scale warm-up size dynamically
                                 measure_size = dummy_size - warm_size
                                 
                                 warm_data = b''
