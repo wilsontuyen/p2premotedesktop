@@ -3482,6 +3482,8 @@ def client_receiver_thread(sock, password):
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
                     pass
+                continue
+
 
             import io
             try:
@@ -3498,9 +3500,9 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"[Client] Lỗi giải mã ảnh Pillow: {ie}\n")
+                with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Lỗi giải mã ảnh Pillow: {ie}\n")
         except Exception as e:
-            with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"[Client] Receiver Error: {e}\n")
+            with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
             client_running = False
             break
 
@@ -5491,7 +5493,11 @@ class UnifiedApp(tk.Tk):
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW, width=420)
+        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(canvas_frame, width=e.width)
+        )
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=10)
@@ -5601,35 +5607,27 @@ class UnifiedApp(tk.Tk):
                 id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor=tk.W)
                 id_lbl.pack(fill=tk.X, pady=(2, 0))
 
-                actions_frame = tk.Frame(card, bg=self.bg_color)
-                actions_frame.pack(side=tk.RIGHT, fill=tk.Y)
+                # Create context menu
+                context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                context_menu.add_command(label="Kết nối", command=lambda c=comp: connect_computer(c))
+                context_menu.add_separator()
+                context_menu.add_command(label="Thay đổi thông tin", command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
+                context_menu.add_command(label="Xóa máy tính", command=lambda c=comp: delete_computer(c))
 
-                # Connect Button
-                connect_btn = tk.Button(
-                    actions_frame, text="Kết nối", font=("Segoe UI", 8, "bold"),
-                    fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
-                    relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
-                    command=lambda c=comp: connect_computer(c)
-                )
-                connect_btn.pack(side=tk.LEFT, padx=3)
+                def show_context_menu(event, menu=context_menu):
+                    try:
+                        menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        menu.grab_release()
 
-                # Edit Button
-                edit_btn = tk.Button(
-                    actions_frame, text="Sửa", font=("Segoe UI", 8, "bold"),
-                    fg=self.text_white, bg="#F39C12", activebackground="#D35400",
-                    relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
-                    command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list)
-                )
-                edit_btn.pack(side=tk.LEFT, padx=3)
-
-                # Delete Button
-                delete_btn = tk.Button(
-                    actions_frame, text="Xóa", font=("Segoe UI", 8, "bold"),
-                    fg=self.text_white, bg="#E05252", activebackground="#C0392B",
-                    relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
-                    command=lambda c=comp: delete_computer(c)
-                )
-                delete_btn.pack(side=tk.LEFT, padx=3)
+                for w in [card, info_frame, title_frame, dot_lbl, name_lbl, id_lbl]:
+                    w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
+                    w.bind("<Button-3>", show_context_menu)
+                    
+                    try:
+                        w.config(cursor="hand2")
+                    except Exception:
+                        pass
 
                 # Register the dot widget and dispatch status check
                 clean_id = comp["id"].replace(" ", "")
@@ -6687,16 +6685,18 @@ class UnifiedApp(tk.Tk):
         clean_id = partner_id.replace(" ", "")
         if clean_id in self.status_dots_widgets:
             widgets = self.status_dots_widgets[clean_id]
+            status_changed = False
             for dot_widget in widgets:
                 try:
                     if dot_widget.winfo_exists():
-                        if is_online:
-                            dot_widget.config(fg="#00F5D4")  # Xanh ngọc (Cyan / Turquoise)
-                        else:
-                            dot_widget.config(fg="#E05252")  # Đỏ (Crimson / Coral Red)
+                        current_color = dot_widget.cget("fg")
+                        new_color = "#00F5D4" if is_online else "#E05252"
+                        if current_color != new_color:
+                            dot_widget.config(fg=new_color)
+                            status_changed = True
                 except Exception:
                     pass
-            if hasattr(self, '_reorder_saved_computers_func'):
+            if status_changed and hasattr(self, '_reorder_saved_computers_func'):
                 self.after(50, self._reorder_saved_computers_func)
     def show_custom_info(self, title, message, parent=None):
         if getattr(self, 'is_headless', False):
@@ -7191,7 +7191,9 @@ class UnifiedApp(tk.Tk):
         scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
 
         scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        
+        canvas_win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_win_id, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -8424,7 +8426,7 @@ class UnifiedApp(tk.Tk):
                 r, _, _ = select.select([conn], [], [], 2.0)
                 if not r:
                     self.host_release_all_modifiers()
-                    if time.time() - last_recv_time > 10.0:
+                    if time.time() - last_recv_time > 60.0:
                         print("[Host] Connection ping timeout. Disconnecting client.")
                         client_state["running"] = False
                         break
@@ -8473,18 +8475,22 @@ class UnifiedApp(tk.Tk):
                     print("[Host] Input Receiver got empty message (Client disconnected).")
                     break
                 last_recv_time = time.time()
-                event = json.loads(msg.decode('utf-8'))
-                evt_type = event.get("type", "")
-                if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
-                    clipboard_sync_manager.handle_received_packet(event)
-                else:
-                    self.host_handle_event(event, conn, password)
-                    if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
-                        client_state["force_update"] = True
-                        if "wake_event" in client_state:
-                            client_state["wake_event"].set()
+                try:
+                    event = json.loads(msg.decode('utf-8'))
+                    evt_type = event.get("type", "")
+                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
+                        clipboard_sync_manager.handle_received_packet(event)
+                    else:
+                        self.host_handle_event(event, conn, password)
+                        if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
+                            client_state["force_update"] = True
+                            if "wake_event" in client_state:
+                                client_state["wake_event"].set()
+                except Exception as parse_err:
+                    print(f"[Host] Packet Handle Error (Ignoring): {parse_err}")
+                    continue
             except Exception as e:
-                print(f"[Host] Input Receiver Error: {e}")
+                print(f"[Host] Input Receiver Critical Error: {e}")
                 break
         print("[Host] Input Receiver Thread Stopped.")
         self.host_release_all_modifiers()
@@ -8946,7 +8952,11 @@ class UnifiedApp(tk.Tk):
                 handshake = json.dumps({
                     "password": partner_pass,
                     "client_id": self.my_id_clean,
-                    "computer_name": platform.node()
+                    "computer_name": platform.node(),
+                    "real_width": 1920,
+                    "real_height": 1080,
+                    "is_mobile": False,
+                    "zalo_phone": ""
                 }).encode('utf-8')
                 send_msg(sock, handshake, partner_pass)
                 
