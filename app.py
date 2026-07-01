@@ -440,15 +440,29 @@ def send_input_keyboard_event(key_name, pressed):
                 0x21, 0x22,             # PageUp, PageDown
                 0x90,                   # Numlock
                 0x2F,                   # Print screen
-                0x12, 0xA1,             # Alt_R
-                0x11, 0xA3,             # Ctrl_R
+                0xA5,                   # VK_RMENU (Right Alt)
+                0xA3,                   # VK_RCONTROL (Right Ctrl)
                 0x5B, 0x5C,             # LWIN, RWIN
                 0x5D                    # VK_APPS (Menu/Application key)
             ]
             if vk in extended_vks:
                 flags |= KEYEVENTF_EXTENDEDKEY
                 
-            inp.union.ki = KEYBDINPUT(vk, scan, flags, 0, None)
+            # Map left/right modifiers to their generic VK equivalents.
+            # This is critical for the Windows Login Screen (Secure Desktop),
+            # which often ignores directional modifiers (like VK_LSHIFT = 0xA0)
+            # when injected via SendInput.
+            generic_vks = {
+                0xA0: 0x10, # VK_LSHIFT -> VK_SHIFT
+                0xA1: 0x10, # VK_RSHIFT -> VK_SHIFT
+                0xA2: 0x11, # VK_LCONTROL -> VK_CONTROL
+                0xA3: 0x11, # VK_RCONTROL -> VK_CONTROL
+                0xA4: 0x12, # VK_LMENU -> VK_MENU
+                0xA5: 0x12, # VK_RMENU -> VK_MENU
+            }
+            inject_vk = generic_vks.get(vk, vk)
+                
+            inp.union.ki = KEYBDINPUT(inject_vk, scan, flags, 0, None)
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         elif len(key_name) == 1 and not is_modifier:
             # Fallback: Use KEYEVENTF_UNICODE only for characters without a VK code
