@@ -5431,6 +5431,10 @@ class UnifiedApp(tk.Tk):
         self.my_pass_label.config(text=self.my_password)
         
     def show_saved_computers_dialog(self):
+        if not hasattr(self, 'collapsed_groups'):
+            self.collapsed_groups = set()
+        self.drag_card_id = None
+        
         if hasattr(self, 'saved_computers_dialog') and self.saved_computers_dialog.winfo_exists():
             self.saved_computers_dialog.lift()
             self.saved_computers_dialog.focus_force()
@@ -5554,11 +5558,132 @@ class UnifiedApp(tk.Tk):
                 save_computers(computers)
                 refresh_list()
 
+        self.auto_scroll_job = None
+
+        def check_auto_scroll():
+            drag_id = getattr(self, 'drag_card_id', None)
+            if not drag_id:
+                self.auto_scroll_job = None
+                return
+
+            try:
+                x, y = canvas.winfo_pointerxy()
+                cy = canvas.winfo_rooty()
+                ch = canvas.winfo_height()
+                rel_y = y - cy
+                
+                if rel_y < 40:
+                    canvas.yview_scroll(-1, "units")
+                elif rel_y > ch - 40:
+                    canvas.yview_scroll(1, "units")
+                    
+                self.auto_scroll_job = dialog.after(50, check_auto_scroll)
+            except Exception:
+                self.auto_scroll_job = None
+
+        def on_drag_motion(event):
+            drag_id = getattr(self, 'drag_card_id', None)
+            if drag_id and not getattr(self, 'auto_scroll_job', None):
+                check_auto_scroll()
+
+        def on_drop(event):
+            if getattr(self, 'auto_scroll_job', None):
+                try:
+                    dialog.after_cancel(self.auto_scroll_job)
+                except Exception:
+                    pass
+                self.auto_scroll_job = None
+                
+            drag_id = getattr(self, 'drag_card_id', None)
+            if not drag_id: return
+            self.drag_card_id = None
+            
+            x, y = event.x_root, event.y_root
+            target_widget = dialog.winfo_containing(x, y)
+            if not target_widget: return
+            
+            target_group = None
+            w = target_widget
+            while w:
+                if getattr(w, 'is_group_header', False):
+                    target_group = w.group_name
+                    break
+                if hasattr(w, 'comp_group'):
+                    target_group = w.comp_group
+                    break
+                if str(w) == str(dialog):
+                    break
+                parent_str = w.winfo_parent()
+                if not parent_str: break
+                w = w._nametowidget(parent_str)
+                
+            if target_group is not None:
+                comps = load_computers()
+                updated = False
+                for c in comps:
+                    if c["id"].replace(" ", "") == drag_id:
+                        if c.get("group", "").strip() != target_group:
+                            c["group"] = target_group
+                            updated = True
+                        break
+                if updated:
+                    save_computers(comps)
+                    refresh_list()
+
+        def rename_group_dialog(old_group_name):
+            rn_win = tk.Toplevel(dialog)
+            rn_win.withdraw()
+            rn_win.title("Đổi tên nhóm")
+            rn_win.resizable(False, False)
+            rn_win.configure(bg=self.bg_color)
+            rn_win.transient(dialog)
+            rn_win.grab_set()
+
+            rn_win.update_idletasks()
+            rw, rh = 300, 160
+            rx = dialog.winfo_x() + (dialog.winfo_width() - rw) // 2
+            ry = dialog.winfo_y() + (dialog.winfo_height() - rh) // 2
+            rn_win.geometry(f"{rw}x{rh}+{rx}+{ry}")
+            rn_win.deiconify()
+
+            lbl = tk.Label(rn_win, text=f"Nhập tên mới cho nhóm:\n'{old_group_name if old_group_name else 'Chưa phân nhóm'}'", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
+            lbl.pack(pady=(15, 10))
+
+            entry_var = tk.StringVar(value=old_group_name)
+            entry = tk.Entry(rn_win, textvariable=entry_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+            entry.pack(fill=tk.X, padx=20, pady=(0, 15))
+            entry.focus()
+            entry.select_range(0, tk.END)
+
+            def do_rename():
+                new_name = entry_var.get().strip()
+                if new_name != old_group_name:
+                    comps = load_computers()
+                    for c in comps:
+                        if c.get("group", "").strip() == old_group_name:
+                            c["group"] = new_name
+                    save_computers(comps)
+                    if old_group_name in getattr(self, 'collapsed_groups', set()):
+                        self.collapsed_groups.remove(old_group_name)
+                        self.collapsed_groups.add(new_name)
+                    refresh_list()
+                rn_win.destroy()
+
+            btn_frame = tk.Frame(rn_win, bg=self.bg_color)
+            btn_frame.pack(fill=tk.X, padx=20)
+            
+            btn_save = tk.Button(btn_frame, text="Lưu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=do_rename)
+            btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            
+            btn_cancel = tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35", relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=rn_win.destroy)
+            btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
         def reorder_list():
             if not scrollable_frame.winfo_exists(): return
-            cards = scrollable_frame.winfo_children()
-            cards = [c for c in cards if hasattr(c, 'comp_id')]
-            if not cards: return
+            children = scrollable_frame.winfo_children()
+            headers = [c for c in children if getattr(c, 'is_group_header', False)]
+            cards = [c for c in children if hasattr(c, 'comp_id')]
+            if not cards and not headers: return
             
             def get_is_online(c):
                 if c.comp_id in self.status_dots_widgets:
@@ -5567,11 +5692,32 @@ class UnifiedApp(tk.Tk):
                         return widgets[0].cget("fg") == "#00F5D4"
                 return False
 
-            cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
-            for c in cards:
+            for c in children:
                 c.pack_forget()
+
+            # Group cards
+            grouped_cards = {}
             for c in cards:
-                c.pack(fill=tk.X, pady=(0, 6), padx=(0, 10))
+                grp = getattr(c, 'comp_group', '')
+                if grp not in grouped_cards:
+                    grouped_cards[grp] = []
+                grouped_cards[grp].append(c)
+
+            def group_sort_key(g):
+                return (1, g) if not g else (0, g.lower())
+            
+            sorted_groups = sorted(grouped_cards.keys(), key=group_sort_key)
+            header_map = {h.group_name: h for h in headers}
+
+            for grp in sorted_groups:
+                if grp in header_map:
+                    header_map[grp].pack(fill=tk.X, pady=(15, 5), padx=15)
+                
+                if grp not in self.collapsed_groups:
+                    grp_cards = grouped_cards.get(grp, [])
+                    grp_cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
+                    for c in grp_cards:
+                        c.pack(fill=tk.X, pady=0, padx=(0, 10))
 
         self._reorder_saved_computers_func = reorder_list
 
@@ -5592,10 +5738,7 @@ class UnifiedApp(tk.Tk):
 
             computers = load_computers()
             
-            # 1. Sắp xếp danh sách (Online lên trên, sau đó theo tên)
-            computers.sort(key=lambda x: (not current_online.get(x["id"].replace(" ", ""), False), x["name"].lower()))
-            
-            # 2. Lọc theo từ khóa tìm kiếm (tên hoặc ID)
+            # Filter
             if query:
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
 
@@ -5605,31 +5748,72 @@ class UnifiedApp(tk.Tk):
                 lbl_empty.pack(pady=40, fill=tk.X, expand=True)
                 return
 
+            unique_groups = set()
+            for c in computers:
+                unique_groups.add(c.get("group", "").strip())
+            
+            for grp in unique_groups:
+                grp_display = grp if grp else "Chưa phân nhóm"
+                icon = "▶" if grp in self.collapsed_groups else "▼"
+                header_text = f"{icon} {grp_display.upper()}"
+                
+                header = tk.Label(scrollable_frame, text=header_text, font=("Segoe UI", 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, cursor="hand2")
+                header.is_group_header = True
+                header.group_name = grp
+                
+                def toggle_group(event, g=grp):
+                    if g in self.collapsed_groups:
+                        self.collapsed_groups.remove(g)
+                    else:
+                        self.collapsed_groups.add(g)
+                    new_icon = "▶" if g in self.collapsed_groups else "▼"
+                    event.widget.config(text=f"{new_icon} {(g if g else 'Chưa phân nhóm').upper()}")
+                    reorder_list()
+                    
+                header.bind("<Button-1>", toggle_group)
+                header.bind("<ButtonRelease-1>", on_drop)
+
+                grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                grp_context_menu.add_command(label="Đổi tên nhóm", command=lambda g=grp: rename_group_dialog(g))
+
+                def show_grp_context(event, menu=grp_context_menu):
+                    try:
+                        menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        menu.grab_release()
+
+                header.bind("<Button-3>", show_grp_context)
+
             for comp in computers:
-                # Card for each saved computer
-                card = tk.Frame(scrollable_frame, bg=self.bg_color, pady=8, padx=12, highlightthickness=1, highlightbackground=self.divider_color)
+                card = tk.Frame(scrollable_frame, bg=self.card_color)
                 card.comp_id = comp["id"].replace(" ", "")
                 card.comp_name = comp["name"]
-                card.pack(fill=tk.X, pady=(0, 6), padx=(0, 10))
+                card.comp_group = comp.get("group", "").strip()
 
-                info_frame = tk.Frame(card, bg=self.bg_color)
+                content_frame = tk.Frame(card, bg=self.card_color, pady=8, padx=12)
+                content_frame.pack(fill=tk.X)
+                
+                separator = tk.Frame(card, bg=self.divider_color, height=2)
+                separator.pack(fill=tk.X, padx=10)
+
+                info_frame = tk.Frame(content_frame, bg=self.card_color)
                 info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-                # Title frame to place the status indicator dot next to the name
-                title_frame = tk.Frame(info_frame, bg=self.bg_color)
+                title_frame = tk.Frame(info_frame, bg=self.card_color)
                 title_frame.pack(fill=tk.X)
 
-                # Status dot: Unicode circle, initially Gray (checking)
-                dot_lbl = tk.Label(title_frame, text="●", font=("Segoe UI", 13, "bold"), fg="#8A8A9A", bg=self.bg_color)
+                clean_id = card.comp_id
+                is_online = current_online.get(clean_id, False)
+                dot_color = "#00F5D4" if is_online else "#8A8A9A"
+                dot_lbl = tk.Label(title_frame, text="●", font=("Segoe UI", 13, "bold"), fg=dot_color, bg=self.card_color)
                 dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
 
-                name_lbl = tk.Label(title_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color, anchor=tk.W)
+                name_lbl = tk.Label(title_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
                 name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor=tk.W)
+                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
                 id_lbl.pack(fill=tk.X, pady=(2, 0))
 
-                # Create context menu
                 context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
                 context_menu.add_command(label="Kết nối", command=lambda c=comp: connect_computer(c))
                 context_menu.add_separator()
@@ -5641,22 +5825,28 @@ class UnifiedApp(tk.Tk):
                         menu.tk_popup(event.x_root, event.y_root)
                     finally:
                         menu.grab_release()
+                        
+                def start_drag(event, c_id=clean_id):
+                    self.drag_card_id = c_id
 
-                for w in [card, info_frame, title_frame, dot_lbl, name_lbl, id_lbl]:
+                for w in [card, content_frame, separator, info_frame, title_frame, dot_lbl, name_lbl, id_lbl]:
                     w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
                     w.bind("<Button-3>", show_context_menu)
+                    w.bind("<ButtonPress-1>", start_drag)
+                    w.bind("<B1-Motion>", on_drag_motion)
+                    w.bind("<ButtonRelease-1>", on_drop)
                     
                     try:
                         w.config(cursor="hand2")
                     except Exception:
                         pass
 
-                # Register the dot widget and dispatch status check
-                clean_id = comp["id"].replace(" ", "")
                 if clean_id not in self.status_dots_widgets:
                     self.status_dots_widgets[clean_id] = []
                 self.status_dots_widgets[clean_id].append(dot_lbl)
                 self.query_computer_status(clean_id)
+                
+            reorder_list()
 
         # Bottom buttons panel
         bottom_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -5740,7 +5930,7 @@ class UnifiedApp(tk.Tk):
         # Center add window
         add_win.update_idletasks()
         aw = 320
-        ah = 300
+        ah = 360
         ax = parent.winfo_x() + (parent.winfo_width() - aw) // 2
         ay = parent.winfo_y() + (parent.winfo_height() - ah) // 2
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
@@ -5765,9 +5955,14 @@ class UnifiedApp(tk.Tk):
         lbl_comp_pass = tk.Label(add_win, text="Mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
-        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
         if initial_pass:
             entry_comp_pass.insert(0, initial_pass)
+
+        lbl_group = tk.Label(add_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group.pack(anchor=tk.W, padx=20)
+        entry_group = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
 
         def load_computers():
             return self.load_saved_computers()
@@ -5779,6 +5974,7 @@ class UnifiedApp(tk.Tk):
             name = entry_name.get().strip()
             cid = entry_comp_id.get().strip()
             cpass = entry_comp_pass.get().strip()
+            cgroup = entry_group.get().strip()
 
             if not name or not cid or not cpass:
                 self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=add_win)
@@ -5793,7 +5989,8 @@ class UnifiedApp(tk.Tk):
             computers.append({
                 "name": name,
                 "id": cid,
-                "password": cpass
+                "password": cpass,
+                "group": cgroup
             })
             save_computers(computers)
             if on_save:
@@ -5833,7 +6030,7 @@ class UnifiedApp(tk.Tk):
         # Center edit window
         edit_win.update_idletasks()
         ew = 320
-        eh = 300
+        eh = 360
         ex = parent.winfo_x() + (parent.winfo_width() - ew) // 2
         ey = parent.winfo_y() + (parent.winfo_height() - eh) // 2
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
@@ -5858,8 +6055,14 @@ class UnifiedApp(tk.Tk):
         lbl_comp_pass = tk.Label(edit_win, text="Mật khẩu mới:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
-        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_comp_pass.insert(0, item["password"])
+
+        lbl_group = tk.Label(edit_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group.pack(anchor=tk.W, padx=20)
+        entry_group = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_group.insert(0, item.get("group", ""))
 
         def load_computers():
             return self.load_saved_computers()
@@ -5871,6 +6074,7 @@ class UnifiedApp(tk.Tk):
             name = entry_name.get().strip()
             new_id = entry_comp_id.get().strip()
             cpass = entry_comp_pass.get().strip()
+            cgroup = entry_group.get().strip()
 
             if not name or not new_id or not cpass:
                 self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=edit_win)
@@ -5883,6 +6087,7 @@ class UnifiedApp(tk.Tk):
                     c["name"] = name
                     c["id"] = new_id
                     c["password"] = cpass
+                    c["group"] = cgroup
                     updated = True
                     break
             
@@ -5923,16 +6128,19 @@ class UnifiedApp(tk.Tk):
                     name_node = comp_node.find("name")
                     id_node = comp_node.find("id")
                     pass_node = comp_node.find("password")
+                    group_node = comp_node.find("group")
                     
                     name = decrypt_text(name_node.text) if name_node is not None else ""
                     cid = decrypt_text(id_node.text) if id_node is not None else ""
                     cpass = decrypt_text(pass_node.text) if pass_node is not None else ""
+                    cgroup = decrypt_text(group_node.text) if group_node is not None else ""
                     
                     if cid:
                         lst.append({
                             "name": name,
                             "id": cid,
-                            "password": cpass
+                            "password": cpass,
+                            "group": cgroup
                         })
             except Exception as e:
                 print(f"[Config] Lỗi tải XML: {e}")
@@ -5970,6 +6178,9 @@ class UnifiedApp(tk.Tk):
                 
                 pass_node = ET.SubElement(comp_node, "password")
                 pass_node.text = encrypt_text(comp["password"])
+                
+                group_node = ET.SubElement(comp_node, "group")
+                group_node.text = encrypt_text(comp.get("group", ""))
                 
             if hasattr(ET, "indent"):
                 ET.indent(root, space="  ")
