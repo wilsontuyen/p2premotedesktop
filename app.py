@@ -318,6 +318,28 @@ vk_map = {
     'f10': 0x79,        # VK_F10
     'f11': 0x7A,        # VK_F11
     'f12': 0x7B,        # VK_F12
+    '`': 0xC0,          # VK_OEM_3
+    '~': 0xC0,          # VK_OEM_3
+    '-': 0xBD,          # VK_OEM_MINUS
+    '_': 0xBD,          # VK_OEM_MINUS
+    '=': 0xBB,          # VK_OEM_PLUS
+    '+': 0xBB,          # VK_OEM_PLUS
+    '[': 0xDB,          # VK_OEM_4
+    '{': 0xDB,          # VK_OEM_4
+    ']': 0xDD,          # VK_OEM_6
+    '}': 0xDD,          # VK_OEM_6
+    '\\': 0xDC,         # VK_OEM_5
+    '|': 0xDC,          # VK_OEM_5
+    ';': 0xBA,          # VK_OEM_1
+    ':': 0xBA,          # VK_OEM_1
+    "'": 0xDE,          # VK_OEM_7
+    '"': 0xDE,          # VK_OEM_7
+    ',': 0xBC,          # VK_OEM_COMMA
+    '<': 0xBC,          # VK_OEM_COMMA
+    '.': 0xBE,          # VK_OEM_PERIOD
+    '>': 0xBE,          # VK_OEM_PERIOD
+    '/': 0xBF,          # VK_OEM_2
+    '?': 0xBF,          # VK_OEM_2
     'left meta': 0x5B,  # VK_LWIN
     'right meta': 0x5C, # VK_RWIN
     'left windows': 0x5B,
