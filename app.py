@@ -5029,6 +5029,10 @@ class UnifiedApp(tk.Tk):
         copy_all_btn = tk.Button(left_panel, text="📋 Sao chép cả ID & Mật khẩu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
+        # Nút gọi Danh sách máy tính đã lưu
+        saved_list_btn = tk.Button(left_panel, text="📁 Danh sách máy tính đã lưu", font=("Segoe UI", 9), fg=self.text_white, bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
+        saved_list_btn.pack(padx=20, fill=tk.X, pady=(8, 0))
+        
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._right_panel = right_panel
