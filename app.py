@@ -4587,6 +4587,33 @@ def set_windows_graphics_effects(enabled=True):
     except Exception as e:
         print(f"[Host] Error setting Windows graphics effects: {e}")
 
+class ToolTip(object):
+    def __init__(self, widget, text='widget info'):
+        self.widget = widget
+        self.text = text
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.close)
+        self.tw = None
+
+    def enter(self, event=None):
+        x = y = 0
+        x, y, cx, cy = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        # creates a toplevel window
+        self.tw = tk.Toplevel(self.widget)
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry("+%d+%d" % (x, y))
+        label = tk.Label(self.tw, text=self.text, justify='left',
+                         background='#ffffe0', relief='solid', borderwidth=1,
+                         font=("Segoe UI", "8", "normal"), padx=2, pady=1)
+        label.pack(ipadx=1)
+
+    def close(self, event=None):
+        if self.tw:
+            self.tw.destroy()
+            self.tw = None
+
 # Unified Application Class
 class UnifiedApp(tk.Tk):
     def __init__(self):
@@ -5011,6 +5038,7 @@ class UnifiedApp(tk.Tk):
         
         copy_id_btn = tk.Button(id_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        ToolTip(copy_id_btn, "Sao chép")
         
         lbl_pass = tk.Label(left_panel, text="Mật khẩu kết nối:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_pass.pack(anchor=tk.W, padx=20)
@@ -5024,9 +5052,11 @@ class UnifiedApp(tk.Tk):
         
         copy_pass_btn = tk.Button(pass_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        ToolTip(copy_pass_btn, "Sao chép")
         
         refresh_btn = tk.Button(pass_frame, text="↻", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=self.refresh_password)
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        ToolTip(refresh_btn, "Đổi mật khẩu")
 
         # Nhãn hiển thị trạng thái mật khẩu cố định
         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=("Segoe UI", 8, "italic"), fg="#2ECC71", bg=self.card_color)
@@ -5077,6 +5107,7 @@ class UnifiedApp(tk.Tk):
         # Add button with a blue "+"
         self.add_partner_btn = tk.Button(btn_container, text="➕", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
+        ToolTip(self.add_partner_btn, "Thêm máy tính")
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
         lan_btn = tk.Button(right_panel, text="📡 Quét mạng LAN (LAN Only)", font=("Segoe UI", 9), fg=self.text_white, bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
