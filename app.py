@@ -4079,6 +4079,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         screen.fill((255, 240, 245))
                     elif pygame_theme == "crystal":
                         screen.fill((224, 247, 250))
+                    elif pygame_theme == "orange":
+                        screen.fill((255, 243, 224))
+                    elif pygame_theme == "red":
+                        screen.fill((255, 235, 238))
                     else:
                         screen.fill((30, 30, 30))
                     
@@ -4119,6 +4123,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         cad_bg_color = (38, 198, 218) if cad_is_hover else (0, 188, 212)
                         cad_text_color = (255, 255, 255)
                         cad_border_color = (128, 222, 234)
+                    elif pygame_theme == "orange":
+                        cad_bg_color = (255, 183, 77) if cad_is_hover else (255, 152, 0)
+                        cad_text_color = (255, 255, 255)
+                        cad_border_color = (255, 167, 38)
+                    elif pygame_theme == "red":
+                        cad_bg_color = (239, 154, 154) if cad_is_hover else (244, 67, 54)
+                        cad_text_color = (255, 255, 255)
+                        cad_border_color = (229, 57, 53)
                     else:
                         cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
                         cad_text_color = (255, 255, 255)
@@ -4134,7 +4146,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     # Record button (Red circle)
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
                     rec_bg_color = (80, 80, 80) if rec_is_hover else (50, 50, 50)
-                    if pygame_theme == "light" or pygame_theme == "crystal":
+                    if pygame_theme in ["light", "crystal", "orange", "red"]:
                         rec_bg_color = (220, 220, 235) if rec_is_hover else (245, 245, 255)
                     
                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
@@ -4720,7 +4732,7 @@ class UnifiedApp(tk.Tk):
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
                     saved_theme = config.get("theme")
-                    if saved_theme in ["light", "dark", "gray", "pink", "crystal", "custom"]:
+                    if saved_theme in ["light", "dark", "gray", "pink", "crystal", "orange", "red", "custom"]:
                         self.current_theme.set(saved_theme)
             except Exception as e:
                 pass
@@ -4989,6 +5001,8 @@ class UnifiedApp(tk.Tk):
         theme_menu.add_radiobutton(label="Xám", variable=self.current_theme, value="gray", command=self.change_theme)
         theme_menu.add_radiobutton(label="Hồng", variable=self.current_theme, value="pink", command=self.change_theme)
         theme_menu.add_radiobutton(label="Pha lê", variable=self.current_theme, value="crystal", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Cam", variable=self.current_theme, value="orange", command=self.change_theme)
+        theme_menu.add_radiobutton(label="Đỏ", variable=self.current_theme, value="red", command=self.change_theme)
         theme_menu.add_separator()
         theme_menu.add_radiobutton(label="Tùy chỉnh", variable=self.current_theme, value="custom", command=self.change_theme)
         options_menu.add_cascade(label="Giao diện", menu=theme_menu)
@@ -5068,8 +5082,8 @@ class UnifiedApp(tk.Tk):
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = tk.Button(left_panel, text="📁 Danh sách máy tính đã lưu", font=("Segoe UI", 9), fg=self.text_white, bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
-        saved_list_btn.pack(padx=20, fill=tk.X, pady=(8, 0))
+        saved_list_btn = tk.Button(left_panel, text="📁 Danh sách máy tính đã lưu", font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
+        saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
@@ -5110,8 +5124,8 @@ class UnifiedApp(tk.Tk):
         ToolTip(self.add_partner_btn, "Thêm máy tính")
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = tk.Button(right_panel, text="📡 Quét mạng LAN (LAN Only)", font=("Segoe UI", 9), fg=self.text_white, bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
-        lan_btn.pack(padx=20, fill=tk.X, pady=(8, 0))
+        lan_btn = tk.Button(right_panel, text="📡 Quét mạng LAN (LAN Only)", font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
+        lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
@@ -5313,6 +5327,34 @@ class UnifiedApp(tk.Tk):
                 "divider_color": "#80DEEA",
                 "btn_cancel_bg": "#80DEEA",
                 "btn_cancel_fg": "#006064"
+            }
+        elif theme_name == "orange":
+            return {
+                "bg_color": "#FFF3E0",
+                "card_color": "#FFE0B2",
+                "text_white": "#4E342E",
+                "text_gray": "#5D4037",
+                "btn_color": "#FF9800",
+                "btn_hover": "#F57C00",
+                "entry_bg": "#FFF3E0",
+                "entry_fg": "#3E2723",
+                "divider_color": "#FFB74D",
+                "btn_cancel_bg": "#FFB74D",
+                "btn_cancel_fg": "#4E342E"
+            }
+        elif theme_name == "red":
+            return {
+                "bg_color": "#FFEBEE",
+                "card_color": "#FFCDD2",
+                "text_white": "#B71C1C",
+                "text_gray": "#D32F2F",
+                "btn_color": "#F44336",
+                "btn_hover": "#E53935",
+                "entry_bg": "#FFEBEE",
+                "entry_fg": "#B71C1C",
+                "divider_color": "#EF9A9A",
+                "btn_cancel_bg": "#EF9A9A",
+                "btn_cancel_fg": "#B71C1C"
             }
 
         elif theme_name == "custom":
