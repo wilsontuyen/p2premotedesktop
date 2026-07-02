@@ -3644,7 +3644,7 @@ def uninstall_keyboard_hook():
         print("[Client] Keyboard hook uninstalled.")
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass=""):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False):
     global client_switching_desktop_countdown
     
     try: log_activity(f"Bắt đầu điều khiển ID {partner_id} ({computer_name})")
@@ -3837,6 +3837,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             was_switching = False
             switching_last_tick = 0
             switching_start_tick = 0
+            drag_start_pos = None
+            drag_start_time = 0
+            drag_path = []
             
             while client_running:
                 frame_counter += 1
@@ -3912,17 +3915,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
                 show_buttons = not is_switching
                 
+                show_cad_button = show_buttons and not is_android
+                
                 total_w = 0
                 if show_buttons:
-                    total_w = min_btn_w + 10 + cad_btn_w + 10 + rec_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
                 if show_buttons:
                     min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
-                    cad_btn_rect = pygame.Rect(start_x + min_btn_w + 10, 0, cad_btn_w, cad_btn_h)
-                    rec_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10, 0, rec_btn_w, rec_btn_h)
-                    close_btn_rect = pygame.Rect(start_x + min_btn_w + 10 + cad_btn_w + 10 + rec_btn_w + 10, 0, close_btn_w, close_btn_h)
+                    current_x = start_x + min_btn_w + 10
+                    
+                    if show_cad_button:
+                        cad_btn_rect = pygame.Rect(current_x, 0, cad_btn_w, cad_btn_h)
+                        current_x += cad_btn_w + 10
+                    else:
+                        cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                        
+                    rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)
+                    current_x += rec_btn_w + 10
+                    close_btn_rect = pygame.Rect(current_x, 0, close_btn_w, close_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
@@ -3953,7 +3966,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
                         host_y = int(my_pos * (host_h / window_h))
-                        send_event({"type": "mouse_move", "x": host_x, "y": host_y})
+                        
+                        if is_android and drag_start_pos is not None:
+                            # Record drag path points for Android swipes/patterns
+                            if not drag_path:
+                                drag_path.append(drag_start_pos)
+                            
+                            last_pt = drag_path[-1]
+                            # Record point if it moved at least 5 pixels (squared distance > 25) to avoid excessive points
+                            if (host_x - last_pt[0])**2 + (host_y - last_pt[1])**2 > 25:
+                                drag_path.append((host_x, host_y))
+                        else:
+                            send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
                         if show_buttons and min_btn_rect.collidepoint(event.pos):
@@ -3986,6 +4010,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     
                                     fourcc = _cv2.VideoWriter_fourcc(*'mp4v')
                                     state['writer'] = _cv2.VideoWriter(filepath, fourcc, 20.0, (host_w, host_h))
+                                    state['size'] = (host_w, host_h)
                                 else:
                                     print("[Client] Stopped recording viewer.")
                                     if state['writer']:
@@ -4001,11 +4026,67 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 pygame.event.post(pygame.event.Event(pygame.QUIT))
                             continue
                         if event.button in button_map:
-                            send_event({
-                                "type": "mouse_click",
-                                "button": button_map[event.button],
-                                "pressed": event.type == pygame.MOUSEBUTTONDOWN
-                            })
+                            mx_pos, my_pos = event.pos
+                            host_x = int(mx_pos * (host_w / window_w))
+                            host_y = int(my_pos * (host_h / window_h))
+                            
+                            if event.type == pygame.MOUSEBUTTONDOWN:
+                                drag_start_pos = (host_x, host_y)
+                                drag_start_time = time.time()
+                                send_event({
+                                    "type": "mouse_click",
+                                    "button": button_map[event.button],
+                                    "pressed": True,
+                                    "x": host_x,
+                                    "y": host_y
+                                })
+                            else: # MOUSEBUTTONUP
+                                if drag_start_pos and is_android:
+                                    dx = host_x - drag_start_pos[0]
+                                    dy = host_y - drag_start_pos[1]
+                                    if (dx*dx + dy*dy) > 400 or len(drag_path) > 3: # distance > 20 pixels or multi-point path
+                                        duration = int((time.time() - drag_start_time) * 1000)
+                                        duration = max(200, min(duration, 3000))
+                                        
+                                        if drag_path and drag_path[-1] != (host_x, host_y):
+                                            drag_path.append((host_x, host_y))
+                                            
+                                        if len(drag_path) > 3:
+                                            # Subsample if too many points to avoid massive payloads
+                                            if len(drag_path) > 50:
+                                                step = len(drag_path) / 50.0
+                                                subsampled_path = [drag_path[int(i*step)] for i in range(50)]
+                                                if subsampled_path[-1] != drag_path[-1]:
+                                                    subsampled_path.append(drag_path[-1])
+                                                drag_path = subsampled_path
+                                                
+                                            send_event({
+                                                "type": "mouse_swipe_path",
+                                                "path": drag_path,
+                                                "duration": duration
+                                            })
+                                        else:
+                                            send_event({
+                                                "type": "mouse_swipe",
+                                                "x1": drag_start_pos[0],
+                                                "y1": drag_start_pos[1],
+                                                "x2": host_x,
+                                                "y2": host_y,
+                                                "duration": duration
+                                            })
+                                        drag_start_pos = None
+                                        drag_path = []
+                                        continue
+                                        
+                                send_event({
+                                    "type": "mouse_click",
+                                    "button": button_map[event.button],
+                                    "pressed": False,
+                                    "x": host_x,
+                                    "y": host_y
+                                })
+                                drag_start_pos = None
+                                drag_path = []
                             
                     elif event.type == pygame.MOUSEWHEEL:
                         send_event({"type": "mouse_scroll", "dx": event.x, "dy": event.y})
@@ -4015,15 +4096,47 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         
                         char_to_send = key_name
                         if event.type == pygame.KEYDOWN:
-                            # For a-z and 0-9, always send raw key_name (not event.unicode)
-                            # so host-side Vietnamese IME (Unikey) can compose characters.
-                            # Using event.unicode would send client-IME-processed characters,
-                            # bypassing the host-side Unikey entirely.
-                            if len(key_name) == 1 and (key_name.isalpha() or key_name.isdigit()):
-                                char_to_send = key_name  # Raw key, let host IME handle it
-                            elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
-                                if key_name not in ['space', 'delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
+                            if is_android:
+                                # Handle Ctrl+V (Paste) directly by fetching PC clipboard and sending paste_text
+                                if event.key == pygame.K_v and (pygame.key.get_mods() & pygame.KMOD_CTRL):
+                                    try:
+                                        clip_text = get_clipboard_text()
+                                        if clip_text:
+                                            send_event({
+                                                "type": "paste_text",
+                                                "text": clip_text
+                                            })
+                                    except Exception as e:
+                                        print(f"[Client] Lỗi paste Ctrl+V: {e}")
+                                    continue
+                                    
+                                # For Android, we inject characters directly into text fields using Accessibility.
+                                # Therefore, we MUST use event.unicode to capture Shift modifications (e.g. 'A' instead of 'a').
+                                # We also map special keys to their string equivalents.
+                                if key_name == "space":
+                                    char_to_send = " "
+                                elif key_name == "tab":
+                                    char_to_send = "\t"
+                                elif key_name == "return" or key_name == "enter":
+                                    char_to_send = "enter" # handled by Android handleKey
+                                elif key_name == "backspace":
+                                    char_to_send = "backspace"
+                                elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) > 0 and ord(event.unicode[0]) >= 32:
                                     char_to_send = event.unicode
+                                else:
+                                    if key_name in ["escape", "home", "menu", "volume up", "volume down"]:
+                                        char_to_send = key_name
+                                    else:
+                                        active_unicode_map[event.key] = ""
+                                        continue
+                            else:
+                                # For Windows hosts, send raw key_name for letters/digits so host IME can compose
+                                if len(key_name) == 1 and (key_name.isalpha() or key_name.isdigit()):
+                                    char_to_send = key_name  # Raw key, let host IME handle it
+                                elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
+                                    if key_name not in ['space', 'delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
+                                        char_to_send = event.unicode
+                            
                             active_unicode_map[event.key] = char_to_send
                         else:
                             char_to_send = active_unicode_map.get(event.key, key_name)
@@ -4053,6 +4166,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             import numpy as _np
                             frame_arr = _np.array(frame_to_draw)
                             bgr_frame = _cv2.cvtColor(frame_arr, _cv2.COLOR_RGB2BGR)
+                            
+                            record_size = state.get('size', (host_w, host_h))
+                            if bgr_frame.shape[1] != record_size[0] or bgr_frame.shape[0] != record_size[1]:
+                                bgr_frame = _cv2.resize(bgr_frame, record_size)
                             
                             # Draw beautiful anti-aliased mouse cursor overlay for recording
                             mx, my = pygame.mouse.get_pos()
@@ -4106,42 +4223,52 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     min_text_rect.y -= 2 # Adjust slightly up to center visually
                     screen.blit(min_text_surf, min_text_rect)
 
-                    # CAD button
+                    # Extract common border color for buttons
                     if pygame_theme == "light":
-                        cad_bg_color = (220, 220, 235) if cad_is_hover else (245, 245, 255)
-                        cad_text_color = (40, 40, 50)
-                        cad_border_color = (0, 173, 181)
+                        btn_border_color = (0, 173, 181)
                     elif pygame_theme == "gray":
-                        cad_bg_color = (99, 106, 115) if cad_is_hover else (82, 89, 98)
-                        cad_text_color = (240, 240, 240)
-                        cad_border_color = (0, 173, 181)
+                        btn_border_color = (0, 173, 181)
                     elif pygame_theme == "pink":
-                        cad_bg_color = (255, 105, 180) if cad_is_hover else (255, 182, 193)
-                        cad_text_color = (255, 255, 255)
-                        cad_border_color = (255, 105, 180)
+                        btn_border_color = (255, 105, 180)
                     elif pygame_theme == "crystal":
-                        cad_bg_color = (38, 198, 218) if cad_is_hover else (0, 188, 212)
-                        cad_text_color = (255, 255, 255)
-                        cad_border_color = (128, 222, 234)
+                        btn_border_color = (128, 222, 234)
                     elif pygame_theme == "orange":
-                        cad_bg_color = (255, 183, 77) if cad_is_hover else (255, 152, 0)
-                        cad_text_color = (255, 255, 255)
-                        cad_border_color = (255, 167, 38)
+                        btn_border_color = (255, 167, 38)
                     elif pygame_theme == "red":
-                        cad_bg_color = (239, 154, 154) if cad_is_hover else (244, 67, 54)
-                        cad_text_color = (255, 255, 255)
-                        cad_border_color = (229, 57, 53)
+                        btn_border_color = (229, 57, 53)
                     else:
-                        cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
-                        cad_text_color = (255, 255, 255)
-                        cad_border_color = (0, 173, 181)
-                    
-                    pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
-                    pygame.draw.rect(screen, cad_border_color, cad_btn_rect, width=1, border_radius=4)
-                    
-                    cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
-                    cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
-                    screen.blit(cad_text_surf, cad_text_rect)
+                        btn_border_color = (0, 173, 181)
+
+                    # CAD button
+                    if show_cad_button:
+                        if pygame_theme == "light":
+                            cad_bg_color = (220, 220, 235) if cad_is_hover else (245, 245, 255)
+                            cad_text_color = (40, 40, 50)
+                        elif pygame_theme == "gray":
+                            cad_bg_color = (99, 106, 115) if cad_is_hover else (82, 89, 98)
+                            cad_text_color = (240, 240, 240)
+                        elif pygame_theme == "pink":
+                            cad_bg_color = (255, 105, 180) if cad_is_hover else (255, 182, 193)
+                            cad_text_color = (255, 255, 255)
+                        elif pygame_theme == "crystal":
+                            cad_bg_color = (38, 198, 218) if cad_is_hover else (0, 188, 212)
+                            cad_text_color = (255, 255, 255)
+                        elif pygame_theme == "orange":
+                            cad_bg_color = (255, 183, 77) if cad_is_hover else (255, 152, 0)
+                            cad_text_color = (255, 255, 255)
+                        elif pygame_theme == "red":
+                            cad_bg_color = (239, 154, 154) if cad_is_hover else (244, 67, 54)
+                            cad_text_color = (255, 255, 255)
+                        else:
+                            cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
+                            cad_text_color = (255, 255, 255)
+                        
+                        pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
+                        pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
+                        
+                        cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
+                        cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
+                        screen.blit(cad_text_surf, cad_text_rect)
                     
                     # Record button (Red circle)
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
@@ -4150,7 +4277,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         rec_bg_color = (220, 220, 235) if rec_is_hover else (245, 245, 255)
                     
                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
-                    pygame.draw.rect(screen, cad_border_color, rec_btn_rect, width=1, border_radius=4)
+                    pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
                     
                     try:
                         windings_font = pygame.font.SysFont("Wingdings", 14)
@@ -9443,6 +9570,7 @@ class UnifiedApp(tk.Tk):
                 computer_name = res.get("computer_name", "")
                 zalo_phone = res.get("zalo_phone", "")
                 is_domain = res.get("is_domain", False)
+                is_android = res.get("is_android", False)
                 
                 # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
                 self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
@@ -9567,7 +9695,7 @@ class UnifiedApp(tk.Tk):
                         force_close_socket(sock)
                         socket_passwords.pop(sock, None)
                 else:
-                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
+                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android)
             else:
                 msg = res.get("message", "Sai mật khẩu!")
                 self.update_status("Bị từ chối kết nối")
@@ -9597,11 +9725,11 @@ class UnifiedApp(tk.Tk):
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
             
-    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
+    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False):
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass), daemon=True)
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android), daemon=True)
             p.start()
             
             # Track active viewer
