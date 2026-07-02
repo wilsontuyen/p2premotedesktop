@@ -888,19 +888,21 @@ def attempt_upnp_forward(internal_port):
 
 # Get Public IPv6 address
 def get_public_ipv6():
-    try:
-        req = urllib.request.Request("https://api64.ipify.org", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=3) as response:
-            ip = response.read().decode('utf-8').strip()
-            if ":" in ip:
-                return ip
-    except Exception:
-        pass
+    urls = ["https://ipv6.icanhazip.com", "https://v6.ident.me"]
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                ip = response.read().decode('utf-8').strip()
+                if ":" in ip:
+                    return ip
+        except Exception:
+            continue
     return None
 
 # Get Public IP address
 def get_public_ip():
-    urls = ["https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"]
+    urls = ["https://checkip.amazonaws.com", "https://icanhazip.com", "https://ifconfig.me/ip"]
     for url in urls:
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -5599,6 +5601,36 @@ class UnifiedApp(tk.Tk):
             drag_id = getattr(self, 'drag_card_id', None)
             if drag_id and not getattr(self, 'auto_scroll_job', None):
                 check_auto_scroll()
+            
+            if drag_id:
+                try:
+                    x, y = event.x_root, event.y_root
+                    target_widget = dialog.winfo_containing(x, y)
+                    target_group = None
+                    if target_widget:
+                        w = target_widget
+                        while w:
+                            if getattr(w, 'is_group_header', False):
+                                target_group = w.group_name
+                                break
+                            if hasattr(w, 'comp_group'):
+                                target_group = w.comp_group
+                                break
+                            if str(w) == str(dialog):
+                                break
+                            parent_str = w.winfo_parent()
+                            if not parent_str: break
+                            w = w._nametowidget(parent_str)
+                    
+                    if scrollable_frame.winfo_exists():
+                        for c in scrollable_frame.winfo_children():
+                            if getattr(c, 'is_group_header', False):
+                                if target_group is not None and c.group_name == target_group:
+                                    c.config(fg=self.btn_color)
+                                else:
+                                    c.config(fg=self.text_gray)
+                except Exception:
+                    pass
 
         def on_drop(event):
             if getattr(self, 'auto_scroll_job', None):
@@ -5607,6 +5639,14 @@ class UnifiedApp(tk.Tk):
                 except Exception:
                     pass
                 self.auto_scroll_job = None
+                
+            try:
+                if scrollable_frame.winfo_exists():
+                    for c in scrollable_frame.winfo_children():
+                        if getattr(c, 'is_group_header', False):
+                            c.config(fg=self.text_gray)
+            except Exception:
+                pass
                 
             drag_id = getattr(self, 'drag_card_id', None)
             if not drag_id: return
@@ -7455,6 +7495,18 @@ class UnifiedApp(tk.Tk):
         status_label.pack(pady=(0, 5))
 
         def connect_to_peer(hwid, peer_info):
+            # Kiểm tra xem máy này đã được lưu chưa
+            saved_comps = self.load_saved_computers()
+            existing_comp = next((c for c in saved_comps if c['id'].replace(" ", "") == hwid.replace(" ", "")), None)
+            
+            # Nếu đã lưu và có mật khẩu, kết nối luôn không cần hỏi
+            if existing_comp and existing_comp.get("password"):
+                self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
+                if hasattr(self, 'connect_btn'):
+                    self.connect_btn.config(state=tk.DISABLED)
+                threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, existing_comp["password"]), daemon=True).start()
+                return
+
             """Mở dialog nhập mật khẩu rồi kết nối trực tiếp qua LAN."""
             pass_dialog = tk.Toplevel(dialog)
             pass_dialog.title(f"Kết nối tới {peer_info['computer_name']}")
@@ -7463,7 +7515,7 @@ class UnifiedApp(tk.Tk):
             pass_dialog.transient(dialog)
             pass_dialog.grab_set()
 
-            pw, ph = 360, 200
+            pw, ph = 360, 230
             px = dialog.winfo_x() + (dialog.winfo_width() - pw) // 2
             py = dialog.winfo_y() + (dialog.winfo_height() - ph) // 2
             pass_dialog.geometry(f"{pw}x{ph}+{px}+{py}")
@@ -7473,22 +7525,47 @@ class UnifiedApp(tk.Tk):
             tk.Label(pass_dialog, text=f"ID: {fmt_id}  •  IP: {peer_info['local_ip']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color).pack(pady=(0, 10))
 
             tk.Label(pass_dialog, text="Nhập mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).pack(anchor=tk.W, padx=30)
+            
             pass_var = tk.StringVar()
             pass_entry = tk.Entry(pass_dialog, textvariable=pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
-            pass_entry.pack(padx=30, fill=tk.X, pady=(3, 15))
+            pass_entry.pack(padx=30, fill=tk.X, pady=(3, 5))
+            
+            save_var = tk.BooleanVar(value=True)
+            save_cb = tk.Checkbutton(pass_dialog, text="Lưu mật khẩu máy tính này", variable=save_var, font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color, selectcolor=self.bg_color, activebackground=self.bg_color, activeforeground=self.text_gray, cursor="hand2")
+            save_cb.pack(anchor=tk.W, padx=25, pady=(0, 10))
+            
             pass_entry.focus()
-
+            
             def do_connect():
                 password = pass_var.get().strip()
                 if not password:
                     self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu!", parent=pass_dialog)
                     return
+                    
+                if save_var.get():
+                    comps = self.load_saved_computers()
+                    comp_idx = next((i for i, c in enumerate(comps) if c['id'].replace(" ", "") == hwid.replace(" ", "")), -1)
+                    if comp_idx >= 0:
+                        comps[comp_idx]["password"] = password
+                        comps[comp_idx]["name"] = peer_info['computer_name']
+                    else:
+                        comps.append({
+                            "name": peer_info['computer_name'],
+                            "id": hwid,
+                            "password": password,
+                            "group": "Mạng LAN"
+                        })
+                    self.save_saved_computers(comps)
+                    if hasattr(self, '_reorder_saved_computers_func'):
+                        self.after(50, self._reorder_saved_computers_func)
+                        
                 pass_dialog.destroy()
                 # Giữ cửa sổ LAN hiển thị theo yêu cầu người dùng
                 # dialog.destroy() 
                 # Kết nối trực tiếp qua LAN
                 self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
-                self.connect_btn.config(state=tk.DISABLED)
+                if hasattr(self, 'connect_btn'):
+                    self.connect_btn.config(state=tk.DISABLED)
                 threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, password), daemon=True).start()
 
             pass_entry.bind("<Return>", lambda e: do_connect())
@@ -7498,6 +7575,7 @@ class UnifiedApp(tk.Tk):
             btn_frame.pack(fill=tk.X, padx=30, pady=(0, 15))
             tk.Button(btn_frame, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
             tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
 
         def refresh_list():
             # Xóa danh sách cũ
