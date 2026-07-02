@@ -739,7 +739,15 @@ def get_hwid():
     # Generate stable 12-digit ID
     twelve_digit_val = (val % 900000000000) + 100000000000
     s = str(twelve_digit_val)
-    return s, f"{s[:3]} {s[3:6]} {s[6:9]} {s[9:]}"
+    
+    # Get clean list of macs
+    macs = []
+    for m in (mac_eth + "," + mac_wifi).split(","):
+        m = m.strip()
+        if m and "FALLBACK" not in m:
+            macs.append(m)
+            
+    return s, f"{s[:3]} {s[3:6]} {s[6:9]} {s[9:]}", ",".join(macs)
 
 # Get Local LAN IP address
 def get_local_ip():
@@ -4713,7 +4721,7 @@ class UnifiedApp(tk.Tk):
                 pass
 
         # Host State Variables
-        self.my_id_clean, self.my_id_formatted = get_hwid()
+        self.my_id_clean, self.my_id_formatted, self.my_macs = get_hwid()
         
         # Check if service (headless agent) is active by checking the mutex
         self.is_service_active = False
@@ -4841,8 +4849,8 @@ class UnifiedApp(tk.Tk):
         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
         
         # LAN Discovery State - Lưu trữ các máy phát hiện được trong mạng LAN
-        # Key: hwid, Value: {computer_name, local_ip, port, last_seen}
-        self.lan_peers = {}
+        # Key: hwid, Value: {computer_name, local_ip, port, last_seen, macs}
+        self.lan_peers = self.load_lan_peers()
         self.lan_peers_lock = threading.Lock()
         
         # Register Trace for Auto-Formatting Partner ID
@@ -6174,6 +6182,26 @@ class UnifiedApp(tk.Tk):
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
+    def load_lan_peers(self):
+        lan_file = "lan_peers.json"
+        if os.path.exists(lan_file):
+            try:
+                with open(lan_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return data
+            except:
+                pass
+        return {}
+
+    def save_lan_peers(self):
+        lan_file = "lan_peers.json"
+        try:
+            with open(lan_file, 'w', encoding='utf-8') as f:
+                with self.lan_peers_lock:
+                    json.dump(self.lan_peers, f, ensure_ascii=False, indent=4)
+        except:
+            pass
+
     def load_saved_computers(self):
         computers_file = "saved_computers.xml"
         import xml.etree.ElementTree as ET
@@ -7339,13 +7367,46 @@ class UnifiedApp(tk.Tk):
         except Exception as e:
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
+    def wake_on_lan(self, mac_str):
+        # mac_str can be multiple MACs separated by comma
+        for m in mac_str.split(','):
+            m = m.strip()
+            if not m: continue
+            try:
+                # Remove common separators
+                mac = m.replace(':', '').replace('-', '').replace('.', '')
+                if len(mac) != 12:
+                    continue
+                data = bytes.fromhex('F' * 12 + mac * 16)
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                try:
+                    sock.sendto(data, ('255.255.255.255', 9))
+                except:
+                    pass
+                # Try subnet broadcasts
+                try:
+                    local_ips = getattr(self, 'local_ip', get_local_ip()).split(',')
+                    for lip in local_ips:
+                        lip = lip.strip()
+                        if lip and not lip.startswith('127.'):
+                            parts = lip.split('.')
+                            if len(parts) == 4:
+                                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                                sock.sendto(data, (subnet_broadcast, 9))
+                except:
+                    pass
+                sock.close()
+                self.update_status(f"Đã gửi Wake-On-Lan tới MAC {m}")
+            except Exception as e:
+                print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
+
     # ==================== LAN DISCOVERY (UDP Broadcast) ====================
     def start_lan_discovery(self):
         """Khởi chạy 2 luồng: beacon broadcaster và beacon listener cho LAN Discovery."""
         threading.Thread(target=self._lan_beacon_sender, daemon=True).start()
         threading.Thread(target=self._lan_beacon_listener, daemon=True).start()
-        threading.Thread(target=self._lan_peer_cleanup, daemon=True).start()
-        print("[LAN Discovery] Started beacon sender, listener and cleanup threads.")
+        print("[LAN Discovery] Started beacon sender and listener threads.")
 
     def _lan_beacon_sender(self):
         """Phát UDP broadcast beacon mỗi LAN_BEACON_INTERVAL giây."""
@@ -7358,6 +7419,7 @@ class UnifiedApp(tk.Tk):
                     "computer_name": platform.node(),
                     "port": BOUND_PORT,
                     "local_ip": getattr(self, 'local_ip', get_local_ip()),
+                    "macs": getattr(self, 'my_macs', "")
                 }).encode('utf-8')
                 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -7417,13 +7479,20 @@ class UnifiedApp(tk.Tk):
                     "computer_name": beacon.get("computer_name", "Unknown"),
                     "local_ip": beacon.get("local_ip", addr[0]),
                     "port": int(beacon.get("port", 12345)),
+                    "macs": beacon.get("macs", ""),
                     "last_seen": time.time(),
                     "source_ip": addr[0],
                 }
                 
                 with self.lan_peers_lock:
-                    is_new = peer_hwid not in self.lan_peers
+                    old_info = self.lan_peers.get(peer_hwid)
+                    is_new = old_info is None
+                    should_save = is_new or old_info.get("local_ip") != peer_info["local_ip"] or old_info.get("macs") != peer_info["macs"]
+                    # Update without erasing history if already saved
                     self.lan_peers[peer_hwid] = peer_info
+                    
+                if should_save:
+                    self.save_lan_peers()
                     
                 if is_new:
                     fmt_id = f"{peer_hwid[:3]} {peer_hwid[3:6]} {peer_hwid[6:9]} {peer_hwid[9:]}" if len(peer_hwid) == 12 else peer_hwid
@@ -7434,19 +7503,6 @@ class UnifiedApp(tk.Tk):
                 if getattr(self, 'running_server', True):
                     print(f"[LAN Discovery] Listener error: {e}")
                 time.sleep(1)
-
-    def _lan_peer_cleanup(self):
-        """Xóa các peer đã offline (không gửi beacon trong LAN_OFFLINE_TIMEOUT giây)."""
-        while getattr(self, 'running_server', True):
-            time.sleep(5)
-            now = time.time()
-            with self.lan_peers_lock:
-                expired = [hwid for hwid, info in self.lan_peers.items() 
-                          if now - info["last_seen"] > LAN_OFFLINE_TIMEOUT]
-                for hwid in expired:
-                    name = self.lan_peers[hwid].get("computer_name", "")
-                    del self.lan_peers[hwid]
-                    print(f"[LAN Discovery] Peer offline: {name} ({hwid})")
 
     def show_lan_computers_dialog(self):
         """Hiển thị dialog danh sách các máy tính phát hiện được trong mạng LAN."""
@@ -7603,8 +7659,14 @@ class UnifiedApp(tk.Tk):
                     dot_color = "#2ECC71" if age < LAN_OFFLINE_TIMEOUT else "#FF4D4D"
                     tk.Label(row, text="●", font=("Segoe UI", 10), fg=dot_color, bg=self.card_color).pack(side=tk.LEFT, padx=(10, 5))
 
-                    # Connect button (Pack first to ensure it's not pushed out by long IP strings)
-                    btn = tk.Button(row, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
+                    # Connect / WOL button
+                    age = time.time() - info["last_seen"]
+                    if age < LAN_OFFLINE_TIMEOUT:
+                        btn = tk.Button(row, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
+                    else:
+                        btn = tk.Button(row, text="Bật nguồn (WOL)", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#D35400", activebackground="#E67E22", relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda m=info.get("macs", ""): self.wake_on_lan(m))
+                        if not info.get("macs"):
+                            btn.config(state=tk.DISABLED, bg="#3A3A4A", disabledforeground="#F39C12")
                     btn.pack(side=tk.RIGHT, padx=10, pady=5)
 
                     # Info
