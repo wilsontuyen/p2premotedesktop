@@ -3483,6 +3483,11 @@ def client_receiver_thread(sock, password):
                 print("[Client] Server closed connection.")
                 client_running = False
                 break
+            
+            # [FIX] Decrypt failure trả về b'' thay vì None — log rõ ràng thay vì fail lặng lẽ
+            if msg == b'':
+                print("[Client] WARNING: Received empty message (decryption may have failed). Skipping.")
+                continue
                 
             global client_last_recv_time
             client_last_recv_time = time.time()
@@ -4156,7 +4161,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 if frame_to_draw is not None:
                     w, h = frame_to_draw.size
                     surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
-                    scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+                    # smoothscale sử dụng bilinear interpolation thay vì nearest-neighbor
+                    # cho chất lượng upscale mượt hơn nhiều (đặc biệt khi xem Android 1080p)
+                    scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
                     screen.blit(scaled_surf, (0, 0))
                     
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
