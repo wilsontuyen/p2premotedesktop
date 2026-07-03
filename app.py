@@ -5644,6 +5644,7 @@ class UnifiedApp(tk.Tk):
 
     def refresh_password(self):
         import string
+        old_password = self.my_password
         ptype = self.pass_type_var.get()
         if ptype == "5 chữ số":
             self.my_password = str(random.randint(10000, 99999))
@@ -5662,6 +5663,8 @@ class UnifiedApp(tk.Tk):
                 print(f"[Host] Saved refreshed session password to {pass_path}")
             except Exception as e:
                 print(f"[Host] Failed to save refreshed session password: {e}")
+                self.my_password = old_password
+                self.show_custom_error("Lỗi", "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!")
                 
         self.my_pass_label.config(text=self.my_password)
         
