@@ -8898,8 +8898,22 @@ class UnifiedApp(tk.Tk):
                             w = int(target_w * dyn_scale)
                             h = int(target_h * dyn_scale)
                             
-                            if cap_w != w or cap_h != h:
-                                pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
+                            # Calculate final dimensions while preserving aspect ratio
+                            cap_ratio = cap_w / cap_h if cap_h > 0 else 1.0
+                            target_ratio = w / h if h > 0 else 1.0
+                            
+                            if cap_ratio > target_ratio:
+                                final_w = w
+                                final_h = int(w / cap_ratio)
+                            else:
+                                final_h = h
+                                final_w = int(h * cap_ratio)
+                                
+                            final_w = max(10, min(final_w, cap_w))
+                            final_h = max(10, min(final_h, cap_h))
+                            
+                            if cap_w != final_w or cap_h != final_h:
+                                pil_img = pil_img.resize((final_w, final_h), Image.Resampling.LANCZOS)
 
                             static_frame = False
                             diff_bbox = None
