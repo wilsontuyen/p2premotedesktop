@@ -4118,10 +4118,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 # For Android, we inject characters directly into text fields using Accessibility.
                                 # Therefore, we MUST use event.unicode to capture Shift modifications (e.g. 'A' instead of 'a').
                                 # We also map special keys to their string equivalents.
+                                if hasattr(event, 'unicode'):
+                                    print(f"[DEBUG KEY] name='{key_name}', unicode='{event.unicode}', mod={event.mod}")
+                                    
                                 if key_name == "space":
                                     char_to_send = " "
                                 elif key_name == "tab":
-                                    char_to_send = "\t"
+                                    char_to_send = "tab"
                                 elif key_name == "return" or key_name == "enter":
                                     char_to_send = "enter" # handled by Android handleKey
                                 elif key_name == "backspace":
@@ -4129,7 +4132,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) > 0 and ord(event.unicode[0]) >= 32:
                                     char_to_send = event.unicode
                                 else:
-                                    if key_name in ["escape", "home", "menu", "volume up", "volume down"]:
+                                    if key_name in ["escape", "home", "menu", "volume up", "volume down", "delete", "up", "down", "left", "right"]:
                                         char_to_send = key_name
                                     else:
                                         active_unicode_map[event.key] = ""
