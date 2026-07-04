@@ -3370,7 +3370,12 @@ class ClipboardSyncManager:
         elif ptype == "file_start":
             filename = packet.get("name", "")
             if not filename: return
-            target_path = os.path.join(self.target_save_dir, filename)
+            
+            # Use target_dir from packet if provided, else use self.target_save_dir
+            save_dir = packet.get("target_dir", self.target_save_dir)
+            if not save_dir: save_dir = self.target_save_dir
+            
+            target_path = os.path.join(save_dir, filename)
             log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path}")
 
             try:
@@ -3529,6 +3534,10 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
+                        continue
+                    elif evt_type == "list_dir_result":
+                        cb = globals().get('file_manager_callback')
+                        if cb: cb(event)
                         continue
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
@@ -3914,6 +3923,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 # Calculate floating button rectangle dynamically
                 min_btn_w, min_btn_h = 40, 22
                 cad_btn_w, cad_btn_h = 145, 22
+                file_btn_w, file_btn_h = 110, 22
                 rec_btn_w, rec_btn_h = 30, 22
                 close_btn_w, close_btn_h = 40, 22
                 
@@ -3921,10 +3931,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 show_buttons = not is_switching
                 
                 show_cad_button = show_buttons and not is_android
+                show_file_button = show_buttons and is_android
                 
                 total_w = 0
                 if show_buttons:
-                    total_w = min_btn_w + 10 + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
@@ -3932,23 +3943,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
                     current_x = start_x + min_btn_w + 10
                     
+                    if show_file_button:
+                        file_btn_rect = pygame.Rect(current_x, 0, file_btn_w, file_btn_h)
+                        current_x += file_btn_w + 10
+                    else:
+                        file_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
+                        
                     if show_cad_button:
                         cad_btn_rect = pygame.Rect(current_x, 0, cad_btn_w, cad_btn_h)
                         current_x += cad_btn_w + 10
                     else:
-                        cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                        cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         
                     rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)
                     current_x += rec_btn_w + 10
                     close_btn_rect = pygame.Rect(current_x, 0, close_btn_w, close_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    file_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     rec_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
 
                 mx, my = pygame.mouse.get_pos()
                 min_is_hover = min_btn_rect.collidepoint(mx, my) if show_buttons else False
+                file_is_hover = file_btn_rect.collidepoint(mx, my) if show_buttons else False
                 cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
                 rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_buttons else False
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
@@ -3966,7 +3985,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -3989,6 +4008,330 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Minimize Button Clicked. Minimizing viewer.")
                                 pygame.display.iconify()
+                            continue
+                        if show_buttons and file_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                print("[Client] Transfer File Button Clicked.")
+                                def open_transfer_window():
+                                    try:
+                                        import tkinter as tk
+                                        from tkinter import ttk, filedialog, messagebox
+                                        import threading, os, time, base64
+
+                                        root = tk.Tk()
+                                        root.withdraw()
+                                        root.attributes('-topmost', True)
+                                    
+                                        top = tk.Toplevel(root)
+                                        host_title = f" - {computer_name}" if computer_name else ""
+                                        top.title(f"P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}")
+                                        
+                                        hwnd = pygame.display.get_wm_info().get("window")
+                                        if hwnd:
+                                            import ctypes
+                                            from ctypes import wintypes
+                                            rect = wintypes.RECT()
+                                            ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
+                                            py_w = rect.right - rect.left
+                                            py_h = rect.bottom - rect.top
+                                            x = max(0, (py_w - 900) // 2)
+                                            y = max(0, (py_h - 600) // 2)
+                                            
+                                            try:
+                                                top.update_idletasks() # Ensure window is created
+                                                tk_hwnd = int(top.wm_frame(), 16)
+                                                
+                                                # Use SetParent to physically lock/embed the window inside the host
+                                                ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
+                                                
+                                                # Geometry is now relative to the parent's client area
+                                                top.geometry(f"900x600+{x}+{y}")
+                                                
+                                            except Exception as e:
+                                                pass
+                                        else:
+                                            top.geometry("900x600")
+
+                                        top.attributes('-topmost', True)
+                                        top.after(100, lambda: top.attributes('-topmost', False))
+                                    
+                                        left_frame = tk.Frame(top)
+                                        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+                                    
+                                        mid_frame = tk.Frame(top, width=60)
+                                        mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+                                    
+                                        right_frame = tk.Frame(top)
+                                        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+                                    
+                                        # --- Left Pane (Local) ---
+                                        tk.Label(left_frame, text="Máy của bạn (Local)", font=("Segoe UI", 10, "bold")).pack()
+                                        local_nav = tk.Frame(left_frame)
+                                        local_nav.pack(fill=tk.X, pady=2)
+                                    
+                                        local_path_var = tk.StringVar(root, value=os.path.abspath(os.path.expanduser("~")))
+                                    
+                                        def format_size(s):
+                                            if s < 1024: return f"{s} B"
+                                            elif s < 1024*1024: return f"{s/1024:.1f} KB"
+                                            else: return f"{s/(1024*1024):.1f} MB"
+
+                                        def refresh_local():
+                                            for item in local_tree.get_children():
+                                                local_tree.delete(item)
+                                            try:
+                                                path = local_path_var.get()
+                                                items = os.listdir(path)
+                                                # Folders first, then files
+                                                dirs = []
+                                                files = []
+                                                for item in items:
+                                                    full = os.path.join(path, item)
+                                                    if os.path.isdir(full):
+                                                        dirs.append(item)
+                                                    else:
+                                                        files.append(item)
+                                                dirs.sort(key=str.lower)
+                                                files.sort(key=str.lower)
+                                            
+                                                for d in dirs:
+                                                    local_tree.insert("", "end", text=d, values=("", "Thư mục"))
+                                                for f in files:
+                                                    full = os.path.join(path, f)
+                                                    size = os.path.getsize(full)
+                                                    local_tree.insert("", "end", text=f, values=(format_size(size), "Tệp", size))
+                                            except Exception as e:
+                                                messagebox.showerror("Lỗi", str(e), parent=top)
+
+                                        def go_up_local():
+                                            parent = os.path.dirname(local_path_var.get())
+                                            if parent and parent != local_path_var.get():
+                                                local_path_var.set(parent)
+                                                refresh_local()
+
+                                        tk.Button(local_nav, text="⬆ Lên", command=go_up_local).pack(side=tk.LEFT)
+                                        tk.Entry(local_nav, textvariable=local_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+                                        tk.Button(local_nav, text="Đi", command=refresh_local).pack(side=tk.LEFT)
+                                    
+                                        local_tree = ttk.Treeview(left_frame, columns=("size", "type", "raw_size"), show="tree headings")
+                                        local_tree.heading("#0", text="Tên")
+                                        local_tree.heading("size", text="Kích thước")
+                                        local_tree.heading("type", text="Loại")
+                                        local_tree.column("#0", width=200)
+                                        local_tree.column("size", width=80)
+                                        local_tree.column("type", width=70)
+                                        local_tree.column("raw_size", width=0, stretch=False)
+                                        local_tree.pack(fill=tk.BOTH, expand=True)
+
+                                        def local_double_click(event):
+                                            sel = local_tree.selection()
+                                            if sel:
+                                                item = local_tree.item(sel[0])
+                                                if item['values'][1] == "Thư mục":
+                                                    new_path = os.path.join(local_path_var.get(), item['text'])
+                                                    local_path_var.set(new_path)
+                                                    refresh_local()
+                                        local_tree.bind("<Double-1>", local_double_click)
+                                    
+                                        # --- Right Pane (Remote) ---
+                                        tk.Label(right_frame, text="Máy điều khiển (Remote Host)", font=("Segoe UI", 10, "bold")).pack()
+                                        remote_nav = tk.Frame(right_frame)
+                                        remote_nav.pack(fill=tk.X, pady=2)
+                                        
+                                        remote_path_var = tk.StringVar(root, value="/sdcard/" if is_android else "C:\\")
+                                    
+                                        def request_remote_dir(path):
+                                            # send list_dir request
+                                            req = {"type": "request_list_dir", "path": path}
+                                            send_event(req)
+
+                                        def on_remote_dir_result(event):
+                                            if event.get("path") != remote_path_var.get():
+                                                return
+                                            # update UI in main thread
+                                            def update_ui():
+                                                for item in remote_tree.get_children():
+                                                    remote_tree.delete(item)
+                                                items = event.get("items", [])
+                                                dirs = [i for i in items if i.get("is_dir")]
+                                                files = [i for i in items if not i.get("is_dir")]
+                                                dirs.sort(key=lambda x: str(x.get("name")).lower())
+                                                files.sort(key=lambda x: str(x.get("name")).lower())
+                                            
+                                                for d in dirs:
+                                                    remote_tree.insert("", "end", text=d.get("name"), values=("", "Thư mục"))
+                                                for f in files:
+                                                    sz = f.get("size", 0)
+                                                    remote_tree.insert("", "end", text=f.get("name"), values=(format_size(sz), "Tệp", sz))
+                                            top.after(0, update_ui)
+                                        
+                                        globals()['file_manager_callback'] = on_remote_dir_result
+
+                                        def go_up_remote():
+                                            p = remote_path_var.get().replace("\\", "/").rstrip("/")
+                                            if "/" in p:
+                                                parent = p.rsplit("/", 1)[0]
+                                                if not parent: parent = "/"
+                                                if not is_android and len(parent) == 2 and parent.endswith(":"):
+                                                    parent += "/"
+                                                remote_path_var.set(parent)
+                                                request_remote_dir(parent)
+                                            
+                                        tk.Button(remote_nav, text="⬆ Lên", command=go_up_remote).pack(side=tk.LEFT)
+                                        tk.Entry(remote_nav, textvariable=remote_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+                                        tk.Button(remote_nav, text="Đi", command=lambda: request_remote_dir(remote_path_var.get())).pack(side=tk.LEFT)
+
+                                        remote_tree = ttk.Treeview(right_frame, columns=("size", "type", "raw_size"), show="tree headings")
+                                        remote_tree.heading("#0", text="Tên")
+                                        remote_tree.heading("size", text="Kích thước")
+                                        remote_tree.heading("type", text="Loại")
+                                        remote_tree.column("#0", width=200)
+                                        remote_tree.column("size", width=80)
+                                        remote_tree.column("type", width=70)
+                                        remote_tree.column("raw_size", width=0, stretch=False)
+                                        remote_tree.pack(fill=tk.BOTH, expand=True)
+
+                                        def remote_double_click(event):
+                                            sel = remote_tree.selection()
+                                            if sel:
+                                                item = remote_tree.item(sel[0])
+                                                if item['values'][1] == "Thư mục":
+                                                    p = remote_path_var.get()
+                                                    sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
+                                                    if not p.endswith(sep): p += sep
+                                                    new_path = p + item['text']
+                                                    remote_path_var.set(new_path)
+                                                    request_remote_dir(new_path)
+                                        remote_tree.bind("<Double-1>", remote_double_click)
+
+                                        def on_tree_keypress(event, tree):
+                                            if not event.char or not event.char.isprintable():
+                                                return
+                                            char = event.char.lower()
+                                            items = tree.get_children()
+                                            if not items: return
+                                            
+                                            start_idx = 0
+                                            current_sel = tree.selection()
+                                            if current_sel:
+                                                try:
+                                                    start_idx = items.index(current_sel[0]) + 1
+                                                except ValueError:
+                                                    start_idx = 0
+
+                                            for idx in list(range(start_idx, len(items))) + list(range(0, start_idx)):
+                                                item = items[idx]
+                                                text = tree.item(item, 'text').lower()
+                                                if text.startswith(char):
+                                                    tree.selection_set(item)
+                                                    tree.focus(item)
+                                                    tree.see(item)
+                                                    return "break"
+                                        
+                                        local_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, local_tree))
+                                        remote_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, remote_tree))
+
+                                        # --- Transfer Actions ---
+                                        def write_transfer_log(direction, file_name, file_size, dest_dir):
+                                            try:
+                                                import datetime
+                                                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                                log_line = f"[{now}] {direction} | File: {file_name} | Size: {format_size(file_size)} | To: {dest_dir}\n"
+                                                with open("transfer.log", "a", encoding="utf-8") as lf:
+                                                    lf.write(log_line)
+                                            except Exception as e:
+                                                print("Log error:", e)
+
+                                        def do_upload():
+                                            sel = local_tree.selection()
+                                            if not sel: return
+                                        
+                                            target_dir = remote_path_var.get()
+                                            for s in sel:
+                                                item = local_tree.item(s)
+                                                if item['values'][1] == "Tệp":
+                                                    fpath = os.path.join(local_path_var.get(), item['text'])
+                                                    size = item['values'][2]
+                                                    name = item['text']
+                                                
+                                                    write_transfer_log("UPLOAD", name, size, target_dir)
+                                                    
+                                                    def upload_thread(path, n, sz, t_dir):
+                                                        try:
+                                                            send_event({"type": "file_start", "name": n, "size": sz, "target_dir": t_dir})
+                                                            time.sleep(0.5)
+                                                            with open(path, "rb") as f:
+                                                                while True:
+                                                                    chunk = f.read(65536)
+                                                                    if not chunk: break
+                                                                    send_event({
+                                                                        "type": "file_chunk",
+                                                                        "name": n,
+                                                                        "data": base64.b64encode(chunk).decode('utf-8')
+                                                                    })
+                                                                    time.sleep(0.01)
+                                                            send_event({"type": "file_end"})
+                                                            
+                                                            def delayed_refresh():
+                                                                time.sleep(1)
+                                                                top.after(0, lambda: request_remote_dir(t_dir))
+                                                            threading.Thread(target=delayed_refresh, daemon=True).start()
+                                                        except Exception as e:
+                                                            print(f"Upload error: {e}")
+                                                
+                                                    threading.Thread(target=upload_thread, args=(fpath, name, size, target_dir), daemon=True).start()
+                                                
+                                        def do_download():
+                                            sel = remote_tree.selection()
+                                            if not sel: return
+                                        
+                                            target_dir = local_path_var.get()
+                                            # Báo cho ClipboardSyncManager biết thư mục lưu
+                                            cm = globals().get('clipboard_sync_manager')
+                                            if cm:
+                                                cm.target_save_dir = target_dir
+                                            
+                                            for s in sel:
+                                                item = remote_tree.item(s)
+                                                if item['values'][1] == "Tệp":
+                                                    p = remote_path_var.get()
+                                                    sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
+                                                    if not p.endswith(sep): p += sep
+                                                    full_remote = p + item['text']
+                                                    size = item['values'][2]
+                                                
+                                                    write_transfer_log("DOWNLOAD", item['text'], size, target_dir)
+                                                    
+                                                    req = {"type": "request_file_download", "path": full_remote, "target_dir_local": target_dir}
+                                                    send_event(req)
+                                                
+                                                    def auto_refresh_local():
+                                                        time.sleep(2)
+                                                        top.after(0, refresh_local)
+                                                    threading.Thread(target=auto_refresh_local, daemon=True).start()
+
+                                        tk.Label(mid_frame, text="").pack(pady=80)
+                                        tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=10)
+                                        tk.Button(mid_frame, text="Nhận về\n<<", font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10, command=do_download).pack(pady=10)
+
+                                        def on_close():
+                                            globals()['file_manager_callback'] = None
+                                            top.destroy()
+                                            root.destroy()
+                                        
+                                        top.protocol("WM_DELETE_WINDOW", on_close)
+                                    
+                                        # init
+                                        refresh_local()
+                                        request_remote_dir(remote_path_var.get())
+                                    
+                                        root.mainloop()
+                                    except Exception as ex:
+                                        with open("transfer_err.log", "w", encoding="utf-8") as f:
+                                            import traceback
+                                            f.write(traceback.format_exc())
+
+                                threading.Thread(target=open_transfer_window, daemon=True).start()
                             continue
                         if show_buttons and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -4249,36 +4592,59 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     else:
                         btn_border_color = (0, 173, 181)
 
-                    # CAD button
-                    if show_cad_button:
+                    # CAD / File buttons
+                    if show_cad_button or show_file_button:
                         if pygame_theme == "light":
                             cad_bg_color = (220, 220, 235) if cad_is_hover else (245, 245, 255)
+                            file_bg_color = (220, 220, 235) if file_is_hover else (245, 245, 255)
                             cad_text_color = (40, 40, 50)
+                            file_text_color = (40, 40, 50)
                         elif pygame_theme == "gray":
                             cad_bg_color = (99, 106, 115) if cad_is_hover else (82, 89, 98)
+                            file_bg_color = (99, 106, 115) if file_is_hover else (82, 89, 98)
                             cad_text_color = (240, 240, 240)
+                            file_text_color = (240, 240, 240)
                         elif pygame_theme == "pink":
                             cad_bg_color = (255, 105, 180) if cad_is_hover else (255, 182, 193)
+                            file_bg_color = (255, 105, 180) if file_is_hover else (255, 182, 193)
                             cad_text_color = (255, 255, 255)
+                            file_text_color = (255, 255, 255)
                         elif pygame_theme == "crystal":
                             cad_bg_color = (38, 198, 218) if cad_is_hover else (0, 188, 212)
+                            file_bg_color = (38, 198, 218) if file_is_hover else (0, 188, 212)
                             cad_text_color = (255, 255, 255)
+                            file_text_color = (255, 255, 255)
                         elif pygame_theme == "orange":
                             cad_bg_color = (255, 183, 77) if cad_is_hover else (255, 152, 0)
+                            file_bg_color = (255, 183, 77) if file_is_hover else (255, 152, 0)
                             cad_text_color = (255, 255, 255)
+                            file_text_color = (255, 255, 255)
                         elif pygame_theme == "red":
                             cad_bg_color = (239, 154, 154) if cad_is_hover else (244, 67, 54)
+                            file_bg_color = (239, 154, 154) if file_is_hover else (244, 67, 54)
                             cad_text_color = (255, 255, 255)
+                            file_text_color = (255, 255, 255)
                         else:
                             cad_bg_color = (58, 58, 77) if cad_is_hover else (42, 42, 53)
+                            file_bg_color = (58, 58, 77) if file_is_hover else (42, 42, 53)
                             cad_text_color = (255, 255, 255)
+                            file_text_color = (255, 255, 255)
                         
-                        pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
-                        pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
-                        
-                        cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
-                        cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
-                        screen.blit(cad_text_surf, cad_text_rect)
+                        if show_file_button:
+                            pygame.draw.rect(screen, file_bg_color, file_btn_rect, border_radius=4)
+                            pygame.draw.rect(screen, btn_border_color, file_btn_rect, width=1, border_radius=4)
+                            
+                            file_text_surf = btn_font.render("Chuyển tệp", True, file_text_color)
+                            file_text_rect = file_text_surf.get_rect(center=file_btn_rect.center)
+                            screen.blit(file_text_surf, file_text_rect)
+
+                        if show_cad_button:
+                            pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
+                            pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
+                            
+                            cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
+                            cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
+                            screen.blit(cad_text_surf, cad_text_rect)
                     
                     # Record button (Red circle)
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
@@ -4442,10 +4808,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         pygame.quit()
         try: log_activity(f"Ngừng điều khiển ID {partner_id} ({computer_name})")
         except: pass
+        import os
         if exit_due_to_disconnect:
             print("[Client] Viewer exited due to disconnect. Exit code 99.")
-            import sys
-            sys.exit(99)
+            os._exit(99)
+        os._exit(0)
     except Exception as critical_e:
         uninstall_keyboard_hook()
         import traceback
@@ -4453,9 +4820,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
         try: pygame.quit()
         except: pass
+        import os
         if exit_due_to_disconnect:
-            import sys
-            sys.exit(99)
+            os._exit(99)
+        os._exit(1)
 
 def encrypt_text(text, key="AntigravityP2P"):
     if not text:
@@ -9196,6 +9564,55 @@ class UnifiedApp(tk.Tk):
                     host_type_password(password)
                 except Exception as e:
                     print(f"[Host] Failed to type password: {e}")
+                    
+        elif ev_type == 'request_list_dir':
+            path = event.get('path', 'C:\\')
+            try:
+                import os
+                items = []
+                if os.path.isdir(path):
+                    for item in os.listdir(path):
+                        full = os.path.join(path, item)
+                        is_dir = os.path.isdir(full)
+                        size = 0 if is_dir else os.path.getsize(full)
+                        items.append({"name": item, "is_dir": is_dir, "size": size})
+                res = {"type": "list_dir_result", "path": path, "items": items}
+                send_msg(conn, json.dumps(res).encode('utf-8'), password)
+            except Exception as e:
+                print(f"[Host] list dir error: {e}")
+                
+        elif ev_type == 'request_file_download':
+            path = event.get('path')
+            target_dir_local = event.get('target_dir_local')
+            if path and os.path.isfile(path):
+                def download_thread(p, t_dir, c, pwd):
+                    try:
+                        import os, base64, time
+                        size = os.path.getsize(p)
+                        name = os.path.basename(p)
+                        
+                        start_msg = {"type": "file_start", "name": name, "size": size, "target_dir": t_dir}
+                        send_msg(c, json.dumps(start_msg).encode('utf-8'), pwd)
+                        time.sleep(0.5)
+                        
+                        with open(p, "rb") as f:
+                            while True:
+                                chunk = f.read(65536)
+                                if not chunk: break
+                                chunk_msg = {
+                                    "type": "file_chunk",
+                                    "name": name,
+                                    "data": base64.b64encode(chunk).decode('utf-8')
+                                }
+                                send_msg(c, json.dumps(chunk_msg).encode('utf-8'), pwd)
+                                time.sleep(0.01)
+                                
+                        end_msg = {"type": "file_end"}
+                        send_msg(c, json.dumps(end_msg).encode('utf-8'), pwd)
+                    except Exception as e:
+                        print(f"[Host] File download error: {e}")
+                import threading
+                threading.Thread(target=download_thread, args=(path, target_dir_local, conn, password), daemon=True).start()
 
     def trigger_taskmgr(self):
         print("[Host] Received trigger_taskmgr command.")
