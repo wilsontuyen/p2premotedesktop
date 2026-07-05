@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 import urllib.request
 import urllib.parse
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 # Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
 _orig_toplevel_geometry = tk.Toplevel.geometry
@@ -778,12 +778,12 @@ def attempt_upnp_forward(internal_port):
     
     # SSDP M-SEARCH Request to find UPnP Router
     ssdp_msg = (
-        'M-SEARCH * HTTP/1.1\r\n'
-        'HOST: 239.255.255.250:1900\r\n'
-        'MAN: "ssdp:discover"\r\n'
-        'MX: 2\r\n'
-        'ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n'
-        '\r\n'
+        'M-SEARCH * HTTP/1.1\n'
+        'HOST: 239.255.255.250:1900\n'
+        'MAN: "ssdp:discover"\n'
+        'MX: 2\n'
+        'ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\n'
+        '\n'
     )
     
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -799,7 +799,7 @@ def attempt_upnp_forward(internal_port):
                 sock.settimeout(max(0.1, 3.0 - (time.time() - start_time)))
                 data, addr = sock.recvfrom(65535)
                 response = data.decode('utf-8', errors='ignore')
-                for line in response.split('\r\n'):
+                for line in response.split('\n'):
                     if line.upper().startswith('LOCATION:'):
                         location_url = line.split(':', 1)[1].strip()
                         break
@@ -1563,147 +1563,181 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
-        self.withdraw()
-        self.title("Truyền tải File")
-        self.resizable(False, False)
-        self.configure(bg="#1E1E24")
-        
-        try:
-            icon_path = os.path.join(app_dir, "app_icon.png")
-            if os.path.exists(icon_path):
-                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
-                self.iconphoto(False, icon_img)
-                self._dialog_icon_img = icon_img
-        except Exception:
-            pass
-            
-        # Luôn hiển thị trên cùng mọi cửa sổ
+        self.overrideredirect(True)
+        self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
+
+        title_bg = "#F3F3F3"
+        self.title_bar = tk.Frame(self, bg=title_bg, height=28)
+        self.title_bar.pack(fill=tk.X, side=tk.TOP)
+        self.title_bar.pack_propagate(False)
+        self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=("Segoe UI", 9, "bold"))
+        self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
+
         self.attributes("-topmost", True)
         self.lift()
-        
         self.total_size = total_size
-        self.filename = filename
+        self.filename = str(filename) if filename is not None else "Unknown"
         self.start_time = time.time()
         self.on_cancel = on_cancel
         
-        lbl_action = tk.Label(self, text=title_text, font=("Segoe UI", 10, "bold"), fg="#00ADB5", bg="#1E1E24")
-        lbl_action.pack(pady=(15, 5), padx=20, anchor=tk.W)
+        top_frame = tk.Frame(self, bg="#FFFFFF")
+        top_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
-        display_name = filename
-        if len(display_name) > 35:
-            display_name = display_name[:20] + "..." + display_name[-12:]
-        self.lbl_file = tk.Label(self, text=f"Tên file: {display_name}", font=("Segoe UI", 9), fg="#FFFFFF", bg="#1E1E24")
-        self.lbl_file.pack(pady=2, padx=20, anchor=tk.W)
+        display_name = self.filename
+        if len(display_name) > 40:
+            display_name = display_name[:20] + "..." + display_name[-15:]
+            
+        self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_action.pack(fill=tk.X)
         
-        self.lbl_size = tk.Label(self, text=f"Dung lượng: {self.format_size(total_size)}", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
-        self.lbl_size.pack(pady=2, padx=20, anchor=tk.W)
+        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
         
-        self.lbl_progress = tk.Label(self, text="Đang chuẩn bị... 0%", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
-        self.lbl_progress.pack(pady=(10, 2), padx=20, anchor=tk.W)
+        self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+        self.prog1.pack(fill=tk.X, pady=(0, 10))
         
-        self.lbl_stats = tk.Label(self, text="Tốc độ: -- KB/s | Thời gian dự kiến: --:--", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
-        self.lbl_stats.pack(pady=2, padx=20, anchor=tk.W)
+        self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_files.pack(fill=tk.X)
         
-        self.progress_bar = PremiumProgressBar(self, width=320, height=12, bg="#15151B", fg="#00ADB5")
-        self.progress_bar.pack(pady=(5, 10), padx=20)
+        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
+        
+        self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+        self.prog2.pack(fill=tk.X)
+        
+        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=45)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        bottom_frame.pack_propagate(False)
+        
+        sep = tk.Frame(self, height=1, bg="#DFDFDF", bd=0)
+        sep.pack(fill=tk.X, side=tk.BOTTOM)
         
         if self.on_cancel:
             btn_cancel = tk.Button(
-                self, text="Hủy (Cancel)", font=("Segoe UI", 9, "bold"),
-                fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
-                relief=tk.FLAT, bd=0, padx=20, pady=5, cursor="hand2", command=self.trigger_cancel
+                bottom_frame, text="Hủy", font=("Segoe UI", 9),
+                fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
+                relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
             )
-            btn_cancel.pack(pady=(0, 15))
+            btn_cancel.pack(side=tk.RIGHT, padx=15, pady=10)
+            def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
+            def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
+            btn_cancel.bind("<Enter>", btn_enter)
+            btn_cancel.bind("<Leave>", btn_leave)
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
-            dialog_h = 230
+            dialog_h = 270
         else:
-            dialog_h = 190
-        
+            dialog_h = 225
+            
         self.update_idletasks()
-        dialog_w = 360
+        dialog_w = 400
         
         is_parent_minimized = False
         try:
-            if parent.state() == "iconic" or parent.winfo_viewable() == 0 or parent.winfo_x() < -10000:
+            if parent is None or parent.state() == "iconic" or parent.winfo_viewable() == 0 or parent.winfo_x() < -10000:
                 is_parent_minimized = True
         except:
             pass
-
-        if is_parent_minimized:
+            
+        if is_parent_minimized or parent is None:
             screen_w = self.winfo_screenwidth()
             screen_h = self.winfo_screenheight()
             x = (screen_w - dialog_w) // 2
             y = (screen_h - dialog_h) // 2
+            self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+            self.deiconify()
+            self.lift()
+            self.focus_force()
         else:
-            parent_x = parent.winfo_x()
-            parent_y = parent.winfo_y()
-            parent_w = parent.winfo_width()
-            parent_h = parent.winfo_height()
-            x = parent_x + (parent_w - dialog_w) // 2
-            y = parent_y + (parent_h - dialog_h) // 2
-            
-        self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
-        self.deiconify()
-        
-    def trigger_cancel(self):
-        try:
-            self.destroy()
-        except:
-            pass
-        if self.on_cancel:
+            self.transient(parent)
             try:
-                self.on_cancel()
-            except:
-                pass
-        
-    def update_progress(self, sent_bytes):
-        percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
-        percent = max(0, min(100, percent))
-        
-        self.lbl_progress.config(
-            text=f"Đang truyền tải... {percent}% ({self.format_size(sent_bytes)} / {self.format_size(self.total_size)})"
-        )
-        
-        elapsed_time = time.time() - self.start_time
-        if elapsed_time > 0 and sent_bytes > 0:
-            speed = sent_bytes / elapsed_time
-            if speed > 0:
-                remaining_bytes = self.total_size - sent_bytes
-                remaining_time = remaining_bytes / speed
-                mins = int(remaining_time // 60)
-                secs = int(remaining_time % 60)
-                time_str = f"{mins} min {secs:02d} giây"
-            else:
-                time_str = "--:--"
-            speed_str = f"{self.format_speed(speed)}"
-        else:
-            speed_str = "-- KB/s"
-            time_str = "--:--"
+                import ctypes
+                parent_hwnd = int(parent.frame(), 16)
+                tk_hwnd = int(self.frame(), 16)
+                
+                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+                style = (style | 0x40000000) & ~0x80000000
+                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+                ctypes.windll.user32.SetParent(tk_hwnd, parent_hwnd)
+                
+                parent_w = parent.winfo_width()
+                parent_h = parent.winfo_height()
+                x = max(0, (parent_w - dialog_w) // 2)
+                y = max(0, (parent_h - dialog_h) // 2)
+                
+                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0004)
+            except Exception as e:
+                parent_x = parent.winfo_rootx()
+                parent_y = parent.winfo_rooty()
+                parent_w = parent.winfo_width()
+                parent_h = parent.winfo_height()
+                x = parent_x + (parent_w - dialog_w) // 2
+                y = parent_y + (parent_h - dialog_h) // 2
+                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+                self.lift()
+                self.focus_force()
             
-        self.lbl_stats.config(text=f"Tốc độ: {speed_str} | Thời gian dự kiến: {time_str}")
-        
-        self.progress_bar.set_progress(percent)
-        self.update_idletasks()
-        
+        self.update()
+
+    def trigger_cancel(self):
+        try: self.destroy()
+        except: pass
+        if self.on_cancel:
+            try: self.on_cancel()
+            except: pass
+
+    def update_progress(self, sent_bytes):
+        def _do_update():
+            try:
+                percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
+                percent = max(0, min(100, percent))
+
+                self.prog1["value"] = percent
+                self.prog2["value"] = percent
+
+                elapsed_time = time.time() - self.start_time
+                if elapsed_time > 0 and sent_bytes > 0:
+                    speed = sent_bytes / elapsed_time
+                    if speed > 0:
+                        remaining_bytes = self.total_size - sent_bytes
+                        remaining_time = remaining_bytes / speed
+                        mins = int(remaining_time // 60)
+                        secs = int(remaining_time % 60)
+                        if mins > 0:
+                            time_str = f"{mins} min {secs} sec(s)"
+                        else:
+                            time_str = f"{secs} sec(s)"
+                    else:
+                        time_str = "-- sec(s)"
+                    speed_str = f"{self.format_speed(speed)}"
+                else:
+                    speed_str = "-- MB/s"
+                    time_str = "-- sec(s)"
+
+                sent_str = self.format_size(sent_bytes)
+                total_str = self.format_size(self.total_size)
+
+                self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {speed_str}  {time_str}")
+                self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {time_str}")
+            except: pass
+        try:
+            self.after(0, _do_update)
+        except: pass
+
+    def safe_destroy(self):
+        try: self.after(0, self.destroy)
+        except: pass
+
     def format_size(self, size_bytes):
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.2f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.2f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+        if size_bytes < 1024: return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024: return f"{size_bytes / 1024:.2f} KB"
+        elif size_bytes < 1024 * 1024 * 1024: return f"{size_bytes / (1024 * 1024):.2f} MB"
+        else: return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
 
     def format_speed(self, speed_bytes_per_sec):
-        if speed_bytes_per_sec < 1024:
-            return f"{speed_bytes_per_sec:.0f} B/s"
-        elif speed_bytes_per_sec < 1024 * 1024:
-            return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
-        elif speed_bytes_per_sec < 1024 * 1024 * 1024:
-            return f"{speed_bytes_per_sec / (1024 * 1024):.2f} MB/s"
-        else:
-            return f"{speed_bytes_per_sec / (1024 * 1024 * 1024):.2f} GB/s"
+        if speed_bytes_per_sec < 1024: return f"{speed_bytes_per_sec:.0f} B/s"
+        elif speed_bytes_per_sec < 1024 * 1024: return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
+        elif speed_bytes_per_sec < 1024 * 1024 * 1024: return f"{speed_bytes_per_sec / (1024 * 1024):.2f} MB/s"
+        else: return f"{speed_bytes_per_sec / (1024 * 1024 * 1024):.2f} GB/s"
 
 class ConfirmDialog(tk.Toplevel):
     def __init__(self, parent, title, message, on_yes, on_no):
@@ -3429,6 +3463,16 @@ class ClipboardSyncManager:
                     if top_level_path not in self.batch_paths:
                         self.batch_paths.append(top_level_path)
                     log_debug(f"[file_end] Đã xử lý xong file: {filename}")
+                    
+                    if not self.incoming_transfers and getattr(self, 'active_batch', False) and getattr(self, 'batch_total_size', 0) > 0 and getattr(self, 'batch_received', 0) >= self.batch_total_size:
+                        if hasattr(self, 'active_dialog') and self.active_dialog:
+                            try:
+                                if hasattr(self.active_dialog, 'safe_destroy'):
+                                    self.active_dialog.safe_destroy()
+                                else:
+                                    self.active_dialog.destroy()
+                                self.active_dialog = None
+                            except: pass
                 
         elif ptype == "batch_end":
             self.close_dialog()
@@ -4623,17 +4667,41 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                     except: is_file = False
                                                 
                                                 if is_file:
+                                                    # --- OVERWRITE CHECK ---
+                                                    remote_exists = False
+                                                    for child in remote_tree.get_children():
+                                                        if remote_tree.item(child)['text'] == name:
+                                                            remote_exists = True
+                                                            break
+                                                    if remote_exists:
+                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở đích.\nBạn có muốn ghi đè không?", parent=top):
+                                                            continue
+                                                    # -----------------------
+                                                    
                                                     try: size = os.path.getsize(fpath)
                                                     except: size = vals[2] if len(vals) > 2 else 0
                                                 
                                                     write_transfer_log("UPLOAD", name, size, target_dir)
+
+                                                    class UploadState:
+                                                        is_cancelled = False
+                                                    state = UploadState()
                                                     
-                                                    def upload_thread(path, n, sz, t_dir):
+                                                    def on_upload_cancel(st=state):
+                                                        st.is_cancelled = True
+                                                        
+                                                    dialog = ProgressDialog(top, "Chuyển qua", name, size, on_cancel=lambda: on_upload_cancel())
+                                                    dialog.update_progress(0)
+                                                    
+                                                    def upload_thread(path, n, sz, t_dir, dlg, st):
                                                         try:
                                                             send_event({"type": "file_start", "name": n, "size": sz, "target_dir": t_dir})
                                                             time.sleep(0.5)
+                                                            sent = 0
                                                             with open(path, "rb") as f:
                                                                 while True:
+                                                                    if st.is_cancelled:
+                                                                        break
                                                                     chunk = f.read(65536)
                                                                     if not chunk: break
                                                                     send_event({
@@ -4641,27 +4709,33 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                                         "name": n,
                                                                         "data": base64.b64encode(chunk).decode('utf-8')
                                                                     })
+                                                                    sent += len(chunk)
+                                                                    dlg.update_progress(sent)
                                                                     time.sleep(0.01)
                                                             send_event({"type": "file_end"})
                                                             
+                                                            if not st.is_cancelled:
+                                                                dlg.safe_destroy()
+                                                                
                                                             def delayed_refresh():
                                                                 time.sleep(1)
                                                                 top.after(0, lambda: request_remote_dir(t_dir))
                                                             threading.Thread(target=delayed_refresh, daemon=True).start()
                                                         except Exception as e:
                                                             print(f"Upload error: {e}")
+                                                            dlg.safe_destroy()
                                                 
-                                                    threading.Thread(target=upload_thread, args=(fpath, name, size, target_dir), daemon=True).start()
-                                                
+                                                    threading.Thread(target=upload_thread, args=(fpath, name, size, target_dir, dialog, state), daemon=True).start()
+
                                         def do_download():
                                             sel = remote_tree.selection()
                                             if not sel: return
-                                        
+
                                             target_dir = local_entry.get()
-                                            # Báo cho ClipboardSyncManager biết thư mục lưu
                                             cm = globals().get('clipboard_sync_manager')
-                                            if cm:
-                                                cm.target_save_dir = target_dir
+                                            
+                                            total_size = 0
+                                            files_to_download = []
                                             
                                             for s in sel:
                                                 item = remote_tree.item(s)
@@ -4670,21 +4744,48 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 is_file = (len(vals) > 1 and vals[1] == "Tệp")
                                                 
                                                 if is_file:
+                                                    target_path = os.path.join(target_dir, name)
+                                                    if os.path.exists(target_path):
+                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở máy Local.\nBạn có muốn ghi đè không?", parent=top):
+                                                            continue
+                                                    
                                                     p = remote_entry.get()
                                                     sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
                                                     if not p.endswith(sep): p += sep
                                                     full_remote = p + name
                                                     size = vals[2] if len(vals) > 2 else 0
-                                                
-                                                    write_transfer_log("DOWNLOAD", item['text'], size, target_dir)
                                                     
-                                                    req = {"type": "request_file_download", "path": full_remote, "target_dir_local": target_dir}
-                                                    send_event(req)
+                                                    total_size += size
+                                                    files_to_download.append((name, full_remote, size))
+                                                    
+                                            if not files_to_download: return
+                                            
+                                            if cm:
+                                                cm.target_save_dir = target_dir
+                                                cm.batch_total_size = total_size
+                                                cm.batch_received = 0
+                                                cm.active_batch = True
+                                                cm._receive_cancelled = False
+
+                                                display_name = files_to_download[0][0]
+                                                if len(files_to_download) > 1:
+                                                    display_name += f" and {len(files_to_download)-1} more"
+
+                                                def _cancel():
+                                                    cm.cancel_active_transfer(remote_triggered=False)
                                                 
-                                                    def auto_refresh_local():
-                                                        time.sleep(2)
-                                                        fm_event_queue.put({"type": "trigger_local_refresh"})
-                                                    threading.Thread(target=auto_refresh_local, daemon=True).start()
+                                                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel)
+                                                dialog.update_progress(0)
+                                                cm.active_dialog = dialog
+                                            for name, full_remote, size in files_to_download:
+                                                write_transfer_log("DOWNLOAD", name, size, target_dir)
+                                                req = {"type": "request_file_download", "path": full_remote, "target_dir_local": target_dir}
+                                                send_event(req)
+                                                
+                                            def auto_refresh_local():
+                                                time.sleep(2)
+                                                fm_event_queue.put({"type": "trigger_local_refresh"})
+                                            threading.Thread(target=auto_refresh_local, daemon=True).start()
 
                                         tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=(100, 10))
                                         tk.Button(mid_frame, text="Nhận về\n<<", font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10, command=do_download).pack(pady=10)
