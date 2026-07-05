@@ -1563,6 +1563,7 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
+        self.attributes("-alpha", 0.0)
         self.overrideredirect(True)
         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
 
@@ -1676,6 +1677,7 @@ class ProgressDialog(tk.Toplevel):
                 self.lift()
                 self.focus_force()
             
+        self.attributes("-alpha", 1.0)
         self.update()
 
     def trigger_cancel(self):
@@ -3473,6 +3475,8 @@ class ClipboardSyncManager:
                                     self.active_dialog.destroy()
                                 self.active_dialog = None
                             except: pass
+                        if 'file_manager_callback' in globals():
+                            globals()['file_manager_callback']({"type": "trigger_local_refresh"})
                 
         elif ptype == "batch_end":
             self.close_dialog()
@@ -4266,7 +4270,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                     if is_dir:
                                                         messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                     else:
-                                                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh'}
+                                                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
                                                         _, ext = os.path.splitext(name.lower())
                                                         if ext in text_exts:
                                                             try:
@@ -4527,7 +4531,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 if is_dir:
                                                     messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                 else:
-                                                    text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh'}
+                                                    text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
                                                     import os
                                                     _, ext = os.path.splitext(name.lower())
                                                     if ext in text_exts:
@@ -4718,7 +4722,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                                 dlg.safe_destroy()
                                                                 
                                                             def delayed_refresh():
-                                                                time.sleep(1)
+                                                                time.sleep(2)
                                                                 top.after(0, lambda: request_remote_dir(t_dir))
                                                             threading.Thread(target=delayed_refresh, daemon=True).start()
                                                         except Exception as e:
@@ -4782,10 +4786,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 req = {"type": "request_file_download", "path": full_remote, "target_dir_local": target_dir}
                                                 send_event(req)
                                                 
-                                            def auto_refresh_local():
-                                                time.sleep(2)
-                                                fm_event_queue.put({"type": "trigger_local_refresh"})
-                                            threading.Thread(target=auto_refresh_local, daemon=True).start()
+                                            pass # Refresh is now handled when the transfer actually completes
 
                                         tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=(100, 10))
                                         tk.Button(mid_frame, text="Nhận về\n<<", font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10, command=do_download).pack(pady=10)
