@@ -6899,6 +6899,7 @@ class UnifiedApp(tk.Tk):
                     new_icon = "▶" if g in self.collapsed_groups else "▼"
                     event.widget.config(text=f"{new_icon} {(g if g else 'Chưa phân nhóm').upper()}")
                     reorder_list()
+                    self.save_group_states_only()
                     
                 header.bind("<Button-1>", toggle_group)
                 header.bind("<ButtonRelease-1>", on_drop)
@@ -7292,6 +7293,14 @@ class UnifiedApp(tk.Tk):
                             "password": cpass,
                             "group": cgroup
                         })
+                        
+                if not hasattr(self, 'collapsed_groups_loaded'):
+                    self.collapsed_groups = set()
+                    self.collapsed_groups_loaded = True
+                    gs_node = root.find("group_states")
+                    if gs_node is not None:
+                        for g_node in gs_node.findall("collapsed_group"):
+                            self.collapsed_groups.add(decrypt_text(g_node.text) if g_node.text else "")
             except Exception as e:
                 print(f"[Config] Lỗi tải XML: {e}")
         return lst
@@ -7318,6 +7327,13 @@ class UnifiedApp(tk.Tk):
             if zalo_node is not None:
                 root.append(zalo_node)
                 
+            if hasattr(self, 'collapsed_groups'):
+                gs_node = ET.SubElement(root, "group_states")
+                for grp in self.collapsed_groups:
+                    g_node = ET.SubElement(gs_node, "collapsed_group")
+                    g_node.text = encrypt_text(grp)
+                
+
             for comp in lst:
                 comp_node = ET.SubElement(root, "computer")
                 name_node = ET.SubElement(comp_node, "name")
@@ -7339,6 +7355,28 @@ class UnifiedApp(tk.Tk):
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
+
+    def save_group_states_only(self):
+        computers_file = "saved_computers.xml"
+        if not os.path.exists(computers_file):
+            return
+        import xml.etree.ElementTree as ET
+        try:
+            tree = ET.parse(computers_file)
+            root = tree.getroot()
+            old_gs = root.find("group_states")
+            if old_gs is not None:
+                root.remove(old_gs)
+            if hasattr(self, 'collapsed_groups'):
+                gs_node = ET.SubElement(root, "group_states")
+                for grp in self.collapsed_groups:
+                    g_node = ET.SubElement(gs_node, "collapsed_group")
+                    g_node.text = encrypt_text(grp)
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+        except:
+            pass
 
     def load_fixed_password_from_xml(self):
         computers_file = "saved_computers.xml"
@@ -10426,6 +10464,7 @@ class UnifiedApp(tk.Tk):
             if do_hole_punch:
                 self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
                 print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
+                log_activity(f"[P2P] Bắt đầu quá trình đục lỗ tường lửa tới IP {public_ip}:{port}...")
                 
                 # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
                 if getattr(self, 'server_socket', None):
@@ -10433,8 +10472,8 @@ class UnifiedApp(tk.Tk):
                         self.server_socket.close()
                     except: pass
                 
-                # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
-                for _ in range(20):
+                # Liên tục spam kết nối cực nhanh để đục lỗ (40 lần, mỗi lần 150ms)
+                for _ in range(40):
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     try:
@@ -10446,10 +10485,11 @@ class UnifiedApp(tk.Tk):
                         sock.connect((public_ip, port))
                         connected = True
                         print(f"[Client] Hole punch successful to {public_ip}:{port}!")
+                        log_activity(f"[P2P] THÀNH CÔNG: Đục lỗ tường lửa hoàn tất sau {_+1} lần thử!")
                         break
                     except Exception:
                         force_close_socket(sock)
-                        time.sleep(0.1)
+                        time.sleep(0.15)
                         
                 # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
                 try:
@@ -10476,6 +10516,7 @@ class UnifiedApp(tk.Tk):
             display_host = getattr(self, 'current_signaling_host', None) or 'Relay'
             print("[Client] Hole punching failed. Attempting Relay fallback...")
             self.update_status("Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...")
+            log_activity(f"[P2P] THẤT BẠI: Không thể đục lỗ tường lửa. Bắt đầu chuyển hướng qua Relay Server ({display_host})...")
             
             try:
                 relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
@@ -10506,8 +10547,10 @@ class UnifiedApp(tk.Tk):
                 connected = True
                 print("[Client] Relay connection established successfully!")
                 self.update_status("Đã kết nối qua Relay Server!")
+                log_activity("[Relay] THÀNH CÔNG: Đã kết nối với đối tác qua Relay Server.")
             except Exception as e:
                 print(f"[Client] Relay fallback failed: {e}")
+                log_activity(f"[Relay] THẤT BẠI: Kết nối Relay thất bại ({e}).")
                 self.update_status("Sẵn sàng kết nối")
                 self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
                     f"Kỹ thuật Đục Lỗ Tường Lửa & Server Trung Chuyển ({display_host}) đều thất bại!\n\n"
