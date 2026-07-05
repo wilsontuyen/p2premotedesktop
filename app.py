@@ -4313,35 +4313,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 success = event.get("success")
                                                 if success:
                                                     try:
-                                                            from datetime import datetime
-                                                            ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                            open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
-                                                            content = event.get("content", "")
-                                                            path = event.get("path", "")
-                                                            name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
-                                                            np_win = tk.Toplevel(top)
-                                                            np_win.title(f"Soạn thảo (Remote) - {name}")
-                                                            np_win.geometry("800x600")
-                                                            np_win.transient(top)
-                                                            np_win.attributes('-topmost', True)
-                                                            np_win.update_idletasks()
-                                                            w, h = 800, 600
-                                                            px, py = top.winfo_rootx(), top.winfo_rooty()
-                                                            pw, ph = top.winfo_width(), top.winfo_height()
-                                                            np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
-                                                            text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
-                                                            text_area.pack(expand=True, fill="both")
-                                                            text_area.insert("1.0", content)
-                                                        except Exception as ex:
-                                                            messagebox.showerror("Lỗi Code", f"Lỗi tạo Notepad: {ex}", parent=top)
-                                                            return
-                                                        def save_remote_file():
-                                                            req = {"type": "request_write_text_file", "path": path, "content": text_area.get("1.0", "end-1c")}
-                                                            send_event(req)
-                                                            messagebox.showinfo("Thông báo", "Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển.", parent=np_win)
-                                                        tk.Button(np_win, text="Lưu", command=save_remote_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
-                                                    else:
-                                                        messagebox.showerror("Lỗi", event.get("error", "Không thể đọc tệp"), parent=top)
+                                                        from datetime import datetime
+                                                        ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+                                                        open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
+                                                        content = event.get("content", "")
+                                                        path = event.get("path", "")
+                                                        name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
+                                                        np_win = tk.Toplevel(top)
+                                                        np_win.title(f"Soạn thảo (Remote) - {name}")
+                                                        np_win.geometry("800x600")
+                                                        np_win.transient(top)
+                                                        np_win.attributes('-topmost', True)
+                                                        np_win.update_idletasks()
+                                                        w, h = 800, 600
+                                                        px, py = top.winfo_rootx(), top.winfo_rooty()
+                                                        pw, ph = top.winfo_width(), top.winfo_height()
+                                                        np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                                                        text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
+                                                        text_area.pack(expand=True, fill="both")
+                                                        text_area.insert("1.0", content)
+                                                    except Exception as ex:
+                                                        messagebox.showerror("Lỗi Code", f"Lỗi tạo Notepad: {ex}", parent=top)
+                                                        return
+                                                    def save_remote_file():
+                                                        req = {"type": "request_write_text_file", "path": path, "content": text_area.get("1.0", "end-1c")}
+                                                        send_event(req)
+                                                        messagebox.showinfo("Thông báo", "Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển.", parent=np_win)
+                                                    tk.Button(np_win, text="Lưu", command=save_remote_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                                                else:
+                                                    messagebox.showerror("Lỗi", event.get("error", "Không thể đọc tệp"), parent=top)
                                             elif evt_type == "write_text_file_result":
                                                 success = event.get("success")
                                                 if not success:
