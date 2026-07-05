@@ -4011,18 +4011,30 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             continue
                         if show_buttons and file_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                if globals().get('fm_is_open'):
+                                    continue
+                                globals()['fm_is_open'] = True
                                 print("[Client] Transfer File Button Clicked.")
+                                
+                                if globals().get('fm_top') and globals().get('fm_top').winfo_exists():
+                                    try:
+                                        def restore_fm():
+                                            globals().get('fm_top').deiconify()
+                                            globals().get('fm_top').focus_force()
+                                        globals().get('fm_top').after(0, restore_fm)
+                                    except: pass
+                                    continue
+
                                 def open_transfer_window():
                                     try:
                                         import tkinter as tk
                                         from tkinter import ttk, filedialog, messagebox
                                         import threading, os, time, base64
 
-                                        root = tk.Tk()
-                                        root.withdraw()
-                                        root.attributes('-topmost', True)
-                                    
-                                        top = tk.Toplevel(root)
+                                        top = tk.Tk()
+                                        globals()['fm_top'] = top
+                                        top.attributes('-alpha', 0.0) # Ẩn đi để tránh nháy khi tạo
+                                        
                                         host_title = f" - {computer_name}" if computer_name else ""
                                         top.title(f"P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}")
                                         
@@ -4042,13 +4054,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if host_w >= 1920 and host_h >= 1080:
                                                 top.update_idletasks()
                                                 tk_hwnd = int(top.frame(), 16)
+                                                try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                                                except: pass
                                                 style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
                                                 style = (style | 0x40000000) & ~0x80000000
                                                 ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
                                                 ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
                                                 x = max(0, (py_w - 900) // 2)
                                                 y = max(0, (py_h - 600) // 2)
-                                                top.geometry(f"900x600+{x}+{y}")
+                                                top.geometry("900x600")
+                                                top.update_idletasks()
+                                                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
                                             else:
                                                 x = max(0, pt.x + (py_w - 900) // 2)
                                                 y = max(0, pt.y + (py_h - 600) // 2)
@@ -4057,19 +4073,21 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             top.geometry("900x600")
 
                                         top.attributes('-topmost', True)
+                                        top.attributes('-alpha', 1.0) # Hiện lại sau khi set geometry
+                                        top.configure(bg="#E5E5E5")
                                     
-                                        left_frame = tk.Frame(top)
+                                        left_frame = tk.Frame(top, bg="#E5E5E5")
                                         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
                                     
-                                        mid_frame = tk.Frame(top, width=60)
+                                        mid_frame = tk.Frame(top, width=60, bg="#E5E5E5")
                                         mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
                                     
-                                        right_frame = tk.Frame(top)
+                                        right_frame = tk.Frame(top, bg="#E5E5E5")
                                         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
                                     
                                         # --- Left Pane (Local) ---
-                                        tk.Label(left_frame, text="Máy của bạn (Local)", font=("Segoe UI", 10, "bold")).pack()
-                                        local_nav = tk.Frame(left_frame)
+                                        tk.Label(left_frame, text="Máy của bạn (Local)", font=("Segoe UI", 10, "bold"), bg="#E5E5E5").pack()
+                                        local_nav = tk.Frame(left_frame, bg="#E5E5E5")
                                         local_nav.pack(fill=tk.X, pady=2)
                                     
                                         local_entry = tk.Entry(local_nav)
@@ -4085,6 +4103,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 local_tree.delete(item)
                                             try:
                                                 path = local_entry.get()
+                                                if path == "This PC":
+                                                    import string
+                                                    import ctypes
+                                                    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+                                                    drives = []
+                                                    for letter in string.ascii_uppercase:
+                                                        if bitmask & 1:
+                                                            drives.append(f"{letter}:\\")
+                                                        bitmask >>= 1
+                                                    for d in drives:
+                                                        local_tree.insert("", "end", text=d, values=("", "Ổ đĩa", 0))
+                                                    return
+                                                
                                                 items = os.listdir(path)
                                                 # Folders first, then files
                                                 dirs = []
@@ -4108,19 +4139,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 pass
 
                                         def go_up_local():
-                                            parent = os.path.dirname(local_entry.get())
-                                            if parent and parent != local_entry.get():
-                                                local_entry.delete(0, tk.END)
-                                                local_entry.insert(0, parent)
-                                                refresh_local()
+                                            current = local_entry.get()
+                                            if current == "This PC": return
+                                            parent = os.path.dirname(current)
+                                            if parent and parent == current:
+                                                parent = "This PC"
+                                            
+                                            local_entry.delete(0, tk.END)
+                                            local_entry.insert(0, parent)
+                                            refresh_local()
 
                                         tk.Button(local_nav, text="⬆ Lên", command=go_up_local).pack(side=tk.LEFT)
                                         local_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
                                         tk.Button(local_nav, text="Đi", command=refresh_local).pack(side=tk.LEFT)
                                     
-                                        local_tree_frame = tk.Frame(left_frame)
+                                        local_tree_frame = tk.Frame(left_frame, bd=1, relief=tk.SUNKEN)
                                         local_tree_frame.pack(fill=tk.BOTH, expand=True)
-                                        local_scrollbar = ttk.Scrollbar(local_tree_frame, orient="vertical")
+                                        local_scrollbar = tk.Scrollbar(local_tree_frame, orient="vertical", width=16)
                                         local_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
                                         local_tree = ttk.Treeview(local_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=local_scrollbar.set)
                                         local_tree.heading("#0", text="Tên")
@@ -4139,8 +4174,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 item = local_tree.item(sel[0])
                                                 vals = item.get('values', [])
                                                 name = item['text']
-                                                fpath = os.path.join(local_entry.get(), name)
-                                                is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                                if local_entry.get() == "This PC":
+                                                    fpath = name
+                                                else:
+                                                    fpath = os.path.join(local_entry.get(), name)
+                                                is_dir = (len(vals) > 1 and vals[1] in ("Thư mục", "Ổ đĩa"))
                                                 if not is_dir:
                                                     try: is_dir = os.path.isdir(fpath)
                                                     except: pass
@@ -4162,6 +4200,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 if action == "mkdir":
                                                     from tkinter import simpledialog
                                                     new_name = simpledialog.askstring("Thư mục mới", "Nhập tên thư mục mới:", parent=top)
+                                                    top.focus_force()
                                                     if new_name:
                                                         try:
                                                             os.makedirs(os.path.join(current_dir, new_name), exist_ok=True)
@@ -4231,6 +4270,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 elif action == "rename":
                                                     from tkinter import simpledialog
                                                     new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
+                                                    top.focus_force()
                                                     if new_name and new_name != name:
                                                         try:
                                                             os.rename(full_path, os.path.join(current_dir, new_name))
@@ -4238,7 +4278,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         except Exception as e:
                                                             messagebox.showerror("Lỗi", str(e), parent=top)
                                                 elif action == "delete":
-                                                    if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' không?", parent=top):
+                                                    confirm = messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' không?", parent=top)
+                                                    top.focus_force()
+                                                    if confirm:
                                                         try:
                                                             if is_dir:
                                                                 import shutil
@@ -4272,8 +4314,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         local_tree.bind("<Button-3>", show_local_menu)
                                     
                                         # --- Right Pane (Remote) ---
-                                        tk.Label(right_frame, text="Máy điều khiển (Remote Host)", font=("Segoe UI", 10, "bold")).pack()
-                                        remote_nav = tk.Frame(right_frame)
+                                        tk.Label(right_frame, text="Máy điều khiển (Remote Host)", font=("Segoe UI", 10, "bold"), bg="#E5E5E5").pack()
+                                        remote_nav = tk.Frame(right_frame, bg="#E5E5E5")
                                         remote_nav.pack(fill=tk.X, pady=2)
                                         
                                         remote_entry = tk.Entry(remote_nav)
@@ -4380,9 +4422,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         remote_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
                                         tk.Button(remote_nav, text="Đi", command=lambda: request_remote_dir(remote_entry.get())).pack(side=tk.LEFT)
 
-                                        remote_tree_frame = tk.Frame(right_frame)
+                                        remote_tree_frame = tk.Frame(right_frame, bd=1, relief=tk.SUNKEN)
                                         remote_tree_frame.pack(fill=tk.BOTH, expand=True)
-                                        remote_scrollbar = ttk.Scrollbar(remote_tree_frame, orient="vertical")
+                                        remote_scrollbar = tk.Scrollbar(remote_tree_frame, orient="vertical", width=16)
                                         remote_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
                                         remote_tree = ttk.Treeview(remote_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=remote_scrollbar.set)
                                         remote_tree.heading("#0", text="Tên")
@@ -4423,6 +4465,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if action == "mkdir":
                                                 from tkinter import simpledialog
                                                 new_name = simpledialog.askstring("Thư mục mới", "Nhập tên thư mục mới:", parent=top)
+                                                top.focus_force()
                                                 if new_name:
                                                     req = {"type": "request_create_folder", "parent_path": current_dir, "folder_name": new_name}
                                                     send_event(req)
@@ -4456,11 +4499,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             elif action == "rename":
                                                 from tkinter import simpledialog
                                                 new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
+                                                top.focus_force()
                                                 if new_name and new_name != name:
                                                     req = {"type": "request_rename_item", "old_path": full_path, "new_name": new_name}
                                                     send_event(req)
                                             elif action == "delete":
-                                                if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' khỏi máy điều khiển không?", parent=top):
+                                                confirm = messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' khỏi máy điều khiển không?", parent=top)
+                                                top.focus_force()
+                                                if confirm:
                                                     req = {"type": "request_delete_item", "path": full_path}
                                                     send_event(req)
                                         remote_menu.add_command(label="Xem file", command=lambda: remote_action("view"))
@@ -4481,7 +4527,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 return
                                             char = event.char.lower()
                                             items = tree.get_children()
-                                            if not items: return
+                                            if not items: return "break"
                                             
                                             start_idx = 0
                                             current_sel = tree.selection()
@@ -4499,9 +4545,56 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                     tree.focus(item)
                                                     tree.see(item)
                                                     return "break"
+                                            return "break"
                                         
                                         local_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, local_tree))
                                         remote_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, remote_tree))
+
+                                        def tree_go_home(event, tree):
+                                            items = tree.get_children()
+                                            if items:
+                                                tree.selection_set(items[0])
+                                                tree.focus(items[0])
+                                                tree.see(items[0])
+                                            return "break"
+
+                                        def tree_go_end(event, tree):
+                                            items = tree.get_children()
+                                            if items:
+                                                tree.selection_set(items[-1])
+                                                tree.focus(items[-1])
+                                                tree.see(items[-1])
+                                            return "break"
+
+                                        local_tree.bind("<Home>", lambda e: tree_go_home(e, local_tree))
+                                        local_tree.bind("<End>", lambda e: tree_go_end(e, local_tree))
+                                        remote_tree.bind("<Home>", lambda e: tree_go_home(e, remote_tree))
+                                        remote_tree.bind("<End>", lambda e: tree_go_end(e, remote_tree))
+                                        
+                                        def tree_page_up(event, tree):
+                                            tree.yview_scroll(-1, "pages")
+                                            def select_top():
+                                                vis = [i for i in tree.get_children() if tree.bbox(i)]
+                                                if vis:
+                                                    tree.selection_set(vis[0])
+                                                    tree.focus(vis[0])
+                                            tree.after(50, select_top)
+                                            return "break"
+
+                                        def tree_page_down(event, tree):
+                                            tree.yview_scroll(1, "pages")
+                                            def select_bottom():
+                                                vis = [i for i in tree.get_children() if tree.bbox(i)]
+                                                if vis:
+                                                    tree.selection_set(vis[-1])
+                                                    tree.focus(vis[-1])
+                                            tree.after(50, select_bottom)
+                                            return "break"
+                                            
+                                        local_tree.bind("<Prior>", lambda e: tree_page_up(e, local_tree))
+                                        local_tree.bind("<Next>", lambda e: tree_page_down(e, local_tree))
+                                        remote_tree.bind("<Prior>", lambda e: tree_page_up(e, remote_tree))
+                                        remote_tree.bind("<Next>", lambda e: tree_page_down(e, remote_tree))
 
                                         # --- Transfer Actions ---
                                         def write_transfer_log(direction, file_name, file_size, dest_dir):
@@ -4593,16 +4686,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         fm_event_queue.put({"type": "trigger_local_refresh"})
                                                     threading.Thread(target=auto_refresh_local, daemon=True).start()
 
-                                        tk.Label(mid_frame, text="").pack(pady=80)
-                                        tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=10)
+                                        tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=(100, 10))
                                         tk.Button(mid_frame, text="Nhận về\n<<", font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10, command=do_download).pack(pady=10)
 
                                         def on_close():
-                                            globals()['file_manager_callback'] = None
-                                            top.destroy()
-                                            try: root.quit()
-                                            except: pass
-                                            try: root.destroy()
+                                            globals()['fm_is_open'] = False
+                                            try: top.withdraw()
                                             except: pass
                                         
                                         top.protocol("WM_DELETE_WINDOW", on_close)
@@ -4610,9 +4699,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         # init
                                         refresh_local()
                                         request_remote_dir(remote_entry.get())
-                                    
-                                        root.mainloop()
+                                        
+                                        top.focus_force()
+                                        local_entry.focus()
+                                        top.mainloop()
                                     except Exception as ex:
+                                        globals()['fm_is_open'] = False
                                         import traceback
                                         err = traceback.format_exc()
                                         try:
@@ -5094,7 +5186,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             outer_running = False
             
         uninstall_keyboard_hook()
-        pygame.quit()
+        # pygame.quit() # Bỏ qua để tránh deadlock SetParent với Tkinter thread
         try: log_activity(f"Ngừng điều khiển ID {partner_id} ({computer_name})")
         except: pass
         import os
@@ -5107,8 +5199,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         import traceback
         with open("client_crash.log", "w", encoding="utf-8") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
-        try: pygame.quit()
-        except: pass
+        # try: pygame.quit()
+        # except: pass
         import os
         if exit_due_to_disconnect:
             os._exit(99)
