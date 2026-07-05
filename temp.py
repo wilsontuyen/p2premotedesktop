@@ -4039,20 +4039,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             pt = wintypes.POINT(0, 0)
                                             ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
                                             
-                                            if host_w >= 1920 and host_h >= 1080:
-                                                top.update_idletasks()
-                                                tk_hwnd = int(top.frame(), 16)
-                                                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                                                style = (style | 0x40000000) & ~0x80000000
-                                                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                                                ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
-                                                x = max(0, (py_w - 900) // 2)
-                                                y = max(0, (py_h - 600) // 2)
-                                                top.geometry(f"900x600+{x}+{y}")
-                                            else:
-                                                x = max(0, pt.x + (py_w - 900) // 2)
-                                                y = max(0, pt.y + (py_h - 600) // 2)
-                                                top.geometry(f"900x600+{x}+{y}")
+                                            x = max(0, pt.x + (py_w - 900) // 2)
+                                            y = max(0, pt.y + (py_h - 600) // 2)
+                                            
+                                            top.geometry(f"900x600+{x}+{y}")
                                         else:
                                             top.geometry("900x600")
 
@@ -4118,11 +4108,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         local_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
                                         tk.Button(local_nav, text="Đi", command=refresh_local).pack(side=tk.LEFT)
                                     
-                                        local_tree_frame = tk.Frame(left_frame)
-                                        local_tree_frame.pack(fill=tk.BOTH, expand=True)
-                                        local_scrollbar = ttk.Scrollbar(local_tree_frame, orient="vertical")
-                                        local_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-                                        local_tree = ttk.Treeview(local_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=local_scrollbar.set)
+                                        local_tree = ttk.Treeview(left_frame, columns=("size", "type", "raw_size"), show="tree headings")
                                         local_tree.heading("#0", text="Tên")
                                         local_tree.heading("size", text="Kích thước")
                                         local_tree.heading("type", text="Loại")
@@ -4130,8 +4116,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         local_tree.column("size", width=80)
                                         local_tree.column("type", width=70)
                                         local_tree.column("raw_size", width=0, stretch=False)
-                                        local_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                                        local_scrollbar.config(command=local_tree.yview)
+                                        local_tree.pack(fill=tk.BOTH, expand=True)
 
                                         def local_double_click(event):
                                             sel = local_tree.selection()
@@ -4152,7 +4137,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 else:
                                                     local_action("view")
                                         local_tree.bind("<Double-1>", local_double_click)
-                                        local_tree.bind("<BackSpace>", lambda e: go_up_local())
 
                                         local_menu = tk.Menu(top, tearoff=0)
                                         def local_action(action):
@@ -4173,88 +4157,60 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 item = local_tree.item(sel[0])
                                                 name = item['text']
                                                 full_path = os.path.join(current_dir, name)
-                                                vals = item.get('values', [])
-                                                is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
-                                                if action == "view":
-                                                    from datetime import datetime
-                                                    ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                    with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                        f.write(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}\n")
-                                                    if is_dir:
-                                                        messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
-                                                    else:
-                                                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh'}
-                                                        _, ext = os.path.splitext(name.lower())
-                                                        if ext in text_exts:
+                                                            w, h = 800, 600
+                                                            px, py = top.winfo_rootx(), top.winfo_rooty()
+                                                            pw, ph = top.winfo_width(), top.winfo_height()
+                                                            np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                                                            text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
+                                                            text_area.pack(expand=True, fill="both")
+                                                            text_area.insert("1.0", content)
+                                                            def save_file():
+                                                                try:
+                                                                    with open(full_path, "w", encoding="utf-8") as fw:
+                                                                        fw.write(text_area.get("1.0", "end-1c"))
+                                                                    messagebox.showinfo("Thành công", "Đã lưu tệp!", parent=np_win)
+                                                                except Exception as e:
+                                                                    messagebox.showerror("Lỗi", f"Không thể lưu: {e}", parent=np_win)
+                                                            btn_frame = tk.Frame(np_win)
+                                                            btn_frame.pack(fill=tk.X)
+                                                            tk.Button(btn_frame, text="Lưu", command=save_file).pack(side=tk.RIGHT, padx=5, pady=5)
+                                                        except UnicodeDecodeError:
+                                                            import sys, subprocess
                                                             try:
-                                                                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                                    f.write(f"{ts} [Local] Opening {full_path}...\n")
-                                                                with open(full_path, "r", encoding="utf-8") as f:
-                                                                    content = f.read(5 * 1024 * 1024)
-                                                                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                                    f.write(f"{ts} [Local] Read successful, creating window...\n")
-                                                                np_win = tk.Toplevel(top)
-                                                                np_win.title(f"Soạn thảo (Local) - {name}")
-                                                                np_win.geometry("800x600")
-                                                                np_win.transient(top)
-                                                                np_win.attributes('-topmost', True)
-                                                                np_win.update_idletasks()
-                                                                w, h = 800, 600
-                                                                px, py = top.winfo_rootx(), top.winfo_rooty()
-                                                                pw, ph = top.winfo_width(), top.winfo_height()
-                                                                np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
-                                                                text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
-                                                                text_area.pack(expand=True, fill="both")
-                                                                text_area.insert("1.0", content)
-                                                                def save_file():
-                                                                    try:
-                                                                        with open(full_path, "w", encoding="utf-8") as fw:
-                                                                            fw.write(text_area.get("1.0", "end-1c"))
-                                                                        messagebox.showinfo("Thành công", "Đã lưu tệp!", parent=np_win)
-                                                                    except Exception as e:
-                                                                        messagebox.showerror("Lỗi", f"Không thể lưu: {e}", parent=np_win)
-                                                                tk.Button(np_win, text="Lưu", command=save_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
-                                                                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                                    f.write(f"{ts} [Local] Window created successfully.\n")
-                                                            except Exception as ex:
-                                                                import traceback
-                                                                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                                    f.write(f"{ts} [Local] CRASH during view: {traceback.format_exc()}\n")
-                                                                messagebox.showerror("Lỗi", str(ex), parent=top)
-                                                        else:
-                                                            try:
-                                                                import sys, subprocess
                                                                 if sys.platform == "win32": os.startfile(full_path)
                                                                 else: subprocess.call(["xdg-open", full_path])
-                                                            except Exception as e:
-                                                                messagebox.showerror("Lỗi", str(e), parent=top)
-                                                elif action == "rename":
-                                                    from tkinter import simpledialog
-                                                    new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
-                                                    if new_name and new_name != name:
-                                                        try:
-                                                            os.rename(full_path, os.path.join(current_dir, new_name))
-                                                            refresh_local()
+                                                            except Exception as ex:
+                                                                messagebox.showerror("Lỗi", str(ex), parent=top)
                                                         except Exception as e:
                                                             messagebox.showerror("Lỗi", str(e), parent=top)
-                                                elif action == "delete":
-                                                    if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' không?", parent=top):
+                                                    else:
                                                         try:
-                                                            if is_dir:
-                                                                import shutil
-                                                                shutil.rmtree(full_path)
-                                                            else:
-                                                                os.remove(full_path)
-                                                            refresh_local()
+                                                            import sys, subprocess
+                                                            if sys.platform == "win32": os.startfile(full_path)
+                                                            else: subprocess.call(["xdg-open", full_path])
                                                         except Exception as e:
                                                             messagebox.showerror("Lỗi", str(e), parent=top)
-                                            except Exception as outer_e:
-                                                import traceback
-                                                from datetime import datetime
-                                                ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                                    f.write(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}\n")
-                                                messagebox.showerror("Lỗi", str(outer_e), parent=top)
+                                            elif action == "rename":
+                                                from tkinter import simpledialog
+                                                new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
+                                                if new_name and new_name != name:
+                                                    try:
+                                                        os.rename(full_path, os.path.join(current_dir, new_name))
+                                                        refresh_local()
+                                                    except Exception as e:
+                                                        messagebox.showerror("Lỗi", str(e), parent=top)
+                                            elif action == "delete":
+                                                if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa '{name}' không?", parent=top):
+                                                    try:
+                                                        if is_dir:
+                                                            import shutil
+                                                            shutil.rmtree(full_path)
+                                                        else:
+                                                            os.remove(full_path)
+                                                        refresh_local()
+                                                    except Exception as e:
+                                                        messagebox.showerror("Lỗi", str(e), parent=top)
+                                                
                                         local_menu.add_command(label="Xem file", command=lambda: local_action("view"))
                                         local_menu.add_command(label="Tạo thư mục mới", command=lambda: local_action("mkdir"))
                                         local_menu.add_command(label="Đổi tên", command=lambda: local_action("rename"))
@@ -4289,30 +4245,36 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if evt_type == "list_dir_result":
                                                 if event.get("path") != remote_entry.get():
                                                     return
-                                                for item in remote_tree.get_children():
-                                                    remote_tree.delete(item)
-                                                items = event.get("items", [])
-                                                dirs = [i for i in items if i.get("is_dir")]
-                                                files = [i for i in items if not i.get("is_dir")]
-                                                dirs.sort(key=lambda x: str(x.get("name")).lower())
-                                                files.sort(key=lambda x: str(x.get("name")).lower())
+                                                # update UI in main thread
+                                                def update_ui():
+                                                    for item in remote_tree.get_children():
+                                                        remote_tree.delete(item)
+                                                    items = event.get("items", [])
+                                                    dirs = [i for i in items if i.get("is_dir")]
+                                                    files = [i for i in items if not i.get("is_dir")]
+                                                    dirs.sort(key=lambda x: str(x.get("name")).lower())
+                                                    files.sort(key=lambda x: str(x.get("name")).lower())
                                                 
-                                                for d in dirs:
-                                                    remote_tree.insert("", "end", text=d.get("name"), values=("", "Thư mục"))
-                                                for f in files:
-                                                    sz = f.get("size", 0)
-                                                    remote_tree.insert("", "end", text=f.get("name"), values=(format_size(sz), "Tệp", sz))
+                                                    for d in dirs:
+                                                        remote_tree.insert("", "end", text=d.get("name"), values=("", "Thư mục"))
+                                                    for f in files:
+                                                        sz = f.get("size", 0)
+                                                        remote_tree.insert("", "end", text=f.get("name"), values=(format_size(sz), "Tệp", sz))
+                                                top.after(0, update_ui)
                                             elif evt_type in ("delete_item_result", "rename_item_result", "create_folder_result", "open_file_result"):
                                                 success = event.get("success")
                                                 error = event.get("error")
-                                                if not success:
-                                                    messagebox.showerror("Lỗi", error or "Thao tác thất bại", parent=top)
-                                                else:
-                                                    request_remote_dir(remote_entry.get())
+                                                def show_msg():
+                                                    if not success:
+                                                        messagebox.showerror("Lỗi", error or "Thao tác thất bại", parent=top)
+                                                    else:
+                                                        request_remote_dir(remote_entry.get())
+                                                top.after(0, show_msg)
                                             elif evt_type == "read_text_file_result":
                                                 success = event.get("success")
-                                                if success:
-                                                    try:
+                                                def show_notepad():
+                                                    if success:
+                                                        try:
                                                             from datetime import datetime
                                                             ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
                                                             open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
@@ -4339,31 +4301,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                             req = {"type": "request_write_text_file", "path": path, "content": text_area.get("1.0", "end-1c")}
                                                             send_event(req)
                                                             messagebox.showinfo("Thông báo", "Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển.", parent=np_win)
-                                                        tk.Button(np_win, text="Lưu", command=save_remote_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                                                        btn_frame = tk.Frame(np_win)
+                                                        btn_frame.pack(fill=tk.X)
+                                                        tk.Button(btn_frame, text="Lưu", command=save_remote_file).pack(side=tk.RIGHT, padx=5, pady=5)
                                                     else:
                                                         messagebox.showerror("Lỗi", event.get("error", "Không thể đọc tệp"), parent=top)
+                                                top.after(0, show_notepad)
                                             elif evt_type == "write_text_file_result":
                                                 success = event.get("success")
-                                                if not success:
-                                                    messagebox.showerror("Lỗi", event.get("error", "Lỗi lưu tệp từ xa"), parent=top)
+                                                def show_write_status():
+                                                    if not success:
+                                                        messagebox.showerror("Lỗi", event.get("error", "Lỗi lưu tệp từ xa"), parent=top)
+                                                top.after(0, show_write_status)
                                         
-                                        import queue
-                                        fm_event_queue = queue.Queue()
-                                        def process_fm_queue():
-                                            try:
-                                                while True:
-                                                    evt = fm_event_queue.get_nowait()
-                                                    if evt.get("type") == "trigger_local_refresh":
-                                                        refresh_local()
-                                                    else:
-                                                        on_remote_dir_result(evt)
-                                            except queue.Empty:
-                                                pass
-                                            if top.winfo_exists():
-                                                top.after(100, process_fm_queue)
-                                                
-                                        top.after(100, process_fm_queue)
-                                        globals()['file_manager_callback'] = lambda e: fm_event_queue.put(e)
+                                        globals()['file_manager_callback'] = on_remote_dir_result
 
                                         def go_up_remote():
                                             p = remote_entry.get().replace("\\", "/").rstrip("/")
@@ -4380,11 +4331,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         remote_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
                                         tk.Button(remote_nav, text="Đi", command=lambda: request_remote_dir(remote_entry.get())).pack(side=tk.LEFT)
 
-                                        remote_tree_frame = tk.Frame(right_frame)
-                                        remote_tree_frame.pack(fill=tk.BOTH, expand=True)
-                                        remote_scrollbar = ttk.Scrollbar(remote_tree_frame, orient="vertical")
-                                        remote_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-                                        remote_tree = ttk.Treeview(remote_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=remote_scrollbar.set)
+                                        remote_tree = ttk.Treeview(right_frame, columns=("size", "type", "raw_size"), show="tree headings")
                                         remote_tree.heading("#0", text="Tên")
                                         remote_tree.heading("size", text="Kích thước")
                                         remote_tree.heading("type", text="Loại")
@@ -4392,8 +4339,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         remote_tree.column("size", width=80)
                                         remote_tree.column("type", width=70)
                                         remote_tree.column("raw_size", width=0, stretch=False)
-                                        remote_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                                        remote_scrollbar.config(command=remote_tree.yview)
+                                        remote_tree.pack(fill=tk.BOTH, expand=True)
 
                                         def remote_double_click(event):
                                             sel = remote_tree.selection()
@@ -4412,7 +4358,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 else:
                                                     remote_action("view")
                                         remote_tree.bind("<Double-1>", remote_double_click)
-                                        remote_tree.bind("<BackSpace>", lambda e: go_up_remote())
 
                                         remote_menu = tk.Menu(top, tearoff=0)
                                         def remote_action(action):
@@ -4590,7 +4535,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 
                                                     def auto_refresh_local():
                                                         time.sleep(2)
-                                                        fm_event_queue.put({"type": "trigger_local_refresh"})
+                                                        top.after(0, refresh_local)
                                                     threading.Thread(target=auto_refresh_local, daemon=True).start()
 
                                         tk.Label(mid_frame, text="").pack(pady=80)
@@ -4600,10 +4545,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         def on_close():
                                             globals()['file_manager_callback'] = None
                                             top.destroy()
-                                            try: root.quit()
-                                            except: pass
-                                            try: root.destroy()
-                                            except: pass
+                                            root.destroy()
                                         
                                         top.protocol("WM_DELETE_WINDOW", on_close)
                                     
