@@ -4253,8 +4253,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                     top.focus_force()
                                                     if new_name:
                                                         try:
-                                                            os.makedirs(os.path.join(current_dir, new_name), exist_ok=True)
-                                                            refresh_local()
+                                                            folder_path = os.path.join(current_dir, new_name)
+                                                            if os.path.exists(folder_path):
+                                                                messagebox.showinfo("Lỗi", f'Thư mục "{new_name}" đã tồn tại trên "{current_dir}"', parent=top)
+                                                            else:
+                                                                os.makedirs(folder_path, exist_ok=True)
+                                                                refresh_local()
                                                         except Exception as e:
                                                             with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f: f.write(f"Error mkdir: {str(e)}\n")
                                                     return
@@ -4365,20 +4369,33 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
                                                     f.write(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}\n")
                                                 messagebox.showerror("Lỗi", str(outer_e), parent=top)
-                                        local_menu.add_command(label="Xem file", command=lambda: local_action("view"))
-                                        local_menu.add_command(label="Tạo thư mục mới", command=lambda: local_action("mkdir"))
-                                        local_menu.add_command(label="Đổi tên", command=lambda: local_action("rename"))
-                                        local_menu.add_separator()
-                                        local_menu.add_command(label="Xóa", command=lambda: local_action("delete"))
                                         def show_local_menu(event):
+                                            local_menu.delete(0, 'end')
                                             row = local_tree.identify_row(event.y)
-                                            if row:
-                                                if row not in local_tree.selection():
-                                                    local_tree.selection_set(row)
-                                                try:
-                                                    local_menu.tk_popup(event.x_root, event.y_root)
-                                                finally:
-                                                    local_menu.grab_release()
+                                            if not row:
+                                                local_menu.add_command(label="Tạo thư mục mới", command=lambda: local_action("mkdir"))
+                                                local_menu.add_separator()
+                                                local_menu.add_command(label="Làm mới", command=refresh_local)
+                                                local_menu.tk_popup(event.x_root, event.y_root)
+                                                return
+                                                
+                                            if row not in local_tree.selection():
+                                                local_tree.selection_set(row)
+                                            
+                                            vals = local_tree.item(row, "values")
+                                            is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                            
+                                            if not is_dir:
+                                                local_menu.add_command(label="Xem file", command=lambda: local_action("view"))
+                                            local_menu.add_command(label="Tạo thư mục mới", command=lambda: local_action("mkdir"))
+                                            local_menu.add_command(label="Đổi tên", command=lambda: local_action("rename"))
+                                            local_menu.add_separator()
+                                            local_menu.add_command(label="Xóa", command=lambda: local_action("delete"))
+                                            
+                                            try:
+                                                local_menu.tk_popup(event.x_root, event.y_root)
+                                            finally:
+                                                local_menu.grab_release()
                                         local_tree.bind("<Button-3>", show_local_menu)
                                         
                                         def select_all_local(event):
@@ -4541,8 +4558,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 new_name = simpledialog.askstring("Thư mục mới", "Nhập tên thư mục mới:", parent=top)
                                                 top.focus_force()
                                                 if new_name:
-                                                    req = {"type": "request_create_folder", "parent_path": current_dir, "folder_name": new_name}
-                                                    send_event(req)
+                                                    exists = False
+                                                    for child in remote_tree.get_children():
+                                                        if remote_tree.item(child, "text") == new_name:
+                                                            exists = True
+                                                            break
+                                                    if exists:
+                                                        messagebox.showinfo("Lỗi", f'Thư mục "{new_name}" đã tồn tại trên "{current_dir}"', parent=top)
+                                                    else:
+                                                        req = {"type": "request_create_folder", "parent_path": current_dir, "folder_name": new_name}
+                                                        send_event(req)
                                                 return
                                             if not sel: return
                                             
@@ -4594,18 +4619,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                     if new_name and new_name != name:
                                                         req = {"type": "request_rename_item", "old_path": full_path, "new_name": new_name}
                                                         send_event(req)
-                                        remote_menu.add_command(label="Xem file", command=lambda: remote_action("view"))
-                                        remote_menu.add_command(label="Tạo thư mục mới", command=lambda: remote_action("mkdir"))
-                                        remote_menu.add_command(label="Đổi tên", command=lambda: remote_action("rename"))
-                                        remote_menu.add_separator()
-                                        remote_menu.add_command(label="Xóa", command=lambda: remote_action("delete"))
                                         def show_remote_menu(event):
+                                            remote_menu.delete(0, 'end')
                                             row = remote_tree.identify_row(event.y)
-                                            if row:
-                                                if row not in remote_tree.selection():
-                                                    remote_tree.selection_set(row)
-                                                remote_tree.focus(row)
+                                            if not row:
+                                                remote_menu.add_command(label="Tạo thư mục mới", command=lambda: remote_action("mkdir"))
+                                                remote_menu.add_separator()
+                                                remote_menu.add_command(label="Làm mới", command=lambda: request_remote_dir(remote_entry.get()))
                                                 remote_menu.post(event.x_root, event.y_root)
+                                                return
+                                                
+                                            if row not in remote_tree.selection():
+                                                remote_tree.selection_set(row)
+                                            remote_tree.focus(row)
+                                            
+                                            vals = remote_tree.item(row, "values")
+                                            is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                            
+                                            if not is_dir:
+                                                remote_menu.add_command(label="Xem file", command=lambda: remote_action("view"))
+                                            remote_menu.add_command(label="Tạo thư mục mới", command=lambda: remote_action("mkdir"))
+                                            remote_menu.add_command(label="Đổi tên", command=lambda: remote_action("rename"))
+                                            remote_menu.add_separator()
+                                            remote_menu.add_command(label="Xóa", command=lambda: remote_action("delete"))
+                                            
+                                            remote_menu.post(event.x_root, event.y_root)
                                         remote_tree.bind("<Button-3>", show_remote_menu)
                                         
                                         def select_all_remote(event):
@@ -4642,6 +4680,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         local_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, local_tree))
                                         remote_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, remote_tree))
 
+                                        local_tree.bind("<F2>", lambda e: local_action("rename"))
+                                        remote_tree.bind("<F2>", lambda e: remote_action("rename"))
+                                        
+                                        local_tree.bind("<F5>", lambda e: refresh_local())
+                                        remote_tree.bind("<F5>", lambda e: request_remote_dir(remote_entry.get()))
+                                        local_tree.bind("<BackSpace>", lambda e: "break" if go_up_local() or True else "")
+                                        remote_tree.bind("<BackSpace>", lambda e: "break" if go_up_remote() or True else "")
+                                        
                                         def tree_go_home(event, tree):
                                             items = tree.get_children()
                                             if items:
@@ -4658,37 +4704,126 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 tree.see(items[-1])
                                             return "break"
 
-                                        local_tree.bind("<Home>", lambda e: tree_go_home(e, local_tree))
-                                        local_tree.bind("<End>", lambda e: tree_go_end(e, local_tree))
-                                        remote_tree.bind("<Home>", lambda e: tree_go_home(e, remote_tree))
-                                        remote_tree.bind("<End>", lambda e: tree_go_end(e, remote_tree))
-                                        
                                         def tree_page_up(event, tree):
-                                            tree.yview_scroll(-1, "pages")
-                                            def select_top():
-                                                vis = [i for i in tree.get_children() if tree.bbox(i)]
-                                                if vis:
-                                                    tree.selection_set(vis[0])
-                                                    tree.focus(vis[0])
-                                            tree.after(50, select_top)
+                                            items = tree.get_children()
+                                            if not items: return "break"
+                                            sel = tree.selection()
+                                            new_idx = max(0, items.index(sel[0]) - 15) if sel else 0
+                                            tree.selection_set(items[new_idx])
+                                            tree.focus(items[new_idx])
+                                            tree.see(items[new_idx])
                                             return "break"
 
                                         def tree_page_down(event, tree):
-                                            tree.yview_scroll(1, "pages")
-                                            def select_bottom():
-                                                vis = [i for i in tree.get_children() if tree.bbox(i)]
-                                                if vis:
-                                                    tree.selection_set(vis[-1])
-                                                    tree.focus(vis[-1])
-                                            tree.after(50, select_bottom)
+                                            items = tree.get_children()
+                                            if not items: return "break"
+                                            sel = tree.selection()
+                                            new_idx = min(len(items) - 1, items.index(sel[-1]) + 15) if sel else len(items) - 1
+                                            tree.selection_set(items[new_idx])
+                                            tree.focus(items[new_idx])
+                                            tree.see(items[new_idx])
                                             return "break"
-                                            
-                                        local_tree.bind("<Prior>", lambda e: tree_page_up(e, local_tree))
-                                        local_tree.bind("<Next>", lambda e: tree_page_down(e, local_tree))
-                                        remote_tree.bind("<Prior>", lambda e: tree_page_up(e, remote_tree))
-                                        remote_tree.bind("<Next>", lambda e: tree_page_down(e, remote_tree))
+
+                                        for t in (local_tree, remote_tree):
+                                            t.bind("<Home>", lambda e, tr=t: tree_go_home(e, tr))
+                                            t.bind("<End>", lambda e, tr=t: tree_go_end(e, tr))
+                                            t.bind("<Prior>", lambda e, tr=t: tree_page_up(e, tr))
+                                            t.bind("<Next>", lambda e, tr=t: tree_page_down(e, tr))
 
                                         # --- Transfer Actions ---
+                                        def resolve_conflicts(conflicts, parent, is_upload):
+                                            results = {}
+                                            overwrite_all = False
+                                            
+                                            for c in conflicts:
+                                                if overwrite_all:
+                                                    results[c['name']] = 'overwrite'
+                                                    continue
+                                                    
+                                                dlg = tk.Frame(parent, bg="#FFFFFF", highlightbackground="#0078D7", highlightthickness=2)
+                                                dlg.place(relx=0.5, rely=0.5, anchor="center", width=650, height=380)
+                                                dlg.lift()
+                                                dlg.focus_force()
+                                                
+                                                try:
+                                                    dlg.grab_set()
+                                                except: pass
+                                                
+                                                title_bar = tk.Frame(dlg, bg="#F3F3F3", height=30)
+                                                title_bar.pack(fill=tk.X, side=tk.TOP)
+                                                title_bar.pack_propagate(False)
+                                                tk.Label(title_bar, text="Xác nhận", bg="#F3F3F3", fg="#333333", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=10, pady=5)
+                                                
+                                                frame = tk.Frame(dlg, bg="white")
+                                                frame.pack(fill="both", expand=True)
+                                                
+                                                # Pack btn_frame first at the bottom so it never gets clipped
+                                                btn_frame = tk.Frame(frame, bg="white")
+                                                btn_frame.pack(fill="x", side="bottom", pady=20, padx=20)
+                                                
+                                                item_type = "Thư mục" if c.get('src_is_dir') else "Tập tin"
+                                                lbl_title = tk.Label(frame, text=f"{item_type} với tên \"{c['name']}\" đã tồn tại.", font=("Segoe UI", 11, "bold"), bg="white", anchor="w")
+                                                lbl_title.pack(fill="x", padx=20, pady=(20, 10))
+                                                
+                                                try:
+                                                    src_sz_val = int(float(c.get('src_size', 0)))
+                                                except:
+                                                    src_sz_val = 0
+                                                try:
+                                                    dst_sz_val = int(float(c.get('dst_size', 0)))
+                                                except:
+                                                    dst_sz_val = 0
+                                                    
+                                                src_sz = format_size(src_sz_val)
+                                                dst_sz = format_size(dst_sz_val)
+                                                
+                                                src_path = c.get('src_path', 'Không rõ')
+                                                dst_path = c.get('dst_path', 'Không rõ')
+                                                src_mtime = c.get('src_mtime', 'Không xác định')
+                                                dst_mtime = c.get('dst_mtime', 'Không xác định')
+                                                
+                                                if is_upload:
+                                                    src_title = "Nguồn (Máy bạn):"
+                                                    dst_title = "Đích (Máy từ xa):"
+                                                else:
+                                                    src_title = "Nguồn (Máy từ xa):"
+                                                    dst_title = "Đích (Máy bạn):"
+                                                    
+                                                src_disp = f"{src_title}\n- Thư mục: {src_path}\n- Dung lượng: {src_sz}\n- Ngày sửa đổi: {src_mtime}"
+                                                dst_disp = f"{dst_title}\n- Thư mục: {dst_path}\n- Dung lượng: {dst_sz}\n- Ngày sửa đổi: {dst_mtime}"
+                                                
+                                                tk.Label(frame, text=src_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=2)
+                                                tk.Label(frame, text=dst_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=(2, 10))
+                                                tk.Label(frame, text="Bạn muốn làm gì?", font=("Segoe UI", 10, "bold"), bg="white", anchor="w").pack(fill="x", padx=20, pady=(5, 15))
+                                                
+                                                decision = ["cancel"]
+                                                def make_decision(d):
+                                                    decision[0] = d
+                                                    try: dlg.grab_release()
+                                                    except: pass
+                                                    dlg.destroy()
+                                                    
+                                                btn_cancel = tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 10, "bold"), bg="#e0e0e0", fg="black", width=8, relief="raised", borderwidth=2, command=lambda: make_decision("cancel"))
+                                                btn_cancel.pack(side="right", padx=5)
+                                                
+                                                btn_skip = tk.Button(btn_frame, text="Bỏ qua", font=("Segoe UI", 10), bg="#e0e0e0", fg="black", width=10, relief="raised", borderwidth=2, command=lambda: make_decision("skip"))
+                                                btn_skip.pack(side="right", padx=10)
+                                                
+                                                btn_ow = tk.Button(btn_frame, text="Ghi đè", font=("Segoe UI", 10), bg="#e0e0e0", fg="black", width=10, relief="raised", borderwidth=2, command=lambda: make_decision("overwrite"))
+                                                btn_ow.pack(side="right", padx=10)
+                                                
+                                                btn_ow_all = tk.Button(btn_frame, text="Ghi đè toàn bộ", font=("Segoe UI", 10, "bold"), bg="#e0e0e0", fg="black", width=15, relief="raised", borderwidth=2, command=lambda: make_decision("overwrite_all"))
+                                                btn_ow_all.pack(side="right", padx=10)
+                                                
+                                                parent.wait_window(dlg)
+                                                if decision[0] == "cancel": return None
+                                                elif decision[0] == "overwrite_all":
+                                                    overwrite_all = True
+                                                    results[c['name']] = 'overwrite'
+                                                else: results[c['name']] = decision[0]
+                                                    
+                                            return results
+
                                         def write_transfer_log(direction, file_name, file_size, dest_dir):
                                             try:
                                                 import datetime
@@ -4704,23 +4839,66 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if not sel: return
                                             
                                             target_dir = remote_entry.get()
+                                            
+                                            # Check conflicts
+                                            remote_items = {}
+                                            for child in remote_tree.get_children():
+                                                txt = remote_tree.item(child, "text")
+                                                vals = remote_tree.item(child, "values")
+                                                is_dir = True if len(vals) > 1 and vals[1] == "Thư mục" else False
+                                                sz = vals[2] if len(vals) > 2 else 0
+                                                remote_items[txt] = {"is_dir": is_dir, "size": sz}
+                                            
+                                            conflicts = []
+                                            for s in sel:
+                                                name = local_tree.item(s, "text")
+                                                if name in remote_items:
+                                                    fpath = os.path.join(local_entry.get(), name)
+                                                    sz = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
+                                                    is_dir = os.path.isdir(fpath)
+                                                    try:
+                                                        import datetime
+                                                        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
+                                                    except: mtime = "Không xác định"
+                                                    dpath = remote_entry.get()
+                                                    if not dpath.endswith('/'): dpath += '/'
+                                                    dpath += name
+                                                    conflicts.append({
+                                                        "name": name,
+                                                        "src_size": sz, "src_is_dir": is_dir, "src_path": fpath, "src_mtime": mtime,
+                                                        "dst_size": remote_items[name]["size"], "dst_is_dir": remote_items[name]["is_dir"],
+                                                        "dst_path": dpath, "dst_mtime": "Không xác định (Remote)"
+                                                    })
+                                                    
+                                            if conflicts:
+                                                decisions = resolve_conflicts(conflicts, top, is_upload=True)
+                                                if decisions is None: return
+                                            else:
+                                                decisions = {}
+
                                             items_to_upload = [] # List of (local_path, remote_name, size)
                                             total_size = 0
                                             
                                             for s in sel:
                                                 item = local_tree.item(s)
                                                 name = item['text']
+                                                
+                                                if name in decisions and decisions[name] == 'skip':
+                                                    continue
                                                 fpath = os.path.join(local_entry.get(), name)
                                                 
                                                 if os.path.isfile(fpath):
                                                     sz = os.path.getsize(fpath)
-                                                    items_to_upload.append((fpath, name, sz))
+                                                    items_to_upload.append((fpath, name, sz, False))
                                                     total_size += sz
                                                 elif os.path.isdir(fpath):
                                                     # Recursive walk for folders
                                                     base_name = name
                                                     for root, dirs, files in os.walk(fpath):
                                                         rel_path = os.path.relpath(root, os.path.dirname(fpath))
+                                                        if not dirs and not files:
+                                                            remote_name = rel_path.replace('\\', '/')
+                                                            items_to_upload.append((None, remote_name, 0, True))
                                                         for d in dirs:
                                                             remote_name = os.path.join(rel_path, d).replace('\\', '/')
                                                         for f in files:
@@ -4728,7 +4906,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                             if os.path.isfile(full_file):
                                                                 sz = os.path.getsize(full_file)
                                                                 remote_name = os.path.join(rel_path, f).replace('\\', '/')
-                                                                items_to_upload.append((full_file, remote_name, sz))
+                                                                items_to_upload.append((full_file, remote_name, sz, False))
                                                                 total_size += sz
 
                                             if not items_to_upload: return
@@ -4747,8 +4925,26 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             def upload_batch_thread(items, t_dir, dlg, st):
                                                 try:
                                                     sent_total = 0
-                                                    for path, n, sz in items:
+                                                    for path, n, sz, is_empty_dir in items:
                                                         if st.is_cancelled: break
+                                                        
+                                                        if is_empty_dir:
+                                                            final_target_dir = t_dir
+                                                            if not final_target_dir.endswith("/"): final_target_dir += "/"
+                                                            
+                                                            parts = n.strip('/').rsplit('/', 1)
+                                                            if len(parts) == 2:
+                                                                parent_path = final_target_dir + parts[0]
+                                                                folder_name = parts[1]
+                                                            else:
+                                                                parent_path = final_target_dir
+                                                                if parent_path.endswith("/"): parent_path = parent_path[:-1]
+                                                                folder_name = parts[0]
+                                                                
+                                                            send_event({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name})
+                                                            time.sleep(0.1)
+                                                            continue
+                                                            
                                                         write_transfer_log("UPLOAD", n, sz, t_dir)
                                                         
                                                         parts = n.split('/')
@@ -4798,6 +4994,39 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if not sel: return
 
                                             target_dir = local_entry.get()
+                                            
+                                            # Check conflicts
+                                            conflicts = []
+                                            for s in sel:
+                                                name = remote_tree.item(s, "text")
+                                                vals = remote_tree.item(s, "values")
+                                                src_is_dir = True if len(vals) > 1 and vals[1] == "Thư mục" else False
+                                                src_sz = vals[2] if len(vals) > 2 else 0
+                                                
+                                                fpath = os.path.join(target_dir, name)
+                                                if os.path.exists(fpath):
+                                                    dst_is_dir = os.path.isdir(fpath)
+                                                    dst_sz = os.path.getsize(fpath) if not dst_is_dir else 0
+                                                    try:
+                                                        import datetime
+                                                        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
+                                                    except: mtime = "Không xác định"
+                                                    spath = remote_entry.get()
+                                                    sep = "/" if "/" in spath else ("\\" if "\\" in spath else "/")
+                                                    if not spath.endswith(sep): spath += sep
+                                                    spath += name
+                                                    conflicts.append({
+                                                        "name": name,
+                                                        "src_size": src_sz, "src_is_dir": src_is_dir, "src_path": spath, "src_mtime": "Không xác định (Remote)",
+                                                        "dst_size": dst_sz, "dst_is_dir": dst_is_dir, "dst_path": fpath, "dst_mtime": mtime
+                                                    })
+                                                    
+                                            if conflicts:
+                                                decisions = resolve_conflicts(conflicts, top, is_upload=False)
+                                                if decisions is None: return
+                                            else:
+                                                decisions = {}
+
                                             cm = globals().get('clipboard_sync_manager')
                                             
                                             total_size = 0
@@ -4807,8 +5036,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             for s in sel:
                                                 item = remote_tree.item(s)
                                                 name = item['text']
+                                                
+                                                if name in decisions and decisions[name] == 'skip':
+                                                    continue
                                                 vals = item.get('values', [])
                                                 
+                                                src_is_dir = True if len(vals) > 1 and vals[1] == "Thư mục" else False
+                                                if src_is_dir:
+                                                    os.makedirs(os.path.join(target_dir, name), exist_ok=True)
+                                                    
                                                 p = remote_entry.get()
                                                 sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
                                                 if not p.endswith(sep): p += sep
@@ -9285,7 +9521,7 @@ class UnifiedApp(tk.Tk):
         success_sock = None
         
         # Spam outbound connections quickly for Simultaneous Open
-        for _ in range(20):
+        for _ in range(10):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -10528,8 +10764,8 @@ class UnifiedApp(tk.Tk):
                         self.server_socket.close()
                     except: pass
                 
-                # Liên tục spam kết nối cực nhanh để đục lỗ (40 lần, mỗi lần 150ms)
-                for _ in range(40):
+                # Liên tục spam kết nối cực nhanh để đục lỗ (10 lần, mỗi lần 150ms)
+                for _ in range(10):
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     try:
