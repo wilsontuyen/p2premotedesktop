@@ -21,6 +21,11 @@ import urllib.request
 import urllib.parse
 import tkinter as tk
 from tkinter import messagebox, ttk
+import sys
+
+is_agent_process = "--clipboard-agent" in sys.argv or (sys.argv and "clipboard_agent" in sys.argv[0])
+is_clipboard_agent = is_agent_process
+is_gui_agent = "--gui-agent" in sys.argv
 
 # Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
 _orig_toplevel_geometry = tk.Toplevel.geometry
@@ -3508,11 +3513,10 @@ class ClipboardSyncManager:
 
 
 
-is_agent_process = "--clipboard-agent" in sys.argv or (sys.argv and "clipboard_agent" in sys.argv[0])
-if not is_agent_process:
-    clipboard_sync_manager = ClipboardSyncManager()
-else:
+if is_clipboard_agent or is_gui_agent:
     clipboard_sync_manager = None
+else:
+    clipboard_sync_manager = ClipboardSyncManager()
 
 
 
@@ -3554,7 +3558,8 @@ def client_receiver_thread(sock, password):
                     if evt_type == "pong":
                         continue
                     elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
-                        clipboard_sync_manager.handle_received_packet(event)
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.handle_received_packet(event)
                         continue
                     elif evt_type == "domain_status":
                         client_is_domain = event.get("is_domain", False)
@@ -3826,14 +3831,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             except Exception:
                 pass
             hidden_root.withdraw()
-            clipboard_sync_manager.register_app(hidden_root)
+            if clipboard_sync_manager:
+                clipboard_sync_manager.register_app(hidden_root)
             
             # Start receiver thread
             t = threading.Thread(target=client_receiver_thread, args=(sock, partner_pass), daemon=True)
             t.start()
             
             # Gắn kết socket vào trình quản lý Event Listener của Clipboard
-            clipboard_sync_manager.add_socket(sock)
+            if clipboard_sync_manager:
+                clipboard_sync_manager.add_socket(sock)
             # We moved pygame init outside
             
             import queue
@@ -6007,7 +6014,8 @@ class UnifiedApp(tk.Tk):
             print(f"[App] Lỗi thiết lập icon cửa sổ: {e}")
         
         # Register app instance to ClipboardSyncManager
-        clipboard_sync_manager.register_app(self)
+        if clipboard_sync_manager:
+            clipboard_sync_manager.register_app(self)
         
         # Window attributes
         self.title("Easy Remote Desktop")
@@ -10006,14 +10014,16 @@ class UnifiedApp(tk.Tk):
                 t_receiver.start()
                 
                 # Khởi chạy luồng đồng bộ Clipboard File cho Host
-                clipboard_sync_manager.add_socket(conn)
+                if clipboard_sync_manager:
+                    clipboard_sync_manager.add_socket(conn)
                 
                 try:
                     t_receiver.join()
                 finally:
                     client_state["running"] = False
                     t_sender.join()
-                    clipboard_sync_manager.remove_socket(conn)
+                    if clipboard_sync_manager:
+                        clipboard_sync_manager.remove_socket(conn)
                     set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
@@ -10383,12 +10393,12 @@ class UnifiedApp(tk.Tk):
                         pass
                     
                 import select
-                r, _, _ = select.select([conn], [], [], 0.5)
+                r, _, _ = select.select([conn], [], [], 0.2)
                 
-                if getattr(self, 'host_block_input_active', False):
+                if getattr(self, 'head_screen_cover_active', False):
                     try:
                         import ctypes
-                        # Luôn re-apply BlockInput mỗi 0.5s để chống lại SAS (Ctrl+Alt+Del)
+                        # Luôn re-apply BlockInput mỗi 0.2s để chống lại SAS (Ctrl+Alt+Del)
                         if ctypes.windll.user32.BlockInput(True) == 0:
                             ctypes.windll.user32.BlockInput(False)
                             ctypes.windll.user32.BlockInput(True)
@@ -10406,7 +10416,8 @@ class UnifiedApp(tk.Tk):
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
                     if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
-                        clipboard_sync_manager.handle_received_packet(event)
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.handle_received_packet(event)
                     else:
                         self.host_handle_event(event, conn, password)
                         if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
@@ -10421,9 +10432,8 @@ class UnifiedApp(tk.Tk):
                 break
         print("[Host] Input Receiver Thread Stopped.")
         self.host_release_all_modifiers()
-        if getattr(self, 'host_block_input_active', False):
-            print("[Host] Client disconnected, forcing screen cover to disable.")
-            self.disable_screen_cover()
+        print("[Host] Client disconnected, forcing screen cover to disable.")
+        self.disable_screen_cover()
         
     def host_handle_event(self, event, conn, password):
         ev_type = event.get('type')
@@ -10438,7 +10448,7 @@ class UnifiedApp(tk.Tk):
             # Primary simulation using standard SendInput API
             send_input_mouse_click(button_name, pressed)
             try:
-                if pressed:
+                if pressed and clipboard_sync_manager:
                     if button_name == 'right':
                         clipboard_sync_manager.last_rbutton_time = time.time()
                     elif button_name == 'left':
@@ -10639,7 +10649,17 @@ class UnifiedApp(tk.Tk):
         import win32con
         
         user32 = ctypes.windll.user32
+        user32 = ctypes.windll.user32
         
+        # Ensure thread is bound to active desktop
+        try:
+            hdesk = user32.OpenInputDesktop(0, False, win32con.MAXIMUM_ALLOWED)
+            if hdesk:
+                user32.SetThreadDesktop(hdesk)
+                user32.CloseDesktop(hdesk)
+        except Exception as e:
+            print(f"[Host] SetThreadDesktop error in input hooks: {e}")
+            
         WH_KEYBOARD_LL = 13
         WH_MOUSE_LL = 14
         LLKHF_INJECTED = 0x00000010
@@ -10702,19 +10722,14 @@ class UnifiedApp(tk.Tk):
     def toggle_screen_cover(self):
         import win32event, win32api, ctypes
         
-        if getattr(self, 'host_block_input_active', False):
-            self.stop_input_hooks()
-            try:
-                ctypes.windll.user32.BlockInput(False)
-            except:
-                pass
-        else:
-            self.start_input_hooks()
-            try:
-                ctypes.windll.user32.BlockInput(True)
-            except:
-                pass
-                
+        is_active = not getattr(self, 'head_screen_cover_active', False)
+        self.head_screen_cover_active = is_active
+        
+        try:
+            ctypes.windll.user32.BlockInput(is_active)
+        except:
+            pass
+            
         try:
             active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
         except:
@@ -10739,10 +10754,9 @@ class UnifiedApp(tk.Tk):
     def disable_screen_cover(self):
         import win32event, win32api, ctypes
         
-        self.stop_input_hooks()
+        self.head_screen_cover_active = False
         try:
             ctypes.windll.user32.BlockInput(False)
-            print("[Host] BlockInput Disabled forcefully.")
         except:
             pass
             
@@ -10777,6 +10791,7 @@ class UnifiedApp(tk.Tk):
                 except Exception as e:
                     print(f"[Host] disable_screen_cover_gui error: {e}")
                 self._cover_hwnd = None
+            self.stop_input_hooks()
             print("[Host] Screen cover disabled forcefully.")
 
     def toggle_screen_cover_gui(self):
@@ -10789,10 +10804,12 @@ class UnifiedApp(tk.Tk):
                 except Exception as e:
                     print(f"[Host] toggle_screen_cover_gui error: {e}")
                 self._cover_hwnd = None
+            self.stop_input_hooks()
             print("[Host] Screen cover disabled.")
             return
 
         self.screen_cover_running = True
+        self.start_input_hooks()
         print("[Host] Screen cover enabled. Launching Win32 cover thread...")
         import threading
         threading.Thread(target=self._run_cover_win32, daemon=True).start()
@@ -10914,6 +10931,8 @@ class UnifiedApp(tk.Tk):
                 elif msg == win32con.WM_DESTROY:
                     win32gui.PostQuitMessage(0)
                     return 0
+                elif msg == win32con.WM_NCHITTEST:
+                    return -1  # HTTRANSPARENT
             except Exception as e:
                 print(f"[Host] Cover Win32 wnd_proc error: {e}")
             return win32gui.DefWindowProc(hwnd, msg, wp, lp)
@@ -10960,13 +10979,13 @@ class UnifiedApp(tk.Tk):
         print(f"[Host] Cover Win32: HWND={hex(hwnd)}")
         
         try:
-            # Set alpha = 255 (Max). 
-            # On some hybrid GPUs, alpha < 255 combined with WDA_EXCLUDEFROMCAPTURE drops the layered window.
-            # Using 255 guarantees DWM opaque-layered fallback composition.
-            win32gui.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
+            # Alpha 254 (instead of 255) forces DWM to compose the window as layered.
+            # This is a critical workaround for Optimus hybrid graphics where WDA_EXCLUDEFROMCAPTURE
+            # completely hides the window on the physical display if alpha is 255 or WS_EX_LAYERED is missing.
+            win32gui.SetLayeredWindowAttributes(hwnd, 0, 254, win32con.LWA_ALPHA)
         except Exception as e:
             print(f"[Host] Cover Win32 SetLayeredWindowAttributes error: {e}")
-            
+        
         try:
             win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, vx, vy, vw, vh, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         except:

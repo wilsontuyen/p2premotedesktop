@@ -233,25 +233,12 @@ def main():
     subprocess.run("powershell -Command \"Enable-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run("powershell -Command \"Start-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 9. Chờ Service khởi động và hoàn tất bước cleanup (Service kill RemoteDesktopP2P.exe khi start)
+    # 9. Chờ Service khởi động và hoàn tất bước cleanup
     log("Waiting for service to initialize and complete cleanup (5s)...")
     time.sleep(5)
-
-    # 10. Launch GUI Agent bằng explorer.exe (chạy trong user context, không bị Service kill vì Service
-    #     chỉ kill 1 lần khi startup, không kill liên tục)
-    log("Launching GUI Agent via explorer.exe in user context...")
-    gui_exe = os.path.join(target_dir, "RemoteDesktopP2P.exe")
-    if os.path.exists(gui_exe):
-        try:
-            # Dùng explorer.exe để launch trong user session (tránh SYSTEM context)
-            subprocess.Popen(
-                ["explorer.exe", gui_exe],
-                shell=False,
-                cwd=target_dir
-            )
-            log("GUI Agent launched successfully via explorer.exe.")
-        except Exception as e:
-            log(f"Failed to launch GUI Agent: {e}")
+    
+    # Service will now automatically spawn the GUI Agent (--gui-agent) and Clipboard Agent (--clipboard-agent) 
+    # under the active user's session using CreateProcessAsUser.
 
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
 

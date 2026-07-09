@@ -54,9 +54,6 @@ Filename: "schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopAgent"""; Fla
 ; Wait 5 seconds for service to initialize and connect to signaling server
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
-; Launch GUI Agent for the user
-Filename: "explorer.exe"; Parameters: """{app}\RemoteDesktopP2P.exe"""; Description: "Launch Easy Remote Desktop"; Flags: postinstall nowait runasoriginaluser
-
 [UninstallRun]
 ; Stop existing scheduled task
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden waituntilterminated

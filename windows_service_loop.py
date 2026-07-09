@@ -4,6 +4,7 @@ import win32con
 import win32process
 import win32security
 import win32event
+import win32profile
 import sys
 import os
 import time
@@ -202,15 +203,70 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
 
 def spawn_clipboard_agent(session_id):
     """
-    Spawn Clipboard Agent ở quyền User thường (sử dụng WTSQueryUserToken).
-    Dùng chính RemoteDesktopP2P.exe với flag --clipboard-agent.
-    Agent này lắng nghe Named Pipe và nạp file vào Clipboard.
+    Spawn Clipboard Agent ở quyền User thường.
     """
     exe_path, cmd_line = get_executable_to_run()
     if not exe_path:
         return None
     
     cmd_line = cmd_line.replace("--headless", "--clipboard-agent")
+
+    h_user_token = None
+    try:
+        h_user_token = win32ts.WTSQueryUserToken(session_id)
+    except Exception as e:
+        log(f"Thất bại khi truy vấn token người dùng cho Clipboard Agent (session {session_id}): {e}")
+        return None
+
+    if h_user_token:
+        try:
+            h_token_dup = win32security.DuplicateTokenEx(
+                h_user_token,
+                win32security.SecurityImpersonation,
+                win32con.TOKEN_ALL_ACCESS,
+                win32security.TokenPrimary
+            )
+            
+            environment = win32profile.CreateEnvironmentBlock(h_token_dup, False)
+            
+            startup_info = win32process.STARTUPINFO()
+            startup_info.lpDesktop = "winsta0\\default"
+            startup_info.dwFlags = win32process.STARTF_USESHOWWINDOW
+            startup_info.wShowWindow = win32con.SW_HIDE
+
+            creation_flags = win32process.CREATE_UNICODE_ENVIRONMENT | win32process.CREATE_NEW_CONSOLE
+
+            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+                h_token_dup,
+                exe_path,
+                cmd_line,
+                None, None, False,
+                creation_flags,
+                environment,
+                os.path.dirname(exe_path),
+                startup_info
+            )
+            
+            win32api.CloseHandle(h_process)
+            win32api.CloseHandle(h_thread)
+            win32api.CloseHandle(h_token_dup)
+
+            log(f"Đã khởi chạy Clipboard Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
+            return dwProcessId
+        except Exception as e:
+            log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
+    return None
+
+def spawn_gui_agent(session_id):
+    """
+    Spawn GUI Agent ở quyền User thường (sử dụng WTSQueryUserToken).
+    Agent này sẽ hiển thị System Tray, quản lý Screen Cover và Clipboard.
+    """
+    exe_path, cmd_line = get_executable_to_run()
+    if not exe_path:
+        return None
+    
+    cmd_line = cmd_line.replace("--headless", "--gui-agent")
 
     h_user_token = None
     try:
@@ -248,10 +304,10 @@ def spawn_clipboard_agent(session_id):
             win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
 
-            log(f"Đã khởi chạy Clipboard Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
+            log(f"Đã khởi chạy GUI Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
             return dwProcessId
         except Exception as e:
-            log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
+            log(f"CreateProcessAsUser cho GUI Agent thất bại: {e}")
     return None
 
 def trigger_sas_system():
@@ -474,6 +530,7 @@ def main():
     t.start()
 
     current_agent_pid = None
+    gui_agent_pid = None
     clipboard_agent_pid = None
     last_session_id = None
 
@@ -496,10 +553,6 @@ def main():
             # Check if screen is locked (LogonUI is running)
             is_screen_locked = is_logon_ui_running(active_session_id)
 
-            # Only kill and respawn the agent if the Windows SESSION ID changes
-            # (e.g., fast user switching). Lock/unlock and login transitions are
-            # handled dynamically by the agent via OpenInputDesktop + SetThreadDesktop,
-            # so we do NOT kill the agent on those events to preserve active connections.
             session_changed = (last_session_id is not None and last_session_id != active_session_id)
 
             if session_changed:
@@ -507,18 +560,19 @@ def main():
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
+                if gui_agent_pid:
+                    terminate_process_with_pid(gui_agent_pid)
+                    gui_agent_pid = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
 
             last_session_id = active_session_id
 
-            # Check if the current agent process has died on its own
             if current_agent_pid and not is_process_alive(current_agent_pid):
                 log(f"Agent với PID {current_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                 current_agent_pid = None
 
-            # Check if agent is running using Mutex (check BOTH desktops)
             agent_running = False
             for desktop_name in ['default', 'winlogon']:
                 mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{active_session_id}_{desktop_name}"
@@ -534,7 +588,7 @@ def main():
                     elif hasattr(e, 'args') and len(e.args) > 0:
                         err_code = e.args[0]
                     
-                    if err_code != 2: # winerror.ERROR_FILE_NOT_FOUND
+                    if err_code != 2:
                         agent_running = True
                         break
 
@@ -554,43 +608,78 @@ def main():
                     clipboard_agent_pid = None
 
                 clipboard_agent_running = False
-                mutex_name_global = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
-                mutex_name_session = f"Session\\{active_session_id}\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                mutex_name_global_cb = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                mutex_name_session_cb = f"Session\\{active_session_id}\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
                 
-                # Check Global Mutex
                 try:
-                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_global)
+                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_global_cb)
                     win32api.CloseHandle(h_mutex)
                     clipboard_agent_running = True
                 except Exception as e:
-                    err_code = getattr(e, 'winerror', 0)
-                    if err_code != 2:
+                    if getattr(e, 'winerror', 0) != 2:
                         clipboard_agent_running = True
                         
-                # Check Session Mutex fallback
                 if not clipboard_agent_running:
                     try:
-                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_session)
+                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_session_cb)
                         win32api.CloseHandle(h_mutex)
                         clipboard_agent_running = True
                     except Exception as e:
-                        err_code = getattr(e, 'winerror', 0)
-                        if err_code != 2:
+                        if getattr(e, 'winerror', 0) != 2:
                             clipboard_agent_running = True
                             
                 if not clipboard_agent_running:
-                    if clipboard_agent_pid and is_process_alive(clipboard_agent_pid):
-                        log(f"Mutex của Clipboard Agent chưa sẵn sàng nhưng tiến trình {clipboard_agent_pid} vẫn đang khởi động. Chờ đợi...")
-                    else:
-                        log(f"Không tìm thấy Mutex của Clipboard Agent cho session {active_session_id}. Đang khởi chạy Clipboard Agent mới.")
-                        pid = spawn_clipboard_agent(active_session_id)
-                        if pid:
-                            clipboard_agent_pid = pid
+                    log(f"Không tìm thấy Mutex của Clipboard Agent cho session {active_session_id}. Đang khởi chạy.")
+                    pid = spawn_clipboard_agent(active_session_id)
+                    if pid:
+                        clipboard_agent_pid = pid
             else:
                 if clipboard_agent_pid:
-                    log(f"Người dùng đã đăng xuất hoặc màn hình bị khóa. Đang tắt Clipboard Agent.")
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
+
+            # Spawn or check GUI Agent (only when user is logged in and not locked)
+            if is_logged_in and not is_screen_locked:
+                if gui_agent_pid and not is_process_alive(gui_agent_pid):
+                    log(f"GUI Agent với PID {gui_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
+                    gui_agent_pid = None
+
+                gui_agent_running = False
+                mutex_name_global = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{active_session_id}_default"
+                mutex_name_session = f"Session\\{active_session_id}\\AntigravityP2PRemoteDesktopAppMutex_2_{active_session_id}_default"
+                
+                try:
+                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_global)
+                    win32api.CloseHandle(h_mutex)
+                    gui_agent_running = True
+                except Exception as e:
+                    err_code = getattr(e, 'winerror', 0)
+                    if err_code != 2:
+                        gui_agent_running = True
+                        
+                if not gui_agent_running:
+                    try:
+                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_session)
+                        win32api.CloseHandle(h_mutex)
+                        gui_agent_running = True
+                    except Exception as e:
+                        err_code = getattr(e, 'winerror', 0)
+                        if err_code != 2:
+                            gui_agent_running = True
+                            
+                if not gui_agent_running:
+                    if gui_agent_pid and is_process_alive(gui_agent_pid):
+                        log(f"Mutex của GUI Agent chưa sẵn sàng nhưng tiến trình {gui_agent_pid} vẫn đang khởi động. Chờ đợi...")
+                    else:
+                        log(f"Không tìm thấy Mutex của GUI Agent cho session {active_session_id}. Đang khởi chạy GUI Agent mới.")
+                        pid = spawn_gui_agent(active_session_id)
+                        if pid:
+                            gui_agent_pid = pid
+            else:
+                if gui_agent_pid:
+                    log(f"Người dùng đã đăng xuất hoặc màn hình bị khóa. Đang tắt GUI Agent.")
+                    terminate_process_with_pid(gui_agent_pid)
+                    gui_agent_pid = None
 
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")

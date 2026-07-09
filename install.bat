@@ -55,9 +55,6 @@ schtasks /run /tn "EasyRemoteDesktopAgent"
 echo [+] Waiting for service to initialize...
 timeout /t 5 /nobreak >nul
 
-echo [+] Launching Remote Desktop GUI Agent...
-explorer.exe "%INSTALL_DIR%\RemoteDesktopP2P.exe"
-
 echo.
 echo ========================================================
 echo  INSTALLATION COMPLETED SUCCESSFULLY!
