@@ -3973,6 +3973,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 # Calculate floating button rectangle dynamically
                 min_btn_w, min_btn_h = 40, 22
                 cad_btn_w, cad_btn_h = 145, 22
+                eye_btn_w, eye_btn_h = 30, 22
                 file_btn_w, file_btn_h = 110, 22
                 power_btn_w, power_btn_h = 40, 22
                 rec_btn_w, rec_btn_h = 30, 22
@@ -3987,7 +3988,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
                 total_w = 0
                 if show_buttons:
-                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (eye_btn_w + 10 if show_cad_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
@@ -4008,9 +4009,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         file_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         
                     if show_cad_button:
+                        eye_btn_rect = pygame.Rect(current_x, 0, eye_btn_w, eye_btn_h)
+                        current_x += eye_btn_w + 10
                         cad_btn_rect = pygame.Rect(current_x, 0, cad_btn_w, cad_btn_h)
                         current_x += cad_btn_w + 10
                     else:
+                        eye_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         
                     rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)
@@ -4020,6 +4024,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     file_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     power_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    eye_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     rec_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
@@ -4028,6 +4033,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 min_is_hover = min_btn_rect.collidepoint(mx, my) if show_buttons else False
                 file_is_hover = file_btn_rect.collidepoint(mx, my) if show_buttons else False
                 power_is_hover = power_btn_rect.collidepoint(mx, my) if show_buttons else False
+                eye_is_hover = eye_btn_rect.collidepoint(mx, my) if show_buttons else False
                 cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
                 rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_buttons else False
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
@@ -4045,7 +4051,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or eye_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -5123,6 +5129,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 print("[Client] Power Button Clicked. Sending power key event to Android.")
                                 send_event({"type": "key_event", "key": "power", "pressed": True})
                             continue
+                        if show_buttons and eye_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                print("[Client] Eye Button Clicked. Sending toggle_screen_cover to host.")
+                                state = globals().get('viewer_cover_state', False)
+                                globals()['viewer_cover_state'] = not state
+                                send_event({"type": "toggle_screen_cover"})
+                            continue
                         if show_buttons and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
@@ -5444,6 +5457,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             screen.blit(power_text_surf, power_text_rect)
 
                         if show_cad_button:
+                            # Draw Eye Button
+                            eye_bg = (100, 100, 100) if globals().get('viewer_cover_state', False) else cad_bg_color
+                            if eye_is_hover and not globals().get('viewer_cover_state', False):
+                                pass # cad_bg_color already has hover color assigned
+                            elif eye_is_hover:
+                                eye_bg = (130, 130, 130)
+                            
+                            pygame.draw.rect(screen, eye_bg, eye_btn_rect, border_radius=4)
+                            pygame.draw.rect(screen, btn_border_color, eye_btn_rect, width=1, border_radius=4)
+                            
+                            try:
+                                symbol_font = pygame.font.SysFont("Webdings", 16)
+                                eye_text_surf = symbol_font.render("N", True, cad_text_color)
+                            except:
+                                eye_text_surf = btn_font.render("N", True, cad_text_color)
+                            
+                            eye_text_rect = eye_text_surf.get_rect(center=eye_btn_rect.center)
+                            eye_text_rect.y -= 2
+                            screen.blit(eye_text_surf, eye_text_rect)
+
+                            # Draw CAD Button
                             pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
                             
@@ -6220,6 +6254,38 @@ class UnifiedApp(tk.Tk):
         # Restore Event Listener for waking the GUI
         if not self.is_headless:
             threading.Thread(target=self.restore_event_listener_thread, daemon=True).start()
+            threading.Thread(target=self.screen_cover_event_listener_thread, daemon=True).start()
+    def screen_cover_event_listener_thread(self):
+        if sys.platform != "win32":
+            return
+        import win32event, win32security, ctypes
+        
+        try:
+            active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
+        except:
+            active_session_id = 1
+            
+        cover_event_name = f"Global\\AntigravityP2PRemoteDesktopScreenCoverEvent_{active_session_id}_default"
+        
+        sa = win32security.SECURITY_ATTRIBUTES()
+        sa.bInheritHandle = 1
+        sd = win32security.SECURITY_DESCRIPTOR()
+        sd.Initialize()
+        sd.SetSecurityDescriptorDacl(True, None, False)
+        sa.SECURITY_DESCRIPTOR = sd
+        
+        try:
+            h_event = win32event.CreateEvent(sa, False, False, cover_event_name)
+        except Exception as e:
+            print(f"[Event] Failed to create screen cover event: {e}")
+            return
+            
+        print(f"[Event] Listening for screen cover event: {cover_event_name}")
+        while True:
+            rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
+            if rc == win32event.WAIT_OBJECT_0:
+                print("[Event] Received screen cover signal. Toggling cover.")
+                self.after(0, self.toggle_screen_cover_gui)
 
     def restore_event_listener_thread(self):
         if sys.platform != "win32":
@@ -10287,6 +10353,11 @@ class UnifiedApp(tk.Tk):
                                 if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
                                     _last_desk_name = _new_name
                                     print(f"[Host] Switched input desktop: {_last_desk_name}")
+                                    if getattr(self, 'host_block_input_active', False):
+                                        try:
+                                            _ct.windll.user32.BlockInput(False)
+                                            _ct.windll.user32.BlockInput(True)
+                                        except: pass
                                     # Đóng handle cũ sau khi switch thành công
                                     if hasattr(self, '_last_hdesk') and self._last_hdesk:
                                         _ct.windll.user32.CloseDesktop(self._last_hdesk)
@@ -10298,6 +10369,21 @@ class UnifiedApp(tk.Tk):
                                 _ct.windll.user32.CloseDesktop(_hdesk_new)
                     except Exception:
                         pass
+                    
+                import select
+                r, _, _ = select.select([conn], [], [], 0.5)
+                
+                if getattr(self, 'host_block_input_active', False):
+                    try:
+                        import ctypes
+                        # Luôn re-apply BlockInput mỗi 0.5s để chống lại SAS (Ctrl+Alt+Del)
+                        if ctypes.windll.user32.BlockInput(True) == 0:
+                            ctypes.windll.user32.BlockInput(False)
+                            ctypes.windll.user32.BlockInput(True)
+                    except: pass
+                    
+                if not r:
+                    continue
                     
                 msg = recv_msg(conn, password)
                 if not msg:
@@ -10366,6 +10452,9 @@ class UnifiedApp(tk.Tk):
                 send_msg(conn, json.dumps({"type": "pong"}).encode('utf-8'), password)
             except Exception:
                 pass
+            
+        elif ev_type == 'toggle_screen_cover':
+            self.toggle_screen_cover()
             
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
@@ -10528,6 +10617,158 @@ class UnifiedApp(tk.Tk):
             except Exception as e:
                 res = {"type": "write_text_file_result", "success": False, "error": str(e), "path": path}
             send_msg(conn, json.dumps(res).encode('utf-8'), password)
+
+    def toggle_screen_cover(self):
+        import win32event, win32api, ctypes
+        
+        if hasattr(self, 'host_block_input_active') and self.host_block_input_active:
+            self.host_block_input_active = False
+            try:
+                ctypes.windll.user32.BlockInput(False)
+                print("[Host] BlockInput Disabled.")
+            except:
+                pass
+        else:
+            self.host_block_input_active = True
+            try:
+                ctypes.windll.user32.BlockInput(True)
+                print("[Host] BlockInput Enabled.")
+            except:
+                pass
+                
+        try:
+            active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
+        except:
+            active_session_id = 1
+            
+        cover_event_name = f"Global\\AntigravityP2PRemoteDesktopScreenCoverEvent_{active_session_id}_default"
+        
+        try:
+            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, cover_event_name)
+            if h_event:
+                win32event.SetEvent(h_event)
+                win32api.CloseHandle(h_event)
+                print(f"[Host] Signaled ScreenCover Event to GUI Agent at Session {active_session_id}.")
+            else:
+                if not self.is_headless:
+                    self.after(0, self.toggle_screen_cover_gui)
+        except Exception as e:
+            print(f"[Host] Failed to signal ScreenCover Event: {e}")
+            if not self.is_headless:
+                self.after(0, self.toggle_screen_cover_gui)
+
+    def toggle_screen_cover_gui(self):
+        if hasattr(self, 'screen_cover_running') and self.screen_cover_running:
+            self.screen_cover_running = False
+            try:
+                if hasattr(self, 'screen_cover_root') and self.screen_cover_root:
+                    self.screen_cover_root.destroy()
+                    self.screen_cover_root = None
+            except:
+                pass
+            print("[Host] Screen cover disabled.")
+            return
+
+        self.screen_cover_running = True
+        print("[Host] Screen cover enabled.")
+
+
+        import tkinter as tk
+        root = tk.Toplevel(self)
+        self.screen_cover_root = root
+        root.config(bg='black')
+        root.attributes('-alpha', 1.0)
+        root.overrideredirect(True)
+        root.attributes('-topmost', True)
+        root.config(cursor="none")
+        
+        lbl = tk.Label(root, text="Máy tính đang hoạt động, vui lòng không tắt", font=("Segoe UI", 24, "bold"), fg="white", bg="black")
+        lbl.place(relx=0.5, rely=0.6, anchor="center")
+
+        icon_lbl = tk.Label(root, bg="black")
+        icon_lbl.place(relx=0.5, rely=0.4, anchor="center")
+        
+        import os
+        icon_path = os.path.join(app_dir, "app_icon.png")
+        fade_frames = []
+        if os.path.exists(icon_path):
+            try:
+                from PIL import Image, ImageTk
+                original_img = Image.open(icon_path).convert("RGBA")
+                try:
+                    resample = Image.Resampling.LANCZOS
+                except AttributeError:
+                    resample = Image.LANCZOS
+                original_img = original_img.resize((256, 256), resample)
+                
+                for alpha in range(50, 256, 10):
+                    frame = original_img.copy()
+                    alpha_channel = frame.split()[3]
+                    alpha_channel = alpha_channel.point(lambda p: p * (alpha / 255.0))
+                    frame.putalpha(alpha_channel)
+                    
+                    bg = Image.new("RGBA", frame.size, (0, 0, 0, 255))
+                    bg.paste(frame, (0, 0), frame)
+                    fade_frames.append(ImageTk.PhotoImage(bg))
+                    
+                fade_frames.extend(fade_frames[::-1])
+            except Exception as e:
+                print(f"[Host] Cover icon load error: {e}")
+                
+        # Ngăn chặn GC dọn dẹp frame
+        icon_lbl.image_frames = fade_frames
+                
+        if fade_frames:
+            def animate_icon(frame_idx=0):
+                if not getattr(self, 'screen_cover_running', False) or not root.winfo_exists():
+                    return
+                try:
+                    icon_lbl.config(image=fade_frames[frame_idx])
+                    next_idx = (frame_idx + 1) % len(fade_frames)
+                    root.after(40, animate_icon, next_idx)
+                except:
+                    pass
+            animate_icon()
+        
+        try:
+            import ctypes
+            w = ctypes.windll.user32.GetSystemMetrics(78) # SM_CXVIRTUALSCREEN
+            h = ctypes.windll.user32.GetSystemMetrics(79) # SM_CYVIRTUALSCREEN
+            x = ctypes.windll.user32.GetSystemMetrics(76) # SM_XVIRTUALSCREEN
+            y = ctypes.windll.user32.GetSystemMetrics(77) # SM_YVIRTUALSCREEN
+            if w > 0 and h > 0:
+                root.geometry(f"{w}x{h}+{x}+{y}")
+            else:
+                root.attributes('-fullscreen', True)
+            
+            root.update_idletasks()
+            hwnd = int(root.frame(), 16)
+            ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+            WS_EX_LAYERED = 0x00080000
+            WS_EX_TRANSPARENT = 0x00000020
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
+            ctypes.windll.user32.SetWindowLongW(hwnd, -20, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+            
+            try:
+                res = ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
+                if not res:
+                    ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x01)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[Host] Cover screen setup error: {e}")
+
+        def keep_topmost():
+            if not getattr(self, 'screen_cover_running', False) or not root.winfo_exists():
+                return
+            try:
+                root.attributes('-topmost', True)
+            except:
+                pass
+            root.after(1000, keep_topmost)
+                
+        root.after(1000, keep_topmost)
+
 
     def trigger_taskmgr(self):
         print("[Host] Received trigger_taskmgr command.")
