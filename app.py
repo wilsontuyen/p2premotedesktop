@@ -5976,6 +5976,14 @@ class UnifiedApp(tk.Tk):
         super().__init__()
         import threading
         
+        # Đảm bảo reset trạng thái BlockInput và màn hình che phủ khi app mới khởi động
+        try:
+            import ctypes
+            ctypes.windll.user32.BlockInput(False)
+            print("[App] Reset BlockInput to False on startup.")
+        except:
+            pass
+        
         # Check headless flag (run in Session 0 / background service mode)
         self.is_headless = "--headless" in sys.argv
         if self.is_headless:
@@ -6275,17 +6283,21 @@ class UnifiedApp(tk.Tk):
         sa.SECURITY_DESCRIPTOR = sd
         
         try:
-            h_event = win32event.CreateEvent(sa, False, False, cover_event_name)
+            h_event_toggle = win32event.CreateEvent(sa, False, False, cover_event_name)
+            h_event_disable = win32event.CreateEvent(sa, False, False, cover_event_name + "_disable")
         except Exception as e:
             print(f"[Event] Failed to create screen cover event: {e}")
             return
             
         print(f"[Event] Listening for screen cover event: {cover_event_name}")
         while True:
-            rc = win32event.WaitForSingleObject(h_event, win32event.INFINITE)
-            if rc == win32event.WAIT_OBJECT_0:
-                print("[Event] Received screen cover signal. Toggling cover.")
+            res = win32event.WaitForMultipleObjects([h_event_toggle, h_event_disable], False, win32event.INFINITE)
+            if res == win32event.WAIT_OBJECT_0:
+                print("[Event] Received screen cover toggle signal.")
                 self.after(0, self.toggle_screen_cover_gui)
+            elif res == win32event.WAIT_OBJECT_0 + 1:
+                print("[Event] Received screen cover disable signal.")
+                self.after(0, self.disable_screen_cover_gui)
 
     def restore_event_listener_thread(self):
         if sys.platform != "win32":
@@ -10409,6 +10421,9 @@ class UnifiedApp(tk.Tk):
                 break
         print("[Host] Input Receiver Thread Stopped.")
         self.host_release_all_modifiers()
+        if getattr(self, 'host_block_input_active', False):
+            print("[Host] Client disconnected, forcing screen cover to disable.")
+            self.disable_screen_cover()
         
     def host_handle_event(self, event, conn, password):
         ev_type = event.get('type')
@@ -10618,21 +10633,85 @@ class UnifiedApp(tk.Tk):
                 res = {"type": "write_text_file_result", "success": False, "error": str(e), "path": path}
             send_msg(conn, json.dumps(res).encode('utf-8'), password)
 
+    def _run_input_hooks(self):
+        import ctypes
+        from ctypes import wintypes
+        import win32con
+        
+        user32 = ctypes.windll.user32
+        
+        WH_KEYBOARD_LL = 13
+        WH_MOUSE_LL = 14
+        LLKHF_INJECTED = 0x00000010
+        LLMHF_INJECTED = 0x00000001
+        
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+        
+        def keyboard_hook_proc(nCode, wParam, lParam):
+            if nCode == 0:
+                flags = ctypes.c_uint.from_address(lParam + 8).value
+                if not (flags & LLKHF_INJECTED):
+                    return 1
+            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+            
+        def mouse_hook_proc(nCode, wParam, lParam):
+            if nCode == 0:
+                flags = ctypes.c_uint.from_address(lParam + 12).value
+                if not (flags & LLMHF_INJECTED):
+                    return 1
+            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+            
+        self._kb_hook_ref = HOOKPROC(keyboard_hook_proc)
+        self._ms_hook_ref = HOOKPROC(mouse_hook_proc)
+        
+        h_mod = ctypes.windll.kernel32.GetModuleHandleW(None)
+        kb_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._kb_hook_ref, h_mod, 0)
+        ms_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._ms_hook_ref, h_mod, 0)
+        
+        def timer_proc(hwnd, msg, timer_id, time):
+            if not getattr(self, 'host_block_input_active', False):
+                user32.PostQuitMessage(0)
+                
+        TIMERPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
+        timer_ref = TIMERPROC(timer_proc)
+        timer_id = user32.SetTimer(None, 0, 200, timer_ref)
+        
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+            
+        user32.KillTimer(None, timer_id)
+        user32.UnhookWindowsHookEx(kb_hook)
+        user32.UnhookWindowsHookEx(ms_hook)
+        self._kb_hook_ref = None
+        self._ms_hook_ref = None
+        print("[Host] Input hooks stopped.")
+        
+    def start_input_hooks(self):
+        import threading
+        if not getattr(self, 'host_block_input_active', False):
+            self.host_block_input_active = True
+            threading.Thread(target=self._run_input_hooks, daemon=True).start()
+            print("[Host] Input hooks (KB/Mouse) Enabled.")
+            
+    def stop_input_hooks(self):
+        self.host_block_input_active = False
+        print("[Host] Input hooks (KB/Mouse) Disabled.")
+
     def toggle_screen_cover(self):
         import win32event, win32api, ctypes
         
-        if hasattr(self, 'host_block_input_active') and self.host_block_input_active:
-            self.host_block_input_active = False
+        if getattr(self, 'host_block_input_active', False):
+            self.stop_input_hooks()
             try:
                 ctypes.windll.user32.BlockInput(False)
-                print("[Host] BlockInput Disabled.")
             except:
                 pass
         else:
-            self.host_block_input_active = True
+            self.start_input_hooks()
             try:
                 ctypes.windll.user32.BlockInput(True)
-                print("[Host] BlockInput Enabled.")
             except:
                 pass
                 
@@ -10657,117 +10736,262 @@ class UnifiedApp(tk.Tk):
             if not self.is_headless:
                 self.after(0, self.toggle_screen_cover_gui)
 
+    def disable_screen_cover(self):
+        import win32event, win32api, ctypes
+        
+        self.stop_input_hooks()
+        try:
+            ctypes.windll.user32.BlockInput(False)
+            print("[Host] BlockInput Disabled forcefully.")
+        except:
+            pass
+            
+        try:
+            active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
+        except:
+            active_session_id = 1
+            
+        disable_event_name = f"Global\\AntigravityP2PRemoteDesktopScreenCoverEvent_{active_session_id}_default_disable"
+        
+        try:
+            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, disable_event_name)
+            if h_event:
+                win32event.SetEvent(h_event)
+                win32api.CloseHandle(h_event)
+                print(f"[Host] Signaled ScreenCover Disable Event to GUI Agent at Session {active_session_id}.")
+            else:
+                if not self.is_headless:
+                    self.after(0, self.disable_screen_cover_gui)
+        except Exception as e:
+            print(f"[Host] Failed to signal ScreenCover Disable Event: {e}")
+            if not self.is_headless:
+                self.after(0, self.disable_screen_cover_gui)
+
+    def disable_screen_cover_gui(self):
+        if hasattr(self, 'screen_cover_running') and self.screen_cover_running:
+            self.screen_cover_running = False
+            if hasattr(self, '_cover_hwnd') and self._cover_hwnd:
+                try:
+                    import win32gui, win32con
+                    win32gui.PostMessage(self._cover_hwnd, win32con.WM_CLOSE, 0, 0)
+                except Exception as e:
+                    print(f"[Host] disable_screen_cover_gui error: {e}")
+                self._cover_hwnd = None
+            print("[Host] Screen cover disabled forcefully.")
+
     def toggle_screen_cover_gui(self):
         if hasattr(self, 'screen_cover_running') and self.screen_cover_running:
             self.screen_cover_running = False
-            try:
-                if hasattr(self, 'screen_cover_root') and self.screen_cover_root:
-                    self.screen_cover_root.destroy()
-                    self.screen_cover_root = None
-            except:
-                pass
+            if hasattr(self, '_cover_hwnd') and self._cover_hwnd:
+                try:
+                    import win32gui, win32con
+                    win32gui.PostMessage(self._cover_hwnd, win32con.WM_CLOSE, 0, 0)
+                except Exception as e:
+                    print(f"[Host] toggle_screen_cover_gui error: {e}")
+                self._cover_hwnd = None
             print("[Host] Screen cover disabled.")
             return
 
         self.screen_cover_running = True
-        print("[Host] Screen cover enabled.")
+        print("[Host] Screen cover enabled. Launching Win32 cover thread...")
+        import threading
+        threading.Thread(target=self._run_cover_win32, daemon=True).start()
 
-
-        import tkinter as tk
-        root = tk.Toplevel(self)
-        self.screen_cover_root = root
-        root.config(bg='black')
-        root.attributes('-alpha', 1.0)
-        root.overrideredirect(True)
-        root.attributes('-topmost', True)
-        root.config(cursor="none")
+    def _run_cover_win32(self):
+        """Tạo cửa sổ che phủ bằng pywin32 API thuần (không Tkinter).
+        Khắc phục hoàn toàn lỗi crash do ctypes 64-bit truncation và lỗi hiển thị trên NVIDIA/AMD."""
+        import win32gui, win32con, win32api
+        import ctypes
         
-        lbl = tk.Label(root, text="Máy tính đang hoạt động, vui lòng không tắt", font=("Segoe UI", 24, "bold"), fg="white", bg="black")
-        lbl.place(relx=0.5, rely=0.6, anchor="center")
-
-        icon_lbl = tk.Label(root, bg="black")
-        icon_lbl.place(relx=0.5, rely=0.4, anchor="center")
+        # Bật DPI Awareness cho thread này
+        try:
+            ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+        except:
+            pass
+        
+        # Đo virtual screen
+        vx = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
+        vy = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
+        vw = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
+        vh = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
+        if vw <= 0 or vh <= 0:
+            vx, vy, vw, vh = 0, 0, win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+            
+        print(f"[Host] Cover Win32: VirtualScreen={vw}x{vh}+{vx}+{vy}")
+        
+        self._fade_value = 0
+        self._fade_dir = 5
         
         import os
-        icon_path = os.path.join(app_dir, "app_icon.png")
-        fade_frames = []
-        if os.path.exists(icon_path):
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
+        self._cover_hIcon = 0
+        try:
+            self._cover_hIcon = win32gui.LoadImage(0, icon_path, win32con.IMAGE_ICON, 256, 256, win32con.LR_LOADFROMFILE)
+        except:
+            pass
+            
+        def wnd_proc(hwnd, msg, wp, lp):
             try:
-                from PIL import Image, ImageTk
-                original_img = Image.open(icon_path).convert("RGBA")
-                try:
-                    resample = Image.Resampling.LANCZOS
-                except AttributeError:
-                    resample = Image.LANCZOS
-                original_img = original_img.resize((256, 256), resample)
-                
-                for alpha in range(50, 256, 10):
-                    frame = original_img.copy()
-                    alpha_channel = frame.split()[3]
-                    alpha_channel = alpha_channel.point(lambda p: p * (alpha / 255.0))
-                    frame.putalpha(alpha_channel)
+                if msg == win32con.WM_ERASEBKGND:
+                    return 1
+                elif msg == win32con.WM_PAINT:
+                    hdc, paintStruct = win32gui.BeginPaint(hwnd)
+                    rect = win32gui.GetClientRect(hwnd)
+                    vw_rect = rect[2] - rect[0]
+                    vh_rect = rect[3] - rect[1]
                     
-                    bg = Image.new("RGBA", frame.size, (0, 0, 0, 255))
-                    bg.paste(frame, (0, 0), frame)
-                    fade_frames.append(ImageTk.PhotoImage(bg))
+                    # Background: Fade từ Đen -> Xanh dương đậm -> Đen
+                    # Dark Blue = (0, 51, 102)
+                    fade = getattr(self, '_fade_value', 255)
+                    r_bg = int(0 * (fade / 255.0))
+                    g_bg = int(51 * (fade / 255.0))
+                    b_bg = int(102 * (fade / 255.0))
+                    bg_color = win32api.RGB(r_bg, g_bg, b_bg)
                     
-                fade_frames.extend(fade_frames[::-1])
+                    brush = win32gui.CreateSolidBrush(bg_color)
+                    win32gui.FillRect(hdc, rect, brush)
+                    win32gui.DeleteObject(brush)
+                    
+                    win32gui.SetBkMode(hdc, win32con.TRANSPARENT)
+                    
+                    # Fade effect cho Logo text (từ Đen -> Trắng -> Đen)
+                    r_fg = int(255 * (fade / 255.0))
+                    g_fg = int(255 * (fade / 255.0))
+                    b_fg = int(255 * (fade / 255.0))
+                    win32gui.SetTextColor(hdc, win32api.RGB(r_fg, g_fg, b_fg))
+                    
+                    # Draw Icon (Centered, Top)
+                    icon_size = 256
+                    icon_x = (vw_rect - icon_size) // 2
+                    icon_y = (vh_rect // 2) - icon_size - 20
+                    if getattr(self, '_cover_hIcon', 0):
+                        win32gui.DrawIconEx(hdc, icon_x, icon_y, self._cover_hIcon, icon_size, icon_size, 0, 0, win32con.DI_NORMAL)
+                    
+                    # Create Font using GDI
+                    text_y = (vh_rect // 2) + 20
+                    text_rect = (0, text_y, vw_rect, text_y + 150)
+                    try:
+                        font_lf = win32gui.LOGFONT()
+                        font_lf.lfHeight = 80
+                        font_lf.lfWeight = win32con.FW_BOLD
+                        font_lf.lfFaceName = "Segoe UI"
+                        font = win32gui.CreateFontIndirect(font_lf)
+                        old_font = win32gui.SelectObject(hdc, font)
+                        win32gui.DrawText(hdc, "P2P REMOTE DESKTOP PRIVACY MODE", -1, text_rect,
+                                          win32con.DT_CENTER | win32con.DT_VCENTER | win32con.DT_SINGLELINE)
+                        win32gui.SelectObject(hdc, old_font)
+                        win32gui.DeleteObject(font)
+                    except:
+                        pass
+                        
+                    win32gui.EndPaint(hwnd, paintStruct)
+                    return 0
+                elif msg == win32con.WM_TIMER:
+                    if not getattr(self, 'screen_cover_running', False):
+                        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                        return 0
+                        
+                    # Fade animation
+                    self._fade_value += self._fade_dir
+                    if self._fade_value >= 255:
+                        self._fade_value = 255
+                        self._fade_dir = -5
+                    elif self._fade_value <= 0:
+                        self._fade_value = 0
+                        self._fade_dir = 5
+                        
+                    win32gui.InvalidateRect(hwnd, None, False)
+                    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW)
+                    return 0
+                elif msg == win32con.WM_CLOSE:
+                    try:
+                        ctypes.windll.user32.KillTimer(hwnd, 1)
+                    except:
+                        pass
+                    win32gui.DestroyWindow(hwnd)
+                    return 0
+                elif msg == win32con.WM_DESTROY:
+                    win32gui.PostQuitMessage(0)
+                    return 0
             except Exception as e:
-                print(f"[Host] Cover icon load error: {e}")
-                
-        # Ngăn chặn GC dọn dẹp frame
-        icon_lbl.image_frames = fade_frames
-                
-        if fade_frames:
-            def animate_icon(frame_idx=0):
-                if not getattr(self, 'screen_cover_running', False) or not root.winfo_exists():
-                    return
-                try:
-                    icon_lbl.config(image=fade_frames[frame_idx])
-                    next_idx = (frame_idx + 1) % len(fade_frames)
-                    root.after(40, animate_icon, next_idx)
-                except:
-                    pass
-            animate_icon()
+                print(f"[Host] Cover Win32 wnd_proc error: {e}")
+            return win32gui.DefWindowProc(hwnd, msg, wp, lp)
+            
+        hInst = win32api.GetModuleHandle(None)
+        cls_name = f"AGCover_{id(self)}"
+        
+        wc = win32gui.WNDCLASS()
+        wc.style = win32con.CS_HREDRAW | win32con.CS_VREDRAW
+        wc.lpfnWndProc = wnd_proc
+        wc.cbWndExtra = 0
+        wc.hInstance = hInst
+        wc.hCursor = 0  # Ẩn cursor
+        wc.hbrBackground = 0 # Tự vẽ
+        wc.lpszClassName = cls_name
         
         try:
-            import ctypes
-            w = ctypes.windll.user32.GetSystemMetrics(78) # SM_CXVIRTUALSCREEN
-            h = ctypes.windll.user32.GetSystemMetrics(79) # SM_CYVIRTUALSCREEN
-            x = ctypes.windll.user32.GetSystemMetrics(76) # SM_XVIRTUALSCREEN
-            y = ctypes.windll.user32.GetSystemMetrics(77) # SM_YVIRTUALSCREEN
-            if w > 0 and h > 0:
-                root.geometry(f"{w}x{h}+{x}+{y}")
-            else:
-                root.attributes('-fullscreen', True)
-            
-            root.update_idletasks()
-            hwnd = int(root.frame(), 16)
-            ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-            WS_EX_LAYERED = 0x00080000
-            WS_EX_TRANSPARENT = 0x00000020
-            style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
-            ctypes.windll.user32.SetWindowLongW(hwnd, -20, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
-            
-            try:
-                res = ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
-                if not res:
-                    ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x01)
-            except Exception:
-                pass
+            class_atom = win32gui.RegisterClass(wc)
         except Exception as e:
-            print(f"[Host] Cover screen setup error: {e}")
-
-        def keep_topmost():
-            if not getattr(self, 'screen_cover_running', False) or not root.winfo_exists():
-                return
+            print(f"[Host] Cover Win32 RegisterClass error: {e}")
             try:
-                root.attributes('-topmost', True)
-            except:
-                pass
-            root.after(1000, keep_topmost)
+                win32gui.UnregisterClass(cls_name, hInst)
+                class_atom = win32gui.RegisterClass(wc)
+            except Exception as ex:
+                print(f"[Host] Cover Win32 RegisterClass retry failed: {ex}")
+                self.screen_cover_running = False
+                return
                 
-        root.after(1000, keep_topmost)
+        ex_style = win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_TOPMOST
+        style = win32con.WS_POPUP | win32con.WS_VISIBLE
+        
+        try:
+            hwnd = win32gui.CreateWindowEx(
+                ex_style, class_atom, "AGCover", style,
+                vx, vy, vw, vh, 0, 0, hInst, None
+            )
+        except Exception as e:
+            print(f"[Host] Cover Win32 CreateWindowEx error: {e}")
+            win32gui.UnregisterClass(class_atom, hInst)
+            self.screen_cover_running = False
+            return
+            
+        self._cover_hwnd = hwnd
+        print(f"[Host] Cover Win32: HWND={hex(hwnd)}")
+        
+        try:
+            # Set alpha = 255 (Max). 
+            # On some hybrid GPUs, alpha < 255 combined with WDA_EXCLUDEFROMCAPTURE drops the layered window.
+            # Using 255 guarantees DWM opaque-layered fallback composition.
+            win32gui.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
+        except Exception as e:
+            print(f"[Host] Cover Win32 SetLayeredWindowAttributes error: {e}")
+            
+        try:
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, vx, vy, vw, vh, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
+        except:
+            pass
+            
+        try:
+            if not ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11):
+                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x01)
+        except:
+            pass
+            
+        try:
+            ctypes.windll.user32.SetTimer(hwnd, 1, 50, None)
+        except Exception as e:
+            pass
+        print("[Host] Cover Win32: Running message pump.")
+        
+        win32gui.PumpMessages()
+        
+        self._cover_hwnd = None
+        try:
+            win32gui.UnregisterClass(class_atom, hInst)
+        except:
+            pass
+        print("[Host] Cover Win32: Closed.")
 
 
     def trigger_taskmgr(self):
