@@ -257,59 +257,6 @@ def spawn_clipboard_agent(session_id):
             log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
     return None
 
-def spawn_gui_agent(session_id):
-    """
-    Spawn GUI Agent ở quyền User thường (sử dụng WTSQueryUserToken).
-    Agent này sẽ hiển thị System Tray, quản lý Screen Cover và Clipboard.
-    """
-    exe_path, cmd_line = get_executable_to_run()
-    if not exe_path:
-        return None
-    
-    cmd_line = cmd_line.replace("--headless", "--gui-agent")
-
-    h_user_token = None
-    try:
-        h_user_token = win32ts.WTSQueryUserToken(session_id)
-    except Exception as e:
-        log(f"Thất bại khi truy vấn token người dùng cho Clipboard Agent (session {session_id}): {e}")
-        return None
-
-    if h_user_token:
-        try:
-            h_token_dup = win32security.DuplicateTokenEx(
-                h_user_token,
-                win32security.SecurityImpersonation,
-                win32con.TOKEN_ALL_ACCESS,
-                win32security.TokenPrimary
-            )
-            win32api.CloseHandle(h_user_token)
-
-            startup_info = win32process.STARTUPINFO()
-            startup_info.lpDesktop = "winsta0\\default"
-
-            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
-                h_token_dup,
-                exe_path,
-                cmd_line,
-                None,
-                None,
-                False,
-                win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
-                None,
-                os.path.dirname(exe_path),
-                startup_info
-            )
-            win32api.CloseHandle(h_process)
-            win32api.CloseHandle(h_thread)
-            win32api.CloseHandle(h_token_dup)
-
-            log(f"Đã khởi chạy GUI Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
-            return dwProcessId
-        except Exception as e:
-            log(f"CreateProcessAsUser cho GUI Agent thất bại: {e}")
-    return None
-
 def trigger_sas_system():
     try:
         import winreg
@@ -530,7 +477,6 @@ def main():
     t.start()
 
     current_agent_pid = None
-    gui_agent_pid = None
     clipboard_agent_pid = None
     last_session_id = None
 
@@ -560,9 +506,6 @@ def main():
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
-                if gui_agent_pid:
-                    terminate_process_with_pid(gui_agent_pid)
-                    gui_agent_pid = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
@@ -637,49 +580,6 @@ def main():
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
-
-            # Spawn or check GUI Agent (only when user is logged in and not locked)
-            if is_logged_in and not is_screen_locked:
-                if gui_agent_pid and not is_process_alive(gui_agent_pid):
-                    log(f"GUI Agent với PID {gui_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
-                    gui_agent_pid = None
-
-                gui_agent_running = False
-                mutex_name_global = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{active_session_id}_default"
-                mutex_name_session = f"Session\\{active_session_id}\\AntigravityP2PRemoteDesktopAppMutex_2_{active_session_id}_default"
-                
-                try:
-                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_global)
-                    win32api.CloseHandle(h_mutex)
-                    gui_agent_running = True
-                except Exception as e:
-                    err_code = getattr(e, 'winerror', 0)
-                    if err_code != 2:
-                        gui_agent_running = True
-                        
-                if not gui_agent_running:
-                    try:
-                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name_session)
-                        win32api.CloseHandle(h_mutex)
-                        gui_agent_running = True
-                    except Exception as e:
-                        err_code = getattr(e, 'winerror', 0)
-                        if err_code != 2:
-                            gui_agent_running = True
-                            
-                if not gui_agent_running:
-                    if gui_agent_pid and is_process_alive(gui_agent_pid):
-                        log(f"Mutex của GUI Agent chưa sẵn sàng nhưng tiến trình {gui_agent_pid} vẫn đang khởi động. Chờ đợi...")
-                    else:
-                        log(f"Không tìm thấy Mutex của GUI Agent cho session {active_session_id}. Đang khởi chạy GUI Agent mới.")
-                        pid = spawn_gui_agent(active_session_id)
-                        if pid:
-                            gui_agent_pid = pid
-            else:
-                if gui_agent_pid:
-                    log(f"Người dùng đã đăng xuất hoặc màn hình bị khóa. Đang tắt GUI Agent.")
-                    terminate_process_with_pid(gui_agent_pid)
-                    gui_agent_pid = None
 
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")

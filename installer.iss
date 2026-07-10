@@ -54,6 +54,9 @@ Filename: "schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopAgent"""; Fla
 ; Wait 5 seconds for service to initialize and connect to signaling server
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
+; Thêm option khởi chạy ứng dụng sau khi cài đặt
+Filename: "{app}\RemoteDesktopP2P.exe"; Description: "Khởi chạy Easy Remote Desktop"; Flags: nowait postinstall skipifsilent
+
 [UninstallRun]
 ; Stop existing scheduled task
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden waituntilterminated
