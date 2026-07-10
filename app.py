@@ -5596,6 +5596,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 try: reconnect_queue.put("RECONNECT_REQUEST")
                 except: pass
                 
+                status_msg_text = None
+                
                 while countdown > 0 and outer_running:
                     for event in pygame.event.get():
                         if event.type == pygame.QUIT:
@@ -5606,31 +5608,52 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     if not outer_running:
                         break
                         
+                    sock_acquired = False
                     try:
-                        new_sock = reconnect_queue.get_nowait()
-                        if new_sock == "FAILED":
-                            print("[Client] Reconnection failed. Closing window.")
-                            outer_running = False
-                            break
-                        elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
-                            print("[Client] Received shared socket. Resuming session!")
-                            sock = socket.fromshare(new_sock[1])
-                            if partner_pass:
-                                socket_passwords[sock] = partner_pass
-                            break # Break inner wait loop, outer loop will continue
-                        elif hasattr(new_sock, 'fileno'):
-                            print("[Client] Received new socket. Resuming session!")
-                            sock = new_sock
-                            if partner_pass:
-                                socket_passwords[sock] = partner_pass
-                            break # Break inner wait loop, outer loop will continue
+                        while True:
+                            new_sock = reconnect_queue.get_nowait()
+                            if isinstance(new_sock, str) and new_sock.startswith("STATUS|"):
+                                status_msg_text = new_sock.split("|", 1)[1]
+                                continue
+                            elif new_sock == "FAILED":
+                                print("[Client] Reconnection failed. Closing window.")
+                                outer_running = False
+                                break
+                            elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
+                                print("[Client] Received shared socket. Resuming session!")
+                                sock = socket.fromshare(new_sock[1])
+                                if partner_pass:
+                                    socket_passwords[sock] = partner_pass
+                                sock_acquired = True
+                                break # Break inner wait loop
+                            elif hasattr(new_sock, 'fileno'):
+                                print("[Client] Received new socket. Resuming session!")
+                                sock = new_sock
+                                if partner_pass:
+                                    socket_passwords[sock] = partner_pass
+                                sock_acquired = True
+                                break # Break inner wait loop
                     except Exception as re_err:
-                        print(f"[Client] Lỗi nhận diện socket tái kết nối: {re_err}")
+                        pass # Ignore queue.Empty
+                        
+                    if not outer_running or sock_acquired:
+                        break
                     
                     screen.fill((30, 30, 30))
-                    text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
-                    text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
-                    screen.blit(text_surf, text_rect)
+                    
+                    if status_msg_text:
+                        text_surf = msg_font.render(f"Trạng thái: {status_msg_text}", True, (255, 165, 0))
+                        text_rect = text_surf.get_rect(center=(window_w//2, window_h//2 - 20))
+                        screen.blit(text_surf, text_rect)
+                        
+                        cd_surf = msg_font.render(f"Thời gian chờ: {countdown} giây...", True, (255, 255, 255))
+                        cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 20))
+                        screen.blit(cd_surf, cd_rect)
+                    else:
+                        text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
+                        text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
+                        screen.blit(text_surf, text_rect)
+                        
                     pygame.display.flip()
                     
                     current_tick = pygame.time.get_ticks()
@@ -11164,7 +11187,10 @@ class UnifiedApp(tk.Tk):
                 
         if not success:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                msg = f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30..."
+                # self.update_status(msg) # Tắt hiển thị trên Status bar của GUI chính
+                try: reconnect_queue.put(f"STATUS|{msg}")
+                except: pass
                 time.sleep(2)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
@@ -11555,7 +11581,10 @@ class UnifiedApp(tk.Tk):
                 socket_passwords.pop(sock, None)
         except Exception as e:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                msg = f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30..."
+                # self.update_status(msg) # Tắt hiển thị trên Status bar của GUI chính
+                try: reconnect_queue.put(f"STATUS|{msg}")
+                except: pass
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
@@ -11603,7 +11632,7 @@ class UnifiedApp(tk.Tk):
                             msg = req_queue.get(timeout=1.0)
                             if msg == "RECONNECT_REQUEST":
                                 print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
-                                self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
+                                # self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
                                 threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
                             else:
                                 req_queue.put(msg)
