@@ -102,6 +102,17 @@ else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
 
+def get_computers_xml_path():
+    import os, sys
+    installed_path = r"C:\Apps\P2P\saved_computers.xml"
+    if os.path.exists(installed_path):
+        return installed_path
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "saved_computers.xml")
+
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 
 # Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
@@ -233,7 +244,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Migrate old JSON list to new encrypted XML format
         old_json_file = "saved_computers.json"
-        new_xml_file = "saved_computers.xml"
+        new_xml_file = get_computers_xml_path()
         if os.path.exists(old_json_file) and not os.path.exists(new_xml_file):
             try:
                 with open(old_json_file, "r", encoding="utf-8") as f:
@@ -1651,7 +1662,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def load_saved_computers(self):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         lst = []
         if os.path.exists(computers_file):
@@ -1690,7 +1701,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def save_saved_computers(self, lst):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         try:
             fixed_node = None
@@ -1742,7 +1753,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def save_group_states_only(self):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         if not os.path.exists(computers_file):
             return
         import xml.etree.ElementTree as ET
@@ -1765,7 +1776,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def load_fixed_password_from_xml(self):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         if os.path.exists(computers_file):
             try:
                 import xml.etree.ElementTree as ET
@@ -1780,7 +1791,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def save_fixed_password_to_xml(self, password):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         
         computers = []
@@ -1841,7 +1852,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def load_zalo_phone_from_xml(self):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         if os.path.exists(computers_file):
             try:
                 import xml.etree.ElementTree as ET
@@ -1856,7 +1867,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def save_zalo_phone_to_xml(self, value):
-        computers_file = "saved_computers.xml"
+        computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         
         computers = []

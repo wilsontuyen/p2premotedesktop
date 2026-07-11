@@ -257,6 +257,7 @@ def spawn_clipboard_agent(session_id):
             log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
     return None
 
+
 def trigger_sas_system():
     try:
         import winreg
@@ -477,6 +478,7 @@ def main():
     t.start()
 
     current_agent_pid = None
+    gui_agent_pid = None
     clipboard_agent_pid = None
     last_session_id = None
 
@@ -506,6 +508,9 @@ def main():
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
+                if gui_agent_pid:
+                    terminate_process_with_pid(gui_agent_pid)
+                    gui_agent_pid = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
@@ -580,6 +585,8 @@ def main():
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
+
+
 
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")
