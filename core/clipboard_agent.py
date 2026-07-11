@@ -21,8 +21,8 @@ from gui.components import ProgressDialog, ClassicCopyDialog
 from utils.logger import log_file_transfer, log_activity
 import base64
 
-
 from utils.logger import log_debug
+from core.i18n import _
 from network.socket_utils import send_msg, recv_msg
 from utils.clipboard_api import (
     ENABLE_CLIPBOARD_SYNC, 
@@ -739,7 +739,7 @@ class ClipboardSyncManager:
         
         try:
             if hasattr(self, 'batch_display_name'):
-                log_activity(f"Truyền file: {self.batch_display_name} - Thất bại")
+                log_activity(_("Truyền file: ") + str(self.batch_display_name) + _(" - Thất bại"))
         except: pass
         
         if not getattr(self, 'transfer_in_progress', False) and not getattr(self, 'incoming_transfers', {}):
@@ -832,7 +832,7 @@ class ClipboardSyncManager:
         if self.app:
             try:
                 if hasattr(self.app, 'update_status'):
-                    self.app.after(0, lambda: self.app.update_status("Đã hủy truyền tải file."))
+                    self.app.after(0, lambda: self.app.update_status(_("Đã hủy truyền tải file.")))
             except:
                 pass
             
@@ -1384,7 +1384,7 @@ class ClipboardSyncManager:
         log_debug(f"[_process_send_requests] Khởi chạy gửi {len(files)} file...")
         try:
             total_size = sum(f.get("size", 0) for f in files)
-            display_name = f"{len(files)} tệp tin" if len(files) > 1 else files[0].get("name", "Unknown")
+            display_name = str(len(files)) + _(" tệp tin") if len(files) > 1 else files[0].get("name", "Unknown")
             self.batch_display_name = display_name
             
             log_file_transfer(display_name, total_size)
@@ -1471,7 +1471,7 @@ class ClipboardSyncManager:
             if not self._send_cancelled:
                 send_msg(sock, json.dumps({"type": "batch_end"}).encode('utf-8'))
                 log_debug(f"[_process_send_requests] Đã gửi batch_end.")
-                try: log_activity(f"Truyền file: {self.batch_display_name} - {total_size} byte - Thành công")
+                try: log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thành công"))
                 except: pass
         except Exception as e:
             import traceback
@@ -1479,7 +1479,7 @@ class ClipboardSyncManager:
             print(f"Error processing send request: {e}")
             log_debug(f"[_process_send_requests] Lỗi tổng quát:\n{tb}")
             try:
-                log_activity(f"Truyền file: {self.batch_display_name} - {total_size} byte - Thất bại")
+                log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thất bại"))
             except: pass
             try:
                 send_msg(sock, json.dumps({"type": "cancel_transfer"}).encode('utf-8'))
@@ -1703,7 +1703,7 @@ class ClipboardSyncManager:
             if 'file_manager_callback' in globals():
                 globals()['file_manager_callback']({"type": "trigger_local_refresh"})
             log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
-            try: log_activity(f"Nhận file: {self.batch_display_name} - {self.batch_total_size} byte - Thành công")
+            try: log_activity(_("Nhận file: ") + str(self.batch_display_name) + " - " + str(self.batch_total_size) + _(" byte - Thành công"))
             except: pass
             
             # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
@@ -2232,7 +2232,7 @@ def run_clipboard_agent_mode():
                         try: active_dialog.destroy()
                         except: pass
                     active_dialog = ProgressDialog(
-                        root, "Đang tải file về...", display_name, total_size,
+                        root, _("Đang tải file về..."), display_name, total_size,
                         on_cancel=trigger_cancel_win32
                     )
                 elif action == "progress":

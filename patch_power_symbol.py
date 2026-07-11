@@ -34,7 +34,7 @@ def apply_patch():
                         file_btn_rect = pygame.Rect(-1000, -1000, 0, 0)"""
 
     # Change render symbol
-    old_c3 = """                            power_text_surf = btn_font.render("Nguồn", True, cad_text_color)
+    old_c3 = """                            power_text_surf = btn_font.render(_("Nguồn"), True, cad_text_color)
                             power_text_rect = power_text_surf.get_rect(center=power_btn_rect.center)
                             screen.blit(power_text_surf, power_text_rect)"""
     new_c3 = """                            try:

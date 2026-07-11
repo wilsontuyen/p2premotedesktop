@@ -13,6 +13,7 @@ import zlib
 from ctypes import wintypes
 import mss
 import tkinter as tk
+from core.i18n import _
 
 from core.config import *
 from network.socket_utils import socket_passwords, force_close_socket, APP_KEY
@@ -362,8 +363,8 @@ class HostMixin:
                 continue
                 
         if not bound:
-            self.after(0, lambda: self.show_custom_error("Lỗi hệ thống", "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng."))
-            self.update_status("Lỗi khởi động Server")
+            self.after(0, lambda: self.show_custom_error(_("Lỗi hệ thống"), _("Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng.")))
+            self.update_status(_("Lỗi khởi động Server"))
             return
             
         # Spawn the socket accept loop in a separate thread
@@ -509,7 +510,7 @@ class HostMixin:
                 try:
                     err_info = json.dumps({
                         "status": "error",
-                        "message": "Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!"
+                        "message": _("Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!")
                     }).encode('utf-8')
                     send_msg(conn, err_info, APP_KEY)
                 except: pass
@@ -532,19 +533,19 @@ class HostMixin:
                 print("[Host] Password matches! Accepting connection.")
                 socket_passwords[conn] = client_pass
                 
-                client_id = data.get("client_id", "Không rõ")
-                client_comp = data.get("computer_name", "Không rõ")
+                client_id = data.get("client_id", _("Không rõ"))
+                client_comp = data.get("computer_name", _("Không rõ"))
                 fmt_client_id = f"{client_id[:3]} {client_id[3:6]} {client_id[6:9]} {client_id[9:]}" if len(client_id) == 12 else client_id
                 
-                if client_comp != "Không rõ":
-                    msg_text = f"Máy tính [{client_comp}] đang điều khiển máy bạn"
+                if client_comp != _("Không rõ"):
+                    msg_text = _("Máy tính [{comp}] đang điều khiển máy bạn").format(comp=client_comp)
                 else:
-                    msg_text = f"Máy tính có ID [{fmt_client_id}] đang điều khiển máy bạn"
+                    msg_text = _("Máy tính có ID [{id}] đang điều khiển máy bạn").format(id=fmt_client_id)
                     
-                try: log_activity(f"Chấp nhận kết nối từ ID {fmt_client_id} ({client_comp})")
+                try: log_activity(_("Chấp nhận kết nối từ ID {id} ({comp})").format(id=fmt_client_id, comp=client_comp))
                 except: pass
                     
-                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
+                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text))
                 self.after(0, self.show_host_connection_border)
                 
                 self.wake_display()
@@ -641,7 +642,7 @@ class HostMixin:
                 self.active_clients[addr] = client_state
                 
                 addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
-                self.update_status(f"Đang dùng máy chủ {addrs_str}")
+                self.update_status(_("Đang dùng máy chủ {addrs}").format(addrs=addrs_str))
                 
                 t_sender = threading.Thread(target=self.host_sender_thread, args=(conn, monitor, client_state, client_pass), daemon=True)
                 t_receiver = threading.Thread(target=self.host_receiver_thread, args=(conn, client_state, client_pass), daemon=True)
@@ -663,7 +664,7 @@ class HostMixin:
                     set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
-                    try: log_activity(f"Ngắt kết nối với ID {fmt_client_id} ({client_comp})")
+                    try: log_activity(_("Ngắt kết nối với ID {id} ({comp})").format(id=fmt_client_id, comp=client_comp))
                     except: pass
                     
                     if addr in self.active_clients:
@@ -671,9 +672,9 @@ class HostMixin:
                         
                     if self.active_clients:
                         addrs_str = ", ".join([str(a[0]) for a in self.active_clients.keys()])
-                        self.update_status(f"Đang bị điều khiển bởi {addrs_str}")
+                        self.update_status(_("Đang bị điều khiển bởi {addrs}").format(addrs=addrs_str))
                     else:
-                        self.update_status(f"Đã đóng kết nối với Client {addr[0]} lúc {time.strftime('%H:%M:%S')} (Sẵn sàng kết nối)")
+                        self.update_status(_("Đã đóng kết nối với Client {client} lúc {time} (Sẵn sàng kết nối)").format(client=addr[0], time=time.strftime('%H:%M:%S')))
                         self.after(0, self.hide_host_connection_border)
                         
                     try:
@@ -684,7 +685,7 @@ class HostMixin:
                 print("[Host] Password mismatch!")
                 err_info = json.dumps({
                     "status": "error",
-                    "message": "Sai mật khẩu kết nối!"
+                    "message": _("Sai mật khẩu kết nối!")
                 }).encode('utf-8')
                 send_msg(conn, err_info, client_pass)
                 time.sleep(0.5)
@@ -695,7 +696,7 @@ class HostMixin:
             try:
                 err_info = json.dumps({
                     "status": "error",
-                    "message": f"Lỗi xảy ra trên máy Host:\n{e}"
+                    "message": _("Lỗi xảy ra trên máy Host:\n") + str(e)
                 }).encode('utf-8')
                 send_msg(conn, err_info, locals().get('client_pass'))
             except:

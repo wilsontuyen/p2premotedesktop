@@ -367,7 +367,7 @@ class ProgressDialog(tk.Toplevel):
         
         if self.on_cancel:
             btn_cancel = tk.Button(
-                bottom_frame, text="Hủy", font=("Segoe UI", 9),
+                bottom_frame, text=_("Hủy"), font=("Segoe UI", 9),
                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
             )
@@ -547,14 +547,14 @@ class ConfirmDialog(tk.Toplevel):
                 self.on_no_cb()
                 
         btn_yes = tk.Button(
-            btn_frame, text="Đồng ý (Yes)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Đồng ý (Yes)"), font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
         )
         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
         btn_no = tk.Button(
-            btn_frame, text="Bỏ qua (No)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Bỏ qua (No)"), font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
         )

@@ -18,7 +18,7 @@ if os.path.exists(log_path):
             msg = line_clean
             
         # Filter out startup noise
-        if any(x in msg for x in ["Khởi động", "Thư mục ứng dụng", "Window ẩn", "Đang chờ kết nối", "===="]):
+        if any(x in msg for x in [_("Khởi động"), _("Thư mục ứng dụng"), _("Window ẩn"), _("Đang chờ kết nối"), "===="]):
             continue
         # Also check unicode escaped forms
         if any(x in msg for x in ["Kh\\u1edfi \\u0111\\u1ed9ng", "Th\\u01b0 m\\u1ee5c", "Window \\u1ea5n", "\\u0110ang ch\\u1edd"]):

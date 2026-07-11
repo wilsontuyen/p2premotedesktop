@@ -31,7 +31,7 @@ def decrypt_payload(encrypted_bytes, password):
     passwords = [p for p in passwords if p]
     
     if len(encrypted_bytes) < 12:
-        raise ValueError("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)")
+        raise ValueError(_("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)"))
     nonce = encrypted_bytes[:12]
     ciphertext = encrypted_bytes[12:]
     
@@ -43,4 +43,4 @@ def decrypt_payload(encrypted_bytes, password):
             return chacha.decrypt(nonce, ciphertext, None)
         except Exception as e:
             last_err = e
-    raise last_err if last_err else ValueError("Không giải mã được với bất kỳ mật khẩu nào")
+    raise last_err if last_err else ValueError(_("Không giải mã được với bất kỳ mật khẩu nào"))

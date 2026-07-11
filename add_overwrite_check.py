@@ -16,7 +16,7 @@ upload_replace = """                                                if is_file:
                                                             remote_exists = True
                                                             break
                                                     if remote_exists:
-                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở đích.\\nBạn có muốn ghi đè không?", parent=top):
+                                                        if not messagebox.askyesno(_("Xác nhận ghi đè"), f"Tệp '{name}' đã tồn tại ở đích.\\nBạn có muốn ghi đè không?", parent=top):
                                                             continue
                                                     # -----------------------
                                                     
@@ -29,7 +29,7 @@ download_replace = """                                                if is_file
                                                     # --- OVERWRITE CHECK ---
                                                     target_path = os.path.join(target_dir, name)
                                                     if os.path.exists(target_path):
-                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
+                                                        if not messagebox.askyesno(_("Xác nhận ghi đè"), f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
                                                             continue
                                                     # -----------------------
                                                     

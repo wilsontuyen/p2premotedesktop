@@ -390,7 +390,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
         else:
             self.fixed_password = self.load_fixed_password_from_xml()
-        self.pass_type_var = tk.StringVar(value="4 chữ số")
+        self.pass_type_var = tk.StringVar(value=_("4 chữ số"))
         self.server_socket = None
         self.running_server = True
         self.active_clients = {}
@@ -553,17 +553,17 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         password_menu = tk.Menu(options_menu, tearoff=0)
         password_menu.add_radiobutton(
             label=_("4 chữ số"),
-            variable=self.pass_type_var, value="4 chữ số",
+            variable=self.pass_type_var, value=_("4 chữ số"),
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
             label=_("5 chữ số"),
-            variable=self.pass_type_var, value="5 chữ số",
+            variable=self.pass_type_var, value=_("5 chữ số"),
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
             label=_("8 ký tự (chữ + số)"),
-            variable=self.pass_type_var, value="8 ký tự (chữ + số)",
+            variable=self.pass_type_var, value=_("8 ký tự (chữ + số)"),
             command=self.refresh_password
         )
         password_menu.add_separator()
@@ -887,127 +887,127 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def export_lang_template(self):
         try:
             template = {
-    "Đang kết nối tới mạng đăng ký...": "Đang kết nối tới mạng đăng ký...",
-    "Đã sao chép cả ID & Mật khẩu!": "Đã sao chép cả ID & Mật khẩu!",
-    "Đã sao chép vào bộ nhớ tạm: ": "Đã sao chép vào bộ nhớ tạm: ",
-    "Lỗi": "Lỗi",
-    "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!": "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!",
-    "Tìm kiếm theo tên hoặc ID...": "Tìm kiếm theo tên hoặc ID...",
-    "tìm kiếm theo tên hoặc id...": "tìm kiếm theo tên hoặc id...",
-    "Lỗi nhập liệu": "Lỗi nhập liệu",
-    "Vui lòng điền đầy đủ các thông tin!": "Vui lòng điền đầy đủ các thông tin!",
-    "Trùng lặp": "Trùng lặp",
-    "Máy tính này đã tồn tại trong danh sách!": "Máy tính này đã tồn tại trong danh sách!",
-    "Sửa thông tin": "Sửa thông tin",
-    "Không tìm thấy máy tính tương ứng để sửa!": "Không tìm thấy máy tính tương ứng để sửa!",
-    "Vui lòng nhập đầy đủ thông tin!": "Vui lòng nhập đầy đủ thông tin!",
-    "Cổng kết nối (Port) phải là số!": "Cổng kết nối (Port) phải là số!",
-    "Không thể lưu file server.ini: ": "Không thể lưu file server.ini: ",
-    "Thất bại": "Thất bại",
-    "Không thể thay đổi cài đặt Registry: ": "Không thể thay đổi cài đặt Registry: ",
-    "Sao chép": "Sao chép",
-    "Đổi mật khẩu": "Đổi mật khẩu",
-    "Thêm máy tính": "Thêm máy tính",
-    "Thành công": "Thành công",
-    "Đã lưu máy tính '{name}' vào danh sách thành công!": "Đã lưu máy tính '{name}' vào danh sách thành công!",
-    "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!": "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!",
+    _("Đang kết nối tới mạng đăng ký..."): _("Đang kết nối tới mạng đăng ký..."),
+    _("Đã sao chép cả ID & Mật khẩu!"): _("Đã sao chép cả ID & Mật khẩu!"),
+    _("Đã sao chép vào bộ nhớ tạm: "): _("Đã sao chép vào bộ nhớ tạm: "),
+    _("Lỗi"): _("Lỗi"),
+    _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"): _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"),
+    _("Tìm kiếm theo tên hoặc ID..."): _("Tìm kiếm theo tên hoặc ID..."),
+    _("tìm kiếm theo tên hoặc id..."): _("tìm kiếm theo tên hoặc id..."),
+    _("Lỗi nhập liệu"): _("Lỗi nhập liệu"),
+    _("Vui lòng điền đầy đủ các thông tin!"): _("Vui lòng điền đầy đủ các thông tin!"),
+    _("Trùng lặp"): _("Trùng lặp"),
+    _("Máy tính này đã tồn tại trong danh sách!"): _("Máy tính này đã tồn tại trong danh sách!"),
+    _("Sửa thông tin"): _("Sửa thông tin"),
+    _("Không tìm thấy máy tính tương ứng để sửa!"): _("Không tìm thấy máy tính tương ứng để sửa!"),
+    _("Vui lòng nhập đầy đủ thông tin!"): _("Vui lòng nhập đầy đủ thông tin!"),
+    _("Cổng kết nối (Port) phải là số!"): _("Cổng kết nối (Port) phải là số!"),
+    _("Không thể lưu file server.ini: "): _("Không thể lưu file server.ini: "),
+    _("Thất bại"): _("Thất bại"),
+    _("Không thể thay đổi cài đặt Registry: "): _("Không thể thay đổi cài đặt Registry: "),
+    _("Sao chép"): _("Sao chép"),
+    _("Đổi mật khẩu"): _("Đổi mật khẩu"),
+    _("Thêm máy tính"): _("Thêm máy tính"),
+    _("Thành công"): _("Thành công"),
+    _("Đã lưu máy tính '{name}' vào danh sách thành công!"): _("Đã lưu máy tính '{name}' vào danh sách thành công!"),
+    _("Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!"): _("Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!"),
     "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.": "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.",
-    "Đã lưu mật khẩu cố định thành công!": "Đã lưu mật khẩu cố định thành công!",
-    "Đã tắt mật khẩu cố định thành công!": "Đã tắt mật khẩu cố định thành công!",
-    "Đã bật tính năng chạy khi mở máy thành công!": "Đã bật tính năng chạy khi mở máy thành công!",
-    "Đã tắt tính năng chạy khi mở máy thành công!": "Đã tắt tính năng chạy khi mở máy thành công!",
-    "+ Thêm Mới": "+ Thêm Mới",
-    "4 chữ số": "4 chữ số",
-    "5 chữ số": "5 chữ số",
-    "8 ký tự (chữ + số)": "8 ký tự (chữ + số)",
+    _("Đã lưu mật khẩu cố định thành công!"): _("Đã lưu mật khẩu cố định thành công!"),
+    _("Đã tắt mật khẩu cố định thành công!"): _("Đã tắt mật khẩu cố định thành công!"),
+    _("Đã bật tính năng chạy khi mở máy thành công!"): _("Đã bật tính năng chạy khi mở máy thành công!"),
+    _("Đã tắt tính năng chạy khi mở máy thành công!"): _("Đã tắt tính năng chạy khi mở máy thành công!"),
+    _("+ Thêm Mới"): _("+ Thêm Mới"),
+    _("4 chữ số"): _("4 chữ số"),
+    _("5 chữ số"): _("5 chữ số"),
+    _("8 ký tự (chữ + số)"): _("8 ký tự (chữ + số)"),
     "AI Pro Version": "AI Pro Version",
     "About": "About",
-    "CHO PHÉP ĐIỀU KHIỂN": "CHO PHÉP ĐIỀU KHIỂN",
-    "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI": "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI",
-    "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO": "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO",
+    _("CHO PHÉP ĐIỀU KHIỂN"): _("CHO PHÉP ĐIỀU KHIỂN"),
+    _("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"): _("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"),
+    _("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"): _("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"),
     "Cam": "Cam",
-    "Chưa có liên lạc": "Chưa có liên lạc",
-    "Chạy khi mở máy (Run on Startup)": "Chạy khi mở máy (Run on Startup)",
-    "Chọn tất cả (Select All)": "Chọn tất cả (Select All)",
-    "Chọn đối tác": "Chọn đối tác",
-    "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH": "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH",
-    "CÀI ĐẶT ZALO / ĐIỆN THOẠI": "CÀI ĐẶT ZALO / ĐIỆN THOẠI",
-    "Cài Zalo / Điện thoại": "Cài Zalo / Điện thoại",
-    "Cài mật khẩu cố định...": "Cài mật khẩu cố định...",
-    "Cài đặt Máy chủ (Signaling Server)": "Cài đặt Máy chủ (Signaling Server)",
-    "Cài đặt máy chủ...": "Cài đặt máy chủ...",
-    "Có": "Có",
-    "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp": "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
-    "CẤU HÌNH MÁY CHỦ SIGNALING": "CẤU HÌNH MÁY CHỦ SIGNALING",
-    "CẬP NHẬT THÔNG TIN": "CẬP NHẬT THÔNG TIN",
-    "Cắt (Cut)": "Cắt (Cut)",
-    "Cổng kết nối (Port):": "Cổng kết nối (Port):",
-    "DANH SÁCH MÁY TÍNH ĐÃ LƯU": "DANH SÁCH MÁY TÍNH ĐÃ LƯU",
-    "Danh sách (Saved Computers)": "Danh sách (Saved Computers)",
-    "Danh sách Máy chủ:": "Danh sách Máy chủ:",
-    "Danh sách Máy tính": "Danh sách Máy tính",
-    "Dán (Paste)": "Dán (Paste)",
+    _("Chưa có liên lạc"): _("Chưa có liên lạc"),
+    _("Chạy khi mở máy (Run on Startup)"): _("Chạy khi mở máy (Run on Startup)"),
+    _("Chọn tất cả (Select All)"): _("Chọn tất cả (Select All)"),
+    _("Chọn đối tác"): _("Chọn đối tác"),
+    _("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"): _("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"),
+    _("CÀI ĐẶT ZALO / ĐIỆN THOẠI"): _("CÀI ĐẶT ZALO / ĐIỆN THOẠI"),
+    _("Cài Zalo / Điện thoại"): _("Cài Zalo / Điện thoại"),
+    _("Cài mật khẩu cố định..."): _("Cài mật khẩu cố định..."),
+    _("Cài đặt Máy chủ (Signaling Server)"): _("Cài đặt Máy chủ (Signaling Server)"),
+    _("Cài đặt máy chủ..."): _("Cài đặt máy chủ..."),
+    _("Có"): _("Có"),
+    _("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"): _("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"),
+    _("CẤU HÌNH MÁY CHỦ SIGNALING"): _("CẤU HÌNH MÁY CHỦ SIGNALING"),
+    _("CẬP NHẬT THÔNG TIN"): _("CẬP NHẬT THÔNG TIN"),
+    _("Cắt (Cut)"): _("Cắt (Cut)"),
+    _("Cổng kết nối (Port):"): _("Cổng kết nối (Port):"),
+    _("DANH SÁCH MÁY TÍNH ĐÃ LƯU"): _("DANH SÁCH MÁY TÍNH ĐÃ LƯU"),
+    _("Danh sách (Saved Computers)"): _("Danh sách (Saved Computers)"),
+    _("Danh sách Máy chủ:"): _("Danh sách Máy chủ:"),
+    _("Danh sách Máy tính"): _("Danh sách Máy tính"),
+    _("Dán (Paste)"): _("Dán (Paste)"),
     "Easy Remote Desktop": "Easy Remote Desktop",
     "File": "File",
-    "Giao diện": "Giao diện",
+    _("Giao diện"): _("Giao diện"),
     "Help": "Help",
-    "Hiển thị mật khẩu": "Hiển thị mật khẩu",
-    "Hồng": "Hồng",
-    "Hủy": "Hủy",
-    "Hủy bỏ": "Hủy bỏ",
-    "ID đối tác:": "ID đối tác:",
-    "Không": "Không",
-    "KẾT NỐI (CONNECT)": "KẾT NỐI (CONNECT)",
-    "Kết nối": "Kết nối",
-    "Kết nối mạng LAN thất bại": "Kết nối mạng LAN thất bại",
-    "Liên hệ Zalo": "Liên hệ Zalo",
-    "Liên hệ: Mr. Tuyến - 0941 261 771": "Liên hệ: Mr. Tuyến - 0941 261 771",
-    "Lưu": "Lưu",
-    "Lưu lại": "Lưu lại",
-    "Lỗi kết nối mạng LAN": "Lỗi kết nối mạng LAN",
-    "Mã ID của bạn:": "Mã ID của bạn:",
-    "Mật khẩu (Password)": "Mật khẩu (Password)",
-    "Mật khẩu cố định": "Mật khẩu cố định",
-    "Mật khẩu kết nối:": "Mật khẩu kết nối:",
-    "Mật khẩu mới:": "Mật khẩu mới:",
-    "Mật khẩu:": "Mật khẩu:",
-    "Nhóm (Tùy chọn):": "Nhóm (Tùy chọn):",
-    "Nhập ID đối tác:": "Nhập ID đối tác:",
-    "Nhập Mật khẩu đối tác:": "Nhập Mật khẩu đối tác:",
+    _("Hiển thị mật khẩu"): _("Hiển thị mật khẩu"),
+    _("Hồng"): _("Hồng"),
+    _("Hủy"): _("Hủy"),
+    _("Hủy bỏ"): _("Hủy bỏ"),
+    _("ID đối tác:"): _("ID đối tác:"),
+    _("Không"): _("Không"),
+    _("KẾT NỐI (CONNECT)"): _("KẾT NỐI (CONNECT)"),
+    _("Kết nối"): _("Kết nối"),
+    _("Kết nối mạng LAN thất bại"): _("Kết nối mạng LAN thất bại"),
+    _("Liên hệ Zalo"): _("Liên hệ Zalo"),
+    _("Liên hệ: Mr. Tuyến - 0941 261 771"): _("Liên hệ: Mr. Tuyến - 0941 261 771"),
+    _("Lưu"): _("Lưu"),
+    _("Lưu lại"): _("Lưu lại"),
+    _("Lỗi kết nối mạng LAN"): _("Lỗi kết nối mạng LAN"),
+    _("Mã ID của bạn:"): _("Mã ID của bạn:"),
+    _("Mật khẩu (Password)"): _("Mật khẩu (Password)"),
+    _("Mật khẩu cố định"): _("Mật khẩu cố định"),
+    _("Mật khẩu kết nối:"): _("Mật khẩu kết nối:"),
+    _("Mật khẩu mới:"): _("Mật khẩu mới:"),
+    _("Mật khẩu:"): _("Mật khẩu:"),
+    _("Nhóm (Tùy chọn):"): _("Nhóm (Tùy chọn):"),
+    _("Nhập ID đối tác:"): _("Nhập ID đối tác:"),
+    _("Nhập Mật khẩu đối tác:"): _("Nhập Mật khẩu đối tác:"),
     "OK": "OK",
     "Options": "Options",
     "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
-    "Pha lê": "Pha lê",
-    "Sao chép (Copy)": "Sao chép (Copy)",
-    "Sáng": "Sáng",
-    "Sửa thông tin": "Sửa thông tin",
-    "THÊM MÁY TÍNH MỚI": "THÊM MÁY TÍNH MỚI",
-    "Thay đổi thông tin": "Thay đổi thông tin",
-    "Thoát (Exit)": "Thoát (Exit)",
-    "Thêm Máy tính": "Thêm Máy tính",
-    "Tên gọi gợi nhớ:": "Tên gọi gợi nhớ:",
-    "Tùy chỉnh": "Tùy chỉnh",
-    "Tối": "Tối",
-    "Xám": "Xám",
-    "Xóa máy tính": "Xóa máy tính",
+    _("Pha lê"): _("Pha lê"),
+    _("Sao chép (Copy)"): _("Sao chép (Copy)"),
+    _("Sáng"): _("Sáng"),
+    _("Sửa thông tin"): _("Sửa thông tin"),
+    _("THÊM MÁY TÍNH MỚI"): _("THÊM MÁY TÍNH MỚI"),
+    _("Thay đổi thông tin"): _("Thay đổi thông tin"),
+    _("Thoát (Exit)"): _("Thoát (Exit)"),
+    _("Thêm Máy tính"): _("Thêm Máy tính"),
+    _("Tên gọi gợi nhớ:"): _("Tên gọi gợi nhớ:"),
+    _("Tùy chỉnh"): _("Tùy chỉnh"),
+    _("Tối"): _("Tối"),
+    _("Xám"): _("Xám"),
+    _("Xóa máy tính"): _("Xóa máy tính"),
     "Zalo": "Zalo",
-    "ĐIỀU KHIỂN ĐỐI TÁC": "ĐIỀU KHIỂN ĐỐI TÁC",
-    "Điều khiển trực tuyến máy tính bằng HWID": "Điều khiển trực tuyến máy tính bằng HWID",
-    "Điện thoại": "Điện thoại",
-    "Điện thoại liên hệ": "Điện thoại liên hệ",
-    "Đã hiểu": "Đã hiểu",
-    "Đóng": "Đóng",
-    "Đỏ": "Đỏ",
-    "Đổi tên nhóm": "Đổi tên nhóm",
-    "● Mật khẩu cố định: Đang hoạt động": "● Mật khẩu cố định: Đang hoạt động",
-    "📁 Danh sách máy tính đã lưu": "📁 Danh sách máy tính đã lưu",
-    "📋  Thông tin kỹ thuật": "📋  Thông tin kỹ thuật",
-    "📋 Sao chép cả ID & Mật khẩu": "📋 Sao chép cả ID & Mật khẩu",
-    "📡 Quét mạng LAN (LAN Discovery)": "📡 Quét mạng LAN (LAN Discovery)",
-    "📡 Quét mạng LAN (LAN Only)": "📡 Quét mạng LAN (LAN Only)",
-    "🔄 Làm mới": "🔄 Làm mới",
-    "🔄 Làm mới (30s)": "🔄 Làm mới (30s)",
-    "🔧  Cách khắc phục": "🔧  Cách khắc phục"
+    _("ĐIỀU KHIỂN ĐỐI TÁC"): _("ĐIỀU KHIỂN ĐỐI TÁC"),
+    _("Điều khiển trực tuyến máy tính bằng HWID"): _("Điều khiển trực tuyến máy tính bằng HWID"),
+    _("Điện thoại"): _("Điện thoại"),
+    _("Điện thoại liên hệ"): _("Điện thoại liên hệ"),
+    _("Đã hiểu"): _("Đã hiểu"),
+    _("Đóng"): _("Đóng"),
+    _("Đỏ"): _("Đỏ"),
+    _("Đổi tên nhóm"): _("Đổi tên nhóm"),
+    _("● Mật khẩu cố định: Đang hoạt động"): _("● Mật khẩu cố định: Đang hoạt động"),
+    _("📁 Danh sách máy tính đã lưu"): _("📁 Danh sách máy tính đã lưu"),
+    _("📋  Thông tin kỹ thuật"): _("📋  Thông tin kỹ thuật"),
+    _("📋 Sao chép cả ID & Mật khẩu"): _("📋 Sao chép cả ID & Mật khẩu"),
+    _("📡 Quét mạng LAN (LAN Discovery)"): _("📡 Quét mạng LAN (LAN Discovery)"),
+    _("📡 Quét mạng LAN (LAN Only)"): _("📡 Quét mạng LAN (LAN Only)"),
+    _("🔄 Làm mới"): _("🔄 Làm mới"),
+    _("🔄 Làm mới (30s)"): _("🔄 Làm mới (30s)"),
+    _("🔧  Cách khắc phục"): _("🔧  Cách khắc phục")
 }
             template_path = export_template(template)
             if template_path:
@@ -1082,9 +1082,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         import string
         old_password = self.my_password
         ptype = self.pass_type_var.get()
-        if ptype == "5 chữ số":
+        if ptype == _("5 chữ số"):
             self.my_password = str(random.randint(10000, 99999))
-        elif ptype == "8 ký tự (chữ + số)":
+        elif ptype == _("8 ký tự (chữ + số)"):
             chars = string.ascii_letters + string.digits
             self.my_password = ''.join(random.choices(chars, k=8))
         else:  # Mặc định: 4 chữ số
@@ -1359,7 +1359,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             rn_win.geometry(f"{rw}x{rh}+{rx}+{ry}")
             rn_win.deiconify()
 
-            lbl = tk.Label(rn_win, text=_("Nhập tên mới cho nhóm:") + f"\n'{old_group_name if old_group_name else _("Chưa phân nhóm")}'", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
+            lbl = tk.Label(rn_win, text=_("Nhập tên mới cho nhóm:") + f"\n_('{old_group_name if old_group_name else _("Chưa phân nhóm")}')", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
             lbl.pack(pady=(15, 10))
 
             entry_var = tk.StringVar(value=old_group_name)
@@ -2136,8 +2136,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT ZALO / ĐIỆN THOẠI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = _("Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn.")
-        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        desc_text = _("Nhập số điện thoại hoặc liên kết Zalo của bạn. Client điều khiển máy bạn có thể click Help -> Zalo để trực tiếp nhắn tin cho bạn.")
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER, wraplength=320)
         lbl_desc.pack(pady=(0, 10))
 
         entry_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -2194,8 +2194,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CẤU HÌNH MÁY CHỦ SIGNALING"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = _("Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)")
-        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        desc_text = _("Nhập danh sách tên miền hoặc IP máy chủ (Cách nhau bằng dấu phẩy để dự phòng)")
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER, wraplength=350)
         lbl_desc.pack(pady=(0, 10))
 
         form_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -2299,8 +2299,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = _("Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)")
-        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        desc_text = _("Đặt mật khẩu cố định giúp đối tác kết nối vào máy của bạn mà không cần hỏi mật khẩu ngẫu nhiên. (Để trống để tắt tính năng này)")
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER, wraplength=350)
         lbl_desc.pack(pady=(0, 10))
 
         # Entry and show password check
@@ -3021,7 +3021,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 self._blink_status()
             elif is_error:
                 self.lbl_status.config(fg="#FF4D4D")
-            elif is_success or "thành công" in text.lower():
+            elif is_success or _("thành công") in text.lower():
                 self.lbl_status.config(fg="#2ECC71")  # Xanh lục (Emerald Green)
             else:
                 self.lbl_status.config(fg="#8A8A9A")
@@ -3037,12 +3037,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             current_status = self.status_var.get()
             # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
             is_pending = any(kw in current_status for kw in [
-                "Không thể kết nối Signaling",
-                "Chưa kết nối Signaling",
-                "Đang kết nối Signaling",
-                "Đang thử lại",
-                "chế độ nền",
-                "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
+                _("Không thể kết nối Signaling"),
+                _("Chưa kết nối Signaling"),
+                _("Đang kết nối Signaling"),
+                _("Đang thử lại"),
+                _("chế độ nền"),
+                _("Sẵn sàng kết nối"),  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
             ])
             if is_pending and getattr(self, 'signaling_sockets', {}):
                 self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."))

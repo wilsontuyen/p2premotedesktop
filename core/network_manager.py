@@ -13,6 +13,7 @@ try:
 except ImportError:
     pass
 
+from core.i18n import _
 from core.config import *
 import core.config
 from utils.hwid import get_local_ip, get_public_ip, get_public_ipv6
@@ -87,7 +88,7 @@ class NetworkMixin:
                 except:
                     pass
                 sock.close()
-                self.update_status(f"Đã gửi Wake-On-Lan tới MAC {m}")
+                self.update_status(_("Đã gửi Wake-On-Lan tới MAC {mac}").format(mac=m))
             except Exception as e:
                 print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
 
@@ -203,7 +204,7 @@ class NetworkMixin:
             
         dialog = tk.Toplevel(self)
         self.lan_computers_dialog = dialog
-        dialog.title("Máy tính trong mạng LAN")
+        dialog.title(_("Máy tính trong mạng LAN"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
 
@@ -213,10 +214,10 @@ class NetworkMixin:
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
         # Title
-        lbl_title = tk.Label(dialog, text="📡 MÁY TÍNH TRONG MẠNG LAN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text=_("📡 MÁY TÍNH TRONG MẠNG LAN"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 5))
         
-        lbl_desc = tk.Label(dialog, text="Kết nối trực tiếp không qua Signaling Server", font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
+        lbl_desc = tk.Label(dialog, text=_("Kết nối trực tiếp không qua Signaling Server"), font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
         lbl_desc.pack(pady=(0, 10))
 
         # Scrollable list frame
@@ -251,7 +252,7 @@ class NetworkMixin:
             
             # Nếu đã lưu và có mật khẩu, kết nối luôn không cần hỏi
             if existing_comp and existing_comp.get("password"):
-                self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
+                self.update_status(_("Đang kết nối LAN trực tiếp tới {name}...").format(name=peer_info['computer_name']))
                 if hasattr(self, 'connect_btn'):
                     self.connect_btn.config(state=tk.DISABLED)
                 threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, existing_comp["password"]), daemon=True).start()
@@ -259,7 +260,7 @@ class NetworkMixin:
 
             """Mở dialog nhập mật khẩu rồi kết nối trực tiếp qua LAN."""
             pass_dialog = tk.Toplevel(dialog)
-            pass_dialog.title(f"Kết nối tới {peer_info['computer_name']}")
+            pass_dialog.title(_("Kết nối tới ") + str(peer_info['computer_name']))
             pass_dialog.resizable(False, False)
             pass_dialog.configure(bg=self.bg_color)
             pass_dialog.transient(dialog)
@@ -271,17 +272,17 @@ class NetworkMixin:
             pass_dialog.geometry(f"{pw}x{ph}+{px}+{py}")
 
             fmt_id = f"{hwid[:3]} {hwid[3:6]} {hwid[6:9]} {hwid[9:]}" if len(hwid) == 12 else hwid
-            tk.Label(pass_dialog, text=f"Máy: {peer_info['computer_name']}", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color).pack(pady=(15, 2))
-            tk.Label(pass_dialog, text=f"ID: {fmt_id}  •  IP: {peer_info['local_ip']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color).pack(pady=(0, 10))
+            tk.Label(pass_dialog, text=_("Máy: ") + str(peer_info['computer_name']), font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color).pack(pady=(15, 2))
+            tk.Label(pass_dialog, text=_("ID: ") + str(fmt_id) + _("  •  IP: ") + str(peer_info['local_ip']), font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color).pack(pady=(0, 10))
 
-            tk.Label(pass_dialog, text="Nhập mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).pack(anchor=tk.W, padx=30)
+            tk.Label(pass_dialog, text=_("Nhập mật khẩu:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).pack(anchor=tk.W, padx=30)
             
             pass_var = tk.StringVar()
             pass_entry = tk.Entry(pass_dialog, textvariable=pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
             pass_entry.pack(padx=30, fill=tk.X, pady=(3, 5))
             
             save_var = tk.BooleanVar(value=True)
-            save_cb = tk.Checkbutton(pass_dialog, text="Lưu mật khẩu máy tính này", variable=save_var, font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color, selectcolor=self.bg_color, activebackground=self.bg_color, activeforeground=self.text_gray, cursor="hand2")
+            save_cb = tk.Checkbutton(pass_dialog, text=_("Lưu mật khẩu máy tính này"), variable=save_var, font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color, selectcolor=self.bg_color, activebackground=self.bg_color, activeforeground=self.text_gray, cursor="hand2")
             save_cb.pack(anchor=tk.W, padx=25, pady=(0, 10))
             
             pass_entry.focus()
@@ -289,7 +290,7 @@ class NetworkMixin:
             def do_connect():
                 password = pass_var.get().strip()
                 if not password:
-                    self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu!", parent=pass_dialog)
+                    self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mật khẩu!"), parent=pass_dialog)
                     return
                     
                 if save_var.get():
@@ -303,7 +304,7 @@ class NetworkMixin:
                             "name": peer_info['computer_name'],
                             "id": hwid,
                             "password": password,
-                            "group": "Mạng LAN"
+                            "group": _("Mạng LAN")
                         })
                     self.save_saved_computers(comps)
                     if hasattr(self, '_reorder_saved_computers_func'):
@@ -313,7 +314,7 @@ class NetworkMixin:
                 # Giữ cửa sổ LAN hiển thị theo yêu cầu người dùng
                 # dialog.destroy() 
                 # Kết nối trực tiếp qua LAN
-                self.update_status(f"Đang kết nối LAN trực tiếp tới {peer_info['computer_name']}...")
+                self.update_status(_("Đang kết nối LAN trực tiếp tới {name}...").format(name=peer_info['computer_name']))
                 if hasattr(self, 'connect_btn'):
                     self.connect_btn.config(state=tk.DISABLED)
                 threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, password), daemon=True).start()
@@ -323,8 +324,8 @@ class NetworkMixin:
 
             btn_frame = tk.Frame(pass_dialog, bg=self.bg_color)
             btn_frame.pack(fill=tk.X, padx=30, pady=(0, 15))
-            tk.Button(btn_frame, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-            tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+            tk.Button(btn_frame, text=_("Kết nối"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
 
         def refresh_list():
@@ -336,10 +337,10 @@ class NetworkMixin:
                 peers = dict(self.lan_peers)
 
             if not peers:
-                tk.Label(scroll_frame, text="Không tìm thấy máy tính nào trong mạng LAN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.", font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
-                status_label.config(text="Đang quét... (0 máy)")
+                tk.Label(scroll_frame, text=_("Không tìm thấy máy tính nào trong mạng LAN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                status_label.config(text=_("Đang quét... (0 máy)"))
             else:
-                status_label.config(text=f"Tìm thấy {len(peers)} máy trong mạng LAN")
+                status_label.config(text=_("Tìm thấy ") + str(len(peers)) + _(" máy trong mạng LAN"))
                 for hwid, info in sorted(peers.items(), key=lambda x: x[1].get("computer_name", "")):
                     row = tk.Frame(scroll_frame, bg=self.card_color, bd=0)
                     row.pack(fill=tk.X, padx=5, pady=3)
@@ -352,9 +353,9 @@ class NetworkMixin:
                     # Connect / WOL button
                     age = time.time() - info["last_seen"]
                     if age < LAN_OFFLINE_TIMEOUT:
-                        btn = tk.Button(row, text="Kết nối", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
+                        btn = tk.Button(row, text=_("Kết nối"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
                     else:
-                        btn = tk.Button(row, text="Bật nguồn (WOL)", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#D35400", activebackground="#E67E22", relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda m=info.get("macs", ""): self.wake_on_lan(m))
+                        btn = tk.Button(row, text=_("Bật nguồn (WOL)"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#D35400", activebackground="#E67E22", relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda m=info.get("macs", ""): self.wake_on_lan(m))
                         if not info.get("macs"):
                             btn.config(state=tk.DISABLED, bg="#3A3A4A", disabledforeground="#F39C12")
                     btn.pack(side=tk.RIGHT, padx=10, pady=5)
@@ -372,7 +373,7 @@ class NetworkMixin:
                     
                     lbl_name = tk.Label(info_frame, text=info["computer_name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
                     lbl_name.pack(fill=tk.X)
-                    lbl_details = tk.Label(info_frame, text=f"ID: {fmt_id}  •  IP: {display_ip}:{info['port']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
+                    lbl_details = tk.Label(info_frame, text=_("ID: ") + str(fmt_id) + _("  •  IP: ") + str(display_ip) + ":" + str(info['port']), font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
                     lbl_details.pack(fill=tk.X)
                     
                     # Bind double click
@@ -406,8 +407,8 @@ class NetworkMixin:
         # Bottom buttons
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-        tk.Button(btn_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, pady=4, padx=10, cursor="hand2", command=refresh_list).pack(side=tk.LEFT)
-        tk.Button(btn_frame, text="Đóng", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, padx=15, cursor="hand2", command=on_dialog_close).pack(side=tk.RIGHT)
+        tk.Button(btn_frame, text=_("🔄 Làm mới"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, pady=4, padx=10, cursor="hand2", command=refresh_list).pack(side=tk.LEFT)
+        tk.Button(btn_frame, text=_("Đóng"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, padx=15, cursor="hand2", command=on_dialog_close).pack(side=tk.RIGHT)
 
     def _connect_lan_direct(self, hwid, peer_info, password):
         """Kết nối TCP trực tiếp tới máy trong LAN (không qua Signaling Server)."""
@@ -442,8 +443,8 @@ class NetworkMixin:
                 continue
 
         if not connected or not sock:
-            self.update_status("Kết nối LAN thất bại!")
-            self.after(0, lambda: self.show_custom_error("Lỗi kết nối LAN", f"Không thể kết nối tới {peer_info['computer_name']} ({ip}:{port}).\nKiểm tra Tường lửa (Firewall) hoặc đảm bảo máy đích đang chạy ứng dụng."))
+            self.update_status(_("Kết nối LAN thất bại!"))
+            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối LAN"), _("Không thể kết nối tới ") + str(peer_info['computer_name']) + " (" + str(ip) + ":" + str(port) + _(").\nKiểm tra Tường lửa (Firewall) hoặc đảm bảo máy đích đang chạy ứng dụng.")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
 
@@ -463,8 +464,8 @@ class NetworkMixin:
             
             res_msg = recv_msg(sock, [password, APP_KEY])
             if not res_msg:
-                self.update_status("Sẵn sàng kết nối")
-                self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                self.update_status(_("Sẵn sàng kết nối"))
+                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Đối tác ngắt kết nối đột ngột!")))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 return
@@ -480,7 +481,7 @@ class NetworkMixin:
                 partner_id = hwid
 
                 # Speed test (same flow as regular connect)
-                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
                 net_class = "medium"
                 avg_ping = 50.0
                 bandwidth = 10.0
@@ -488,9 +489,9 @@ class NetworkMixin:
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
-                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                            self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2..."))
                         rtts = []
-                        for _ in range(3):
+                        for _i in range(3):
                             t0 = time.time()
                             send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), password)
                             pong_msg = recv_msg(sock, password)
@@ -544,18 +545,18 @@ class NetworkMixin:
                         send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": "medium", "ping": 50.0, "bandwidth": 10.0}).encode('utf-8'), password)
                     except: pass
 
-                self.update_status("Kết nối LAN thành công! Đang khởi động màn hình...")
+                self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
                 self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password)
             else:
-                msg = res.get("message", "Sai mật khẩu!")
-                self.update_status("Bị từ chối kết nối")
-                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                msg = res.get("message", _("Sai mật khẩu!"))
+                self.update_status(_("Bị từ chối kết nối"))
+                self.after(0, lambda: self.show_custom_error(_("Từ chối kết nối"), _("Kết nối bị từ chối:\n{msg}").format(msg=msg)))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
-            self.update_status("Sẵn sàng kết nối")
-            self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay LAN", f"Lỗi xác thực handshake:\n{err}"))
+            self.update_status(_("Sẵn sàng kết nối"))
+            self.after(0, lambda err=str(e): self.show_custom_error(_("Lỗi bắt tay LAN"), _("Lỗi xác thực handshake:\n{err}").format(err=err)))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
@@ -572,15 +573,15 @@ class NetworkMixin:
             self.server_socket = None
             upnp_success = False
         else:
-            self.update_status("Đang khởi động Server lắng nghe...")
+            self.update_status(_("Đang khởi động Server lắng nghe..."))
             self.start_host_server()
             
             # 2. Try automatic UPnP Port Forwarding
-            self.update_status("Đang tự động cấu hình Router (UPnP)...")
+            self.update_status(_("Đang tự động cấu hình Router (UPnP)..."))
             upnp_success = attempt_upnp_forward(BOUND_PORT)
         
         # 3. Get Public & Local IPs
-        self.update_status("Đang lấy thông vị trí mạng...")
+        self.update_status(_("Đang lấy thông vị trí mạng..."))
         print("[DEBUG] Calling get_public_ip()")
         self.current_ip = get_public_ip()
         print("[DEBUG] Returned from get_public_ip()")
@@ -593,7 +594,7 @@ class NetworkMixin:
         print(f"[Host] Public IPv4: {self.current_ip}, IPv6: {self.ipv6}, Local IP: {self.local_ip}")
         
         # 4. Connect to real-time Signaling Server
-        self.update_status(f"Đang kết nối tới các Signaling Server...")
+        self.update_status(_("Đang kết nối tới các Signaling Server..."))
         self.signaling_sockets = {}
         self.primary_signaling_socket = None
         self.current_signaling_host = None
@@ -610,17 +611,17 @@ class NetworkMixin:
             # Hiện thông báo đang chờ mỗi 2 giây
             elapsed = 8.0 - timeout
             if abs(elapsed - 2.0) < 0.1 or abs(elapsed - 5.0) < 0.1:
-                self.update_status(f"Đang kết nối Signaling Server... ({8 - int(timeout)}s)")
+                self.update_status(_("Đang kết nối Signaling Server... ({sec}s)").format(sec=8 - int(timeout)))
             
         if self.signaling_sockets:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
+            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
             if upnp_success:
-                self.update_status(f"Kết nối Signaling & Mở cổng Router thành công (Cổng {BOUND_PORT})!{suffix}")
+                self.update_status(_("Kết nối Signaling & Mở cổng Router thành công (Cổng {port})!{suffix}").format(port=BOUND_PORT, suffix=suffix))
             else:
-                self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.{suffix}")
+                self.update_status(_("Kết nối Signaling thành công (Cổng {port})! Sẵn sàng kết nối.{suffix}").format(port=BOUND_PORT, suffix=suffix))
         else:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
-            self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...{suffix}")
+            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
+            self.update_status(_("Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {suffix}").format(suffix=suffix))
 
         # 5. Start LAN Discovery (UDP Broadcast) - Phát hiện máy trong mạng nội bộ
         self.start_lan_discovery()
@@ -665,7 +666,7 @@ class NetworkMixin:
                         self.current_signaling_host = host
                         self.primary_signaling_socket = sock
                     # Luôn cập nhật status khi kết nối thành công (kể cả lần đầu sau timeout hoặc sau reconnect)
-                    self.after(0, lambda: self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                    self.after(0, lambda: self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối.")))
                 
                 # Reset counters khi kết nối thành công
                 fail_count = 0
@@ -678,7 +679,7 @@ class NetworkMixin:
                 
                 import select
                 while self.running_server:
-                    r, _, _ = select.select([sock], [], [], 1.0)
+                    r, _w, _e = select.select([sock], [], [], 1.0)
                     if r:
                         msg_bytes = recv_msg(sock, APP_KEY)
                         if msg_bytes is None:
@@ -723,7 +724,7 @@ class NetworkMixin:
                             self.primary_signaling_socket = self.signaling_sockets[new_host]
                         else:
                             if self.running_server:
-                                self.after(0, lambda: self.update_status("Mất kết nối toàn bộ Signaling Server. Đang thử lại...", is_error=True, blink=True))
+                                self.after(0, lambda: self.update_status(_("Mất kết nối toàn bộ Signaling Server. Đang thử lại..."), is_error=True, blink=True))
             
             time.sleep(retry_delay)
             # Tăng retry_delay sau 3 lần thất bại liên tiếp
@@ -817,7 +818,7 @@ class NetworkMixin:
         success_sock = None
         
         # Spam outbound connections quickly for Simultaneous Open
-        for _ in range(10):
+        for _i in range(10):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -873,14 +874,14 @@ class NetworkMixin:
         partner_pass = self.partner_pass_var.get().strip()
         
         if not partner_id or len(partner_id) < 12:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!")
+            self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!"))
             return
             
         if not partner_pass:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu đối tác!")
+            self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mật khẩu đối tác!"))
             return
             
-        self.update_status("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...")
+        self.update_status(_("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ..."))
         self.connect_btn.config(state=tk.DISABLED)
         
         # Connect inside background thread to prevent UI freezing
@@ -888,9 +889,9 @@ class NetworkMixin:
         
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
         if partner_id == getattr(self, "my_id_clean", ""):
-            self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
+            self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            self.update_status("Kết nối bị hủy.")
+            self.update_status(_("Kết nối bị hủy."))
             return
             
         # Clean up dead viewer processes first
@@ -905,7 +906,7 @@ class NetworkMixin:
                 
         if existing_viewer and reconnect_queue is None:
             print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
-            self.update_status(f"Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...")
+            self.update_status(_("Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...").format(partner_id=partner_id))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             # Write blink signal file
             import tempfile
@@ -918,8 +919,8 @@ class NetworkMixin:
             return
 
         if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-            self.update_status("Chưa kết nối Signaling Server!")
-            self.after(0, lambda: self.show_custom_error("Lỗi", "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS."))
+            self.update_status(_("Chưa kết nối Signaling Server!"))
+            self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS.")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
 
@@ -941,7 +942,7 @@ class NetworkMixin:
                     sockets_to_try.append(sock)
                     
         success = False
-        self.update_status("Đang tìm và chờ đối tác phản hồi...")
+        self.update_status(_("Đang tìm và chờ đối tác phản hồi..."))
         
         for sock in sockets_to_try:
             self.pending_connection_info = None
@@ -962,14 +963,14 @@ class NetworkMixin:
                 
         if not success:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
                 time.sleep(2)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
                 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status(_("Sẵn sàng kết nối"))
             if not reconnect_queue:
-                self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
+                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối.")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
@@ -997,7 +998,7 @@ class NetworkMixin:
                 if p not in ports_to_try:
                     ports_to_try.append(p)
                     
-            self.update_status(f"Đang quét kết nối nội bộ (LAN)...")
+            self.update_status(_("Đang quét kết nối nội bộ (LAN)..."))
             import select
             
             # Quét tuần tự từng port (ưu tiên local_port trước) để tránh lỗi dính Kaspersky/ứng dụng rác ở port 12345
@@ -1018,7 +1019,7 @@ class NetworkMixin:
                     try:
                         sock_list = [item[0] for item in sockets]
                         if not sock_list: break
-                        _, writable, _ = select.select([], sock_list, [], timeout)
+                        _r, writable, _e = select.select([], sock_list, [], timeout)
                         for w_sock in writable:
                             if w_sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
                                 try:
@@ -1062,11 +1063,11 @@ class NetworkMixin:
         if not self.force_relay_var.get() and not connected:
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                self.update_status("Sẵn sàng kết nối")
+                self.update_status(_("Sẵn sàng kết nối"))
                 self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
-            self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
+            self.update_status(_("Đang đục lỗ Tường lửa (TCP Hole Punching) tới {ip}:{port}...").format(ip=public_ip, port=port))
             print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
             
             # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
@@ -1076,7 +1077,7 @@ class NetworkMixin:
                 except: pass
             
             # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
-            for _ in range(20):
+            for _i in range(20):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
@@ -1115,8 +1116,8 @@ class NetworkMixin:
                 print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
 
         if not connected:
-            self.update_status("Sẵn sàng kết nối")
-            self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
+            self.update_status(_("Sẵn sàng kết nối"))
+            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối"), 
                 f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
                 f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
             ))
@@ -1156,8 +1157,8 @@ class NetworkMixin:
                 # Read verification response (allow APP_KEY fallback to receive error messages)
                 res_msg = recv_msg(sock, [partner_pass, APP_KEY])
                 if not res_msg:
-                    self.update_status("Sẵn sàng kết nối")
-                    self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                    self.update_status(_("Sẵn sàng kết nối"))
+                    self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Đối tác ngắt kết nối đột ngột!")))
                     self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                     force_close_socket(sock)
                     return
@@ -1174,19 +1175,19 @@ class NetworkMixin:
                 is_domain = res.get("is_domain", False)
                 
                 # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
-                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
                 net_class = "medium"
-                net_class_viet = "Trung bình (Medium)"
+                net_class_viet = _("Trung bình (Medium)")
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
-                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                            self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2..."))
                         # 1. Ping / Latency test
                         rtts = []
-                        for _ in range(3):
+                        for _i in range(3):
                             t0 = time.time()
                             send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), partner_pass)
                             pong_msg = recv_msg(sock, partner_pass)
@@ -1248,13 +1249,13 @@ class NetworkMixin:
                     # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
                     if bandwidth > 20.0 and avg_ping < 10.0:
                         net_class = "high"
-                        net_class_viet = "Tốt (High-speed)"
+                        net_class_viet = _("Tốt (High-speed)")
                     elif bandwidth < 5.0 or avg_ping > 50.0:
                         net_class = "low"
-                        net_class_viet = "Yếu (Low-speed)"
+                        net_class_viet = _("Yếu (Low-speed)")
                     else:
                         net_class = "medium"
-                        net_class_viet = "Trung bình (Medium)"
+                        net_class_viet = _("Trung bình (Medium)")
                         
                     # 4. Report speed test results to Host
                     send_msg(sock, json.dumps({
@@ -1264,7 +1265,7 @@ class NetworkMixin:
                         "bandwidth": bandwidth
                     }).encode('utf-8'), partner_pass)
                     
-                    status_text = f"Đo tốc độ (Lớn nhất 2 lần): Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
+                    status_text = _("Đo tốc độ (Lớn nhất 2 lần): Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
                     time.sleep(0.5)
@@ -1282,7 +1283,7 @@ class NetworkMixin:
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
                 # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
-                self.update_status("Kết nối thành công! Đang khởi động màn hình...")
+                self.update_status(_("Kết nối thành công! Đang khởi động màn hình..."))
                 if reconnect_queue:
                     try:
                         if viewer_pid and sys.platform == "win32":
@@ -1298,17 +1299,17 @@ class NetworkMixin:
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
-                msg = res.get("message", "Sai mật khẩu!")
-                self.update_status("Bị từ chối kết nối")
+                msg = res.get("message", _("Sai mật khẩu!"))
+                self.update_status(_("Bị từ chối kết nối"))
                 if reconnect_queue:
                     reconnect_queue.put("FAILED")
-                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                self.after(0, lambda: self.show_custom_error(_("Từ chối kết nối"), _("Kết nối bị từ chối:\n{msg}").format(msg=msg)))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
             if reconnect_queue and retry_count < 30:
-                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
@@ -1316,11 +1317,11 @@ class NetworkMixin:
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status(_("Sẵn sàng kết nối"))
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
             else:
-                self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
+                self.after(0, lambda err=str(e): self.show_custom_error(_("Lỗi bắt tay"), _("Lỗi xác thực handshake:\n{err}").format(err=err)))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
@@ -1356,7 +1357,7 @@ class NetworkMixin:
                             msg = req_queue.get(timeout=1.0)
                             if msg == "RECONNECT_REQUEST":
                                 print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
-                                self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
+                                self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
                                 threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
                             else:
                                 req_queue.put(msg)
@@ -1370,7 +1371,7 @@ class NetworkMixin:
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
-            self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
+            self.update_status(_("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)"))
             print(f"[Client] Đã mở tiến trình điều khiển cho {computer_name or 'đối tác'}")
             
         except Exception as e:

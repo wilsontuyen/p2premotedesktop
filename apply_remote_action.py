@@ -13,7 +13,7 @@ new_remote_action = """                                            if not sel: r
                                                     msg = f"Bạn có chắc muốn xóa '{remote_tree.item(sel[0])['text']}' khỏi máy điều khiển không?"
                                                 else:
                                                     msg = f"Bạn có chắc muốn xóa {len(sel)} mục đã chọn khỏi máy điều khiển không?"
-                                                confirm = messagebox.askyesno("Xác nhận", msg, parent=top)
+                                                confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
                                                 top.focus_force()
                                                 if confirm:
                                                     for s in sel:
@@ -29,13 +29,13 @@ new_remote_action = """                                            if not sel: r
                                                 name = item['text']
                                                 full_path = current_dir + name
                                                 vals = item.get('values', [])
-                                                is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                                is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
                                                 if action == "view":
                                                     from datetime import datetime
                                                     ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
                                                     open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\\n")
                                                     if is_dir:
-                                                        messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
+                                                        messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                     else:
                                                         text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
                                                         _, ext = os.path.splitext(name.lower())
@@ -43,12 +43,12 @@ new_remote_action = """                                            if not sel: r
                                                             req = {"type": "request_read_text_file", "path": full_path}
                                                         else:
                                                             req = {"type": "request_open_file", "path": full_path}
-                                                            messagebox.showinfo("Thông báo", f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
+                                                            messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
                                                         try:
                                                             open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\\n")
                                                             send_event(req)
                                                         except Exception as ex:
-                                                            messagebox.showerror("Lỗi", f"Không thể gửi lệnh: {ex}", parent=top)
+                                                            messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)
                                                 elif action == "rename":
                                                     from tkinter import simpledialog
                                                     new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)

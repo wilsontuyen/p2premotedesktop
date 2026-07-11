@@ -141,7 +141,7 @@ def apply_patch():
                             pygame.draw.rect(screen, file_bg_color, file_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, file_btn_rect, width=1, border_radius=4)
                             
-                            file_text_surf = btn_font.render("Chuyển tệp", True, file_text_color)
+                            file_text_surf = btn_font.render(_("Chuyển tệp"), True, file_text_color)
                             file_text_rect = file_text_surf.get_rect(center=file_btn_rect.center)
                             screen.blit(file_text_surf, file_text_rect)
 
@@ -150,7 +150,7 @@ def apply_patch():
                             pygame.draw.rect(screen, file_bg_color, file_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, file_btn_rect, width=1, border_radius=4)
                             
-                            file_text_surf = btn_font.render("Chuyển tệp", True, file_text_color)
+                            file_text_surf = btn_font.render(_("Chuyển tệp"), True, file_text_color)
                             file_text_rect = file_text_surf.get_rect(center=file_btn_rect.center)
                             screen.blit(file_text_surf, file_text_rect)
 
@@ -159,7 +159,7 @@ def apply_patch():
                             pygame.draw.rect(screen, power_bg, power_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, power_btn_rect, width=1, border_radius=4)
                             
-                            power_text_surf = btn_font.render("Nguồn", True, cad_text_color)
+                            power_text_surf = btn_font.render(_("Nguồn"), True, cad_text_color)
                             power_text_rect = power_text_surf.get_rect(center=power_btn_rect.center)
                             screen.blit(power_text_surf, power_text_rect)
 

@@ -14,7 +14,7 @@ new_local_action = """                                                if not sel
                                                         msg = f"Bạn có chắc muốn xóa '{local_tree.item(sel[0])['text']}' không?"
                                                     else:
                                                         msg = f"Bạn có chắc muốn xóa {len(sel)} mục đã chọn không?"
-                                                    confirm = messagebox.askyesno("Xác nhận", msg, parent=top)
+                                                    confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
                                                     top.focus_force()
                                                     if confirm:
                                                         for s in sel:
@@ -22,7 +22,7 @@ new_local_action = """                                                if not sel
                                                             name = item['text']
                                                             full_path = os.path.join(current_dir, name)
                                                             vals = item.get('values', [])
-                                                            is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                                            is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
                                                             try:
                                                                 if is_dir:
                                                                     import shutil
@@ -30,7 +30,7 @@ new_local_action = """                                                if not sel
                                                                 else:
                                                                     os.remove(full_path)
                                                             except Exception as e:
-                                                                messagebox.showerror("Lỗi", f"Lỗi xóa {name}: {e}", parent=top)
+                                                                messagebox.showerror(_("Lỗi"), f"Lỗi xóa {name}: {e}", parent=top)
                                                         refresh_local()
                                                     return
 
@@ -39,7 +39,7 @@ new_local_action = """                                                if not sel
                                                     name = item['text']
                                                     full_path = os.path.join(current_dir, name)
                                                     vals = item.get('values', [])
-                                                    is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                                    is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
                                                     
                                                     if action == "view":
                                                         from datetime import datetime
@@ -47,7 +47,7 @@ new_local_action = """                                                if not sel
                                                         with open("C:\\\\Apps\\\\P2P\\\\debug_view.txt", "a", encoding="utf-8") as f:
                                                             f.write(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}\\n")
                                                         if is_dir:
-                                                            messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
+                                                            messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                         else:
                                                             text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
                                                             _, ext = os.path.splitext(name.lower())
@@ -77,25 +77,25 @@ new_local_action = """                                                if not sel
                                                                             try:
                                                                                 with open(fp, "w", encoding="utf-8") as fw:
                                                                                     fw.write(ta.get("1.0", "end-1c"))
-                                                                                messagebox.showinfo("Thành công", "Đã lưu tệp!", parent=win)
+                                                                                messagebox.showinfo(_("Thành công"), _("Đã lưu tệp!"), parent=win)
                                                                             except Exception as e:
-                                                                                messagebox.showerror("Lỗi", f"Không thể lưu: {e}", parent=win)
+                                                                                messagebox.showerror(_("Lỗi"), f"Không thể lưu: {e}", parent=win)
                                                                         return save_file
-                                                                    tk.Button(np_win, text="Lưu", command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                                                                    tk.Button(np_win, text=_("Lưu"), command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
                                                                     with open("C:\\\\Apps\\\\P2P\\\\debug_view.txt", "a", encoding="utf-8") as f:
                                                                         f.write(f"{ts} [Local] Window created successfully.\\n")
                                                                 except Exception as ex:
                                                                     import traceback
                                                                     with open("C:\\\\Apps\\\\P2P\\\\debug_view.txt", "a", encoding="utf-8") as f:
                                                                         f.write(f"{ts} [Local] CRASH during view: {traceback.format_exc()}\\n")
-                                                                    messagebox.showerror("Lỗi", str(ex), parent=top)
+                                                                    messagebox.showerror(_("Lỗi"), str(ex), parent=top)
                                                             else:
                                                                 try:
                                                                     import sys, subprocess
                                                                     if sys.platform == "win32": os.startfile(full_path)
                                                                     else: subprocess.call(["xdg-open", full_path])
                                                                 except Exception as e:
-                                                                    messagebox.showerror("Lỗi", str(e), parent=top)
+                                                                    messagebox.showerror(_("Lỗi"), str(e), parent=top)
                                                     elif action == "rename":
                                                         from tkinter import simpledialog
                                                         new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
@@ -104,7 +104,7 @@ new_local_action = """                                                if not sel
                                                             try:
                                                                 os.rename(full_path, os.path.join(current_dir, new_name))
                                                             except Exception as e:
-                                                                messagebox.showerror("Lỗi", str(e), parent=top)
+                                                                messagebox.showerror(_("Lỗi"), str(e), parent=top)
                                                 if action == "rename":
                                                     refresh_local()
                                             except Exception as outer_e:
@@ -113,7 +113,7 @@ new_local_action = """                                                if not sel
                                                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
                                                 with open("C:\\\\Apps\\\\P2P\\\\debug_view.txt", "a", encoding="utf-8") as f:
                                                     f.write(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}\\n")
-                                                messagebox.showerror("Lỗi", str(outer_e), parent=top)
+                                                messagebox.showerror(_("Lỗi"), str(outer_e), parent=top)
 """
 idx1 = content.find(start_marker1)
 idx2 = content.find(end_marker1)
@@ -154,7 +154,7 @@ new_remote_action = """                                                if not se
                                                         msg = f"Bạn có chắc muốn xóa '{remote_tree.item(sel[0])['text']}' khỏi máy điều khiển không?"
                                                     else:
                                                         msg = f"Bạn có chắc muốn xóa {len(sel)} mục đã chọn khỏi máy điều khiển không?"
-                                                    confirm = messagebox.askyesno("Xác nhận", msg, parent=top)
+                                                    confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
                                                     top.focus_force()
                                                     if confirm:
                                                         for s in sel:
@@ -170,7 +170,7 @@ new_remote_action = """                                                if not se
                                                     name = item['text']
                                                     full_path = current_dir + name if current_dir.endswith('/') or current_dir.endswith('\\\\') else current_dir + '/' + name
                                                     vals = item.get('values', [])
-                                                    is_dir = (len(vals) > 1 and vals[1] == "Thư mục")
+                                                    is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
                                                     
                                                     if action == "view":
                                                         from datetime import datetime
@@ -178,7 +178,7 @@ new_remote_action = """                                                if not se
                                                         with open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8") as f:
                                                             f.write(f"{ts} [Remote] Action 'view' started for '{name}', is_dir={is_dir}\\n")
                                                         if is_dir:
-                                                            messagebox.showwarning("Cảnh báo", f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
+                                                            messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                             continue
                                                         text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
                                                         _, ext = os.path.splitext(name.lower())
@@ -186,12 +186,12 @@ new_remote_action = """                                                if not se
                                                             req = {"type": "request_read_text_file", "path": full_path}
                                                         else:
                                                             req = {"type": "request_open_file", "path": full_path}
-                                                            messagebox.showinfo("Thông báo", f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
+                                                            messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
                                                         try:
                                                             open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\\n")
                                                             send_event(req)
                                                         except Exception as ex:
-                                                            messagebox.showerror("Lỗi", f"Không thể gửi lệnh: {ex}", parent=top)
+                                                            messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)
                                                     elif action == "rename":
                                                         from tkinter import simpledialog
                                                         new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
@@ -205,7 +205,7 @@ new_remote_action = """                                                if not se
                                                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
                                                 with open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8") as f:
                                                     f.write(f"{ts} [Remote] OUTER CRASH: {traceback.format_exc()}\\n")
-                                                messagebox.showerror("Lỗi", str(outer_e), parent=top)
+                                                messagebox.showerror(_("Lỗi"), str(outer_e), parent=top)
 """
 idx3 = content.find(start_marker2)
 idx4 = content.find(end_marker2)

@@ -8,7 +8,7 @@ if os.path.exists(log_path):
         for line in f:
             # Look for errors, warnings, empty clipboard, or clear/skip clear messages
             lower_line = line.lower()
-            if any(k in lower_line for k in ["lỗi", "error", "exception", "cảnh báo", "bỏ qua dọn dẹp", "hết thời gian", "bị hủy", "openclipboard thất bại", "emptyclipboard"]):
+            if any(k in lower_line for k in [_("lỗi"), "error", "exception", _("cảnh báo"), _("bỏ qua dọn dẹp"), _("hết thời gian"), _("bị hủy"), _("openclipboard thất bại"), "emptyclipboard"]):
                 output_lines.append(line)
 else:
     output_lines.append("Log file not found.")

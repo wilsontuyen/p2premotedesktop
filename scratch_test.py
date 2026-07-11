@@ -520,7 +520,7 @@ def decrypt_payload(encrypted_bytes, password):
     passwords = [p for p in passwords if p]
     
     if len(encrypted_bytes) < 12:
-        raise ValueError("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)")
+        raise ValueError(_("Dữ liệu mã hóa không hợp lệ (kích thước quá nhỏ)"))
     nonce = encrypted_bytes[:12]
     ciphertext = encrypted_bytes[12:]
     
@@ -532,7 +532,7 @@ def decrypt_payload(encrypted_bytes, password):
             return chacha.decrypt(nonce, ciphertext, None)
         except Exception as e:
             last_err = e
-    raise last_err if last_err else ValueError("Không giải mã được với bất kỳ mật khẩu nào")
+    raise last_err if last_err else ValueError(_("Không giải mã được với bất kỳ mật khẩu nào"))
 
 
 def force_close_socket(sock):
@@ -1495,7 +1495,7 @@ class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
         self.withdraw()
-        self.title("Truyền tải File")
+        self.title(_("Truyền tải File"))
         self.resizable(False, False)
         self.configure(bg="#1E1E24")
         
@@ -1529,10 +1529,10 @@ class ProgressDialog(tk.Toplevel):
         self.lbl_size = tk.Label(self, text=f"Dung lượng: {self.format_size(total_size)}", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_size.pack(pady=2, padx=20, anchor=tk.W)
         
-        self.lbl_progress = tk.Label(self, text="Đang chuẩn bị... 0%", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
+        self.lbl_progress = tk.Label(self, text=_("Đang chuẩn bị... 0%"), font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_progress.pack(pady=(10, 2), padx=20, anchor=tk.W)
         
-        self.lbl_stats = tk.Label(self, text="Tốc độ: -- KB/s | Thời gian dự kiến: --:--", font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
+        self.lbl_stats = tk.Label(self, text=_("Tốc độ: -- KB/s | Thời gian dự kiến: --:--"), font=("Segoe UI", 9), fg="#A0A0B0", bg="#1E1E24")
         self.lbl_stats.pack(pady=2, padx=20, anchor=tk.W)
         
         self.progress_bar = PremiumProgressBar(self, width=320, height=12, bg="#15151B", fg="#00ADB5")
@@ -1540,7 +1540,7 @@ class ProgressDialog(tk.Toplevel):
         
         if self.on_cancel:
             btn_cancel = tk.Button(
-                self, text="Hủy (Cancel)", font=("Segoe UI", 9, "bold"),
+                self, text=_("Hủy (Cancel)"), font=("Segoe UI", 9, "bold"),
                 fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
                 relief=tk.FLAT, bd=0, padx=20, pady=5, cursor="hand2", command=self.trigger_cancel
             )
@@ -1690,14 +1690,14 @@ class ConfirmDialog(tk.Toplevel):
                 self.on_no_cb()
                 
         btn_yes = tk.Button(
-            btn_frame, text="Đồng ý (Yes)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Đồng ý (Yes)"), font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
         )
         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
         btn_no = tk.Button(
-            btn_frame, text="Bỏ qua (No)", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Bỏ qua (No)"), font=("Segoe UI", 9, "bold"),
             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
         )
@@ -2464,7 +2464,7 @@ class ClipboardSyncManager:
         if self.app:
             try:
                 if hasattr(self.app, 'update_status'):
-                    self.app.after(0, lambda: self.app.update_status("Đã hủy truyền tải file."))
+                    self.app.after(0, lambda: self.app.update_status(_("Đã hủy truyền tải file.")))
             except:
                 pass
             
@@ -3904,7 +3904,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     
                     elapsed_switching = pygame.time.get_ticks() - switching_start_tick
                     if elapsed_switching > 3000:
-                        text_msg = "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host..."
+                        text_msg = _("Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...")
                     else:
                         text_msg = f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây..."
                     
@@ -4529,12 +4529,12 @@ class UnifiedApp(tk.Tk):
                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
         else:
             self.fixed_password = self.load_fixed_password_from_xml()
-        self.pass_type_var = tk.StringVar(value="4 chữ số")
+        self.pass_type_var = tk.StringVar(value=_("4 chữ số"))
         self.server_socket = None
         self.running_server = True
         self.active_clients = {}
         self.active_viewers = []
-        self.current_ip = "Đang lấy IP..."
+        self.current_ip = _("Đang lấy IP...")
         self.local_ip = "127.0.0.1"
         self.ipv6 = None
         self.client_viewer_w = 1280
@@ -4551,7 +4551,7 @@ class UnifiedApp(tk.Tk):
         self.received_first_pong = False
         
         # Form variables
-        self.status_var = tk.StringVar(value="Đang kết nối tới mạng đăng ký...")
+        self.status_var = tk.StringVar(value=_("Đang kết nối tới mạng đăng ký..."))
         self.partner_id_var = tk.StringVar()
         self.partner_pass_var = tk.StringVar()
         self.force_relay_var = tk.BooleanVar(value=False)
@@ -4612,7 +4612,7 @@ class UnifiedApp(tk.Tk):
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Danh sách (Saved Computers)", command=self.show_saved_computers_dialog)
         file_menu.add_separator()
-        file_menu.add_command(label="Thoát (Exit)", command=self.destroy)
+        file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label="File", menu=file_menu)
         
         # 2. Options Menu
@@ -4621,53 +4621,53 @@ class UnifiedApp(tk.Tk):
         # Submenu: Password type
         password_menu = tk.Menu(options_menu, tearoff=0)
         password_menu.add_radiobutton(
-            label="4 chữ số",
-            variable=self.pass_type_var, value="4 chữ số",
+            label=_("4 chữ số"),
+            variable=self.pass_type_var, value=_("4 chữ số"),
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="5 chữ số",
-            variable=self.pass_type_var, value="5 chữ số",
+            label=_("5 chữ số"),
+            variable=self.pass_type_var, value=_("5 chữ số"),
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="8 ký tự (chữ + số)",
-            variable=self.pass_type_var, value="8 ký tự (chữ + số)",
+            label=_("8 ký tự (chữ + số)"),
+            variable=self.pass_type_var, value=_("8 ký tự (chữ + số)"),
             command=self.refresh_password
         )
         password_menu.add_separator()
         password_menu.add_command(
-            label="Cài mật khẩu cố định...",
+            label=_("Cài mật khẩu cố định..."),
             command=self.open_set_fixed_password_dialog
         )
-        options_menu.add_cascade(label="Mật khẩu (Password)", menu=password_menu)
+        options_menu.add_cascade(label=_("Mật khẩu (Password)"), menu=password_menu)
         options_menu.add_separator()
         options_menu.add_checkbutton(
-            label="Chạy khi mở máy (Run on Startup)",
+            label=_("Chạy khi mở máy (Run on Startup)"),
             variable=self.startup_var,
             command=self.toggle_startup
         )
         options_menu.add_command(
-            label="Cài Zalo / Điện thoại",
+            label=_("Cài Zalo / Điện thoại"),
             command=self.open_set_zalo_phone_dialog
         )
         options_menu.add_separator()
         options_menu.add_command(
-            label="Cài đặt máy chủ...",
+            label=_("Cài đặt máy chủ..."),
             command=self.show_server_settings_dialog
         )
         options_menu.add_separator()
         
         # Submenu: Theme
         theme_menu = tk.Menu(options_menu, tearoff=0)
-        theme_menu.add_radiobutton(label="Sáng", variable=self.current_theme, value="light", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Tối", variable=self.current_theme, value="dark", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Xám", variable=self.current_theme, value="gray", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Hồng", variable=self.current_theme, value="pink", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Pha lê", variable=self.current_theme, value="crystal", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Tối"), variable=self.current_theme, value="dark", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Xám"), variable=self.current_theme, value="gray", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Hồng"), variable=self.current_theme, value="pink", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Pha lê"), variable=self.current_theme, value="crystal", command=self.change_theme)
         theme_menu.add_separator()
-        theme_menu.add_radiobutton(label="Tùy chỉnh", variable=self.current_theme, value="custom", command=self.change_theme)
-        options_menu.add_cascade(label="Giao diện", menu=theme_menu)
+        theme_menu.add_radiobutton(label=_("Tùy chỉnh"), variable=self.current_theme, value="custom", command=self.change_theme)
+        options_menu.add_cascade(label=_("Giao diện"), menu=theme_menu)
  
         menubar.add_cascade(label="Options", menu=options_menu)
         
@@ -4686,7 +4686,7 @@ class UnifiedApp(tk.Tk):
         header.pack(pady=(15, 5))
         
         # Sub-header
-        subheader = tk.Label(self, text="Điều khiển trực tuyến máy tính bằng HWID", font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+        subheader = tk.Label(self, text=_("Điều khiển trực tuyến máy tính bằng HWID"), font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
         subheader.pack(pady=(0, 15))
         
         # Main Panels Container
@@ -4699,10 +4699,10 @@ class UnifiedApp(tk.Tk):
         self._left_panel = left_panel
         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.88)
         
-        lbl_allow = tk.Label(left_panel, text="CHO PHÉP ĐIỀU KHIỂN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
         
-        lbl_id = tk.Label(left_panel, text="Mã ID của bạn:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_id = tk.Label(left_panel, text=_("Mã ID của bạn:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_id.pack(anchor=tk.W, padx=20)
         
         id_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -4715,7 +4715,7 @@ class UnifiedApp(tk.Tk):
         copy_id_btn = tk.Button(id_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         
-        lbl_pass = tk.Label(left_panel, text="Mật khẩu kết nối:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_pass.pack(anchor=tk.W, padx=20)
         
         pass_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -4737,7 +4737,7 @@ class UnifiedApp(tk.Tk):
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
-        copy_all_btn = tk.Button(left_panel, text="📋 Sao chép cả ID & Mật khẩu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
+        copy_all_btn = tk.Button(left_panel, text=_("📋 Sao chép cả ID & Mật khẩu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
         # RIGHT PANEL: Control Remote Computer
@@ -4745,16 +4745,16 @@ class UnifiedApp(tk.Tk):
         self._right_panel = right_panel
         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.88)
         
-        lbl_control = tk.Label(right_panel, text="ĐIỀU KHIỂN ĐỐI TÁC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
         
-        lbl_p_id = tk.Label(right_panel, text="Nhập ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=4)
         self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
         
-        lbl_p_pass = tk.Label(right_panel, text="Nhập Mật khẩu đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
@@ -4770,7 +4770,7 @@ class UnifiedApp(tk.Tk):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = tk.Button(btn_container, text="KẾT NỐI (CONNECT)", font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
+        self.connect_btn = tk.Button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
@@ -5109,7 +5109,7 @@ class UnifiedApp(tk.Tk):
         text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.update_status("Đã sao chép cả ID & Mật khẩu!")
+        self.update_status(_("Đã sao chép cả ID & Mật khẩu!"))
 
     def copy_to_clipboard(self, text):
         self.clipboard_clear()
@@ -5118,10 +5118,10 @@ class UnifiedApp(tk.Tk):
 
     def make_context_menu(self, entry):
         menu = tk.Menu(entry, tearoff=0)
-        menu.add_command(label="Cắt (Cut)", command=lambda: entry.event_generate("<<Cut>>"))
-        menu.add_command(label="Sao chép (Copy)", command=lambda: entry.event_generate("<<Copy>>"))
-        menu.add_command(label="Dán (Paste)", command=lambda: entry.event_generate("<<Paste>>"))
-        menu.add_command(label="Chọn tất cả (Select All)", command=lambda: entry.event_generate("<<SelectAll>>"))
+        menu.add_command(label=_("Cắt (Cut)"), command=lambda: entry.event_generate("<<Cut>>"))
+        menu.add_command(label=_("Sao chép (Copy)"), command=lambda: entry.event_generate("<<Copy>>"))
+        menu.add_command(label=_("Dán (Paste)"), command=lambda: entry.event_generate("<<Paste>>"))
+        menu.add_command(label=_("Chọn tất cả (Select All)"), command=lambda: entry.event_generate("<<SelectAll>>"))
         
         # Giữ tham chiếu mạnh (Strong Reference) tránh rác hệ thống làm mất menu
         entry.menu = menu
@@ -5133,9 +5133,9 @@ class UnifiedApp(tk.Tk):
     def refresh_password(self):
         import string
         ptype = self.pass_type_var.get()
-        if ptype == "5 chữ số":
+        if ptype == _("5 chữ số"):
             self.my_password = str(random.randint(10000, 99999))
-        elif ptype == "8 ký tự (chữ + số)":
+        elif ptype == _("8 ký tự (chữ + số)"):
             chars = string.ascii_letters + string.digits
             self.my_password = ''.join(random.choices(chars, k=8))
         else:  # Mặc định: 4 chữ số
@@ -5195,17 +5195,17 @@ class UnifiedApp(tk.Tk):
         entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4, padx=(0, 8))
         
         # Thiết lập Placeholder chuyên nghiệp
-        entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+        entry_search.insert(0, _("Tìm kiếm theo tên hoặc ID..."))
         entry_search.configure(fg=self.text_gray)
         
         def on_focus_in(event):
-            if entry_search.get() == "Tìm kiếm theo tên hoặc ID...":
+            if entry_search.get() == _("Tìm kiếm theo tên hoặc ID..."):
                 entry_search.delete(0, tk.END)
                 entry_search.configure(fg=self.text_white)
                 
         def on_focus_out(event):
             if entry_search.get() == "":
-                entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+                entry_search.insert(0, _("Tìm kiếm theo tên hoặc ID..."))
                 entry_search.configure(fg=self.text_gray)
                 
         entry_search.bind("<FocusIn>", on_focus_in)
@@ -5213,7 +5213,7 @@ class UnifiedApp(tk.Tk):
         
         def on_search_change(*args):
             val = search_var.get()
-            if val == "Tìm kiếm theo tên hoặc ID...":
+            if val == _("Tìm kiếm theo tên hoặc ID..."):
                 return
             refresh_list()
             
@@ -5306,7 +5306,7 @@ class UnifiedApp(tk.Tk):
             self.status_dots_widgets.clear()
 
             query = search_var.get().strip().lower()
-            if query == "tìm kiếm theo tên hoặc id...":
+            if query == _("tìm kiếm theo tên hoặc id..."):
                 query = ""
 
             computers = load_computers()
@@ -5319,7 +5319,7 @@ class UnifiedApp(tk.Tk):
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
 
             if not computers:
-                txt = "Không tìm thấy máy tính phù hợp." if query else "Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới."
+                txt = _("Không tìm thấy máy tính phù hợp.") if query else "Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới."
                 lbl_empty = tk.Label(scrollable_frame, text=txt, font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
                 lbl_empty.pack(pady=40, fill=tk.X, expand=True)
                 return
@@ -5353,7 +5353,7 @@ class UnifiedApp(tk.Tk):
 
                 # Connect Button
                 connect_btn = tk.Button(
-                    actions_frame, text="Kết nối", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text=_("Kết nối"), font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: connect_computer(c)
@@ -5362,7 +5362,7 @@ class UnifiedApp(tk.Tk):
 
                 # Edit Button
                 edit_btn = tk.Button(
-                    actions_frame, text="Sửa", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text=_("Sửa"), font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg="#F39C12", activebackground="#D35400",
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list)
@@ -5371,7 +5371,7 @@ class UnifiedApp(tk.Tk):
 
                 # Delete Button
                 delete_btn = tk.Button(
-                    actions_frame, text="Xóa", font=("Segoe UI", 8, "bold"),
+                    actions_frame, text=_("Xóa"), font=("Segoe UI", 8, "bold"),
                     fg=self.text_white, bg="#E05252", activebackground="#C0392B",
                     relief=tk.FLAT, bd=0, padx=8, pady=3, cursor="hand2",
                     command=lambda c=comp: delete_computer(c)
@@ -5405,23 +5405,23 @@ class UnifiedApp(tk.Tk):
                 else:
                     if dialog.winfo_exists():
                         btn_refresh.config(
-                            state="normal", text="🔄 Làm mới",
+                            state="normal", text=_("🔄 Làm mới"),
                             fg=self.text_white, bg="#2ECC71",
                             cursor="hand2"
                         )
                         
-            btn_refresh.config(state="disabled", text="🔄 Làm mới (30s)", bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
+            btn_refresh.config(state="disabled", text=_("🔄 Làm mới (30s)"), bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
             update_timer()
 
         btn_add = tk.Button(
-            bottom_frame, text="+ Thêm Mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("+ Thêm Mới"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=open_add_dialog
         )
         btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
 
         btn_refresh = tk.Button(
-            bottom_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("🔄 Làm mới"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
             command=lambda: [refresh_list(), start_refresh_cooldown()]
@@ -5429,7 +5429,7 @@ class UnifiedApp(tk.Tk):
         btn_refresh.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
         btn_close = tk.Button(
-            bottom_frame, text="Đóng", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("Đóng"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=on_dialog_destroy
         )
@@ -5458,7 +5458,7 @@ class UnifiedApp(tk.Tk):
         
         add_win = tk.Toplevel(parent)
         add_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        add_win.title("Thêm Máy tính")
+        add_win.title(_("Thêm Máy tính"))
         add_win.resizable(False, False)
         add_win.configure(bg=self.bg_color)
         add_win.transient(parent)
@@ -5473,23 +5473,23 @@ class UnifiedApp(tk.Tk):
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
         add_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
-        lbl_add_title = tk.Label(add_win, text="THÊM MÁY TÍNH MỚI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_add_title = tk.Label(add_win, text=_("THÊM MÁY TÍNH MỚI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_add_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(add_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(add_win, text=_("Tên gọi gợi nhớ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(add_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(add_win, text=_("ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         if initial_id:
             entry_comp_id.insert(0, initial_id)
 
-        lbl_comp_pass = tk.Label(add_win, text="Mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(add_win, text=_("Mật khẩu:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -5508,13 +5508,13 @@ class UnifiedApp(tk.Tk):
             cpass = entry_comp_pass.get().strip()
 
             if not name or not cid or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=add_win)
+                self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=add_win)
                 return
 
             computers = load_computers()
             for c in computers:
                 if c["id"] == cid and c["name"] == name:
-                    self.show_custom_error("Trùng lặp", "Máy tính này đã tồn tại trong danh sách!", parent=add_win)
+                    self.show_custom_error(_("Trùng lặp"), _("Máy tính này đã tồn tại trong danh sách!"), parent=add_win)
                     return
 
             computers.append({
@@ -5526,21 +5526,21 @@ class UnifiedApp(tk.Tk):
             if on_save:
                 on_save()
             if not parent_win:
-                self.show_custom_info("Thành công", f"Đã lưu máy tính '{name}' vào danh sách thành công!", parent=add_win)
+                self.show_custom_info(_("Thành công"), f"Đã lưu máy tính '{name}' vào danh sách thành công!", parent=add_win)
             add_win.destroy()
 
         btn_add_frame = tk.Frame(add_win, bg=self.bg_color)
         btn_add_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_add_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_new
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_add_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
         )
@@ -5551,7 +5551,7 @@ class UnifiedApp(tk.Tk):
         
         edit_win = tk.Toplevel(parent)
         edit_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        edit_win.title("Sửa thông tin")
+        edit_win.title(_("Sửa thông tin"))
         edit_win.resizable(False, False)
         edit_win.configure(bg=self.bg_color)
         edit_win.transient(parent)
@@ -5566,23 +5566,23 @@ class UnifiedApp(tk.Tk):
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
         edit_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
-        lbl_edit_title = tk.Label(edit_win, text="CẬP NHẬT THÔNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_edit_title = tk.Label(edit_win, text=_("CẬP NHẬT THÔNG TIN"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_edit_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(edit_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(edit_win, text=_("Tên gọi gợi nhớ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.insert(0, item["name"])
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(edit_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(edit_win, text=_("ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_comp_id.insert(0, item["id"])
 
-        lbl_comp_pass = tk.Label(edit_win, text="Mật khẩu mới:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(edit_win, text=_("Mật khẩu mới:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -5600,7 +5600,7 @@ class UnifiedApp(tk.Tk):
             cpass = entry_comp_pass.get().strip()
 
             if not name or not new_id or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=edit_win)
+                self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=edit_win)
                 return
 
             computers = load_computers()
@@ -5619,20 +5619,20 @@ class UnifiedApp(tk.Tk):
                     on_save()
                 edit_win.destroy()
             else:
-                self.show_custom_error("Lỗi", "Không tìm thấy máy tính tương ứng để sửa!", parent=edit_win)
+                self.show_custom_error(_("Lỗi"), _("Không tìm thấy máy tính tương ứng để sửa!"), parent=edit_win)
 
         btn_edit_frame = tk.Frame(edit_win, bg=self.bg_color)
         btn_edit_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_edit_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_edit
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_edit_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
         )
@@ -5893,14 +5893,14 @@ class UnifiedApp(tk.Tk):
         btn_frame.pack(fill=tk.X, padx=30, pady=5)
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_val
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -5931,13 +5931,13 @@ class UnifiedApp(tk.Tk):
         form_frame = tk.Frame(dialog, bg=self.bg_color)
         form_frame.pack(fill=tk.BOTH, expand=True, padx=30)
 
-        lbl_hosts = tk.Label(form_frame, text="Danh sách Máy chủ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_hosts = tk.Label(form_frame, text=_("Danh sách Máy chủ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_hosts.pack(anchor=tk.W)
         
         entry_hosts = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_hosts.pack(fill=tk.X, pady=(3, 10))
         
-        lbl_port = tk.Label(form_frame, text="Cổng kết nối (Port):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_port = tk.Label(form_frame, text=_("Cổng kết nối (Port):"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_port.pack(anchor=tk.W)
         
         entry_port = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
@@ -5988,14 +5988,14 @@ class UnifiedApp(tk.Tk):
         btn_frame.pack(fill=tk.X, padx=30, pady=10)
         
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_config
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
         
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -6004,7 +6004,7 @@ class UnifiedApp(tk.Tk):
     def update_fixed_password_indicator(self):
         if hasattr(self, 'fixed_pass_indicator'):
             if self.fixed_password:
-                self.fixed_pass_indicator.config(text="● Mật khẩu cố định: Đang hoạt động")
+                self.fixed_pass_indicator.config(text=_("● Mật khẩu cố định: Đang hoạt động"))
             else:
                 self.fixed_pass_indicator.config(text="")
 
@@ -6073,14 +6073,14 @@ class UnifiedApp(tk.Tk):
         btn_frame.pack(fill=tk.X, padx=30, pady=(5, 10))
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_password
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -6147,7 +6147,7 @@ class UnifiedApp(tk.Tk):
                 except Exception as e:
                     print(f"[Startup] Warning: Could not set StartupApproved: {e}")
                 print(f"[Startup] Enabled run on startup: {exe_path}")
-                self.show_custom_info("Thành công", "Đã bật tính năng chạy khi mở máy thành công!")
+                self.show_custom_info(_("Thành công"), _("Đã bật tính năng chạy khi mở máy thành công!"))
             else:
                 try:
                     winreg.DeleteValue(key, key_name)
@@ -6160,11 +6160,11 @@ class UnifiedApp(tk.Tk):
                     winreg.CloseKey(approved_key)
                 except Exception:
                     pass
-                self.show_custom_info("Thành công", "Đã tắt tính năng chạy khi mở máy thành công!")
+                self.show_custom_info(_("Thành công"), _("Đã tắt tính năng chạy khi mở máy thành công!"))
             winreg.CloseKey(key)
         except Exception as e:
             print(f"[Startup] Failed to modify registry: {e}")
-            self.show_custom_error("Thất bại", f"Không thể thay đổi cài đặt Registry: {e}")
+            self.show_custom_error(_("Thất bại"), f"Không thể thay đổi cài đặt Registry: {e}")
             self.startup_var.set(not enabled)
 
 
@@ -6201,9 +6201,9 @@ class UnifiedApp(tk.Tk):
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else _('Không có số')})"
                 
                 def contact(val=p_val, name=c_name):
                     dialog.destroy()
@@ -6244,7 +6244,7 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "LIÊN HỆ ZALO"
+        title_text = _("LIÊN HỆ ZALO")
         if comp_name:
             title_text = f"ZALO: {comp_name.upper()}"
             
@@ -6292,9 +6292,9 @@ class UnifiedApp(tk.Tk):
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else _('Không có số')})"
                 
                 def show_phone(val=p_val, name=c_name):
                     dialog.destroy()
@@ -6329,14 +6329,14 @@ class UnifiedApp(tk.Tk):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "SỐ ĐIỆN THOẠI LIÊN HỆ"
+        title_text = _("SỐ ĐIỆN THOẠI LIÊN HỆ")
         if comp_name:
             title_text = f"ĐIỆN THOẠI: {comp_name.upper()}"
             
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        display_text = phone_val if phone_val else "Chưa có liên lạc"
+        display_text = phone_val if phone_val else _("Chưa có liên lạc")
         lbl_phone = tk.Label(dialog, text=display_text, font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
         lbl_phone.pack(pady=(5, 15))
 
@@ -6365,10 +6365,10 @@ class UnifiedApp(tk.Tk):
         ai_label = tk.Label(about, text="AI Pro Version", font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
         ai_label.pack(pady=(0, 5))
         
-        contact_label = tk.Label(about, text="Liên hệ: Mr. Tuyến - 0941 261 771", font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
+        contact_label = tk.Label(about, text=_("Liên hệ: Mr. Tuyến - 0941 261 771"), font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
         contact_label.pack(pady=(0, 15))
         
-        close_btn = tk.Button(about, text="Đóng", font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
+        close_btn = tk.Button(about, text=_("Đóng"), font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
                               activeforeground=self.text_white, activebackground="#C04242",
                               bd=0, padx=25, pady=6, cursor="hand2", command=about.destroy)
         close_btn.pack(pady=(0, 15))
@@ -6576,9 +6576,9 @@ class UnifiedApp(tk.Tk):
         tk.Label(title_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
         title_col = tk.Frame(title_frame, bg=self.bg_color)
         title_col.pack(side=tk.LEFT, fill=tk.BOTH)
-        tk.Label(title_col, text="Kết nối mạng LAN thất bại", font=("Segoe UI", 12, "bold"),
+        tk.Label(title_col, text=_("Kết nối mạng LAN thất bại"), font=("Segoe UI", 12, "bold"),
                  fg="#E05252", bg=self.bg_color, anchor="w").pack(anchor="w")
-        tk.Label(title_col, text="Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+        tk.Label(title_col, text=_("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"),
                  font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
 
         # ── SEPARATOR ───────────────────────────────────────────
@@ -6588,14 +6588,14 @@ class UnifiedApp(tk.Tk):
         info_frame = tk.Frame(dialog, bg=self.entry_bg, bd=0, highlightthickness=1, highlightbackground=self.divider_color)
         info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
 
-        tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
+        tk.Label(info_frame, text=_("📋  Thông tin kỹ thuật"), font=("Segoe UI", 8, "bold"),
                  fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
-            ("Public IP phát hiện", public_ip if public_ip else "N/A"),
-            ("Trạng thái",          "Cùng Public IP → cùng Router/Mạng nội bộ"),
-            ("Phương thức thử",     "Kết nối TCP trực tiếp qua Local IP (LAN)"),
-            ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
+            (_("Public IP phát hiện"), public_ip if public_ip else "N/A"),
+            (_("Trạng thái"),          _("Cùng Public IP → cùng Router/Mạng nội bộ")),
+            (_("Phương thức thử"),     _("Kết nối TCP trực tiếp qua Local IP (LAN)")),
+            (_("Kết quả"),             _("❌  Tất cả địa chỉ LAN đều không phản hồi")),
         ]
         for label, value in rows:
             row = tk.Frame(info_frame, bg=self.entry_bg)
@@ -6611,11 +6611,11 @@ class UnifiedApp(tk.Tk):
                  fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
 
         steps = [
-            ("1", "Kiểm tra Tường lửa Windows",
-             "Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network."),
-            ("2", "Kiểm tra phần mềm diệt virus / VPN",
-             "Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ."),
-            ("3", "Kiểm tra cổng mạng đang dùng",
+            ("1", _("Kiểm tra Tường lửa Windows"),
+             _("Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network.")),
+            ("2", _("Kiểm tra phần mềm diệt virus / VPN"),
+             _("Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ.")),
+            ("3", _("Kiểm tra cổng mạng đang dùng"),
              f"Ứng dụng dùng cổng {BOUND_PORT}. Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall."),
         ]
         for num, title_step, desc in steps:
@@ -6636,7 +6636,7 @@ class UnifiedApp(tk.Tk):
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
         tk.Button(
-            btn_frame, text="Đã hiểu", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Đã hiểu"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#E05252", activebackground="#C0392B",
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
             command=dialog.destroy
@@ -6696,7 +6696,7 @@ class UnifiedApp(tk.Tk):
         
         # Nút "Không"
         btn_no = tk.Button(
-            btn_frame, text="Không", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Không"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_no
         )
@@ -6704,7 +6704,7 @@ class UnifiedApp(tk.Tk):
         
         # Nút "Có"
         btn_yes = tk.Button(
-            btn_frame, text="Có", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Có"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_yes
         )
@@ -6732,7 +6732,7 @@ class UnifiedApp(tk.Tk):
                 self._blink_status()
             elif is_error:
                 self.lbl_status.config(fg="#FF4D4D")
-            elif is_success or "thành công" in text.lower():
+            elif is_success or _("thành công") in text.lower():
                 self.lbl_status.config(fg="#2ECC71")  # Xanh lục (Emerald Green)
             else:
                 self.lbl_status.config(fg="#8A8A9A")
@@ -6747,15 +6747,15 @@ class UnifiedApp(tk.Tk):
             current_status = self.status_var.get()
             # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
             is_pending = any(kw in current_status for kw in [
-                "Không thể kết nối Signaling",
-                "Chưa kết nối Signaling",
-                "Đang kết nối Signaling",
-                "Đang thử lại",
-                "chế độ nền",
-                "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
+                _("Không thể kết nối Signaling"),
+                _("Chưa kết nối Signaling"),
+                _("Đang kết nối Signaling"),
+                _("Đang thử lại"),
+                _("chế độ nền"),
+                _("Sẵn sàng kết nối"),  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
             ])
             if is_pending and getattr(self, 'signaling_sockets', {}):
-                self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối.")
+                self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."))
         except Exception:
             pass
         self.after(3000, self._poll_signaling_status)
@@ -6806,15 +6806,15 @@ class UnifiedApp(tk.Tk):
             self.server_socket = None
             upnp_success = False
         else:
-            self.update_status("Đang khởi động Server lắng nghe...")
+            self.update_status(_("Đang khởi động Server lắng nghe..."))
             self.start_host_server()
             
             # 2. Try automatic UPnP Port Forwarding
-            self.update_status("Đang tự động cấu hình Router (UPnP)...")
+            self.update_status(_("Đang tự động cấu hình Router (UPnP)..."))
             upnp_success = attempt_upnp_forward(BOUND_PORT)
         
         # 3. Get Public & Local IPs
-        self.update_status("Đang lấy thông vị trí mạng...")
+        self.update_status(_("Đang lấy thông vị trí mạng..."))
         print("[DEBUG] Calling get_public_ip()")
         self.current_ip = get_public_ip()
         print("[DEBUG] Returned from get_public_ip()")
@@ -6847,13 +6847,13 @@ class UnifiedApp(tk.Tk):
                 self.update_status(f"Đang kết nối Signaling Server... ({8 - int(timeout)}s)")
             
         if self.signaling_sockets:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
+            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
             if upnp_success:
                 self.update_status(f"Kết nối Signaling & Mở cổng Router thành công (Cổng {BOUND_PORT})!{suffix}")
             else:
                 self.update_status(f"Kết nối Signaling thành công (Cổng {BOUND_PORT})! Sẵn sàng kết nối.{suffix}")
         else:
-            suffix = " (Dịch vụ hoạt động)" if getattr(self, "is_service_active", False) else ""
+            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
             self.update_status(f"Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền...{suffix}")
 
 
@@ -6896,7 +6896,7 @@ class UnifiedApp(tk.Tk):
                         self.current_signaling_host = host
                         self.primary_signaling_socket = sock
                     # Luôn cập nhật status khi kết nối thành công (kể cả lần đầu sau timeout hoặc sau reconnect)
-                    self.after(0, lambda: self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                    self.after(0, lambda: self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối.")))
                 
                 # Reset counters khi kết nối thành công
                 fail_count = 0
@@ -6954,7 +6954,7 @@ class UnifiedApp(tk.Tk):
                             self.primary_signaling_socket = self.signaling_sockets[new_host]
                         else:
                             if self.running_server:
-                                self.after(0, lambda: self.update_status("Mất kết nối toàn bộ Signaling Server. Đang thử lại...", is_error=True, blink=True))
+                                self.after(0, lambda: self.update_status(_("Mất kết nối toàn bộ Signaling Server. Đang thử lại..."), is_error=True, blink=True))
             
             time.sleep(retry_delay)
             # Tăng retry_delay sau 3 lần thất bại liên tiếp
@@ -7137,8 +7137,8 @@ class UnifiedApp(tk.Tk):
                 continue
                 
         if not bound:
-            self.after(0, lambda: self.show_custom_error("Lỗi hệ thống", "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng."))
-            self.update_status("Lỗi khởi động Server")
+            self.after(0, lambda: self.show_custom_error(_("Lỗi hệ thống"), "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng."))
+            self.update_status(_("Lỗi khởi động Server"))
             return
             
         # Spawn the socket accept loop in a separate thread
@@ -7233,7 +7233,7 @@ class UnifiedApp(tk.Tk):
                 try:
                     err_info = json.dumps({
                         "status": "error",
-                        "message": "Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!"
+                        "message": _("Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!")
                     }).encode('utf-8')
                     send_msg(conn, err_info, APP_KEY)
                 except: pass
@@ -7256,11 +7256,11 @@ class UnifiedApp(tk.Tk):
                 print("[Host] Password matches! Accepting connection.")
                 socket_passwords[conn] = client_pass
                 
-                client_id = data.get("client_id", "Không rõ")
-                client_comp = data.get("computer_name", "Không rõ")
+                client_id = data.get("client_id", _("Không rõ"))
+                client_comp = data.get("computer_name", _("Không rõ"))
                 fmt_client_id = f"{client_id[:3]} {client_id[3:6]} {client_id[6:9]} {client_id[9:]}" if len(client_id) == 12 else client_id
                 
-                if client_comp != "Không rõ":
+                if client_comp != _("Không rõ"):
                     msg_text = f"Máy tính [{client_comp}] đang điều khiển máy bạn"
                 else:
                     msg_text = f"Máy tính có ID [{fmt_client_id}] đang điều khiển máy bạn"
@@ -7268,7 +7268,7 @@ class UnifiedApp(tk.Tk):
                 try: log_activity(f"Chấp nhận kết nối từ ID {fmt_client_id} ({client_comp})")
                 except: pass
                     
-                self.after(0, lambda: self.show_custom_info("Kết nối từ xa", msg_text))
+                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text))
                 self.after(0, self.show_host_connection_border)
                 
                 self.wake_display()
@@ -7406,7 +7406,7 @@ class UnifiedApp(tk.Tk):
                 print("[Host] Password mismatch!")
                 err_info = json.dumps({
                     "status": "error",
-                    "message": "Sai mật khẩu kết nối!"
+                    "message": _("Sai mật khẩu kết nối!")
                 }).encode('utf-8')
                 send_msg(conn, err_info, client_pass)
                 time.sleep(0.5)
@@ -7898,14 +7898,14 @@ class UnifiedApp(tk.Tk):
         partner_pass = self.partner_pass_var.get().strip()
         
         if not partner_id or len(partner_id) < 12:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!")
+            self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!"))
             return
             
         if not partner_pass:
-            self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu đối tác!")
+            self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mật khẩu đối tác!"))
             return
             
-        self.update_status("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...")
+        self.update_status(_("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ..."))
         self.connect_btn.config(state=tk.DISABLED)
         
         # Connect inside background thread to prevent UI freezing
@@ -7913,9 +7913,9 @@ class UnifiedApp(tk.Tk):
         
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
         if partner_id == getattr(self, "my_id_clean", ""):
-            self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
+            self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            self.update_status("Kết nối bị hủy.")
+            self.update_status(_("Kết nối bị hủy."))
             return
             
         # Clean up dead viewer processes first
@@ -7943,8 +7943,8 @@ class UnifiedApp(tk.Tk):
             return
 
         if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-            self.update_status("Chưa kết nối Signaling Server!")
-            self.after(0, lambda: self.show_custom_error("Lỗi", "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS."))
+            self.update_status(_("Chưa kết nối Signaling Server!"))
+            self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS.")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
 
@@ -7966,7 +7966,7 @@ class UnifiedApp(tk.Tk):
                     sockets_to_try.append(sock)
                     
         success = False
-        self.update_status("Đang tìm và chờ đối tác phản hồi...")
+        self.update_status(_("Đang tìm và chờ đối tác phản hồi..."))
         
         for sock in sockets_to_try:
             self.pending_connection_info = None
@@ -7992,9 +7992,9 @@ class UnifiedApp(tk.Tk):
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
                 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status(_("Sẵn sàng kết nối"))
             if not reconnect_queue:
-                self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
+                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối.")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
@@ -8087,7 +8087,7 @@ class UnifiedApp(tk.Tk):
         if not self.force_relay_var.get() and not connected:
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                self.update_status("Sẵn sàng kết nối")
+                self.update_status(_("Sẵn sàng kết nối"))
                 self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
@@ -8142,7 +8142,7 @@ class UnifiedApp(tk.Tk):
         if not connected:
             display_host = getattr(self, 'current_signaling_host', None) or 'Relay'
             print("[Client] Hole punching failed. Attempting Relay fallback...")
-            self.update_status("Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...")
+            self.update_status(_("Đục lỗ thất bại. Đang chuyển hướng qua Relay Server..."))
             
             try:
                 relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
@@ -8172,11 +8172,11 @@ class UnifiedApp(tk.Tk):
                 
                 connected = True
                 print("[Client] Relay connection established successfully!")
-                self.update_status("Đã kết nối qua Relay Server!")
+                self.update_status(_("Đã kết nối qua Relay Server!"))
             except Exception as e:
                 print(f"[Client] Relay fallback failed: {e}")
-                self.update_status("Sẵn sàng kết nối")
-                self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
+                self.update_status(_("Sẵn sàng kết nối"))
+                self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối"), 
                     f"Kỹ thuật Đục Lỗ Tường Lửa & Server Trung Chuyển ({display_host}) đều thất bại!\n\n"
                     f"Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau."
                 ))
@@ -8216,8 +8216,8 @@ class UnifiedApp(tk.Tk):
                 # Read verification response (allow APP_KEY fallback to receive error messages)
                 res_msg = recv_msg(sock, [partner_pass, APP_KEY])
                 if not res_msg:
-                    self.update_status("Sẵn sàng kết nối")
-                    self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                    self.update_status(_("Sẵn sàng kết nối"))
+                    self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Đối tác ngắt kết nối đột ngột!")))
                     self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                     force_close_socket(sock)
                     return
@@ -8234,16 +8234,16 @@ class UnifiedApp(tk.Tk):
                 is_domain = res.get("is_domain", False)
                 
                 # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
-                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
                 net_class = "medium"
-                net_class_viet = "Trung bình (Medium)"
+                net_class_viet = _("Trung bình (Medium)")
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
-                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                            self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2..."))
                         # 1. Ping / Latency test
                         rtts = []
                         for _ in range(3):
@@ -8308,13 +8308,13 @@ class UnifiedApp(tk.Tk):
                     # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
                     if bandwidth > 20.0 and avg_ping < 10.0:
                         net_class = "high"
-                        net_class_viet = "Tốt (High-speed)"
+                        net_class_viet = _("Tốt (High-speed)")
                     elif bandwidth < 5.0 or avg_ping > 50.0:
                         net_class = "low"
-                        net_class_viet = "Yếu (Low-speed)"
+                        net_class_viet = _("Yếu (Low-speed)")
                     else:
                         net_class = "medium"
-                        net_class_viet = "Trung bình (Medium)"
+                        net_class_viet = _("Trung bình (Medium)")
                         
                     # 4. Report speed test results to Host
                     send_msg(sock, json.dumps({
@@ -8342,7 +8342,7 @@ class UnifiedApp(tk.Tk):
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
                 # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
-                self.update_status("Kết nối thành công! Đang khởi động màn hình...")
+                self.update_status(_("Kết nối thành công! Đang khởi động màn hình..."))
                 if reconnect_queue:
                     try:
                         if viewer_pid and sys.platform == "win32":
@@ -8358,11 +8358,11 @@ class UnifiedApp(tk.Tk):
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
             else:
-                msg = res.get("message", "Sai mật khẩu!")
-                self.update_status("Bị từ chối kết nối")
+                msg = res.get("message", _("Sai mật khẩu!"))
+                self.update_status(_("Bị từ chối kết nối"))
                 if reconnect_queue:
                     reconnect_queue.put("FAILED")
-                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                self.after(0, lambda: self.show_custom_error(_("Từ chối kết nối"), f"Kết nối bị từ chối:\n{msg}"))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
@@ -8376,11 +8376,11 @@ class UnifiedApp(tk.Tk):
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                 return
 
-            self.update_status("Sẵn sàng kết nối")
+            self.update_status(_("Sẵn sàng kết nối"))
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
             else:
-                self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
+                self.after(0, lambda err=str(e): self.show_custom_error(_("Lỗi bắt tay"), f"Lỗi xác thực handshake:\n{err}"))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
@@ -8430,7 +8430,7 @@ class UnifiedApp(tk.Tk):
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
-            self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
+            self.update_status(_("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)"))
             print(f"[Client] Đã mở tiến trình điều khiển cho {computer_name or 'đối tác'}")
             
         except Exception as e:
@@ -8472,8 +8472,8 @@ class UnifiedApp(tk.Tk):
                 dc.ellipse((16, 16, 48, 48), fill="#00ADB5")
             
             menu = pystray.Menu(
-                item('Hiện (Show)', self.show_gui_from_tray, default=True),
-                item('Thoát (Exit)', self.exit_from_tray)
+                item(_('Hiện (Show)'), self.show_gui_from_tray, default=True),
+                item(_('Thoát (Exit)'), self.exit_from_tray)
             )
             
             self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, "Easy Remote Desktop", menu)
@@ -9058,7 +9058,7 @@ def run_clipboard_agent_mode():
                         try: active_dialog.destroy()
                         except: pass
                     active_dialog = ProgressDialog(
-                        root, "Đang tải file về...", display_name, total_size,
+                        root, _("Đang tải file về..."), display_name, total_size,
                         on_cancel=trigger_cancel_win32
                     )
                 elif action == "progress":
@@ -9194,8 +9194,8 @@ if __name__ == '__main__':
                         continue
                     else:
                         # Topmost native message dialog
-                        msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
-                        msg_title = "Thông báo"
+                        msg_text = _("Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống")
+                        msg_title = _("Thông báo")
                         # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
                         ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
                         

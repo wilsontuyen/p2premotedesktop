@@ -21,7 +21,7 @@ from utils.clipboard_api import get_clipboard_text
 import socket
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
 
-
+from core.i18n import _
 from utils.logger import log_debug, log_activity
 from network.socket_utils import send_msg, recv_msg
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
@@ -127,7 +127,7 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Lỗi giải mã ảnh Pillow: {ie}\n")
+                with open("client_error.log", "a", encoding="utf-8") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
         except Exception as e:
             with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
             client_running = False
@@ -228,7 +228,7 @@ def uninstall_keyboard_hook():
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False):
     global client_switching_desktop_countdown
     
-    try: log_activity(f"Bắt đầu điều khiển ID {partner_id} ({computer_name})")
+    try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
     except: pass
     
     # [FIX] Trong Windows, multiprocessing.Process khởi tạo tiến trình con mới hoàn toàn.
@@ -926,7 +926,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             pygame.draw.rect(screen, file_bg_color, file_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, file_btn_rect, width=1, border_radius=4)
                             
-                            file_text_surf = btn_font.render("Chuyển tệp", True, file_text_color)
+                            file_text_surf = btn_font.render(_("Chuyển tệp"), True, file_text_color)
                             file_text_rect = file_text_surf.get_rect(center=file_btn_rect.center)
                             screen.blit(file_text_surf, file_text_rect)
 
@@ -1031,9 +1031,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     
                     elapsed_switching = pygame.time.get_ticks() - switching_start_tick
                     if elapsed_switching > 3000:
-                        text_msg = "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host..."
+                        text_msg = _("Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...")
                     else:
-                        text_msg = f"Đang chuyển giao diện... Vui lòng đợi {current_countdown} giây..."
+                        text_msg = _("Đang chuyển giao diện... Vui lòng đợi ") + str(current_countdown) + _(" giây...")
                     
                     text_surf = msg_font.render(text_msg, True, (255, 255, 255))
                     text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
@@ -1124,15 +1124,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     screen.fill((30, 30, 30))
                     
                     if status_msg_text:
-                        text_surf = msg_font.render(f"Trạng thái: {status_msg_text}", True, (255, 165, 0))
+                        text_surf = msg_font.render(_("Trạng thái: ") + str(status_msg_text), True, (255, 165, 0))
                         text_rect = text_surf.get_rect(center=(window_w//2, window_h//2 - 20))
                         screen.blit(text_surf, text_rect)
                         
-                        cd_surf = msg_font.render(f"Thời gian chờ: {countdown} giây...", True, (255, 255, 255))
+                        cd_surf = msg_font.render(_("Thời gian chờ: ") + str(countdown) + _(" giây..."), True, (255, 255, 255))
                         cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 20))
                         screen.blit(cd_surf, cd_rect)
                     else:
-                        text_surf = msg_font.render(f"Mất kết nối. Đang thử kết nối lại... {countdown} giây...", True, (255, 255, 255))
+                        text_surf = msg_font.render(_("Mất kết nối. Đang thử kết nối lại... ") + str(countdown) + _(" giây..."), True, (255, 255, 255))
                         text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
                         screen.blit(text_surf, text_rect)
                         
@@ -1157,7 +1157,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
         uninstall_keyboard_hook()
         # pygame.quit() # Bỏ qua để tránh deadlock SetParent với Tkinter thread
-        try: log_activity(f"Ngừng điều khiển ID {partner_id} ({computer_name})")
+        try: log_activity(_("Ngừng điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
         except: pass
         import os
         if exit_due_to_disconnect:

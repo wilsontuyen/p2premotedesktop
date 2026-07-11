@@ -46,11 +46,11 @@ lang_menu_code = """
         
         # Export template
         lang_menu.add_separator()
-        lang_menu.add_command(label="Xuất file ngôn ngữ mẫu...", command=self.export_lang_template)
+        lang_menu.add_command(label=_("Xuất file ngôn ngữ mẫu..."), command=self.export_lang_template)
         options_menu.add_cascade(label=_("Giao diện"), menu=lang_menu) # Tạm thay thế
         options_menu.add_separator()
 """
-lang_menu_code = lang_menu_code.replace('_("Giao diện")', '"Ngôn ngữ (Language)"')
+lang_menu_code = lang_menu_code.replace(_('_("Giao diện")'), _('_("Ngôn ngữ (Language)")'))
 
 content = content.replace('# Submenu: Theme', lang_menu_code + '\n        # Submenu: Theme')
 

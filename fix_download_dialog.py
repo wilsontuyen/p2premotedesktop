@@ -20,13 +20,13 @@ search = """                                        def do_download():
                                                 item = remote_tree.item(s)
                                                 name = item['text']
                                                 vals = item.get('values', [])
-                                                is_file = (len(vals) > 1 and vals[1] == "Tệp")
+                                                is_file = (len(vals) > 1 and vals[1] == _("Tệp"))
 
                                                 if is_file:
                                                     # --- OVERWRITE CHECK ---
                                                     target_path = os.path.join(target_dir, name)
                                                     if os.path.exists(target_path):
-                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
+                                                        if not messagebox.askyesno(_("Xác nhận ghi đè"), f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
                                                             continue
                                                     # -----------------------
 
@@ -60,12 +60,12 @@ replace = """                                        def do_download():
                                                 item = remote_tree.item(s)
                                                 name = item['text']
                                                 vals = item.get('values', [])
-                                                is_file = (len(vals) > 1 and vals[1] == "Tệp")
+                                                is_file = (len(vals) > 1 and vals[1] == _("Tệp"))
                                                 
                                                 if is_file:
                                                     target_path = os.path.join(target_dir, name)
                                                     if os.path.exists(target_path):
-                                                        if not messagebox.askyesno("Xác nhận ghi đè", f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
+                                                        if not messagebox.askyesno(_("Xác nhận ghi đè"), f"Tệp '{name}' đã tồn tại ở máy Local.\\nBạn có muốn ghi đè không?", parent=top):
                                                             continue
                                                     
                                                     p = remote_entry.get()

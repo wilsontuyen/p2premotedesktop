@@ -18,7 +18,7 @@ def test():
                 text_area.insert("1.0", "Hello World")
                 btn_frame = tk.Frame(np_win)
                 btn_frame.pack(fill=tk.X)
-                tk.Button(btn_frame, text="Lưu").pack(side=tk.RIGHT, padx=5, pady=5)
+                tk.Button(btn_frame, text=_("Lưu")).pack(side=tk.RIGHT, padx=5, pady=5)
                 print("Notepad created successfully")
             except Exception as e:
                 print("Error in show_notepad:", e)

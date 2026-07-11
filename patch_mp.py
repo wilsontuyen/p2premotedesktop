@@ -32,7 +32,7 @@ content = content.replace(old_update, new_update)
 # 2. Update click_connect to remove the block
 block_check = '''    def click_connect(self):
         if self.is_client_connected:
-            self.show_custom_error("Cảnh báo", "Bạn đang điều khiển một máy tính khác!\\n\\nVui lòng đóng cửa sổ điều khiển hiện tại trước khi kết nối tới máy mới (mỗi giao diện chỉ hỗ trợ mở 1 cửa sổ điều khiển).")
+            self.show_custom_error(_("Cảnh báo"), "Bạn đang điều khiển một máy tính khác!\\n\\nVui lòng đóng cửa sổ điều khiển hiện tại trước khi kết nối tới máy mới (mỗi giao diện chỉ hỗ trợ mở 1 cửa sổ điều khiển).")
             return
             
         partner_id = self.partner_id_var.get().strip().replace(" ", "")'''
@@ -75,7 +75,7 @@ new_launch = '''    def launch_pygame_viewer(self, sock, host_w, host_h, compute
             except: pass
             
             self.connect_btn.config(state=tk.NORMAL)
-            self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
+            self.update_status(_("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)"))
             print(f"[Client] Đã mở tiến trình điều khiển cho {computer_name or 'đối tác'}")
             
         except Exception as e:

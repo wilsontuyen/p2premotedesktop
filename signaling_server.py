@@ -54,7 +54,7 @@ def encrypt_payload(data_bytes, password):
 
 def decrypt_payload(encrypted_bytes, password):
     if len(encrypted_bytes) < 12:
-        raise ValueError("Dữ liệu mã hóa không hợp lệ")
+        raise ValueError(_("Dữ liệu mã hóa không hợp lệ"))
     nonce = encrypted_bytes[:12]
     ciphertext = encrypted_bytes[12:]
     key = get_crypto_key(password)
@@ -330,7 +330,7 @@ def handle_client(conn, addr):
                     })
                     send_msg(target_conn, forward_msg.encode('utf-8'), APP_KEY)
                 else:
-                    err_msg = json.dumps({"action": "error", "message": "Đối tác đang offline!"})
+                    err_msg = json.dumps({"action": "error", "message": _("Đối tác đang offline!")})
                     send_msg(conn, err_msg.encode('utf-8'), APP_KEY)
 
             elif action == "connect_accept":
