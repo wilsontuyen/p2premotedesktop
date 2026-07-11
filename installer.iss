@@ -55,7 +55,7 @@ Filename: "schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopAgent"""; Fla
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
 ; Thêm option khởi chạy ứng dụng sau khi cài đặt
-Filename: "{app}\RemoteDesktopP2P.exe"; Description: "Khởi chạy Easy Remote Desktop"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\RemoteDesktopP2P.exe"; Description: "Start Easy Remote Desktop"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; Stop existing scheduled task

@@ -240,6 +240,15 @@ def main():
     # Service will now automatically spawn the GUI Agent (--gui-agent) and Clipboard Agent (--clipboard-agent) 
     # under the active user's session using CreateProcessAsUser.
 
+    # 10. Start the main application
+    app_exe_path = os.path.join(target_dir, "RemoteDesktopP2P.exe")
+    if os.path.exists(app_exe_path):
+        log(f"Starting application: {app_exe_path}")
+        try:
+            subprocess.Popen([app_exe_path], cwd=target_dir)
+        except Exception as e:
+            log(f"Failed to start application: {e}")
+
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
 
 if __name__ == "__main__":
