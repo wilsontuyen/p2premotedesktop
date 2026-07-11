@@ -1,5 +1,5 @@
 from core.config import *
-from core.i18n import _, load_language, get_available_languages, export_template
+from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
 
 import socket
 import threading
@@ -680,7 +680,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lang_menu = tk.Menu(options_menu, tearoff=0)
         langs = get_available_languages()
         for l in langs:
-            lang_menu.add_radiobutton(label=l.upper(), variable=self.current_lang, value=l, command=self.change_language)
+            lang_menu.add_radiobutton(label=get_language_name(l), variable=self.current_lang, value=l, command=self.change_language)
         
         # Export template
         lang_menu.add_separator()

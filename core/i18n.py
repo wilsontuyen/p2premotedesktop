@@ -5,6 +5,21 @@ import sys
 _translations = {}
 _current_lang = "vi"
 
+LANGUAGE_NAMES = {
+    "vi": "Tiếng Việt",
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "jp": "Japanese",
+    "kr": "Korean",
+    "ru": "Russian",
+    "cn": "Chinese",
+    "tw": "Traditional Chinese"
+}
+
+def get_language_name(lang_code):
+    return LANGUAGE_NAMES.get(lang_code, lang_code.upper())
+
 def get_lang_dir():
     if getattr(sys, 'frozen', False):
         base_dir = os.path.dirname(sys.executable)
