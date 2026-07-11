@@ -1779,7 +1779,7 @@ def run_clipboard_agent_mode():
         pass
         
     if not is_stdout_log and sys.stdout:
-        sh = logging.StreamHandler(sys.stdout)
+        import io; sh = logging.StreamHandler(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')) if hasattr(sys.stdout, 'buffer') else logging.StreamHandler(sys.stdout)
         sh.setFormatter(formatter)
         agent_log.addHandler(sh)
 

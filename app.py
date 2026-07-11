@@ -260,10 +260,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except Exception as e:
                 print(f"[Migration] Lỗi chuyển đổi: {e}")
         
-        # Color Theme Setup
         from gui.themes import setup_app_theme
         setup_app_theme(self, self.config_file)
-        # Host State Variables
+        
         self.my_id_clean, self.my_id_formatted, self.my_macs = get_hwid()
         
         # Check if service (headless agent) is active by checking the mutex
@@ -478,6 +477,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if rc == win32event.WAIT_OBJECT_0:
                 print("[Event] Received restore signal. Restoring window.")
                 self.after(0, self._restore_window)
+        
+    def change_theme(self):
+        from gui.themes import change_app_theme
+        change_app_theme(self)
         
     def setup_ui(self):
         # Setup Window Menu Bar
@@ -814,3 +817,2405 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def change_theme(self):
         from gui.themes import change_app_theme
         change_app_theme(self)
+    def save_window_position(self):
+        try:
+            # Ưu tiên lấy tọa độ hoạt động bình thường cuối cùng được ghi nhận
+            geom = getattr(self, 'last_normal_geometry', None)
+            if not geom:
+                geom = self.geometry()
+                
+            # Tránh lưu tọa độ ảo/thu nhỏ lỗi
+            if "+" in geom:
+                parts = geom.split("+")
+                if len(parts) >= 3:
+                    x = int(parts[1])
+                    y = int(parts[2])
+                    if x <= -30000 or y <= -30000:
+                        print(f"[Config] Skip saving minimized geometry: {geom}")
+                        return
+                        
+            config_data = {"geometry": geom}
+            if hasattr(self, 'current_theme'):
+                config_data["theme"] = self.current_theme.get()
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(config_data, f)
+            print(f"[Config] Saved window position & theme: {geom}")
+        except Exception as e:
+            print(f"[Config] Error saving window config: {e}")
+
+
+    def copy_id_and_password(self):
+        text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update_status("Đã sao chép cả ID & Mật khẩu!")
+
+
+    def copy_to_clipboard(self, text):
+        self.clipboard_clear()
+        self.clipboard_append(text.strip())
+        self.update_status(f"Đã sao chép vào bộ nhớ tạm: {text.strip()}")
+
+
+    def make_context_menu(self, entry):
+        menu = tk.Menu(entry, tearoff=0)
+        menu.add_command(label="Cắt (Cut)", command=lambda: entry.event_generate("<<Cut>>"))
+        menu.add_command(label="Sao chép (Copy)", command=lambda: entry.event_generate("<<Copy>>"))
+        menu.add_command(label="Dán (Paste)", command=lambda: entry.event_generate("<<Paste>>"))
+        menu.add_command(label="Chọn tất cả (Select All)", command=lambda: entry.event_generate("<<SelectAll>>"))
+        
+        # Giữ tham chiếu mạnh (Strong Reference) tránh rác hệ thống làm mất menu
+        entry.menu = menu
+        
+        # Bắt chuột phải trên cả Windows (Button-3) và một số Touchpad/Mac (Button-2)
+        entry.bind("<Button-3>", lambda e: entry.menu.post(e.x_root, e.y_root))
+        entry.bind("<Button-2>", lambda e: entry.menu.post(e.x_root, e.y_root))
+
+
+    def refresh_password(self):
+        import string
+        old_password = self.my_password
+        ptype = self.pass_type_var.get()
+        if ptype == "5 chữ số":
+            self.my_password = str(random.randint(10000, 99999))
+        elif ptype == "8 ký tự (chữ + số)":
+            chars = string.ascii_letters + string.digits
+            self.my_password = ''.join(random.choices(chars, k=8))
+        else:  # Mặc định: 4 chữ số
+            self.my_password = str(random.randint(1000, 9999))
+            
+        # Write to session_pass.txt if service is active or we are headless
+        if self.is_headless or getattr(self, "is_service_active", False):
+            try:
+                pass_path = os.path.join(app_dir, "session_pass.txt")
+                with open(pass_path, "w", encoding="utf-8") as f:
+                    f.write(self.my_password)
+                print(f"[Host] Saved refreshed session password to {pass_path}")
+            except Exception as e:
+                print(f"[Host] Failed to save refreshed session password: {e}")
+                self.my_password = old_password
+                self.show_custom_error("Lỗi", "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!")
+                
+        self.my_pass_label.config(text=self.my_password)
+        
+
+    def show_saved_computers_dialog(self):
+        if not hasattr(self, 'collapsed_groups'):
+            self.collapsed_groups = set()
+        self.drag_card_id = None
+        
+        if hasattr(self, 'saved_computers_dialog') and self.saved_computers_dialog.winfo_exists():
+            self.saved_computers_dialog.lift()
+            self.saved_computers_dialog.focus_force()
+            return
+            
+        dialog = tk.Toplevel(self)
+        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        self.saved_computers_dialog = dialog
+        dialog.title("Danh sách Máy tính")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+
+        # Center dialog
+        dialog.update_idletasks()
+        w = 480
+        h = 400
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+
+        # Top title
+        lbl_title = tk.Label(dialog, text="DANH SÁCH MÁY TÍNH ĐÃ LƯU", font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        # Thanh Tìm kiếm
+        search_frame = tk.Frame(dialog, bg=self.bg_color)
+        search_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        search_inner = tk.Frame(search_frame, bg="#2A2A3D", highlightthickness=1, highlightbackground=self.divider_color)
+        search_inner.pack(fill=tk.X)
+        
+        lbl_search_icon = tk.Label(search_inner, text="🔍", font=("Segoe UI", 9), fg=self.text_gray, bg="#2A2A3D")
+        lbl_search_icon.pack(side=tk.LEFT, padx=(8, 5), pady=4)
+        
+        search_var = tk.StringVar()
+        entry_search = tk.Entry(search_inner, textvariable=search_var, font=("Segoe UI", 9), fg=self.text_white, bg="#2A2A3D", bd=0, insertbackground=self.text_white)
+        entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4, padx=(0, 8))
+        
+        # Thiết lập Placeholder chuyên nghiệp
+        entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+        entry_search.configure(fg=self.text_gray)
+        
+        def on_focus_in(event):
+            if entry_search.get() == "Tìm kiếm theo tên hoặc ID...":
+                entry_search.delete(0, tk.END)
+                entry_search.configure(fg=self.text_white)
+                
+        def on_focus_out(event):
+            if entry_search.get() == "":
+                entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+                entry_search.configure(fg=self.text_gray)
+                
+        entry_search.bind("<FocusIn>", on_focus_in)
+        entry_search.bind("<FocusOut>", on_focus_out)
+        
+        def on_search_change(*args):
+            val = search_var.get()
+            if val == "Tìm kiếm theo tên hoặc ID...":
+                return
+            refresh_list()
+            
+        search_var.trace_add("write", on_search_change)
+
+        def load_computers():
+            return self.load_saved_computers()
+
+        def save_computers(lst):
+            self.save_saved_computers(lst)
+
+        # Container for the list (Sẽ pack ở cuối cùng sau khi đã pack bottom_frame để tránh bị đè/cắt nút)
+        list_container = tk.Frame(dialog, bg=self.card_color)
+
+        # Canvas & Scrollbar for scrollable area
+        canvas = tk.Canvas(list_container, bg=self.card_color, highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL, command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=self.card_color)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(canvas_frame, width=e.width)
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=10)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Mouse wheel support
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def on_dialog_destroy():
+            canvas.unbind_all("<MouseWheel>")
+            self.status_dots_widgets.clear()
+            if hasattr(self, '_reorder_saved_computers_func'):
+                delattr(self, '_reorder_saved_computers_func')
+            dialog.destroy()
+            
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
+
+        def connect_computer(item):
+            self.partner_id_var.set(item["id"])
+            self.partner_pass_var.set(item["password"])
+            # Giữ cửa sổ Danh sách Máy tính tiếp tục hiển thị theo yêu cầu người dùng
+            # Trigger connection immediately
+            self.click_connect()
+
+        def delete_computer(item):
+            if self.show_custom_question("Xóa máy tính", f"Bạn có chắc muốn xóa '{item['name']}' khỏi danh sách?", parent=dialog):
+                computers = load_computers()
+                computers = [c for c in computers if not (c["id"] == item["id"] and c["name"] == item["name"])]
+                save_computers(computers)
+                refresh_list()
+
+        self.auto_scroll_job = None
+
+        def check_auto_scroll():
+            drag_id = getattr(self, 'drag_card_id', None)
+            if not drag_id:
+                self.auto_scroll_job = None
+                return
+
+            try:
+                x, y = canvas.winfo_pointerxy()
+                cy = canvas.winfo_rooty()
+                ch = canvas.winfo_height()
+                rel_y = y - cy
+                
+                if rel_y < 40:
+                    canvas.yview_scroll(-1, "units")
+                elif rel_y > ch - 40:
+                    canvas.yview_scroll(1, "units")
+                    
+                self.auto_scroll_job = dialog.after(50, check_auto_scroll)
+            except Exception:
+                self.auto_scroll_job = None
+
+        def on_drag_motion(event):
+            drag_id = getattr(self, 'drag_card_id', None)
+            if drag_id and not getattr(self, 'auto_scroll_job', None):
+                check_auto_scroll()
+            
+            if drag_id:
+                try:
+                    x, y = event.x_root, event.y_root
+                    target_widget = dialog.winfo_containing(x, y)
+                    target_group = None
+                    if target_widget:
+                        w = target_widget
+                        while w:
+                            if getattr(w, 'is_group_header', False):
+                                target_group = w.group_name
+                                break
+                            if hasattr(w, 'comp_group'):
+                                target_group = w.comp_group
+                                break
+                            if str(w) == str(dialog):
+                                break
+                            parent_str = w.winfo_parent()
+                            if not parent_str: break
+                            w = w._nametowidget(parent_str)
+                    
+                    if scrollable_frame.winfo_exists():
+                        for c in scrollable_frame.winfo_children():
+                            if getattr(c, 'is_group_header', False):
+                                if target_group is not None and c.group_name == target_group:
+                                    c.config(fg=self.btn_color)
+                                else:
+                                    c.config(fg=self.text_gray)
+                except Exception:
+                    pass
+
+        def on_drop(event):
+            if getattr(self, 'auto_scroll_job', None):
+                try:
+                    dialog.after_cancel(self.auto_scroll_job)
+                except Exception:
+                    pass
+                self.auto_scroll_job = None
+                
+            try:
+                if scrollable_frame.winfo_exists():
+                    for c in scrollable_frame.winfo_children():
+                        if getattr(c, 'is_group_header', False):
+                            c.config(fg=self.text_gray)
+            except Exception:
+                pass
+                
+            drag_id = getattr(self, 'drag_card_id', None)
+            if not drag_id: return
+            self.drag_card_id = None
+            
+            x, y = event.x_root, event.y_root
+            target_widget = dialog.winfo_containing(x, y)
+            if not target_widget: return
+            
+            target_group = None
+            w = target_widget
+            while w:
+                if getattr(w, 'is_group_header', False):
+                    target_group = w.group_name
+                    break
+                if hasattr(w, 'comp_group'):
+                    target_group = w.comp_group
+                    break
+                if str(w) == str(dialog):
+                    break
+                parent_str = w.winfo_parent()
+                if not parent_str: break
+                w = w._nametowidget(parent_str)
+                
+            if target_group is not None:
+                comps = load_computers()
+                updated = False
+                for c in comps:
+                    if c["id"].replace(" ", "") == drag_id:
+                        if c.get("group", "").strip() != target_group:
+                            c["group"] = target_group
+                            updated = True
+                        break
+                if updated:
+                    save_computers(comps)
+                    refresh_list()
+
+        def rename_group_dialog(old_group_name):
+            rn_win = tk.Toplevel(dialog)
+            rn_win.withdraw()
+            rn_win.title("Đổi tên nhóm")
+            rn_win.resizable(False, False)
+            rn_win.configure(bg=self.bg_color)
+            rn_win.transient(dialog)
+            rn_win.grab_set()
+
+            rn_win.update_idletasks()
+            rw, rh = 300, 160
+            rx = dialog.winfo_x() + (dialog.winfo_width() - rw) // 2
+            ry = dialog.winfo_y() + (dialog.winfo_height() - rh) // 2
+            rn_win.geometry(f"{rw}x{rh}+{rx}+{ry}")
+            rn_win.deiconify()
+
+            lbl = tk.Label(rn_win, text=f"Nhập tên mới cho nhóm:\n'{old_group_name if old_group_name else 'Chưa phân nhóm'}'", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
+            lbl.pack(pady=(15, 10))
+
+            entry_var = tk.StringVar(value=old_group_name)
+            entry = tk.Entry(rn_win, textvariable=entry_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+            entry.pack(fill=tk.X, padx=20, pady=(0, 15))
+            entry.focus()
+            entry.select_range(0, tk.END)
+
+            def do_rename():
+                new_name = entry_var.get().strip()
+                if new_name != old_group_name:
+                    comps = load_computers()
+                    for c in comps:
+                        if c.get("group", "").strip() == old_group_name:
+                            c["group"] = new_name
+                    save_computers(comps)
+                    if old_group_name in getattr(self, 'collapsed_groups', set()):
+                        self.collapsed_groups.remove(old_group_name)
+                        self.collapsed_groups.add(new_name)
+                    refresh_list()
+                rn_win.destroy()
+
+            btn_frame = tk.Frame(rn_win, bg=self.bg_color)
+            btn_frame.pack(fill=tk.X, padx=20)
+            
+            btn_save = tk.Button(btn_frame, text="Lưu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=do_rename)
+            btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            
+            btn_cancel = tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35", relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=rn_win.destroy)
+            btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+        def reorder_list():
+            if not scrollable_frame.winfo_exists(): return
+            children = scrollable_frame.winfo_children()
+            headers = [c for c in children if getattr(c, 'is_group_header', False)]
+            cards = [c for c in children if hasattr(c, 'comp_id')]
+            if not cards and not headers: return
+            
+            def get_is_online(c):
+                if c.comp_id in self.status_dots_widgets:
+                    widgets = self.status_dots_widgets[c.comp_id]
+                    if widgets and widgets[0].winfo_exists():
+                        return widgets[0].cget("fg") == "#00F5D4"
+                return False
+
+            for c in children:
+                c.pack_forget()
+
+            # Group cards
+            grouped_cards = {}
+            for c in cards:
+                grp = getattr(c, 'comp_group', '')
+                if grp not in grouped_cards:
+                    grouped_cards[grp] = []
+                grouped_cards[grp].append(c)
+
+            def group_sort_key(g):
+                return (1, g) if not g else (0, g.lower())
+            
+            sorted_groups = sorted(grouped_cards.keys(), key=group_sort_key)
+            header_map = {h.group_name: h for h in headers}
+
+            for grp in sorted_groups:
+                if grp in header_map:
+                    header_map[grp].pack(fill=tk.X, pady=(15, 5), padx=15)
+                
+                if grp not in self.collapsed_groups:
+                    grp_cards = grouped_cards.get(grp, [])
+                    grp_cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
+                    for c in grp_cards:
+                        c.pack(fill=tk.X, pady=0, padx=(0, 10))
+
+        self._reorder_saved_computers_func = reorder_list
+
+        def refresh_list():
+            current_online = {}
+            for cid, widgets in self.status_dots_widgets.items():
+                if widgets and widgets[0].winfo_exists():
+                    current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
+
+            # Clear previous items
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+            self.status_dots_widgets.clear()
+
+            query = search_var.get().strip().lower()
+            if query == "tìm kiếm theo tên hoặc id...":
+                query = ""
+
+            computers = load_computers()
+            
+            # Filter
+            if query:
+                computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
+
+            if not computers:
+                txt = "Không tìm thấy máy tính phù hợp." if query else "Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới."
+                lbl_empty = tk.Label(scrollable_frame, text=txt, font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
+                lbl_empty.pack(pady=40, fill=tk.X, expand=True)
+                return
+
+            unique_groups = set()
+            for c in computers:
+                unique_groups.add(c.get("group", "").strip())
+            
+            for grp in unique_groups:
+                grp_display = grp if grp else "Chưa phân nhóm"
+                icon = "▶" if grp in self.collapsed_groups else "▼"
+                header_text = f"{icon} {grp_display.upper()}"
+                
+                header = tk.Label(scrollable_frame, text=header_text, font=("Segoe UI", 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, cursor="hand2")
+                header.is_group_header = True
+                header.group_name = grp
+                
+                def toggle_group(event, g=grp):
+                    if g in self.collapsed_groups:
+                        self.collapsed_groups.remove(g)
+                    else:
+                        self.collapsed_groups.add(g)
+                    new_icon = "▶" if g in self.collapsed_groups else "▼"
+                    event.widget.config(text=f"{new_icon} {(g if g else 'Chưa phân nhóm').upper()}")
+                    reorder_list()
+                    self.save_group_states_only()
+                    
+                header.bind("<Button-1>", toggle_group)
+                header.bind("<ButtonRelease-1>", on_drop)
+
+                grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                grp_context_menu.add_command(label="Đổi tên nhóm", command=lambda g=grp: rename_group_dialog(g))
+
+                def show_grp_context(event, menu=grp_context_menu):
+                    try:
+                        menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        menu.grab_release()
+
+                header.bind("<Button-3>", show_grp_context)
+
+            for comp in computers:
+                card = tk.Frame(scrollable_frame, bg=self.card_color)
+                card.comp_id = comp["id"].replace(" ", "")
+                card.comp_name = comp["name"]
+                card.comp_group = comp.get("group", "").strip()
+
+                content_frame = tk.Frame(card, bg=self.card_color, pady=8, padx=12)
+                content_frame.pack(fill=tk.X)
+                
+                separator = tk.Frame(card, bg=self.divider_color, height=2)
+                separator.pack(fill=tk.X, padx=10)
+
+                info_frame = tk.Frame(content_frame, bg=self.card_color)
+                info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+                title_frame = tk.Frame(info_frame, bg=self.card_color)
+                title_frame.pack(fill=tk.X)
+
+                clean_id = card.comp_id
+                is_online = current_online.get(clean_id, False)
+                dot_color = "#00F5D4" if is_online else "#8A8A9A"
+                dot_lbl = tk.Label(title_frame, text="●", font=("Segoe UI", 13, "bold"), fg=dot_color, bg=self.card_color)
+                dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
+
+                name_lbl = tk.Label(title_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
+                name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
+                id_lbl.pack(fill=tk.X, pady=(2, 0))
+
+                context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                context_menu.add_command(label="Kết nối", command=lambda c=comp: connect_computer(c))
+                context_menu.add_separator()
+                context_menu.add_command(label="Thay đổi thông tin", command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
+                context_menu.add_command(label="Xóa máy tính", command=lambda c=comp: delete_computer(c))
+
+                def show_context_menu(event, menu=context_menu):
+                    try:
+                        menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        menu.grab_release()
+                        
+                def start_drag(event, c_id=clean_id):
+                    self.drag_card_id = c_id
+
+                for w in [card, content_frame, separator, info_frame, title_frame, dot_lbl, name_lbl, id_lbl]:
+                    w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
+                    w.bind("<Button-3>", show_context_menu)
+                    w.bind("<ButtonPress-1>", start_drag)
+                    w.bind("<B1-Motion>", on_drag_motion)
+                    w.bind("<ButtonRelease-1>", on_drop)
+                    
+                    try:
+                        w.config(cursor="hand2")
+                    except Exception:
+                        pass
+
+                if clean_id not in self.status_dots_widgets:
+                    self.status_dots_widgets[clean_id] = []
+                self.status_dots_widgets[clean_id].append(dot_lbl)
+                self.query_computer_status(clean_id)
+                
+            reorder_list()
+
+        # Bottom buttons panel
+        bottom_frame = tk.Frame(dialog, bg=self.bg_color)
+        bottom_frame.pack(fill=tk.X, padx=20, pady=(10, 15))
+
+        def open_add_dialog():
+            self.open_add_computer_dialog_with_vals("", "", parent_win=dialog, on_save=refresh_list)
+
+        def start_refresh_cooldown():
+            seconds_left = 30
+            
+            def update_timer():
+                nonlocal seconds_left
+                if seconds_left > 0:
+                    btn_refresh.config(text=f"🔄 Làm mới ({seconds_left}s)")
+                    seconds_left -= 1
+                    if dialog.winfo_exists():
+                        dialog.after(1000, update_timer)
+                else:
+                    if dialog.winfo_exists():
+                        btn_refresh.config(
+                            state="normal", text="🔄 Làm mới",
+                            fg=self.text_white, bg="#2ECC71",
+                            cursor="hand2"
+                        )
+                        
+            btn_refresh.config(state="disabled", text="🔄 Làm mới (30s)", bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
+            update_timer()
+
+        btn_add = tk.Button(
+            bottom_frame, text="+ Thêm Mới", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=open_add_dialog
+        )
+        btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+
+        btn_refresh = tk.Button(
+            bottom_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
+            relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
+            command=lambda: [refresh_list(), start_refresh_cooldown()]
+        )
+        btn_refresh.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+
+        btn_close = tk.Button(
+            bottom_frame, text="Đóng", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=on_dialog_destroy
+        )
+        btn_close.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
+
+        # Pack list_container sau cùng để lấp đầy phần diện tích còn lại ở giữa Search Bar và Bottom Buttons!
+        list_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        refresh_list()
+
+        def auto_refresh_status():
+            if not dialog.winfo_exists(): return
+            for clean_id in list(self.status_dots_widgets.keys()):
+                self.query_computer_status(clean_id)
+            dialog.after(10000, auto_refresh_status)
+
+        dialog.after(10000, auto_refresh_status)
+
+
+    def add_current_partner_to_saved(self):
+        curr_id = self.partner_id_var.get().strip()
+        curr_pass = self.partner_pass_var.get().strip()
+        self.open_add_computer_dialog_with_vals(curr_id, curr_pass)
+
+
+    def open_add_computer_dialog_with_vals(self, initial_id="", initial_pass="", parent_win=None, on_save=None):
+        parent = parent_win if parent_win else self
+        
+        add_win = tk.Toplevel(parent)
+        add_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
+        add_win.title("Thêm Máy tính")
+        add_win.resizable(False, False)
+        add_win.configure(bg=self.bg_color)
+        add_win.transient(parent)
+        add_win.grab_set()
+
+        # Center add window
+        add_win.update_idletasks()
+        aw = 320
+        ah = 360
+        ax = parent.winfo_x() + (parent.winfo_width() - aw) // 2
+        ay = parent.winfo_y() + (parent.winfo_height() - ah) // 2
+        add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
+        add_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+
+        lbl_add_title = tk.Label(add_win, text="THÊM MÁY TÍNH MỚI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_add_title.pack(pady=(12, 10))
+
+        lbl_name = tk.Label(add_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name.pack(anchor=tk.W, padx=20)
+        entry_name = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
+        entry_name.focus()
+
+        lbl_comp_id = tk.Label(add_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id.pack(anchor=tk.W, padx=20)
+        entry_comp_id = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
+        if initial_id:
+            entry_comp_id.insert(0, initial_id)
+
+        lbl_comp_pass = tk.Label(add_win, text="Mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass.pack(anchor=tk.W, padx=20)
+        entry_comp_pass = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
+        if initial_pass:
+            entry_comp_pass.insert(0, initial_pass)
+
+        lbl_group = tk.Label(add_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group.pack(anchor=tk.W, padx=20)
+        entry_group = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
+
+        def load_computers():
+            return self.load_saved_computers()
+
+        def save_computers(lst):
+            self.save_saved_computers(lst)
+
+        def save_new():
+            name = entry_name.get().strip()
+            cid = entry_comp_id.get().strip()
+            cpass = entry_comp_pass.get().strip()
+            cgroup = entry_group.get().strip()
+
+            if not name or not cid or not cpass:
+                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=add_win)
+                return
+
+            computers = load_computers()
+            for c in computers:
+                if c["id"] == cid and c["name"] == name:
+                    self.show_custom_error("Trùng lặp", "Máy tính này đã tồn tại trong danh sách!", parent=add_win)
+                    return
+
+            computers.append({
+                "name": name,
+                "id": cid,
+                "password": cpass,
+                "group": cgroup
+            })
+            save_computers(computers)
+            if on_save:
+                on_save()
+            if not parent_win:
+                self.show_custom_info("Thành công", f"Đã lưu máy tính '{name}' vào danh sách thành công!", parent=add_win)
+            add_win.destroy()
+
+        btn_add_frame = tk.Frame(add_win, bg=self.bg_color)
+        btn_add_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        btn_save = tk.Button(
+            btn_add_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_new
+        )
+        btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        btn_cancel = tk.Button(
+            btn_add_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
+        )
+        btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+
+    def open_edit_computer_dialog(self, item, parent_win, on_save):
+        parent = parent_win
+        
+        edit_win = tk.Toplevel(parent)
+        edit_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
+        edit_win.title("Sửa thông tin")
+        edit_win.resizable(False, False)
+        edit_win.configure(bg=self.bg_color)
+        edit_win.transient(parent)
+        edit_win.grab_set()
+
+        # Center edit window
+        edit_win.update_idletasks()
+        ew = 320
+        eh = 360
+        ex = parent.winfo_x() + (parent.winfo_width() - ew) // 2
+        ey = parent.winfo_y() + (parent.winfo_height() - eh) // 2
+        edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
+        edit_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+
+        lbl_edit_title = tk.Label(edit_win, text="CẬP NHẬT THÔNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_edit_title.pack(pady=(12, 10))
+
+        lbl_name = tk.Label(edit_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name.pack(anchor=tk.W, padx=20)
+        entry_name = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
+        entry_name.insert(0, item["name"])
+        entry_name.focus()
+
+        lbl_comp_id = tk.Label(edit_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id.pack(anchor=tk.W, padx=20)
+        entry_comp_id = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
+        entry_comp_id.insert(0, item["id"])
+
+        lbl_comp_pass = tk.Label(edit_win, text="Mật khẩu mới:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass.pack(anchor=tk.W, padx=20)
+        entry_comp_pass = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
+        entry_comp_pass.insert(0, item["password"])
+
+        lbl_group = tk.Label(edit_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group.pack(anchor=tk.W, padx=20)
+        entry_group = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_group.insert(0, item.get("group", ""))
+
+        def load_computers():
+            return self.load_saved_computers()
+
+        def save_computers(lst):
+            self.save_saved_computers(lst)
+
+        def save_edit():
+            name = entry_name.get().strip()
+            new_id = entry_comp_id.get().strip()
+            cpass = entry_comp_pass.get().strip()
+            cgroup = entry_group.get().strip()
+
+            if not name or not new_id or not cpass:
+                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=edit_win)
+                return
+
+            computers = load_computers()
+            updated = False
+            for c in computers:
+                if c["id"] == item["id"] and c["name"] == item["name"]:
+                    c["name"] = name
+                    c["id"] = new_id
+                    c["password"] = cpass
+                    c["group"] = cgroup
+                    updated = True
+                    break
+            
+            if updated:
+                save_computers(computers)
+                if on_save:
+                    on_save()
+                edit_win.destroy()
+            else:
+                self.show_custom_error("Lỗi", "Không tìm thấy máy tính tương ứng để sửa!", parent=edit_win)
+
+        btn_edit_frame = tk.Frame(edit_win, bg=self.bg_color)
+        btn_edit_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        btn_save = tk.Button(
+            btn_edit_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_edit
+        )
+        btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        btn_cancel = tk.Button(
+            btn_edit_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
+        )
+        btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+
+    def load_lan_peers(self):
+        lan_file = "lan_peers.json"
+        if os.path.exists(lan_file):
+            try:
+                with open(lan_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return data
+            except:
+                pass
+        return {}
+
+
+    def save_lan_peers(self):
+        lan_file = "lan_peers.json"
+        try:
+            with open(lan_file, 'w', encoding='utf-8') as f:
+                with self.lan_peers_lock:
+                    json.dump(self.lan_peers, f, ensure_ascii=False, indent=4)
+        except:
+            pass
+
+
+    def load_saved_computers(self):
+        computers_file = "saved_computers.xml"
+        import xml.etree.ElementTree as ET
+        lst = []
+        if os.path.exists(computers_file):
+            try:
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                for comp_node in root.findall("computer"):
+                    name_node = comp_node.find("name")
+                    id_node = comp_node.find("id")
+                    pass_node = comp_node.find("password")
+                    group_node = comp_node.find("group")
+                    
+                    name = decrypt_text(name_node.text) if name_node is not None else ""
+                    cid = decrypt_text(id_node.text) if id_node is not None else ""
+                    cpass = decrypt_text(pass_node.text) if pass_node is not None else ""
+                    cgroup = decrypt_text(group_node.text) if group_node is not None else ""
+                    
+                    if cid:
+                        lst.append({
+                            "name": name,
+                            "id": cid,
+                            "password": cpass,
+                            "group": cgroup
+                        })
+                        
+                if not hasattr(self, 'collapsed_groups_loaded'):
+                    self.collapsed_groups = set()
+                    self.collapsed_groups_loaded = True
+                    gs_node = root.find("group_states")
+                    if gs_node is not None:
+                        for g_node in gs_node.findall("collapsed_group"):
+                            self.collapsed_groups.add(decrypt_text(g_node.text) if g_node.text else "")
+            except Exception as e:
+                print(f"[Config] Lỗi tải XML: {e}")
+        return lst
+
+
+    def save_saved_computers(self, lst):
+        computers_file = "saved_computers.xml"
+        import xml.etree.ElementTree as ET
+        try:
+            fixed_node = None
+            zalo_node = None
+            if os.path.exists(computers_file):
+                try:
+                    tree = ET.parse(computers_file)
+                    root = tree.getroot()
+                    fixed_node = root.find("fixed_password")
+                    zalo_node = root.find("zalo_phone")
+                except:
+                    pass
+            
+            root = ET.Element("computers")
+            
+            if fixed_node is not None:
+                root.append(fixed_node)
+            if zalo_node is not None:
+                root.append(zalo_node)
+                
+            if hasattr(self, 'collapsed_groups'):
+                gs_node = ET.SubElement(root, "group_states")
+                for grp in self.collapsed_groups:
+                    g_node = ET.SubElement(gs_node, "collapsed_group")
+                    g_node.text = encrypt_text(grp)
+                
+
+            for comp in lst:
+                comp_node = ET.SubElement(root, "computer")
+                name_node = ET.SubElement(comp_node, "name")
+                name_node.text = encrypt_text(comp["name"])
+                
+                id_node = ET.SubElement(comp_node, "id")
+                id_node.text = encrypt_text(comp["id"])
+                
+                pass_node = ET.SubElement(comp_node, "password")
+                pass_node.text = encrypt_text(comp["password"])
+                
+                group_node = ET.SubElement(comp_node, "group")
+                group_node.text = encrypt_text(comp.get("group", ""))
+                
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+                
+            tree = ET.ElementTree(root)
+            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"[Config] Lỗi lưu XML: {e}")
+
+
+    def save_group_states_only(self):
+        computers_file = "saved_computers.xml"
+        if not os.path.exists(computers_file):
+            return
+        import xml.etree.ElementTree as ET
+        try:
+            tree = ET.parse(computers_file)
+            root = tree.getroot()
+            old_gs = root.find("group_states")
+            if old_gs is not None:
+                root.remove(old_gs)
+            if hasattr(self, 'collapsed_groups'):
+                gs_node = ET.SubElement(root, "group_states")
+                for grp in self.collapsed_groups:
+                    g_node = ET.SubElement(gs_node, "collapsed_group")
+                    g_node.text = encrypt_text(grp)
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+        except:
+            pass
+
+
+    def load_fixed_password_from_xml(self):
+        computers_file = "saved_computers.xml"
+        if os.path.exists(computers_file):
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                fixed_node = root.find("fixed_password")
+                if fixed_node is not None and fixed_node.text:
+                    return decrypt_text(fixed_node.text)
+            except Exception as e:
+                print(f"[Config] Lỗi đọc mật khẩu cố định từ XML: {e}")
+        return ""
+
+
+    def save_fixed_password_to_xml(self, password):
+        computers_file = "saved_computers.xml"
+        import xml.etree.ElementTree as ET
+        
+        computers = []
+        zalo_node_text = ""
+        if os.path.exists(computers_file):
+            try:
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                for comp_node in root.findall("computer"):
+                    name_node = comp_node.find("name")
+                    id_node = comp_node.find("id")
+                    pass_node = comp_node.find("password")
+                    computers.append({
+                        "name": name_node.text if name_node is not None else "",
+                        "id": id_node.text if id_node is not None else "",
+                        "password": pass_node.text if pass_node is not None else ""
+                    })
+                z_node = root.find("zalo_phone")
+                if z_node is not None:
+                    zalo_node_text = z_node.text
+            except:
+                pass
+                
+        root = ET.Element("computers")
+        
+        if password:
+            fixed_node = ET.SubElement(root, "fixed_password")
+            fixed_node.text = encrypt_text(password)
+            
+        if zalo_node_text:
+            z_node = ET.SubElement(root, "zalo_phone")
+            z_node.text = zalo_node_text
+            
+        for comp in computers:
+            comp_node = ET.SubElement(root, "computer")
+            name_node = ET.SubElement(comp_node, "name")
+            name_node.text = comp["name"]
+            
+            id_node = ET.SubElement(comp_node, "id")
+            id_node.text = comp["id"]
+            
+            pass_node = ET.SubElement(comp_node, "password")
+            pass_node.text = comp["password"]
+            
+        if hasattr(ET, "indent"):
+            ET.indent(root, space="  ")
+            
+        try:
+            tree = ET.ElementTree(root)
+            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"[Config] Lỗi lưu XML: {e}")
+
+
+    def save_fixed_password(self, password):
+        self.fixed_password = password
+        self.save_fixed_password_to_xml(password)
+
+
+    def load_zalo_phone_from_xml(self):
+        computers_file = "saved_computers.xml"
+        if os.path.exists(computers_file):
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                zalo_node = root.find("zalo_phone")
+                if zalo_node is not None and zalo_node.text:
+                    return zalo_node.text
+            except Exception as e:
+                print(f"[Config] Lỗi đọc Zalo/Điện thoại từ XML: {e}")
+        return ""
+
+
+    def save_zalo_phone_to_xml(self, value):
+        computers_file = "saved_computers.xml"
+        import xml.etree.ElementTree as ET
+        
+        computers = []
+        fixed_node_text = ""
+        if os.path.exists(computers_file):
+            try:
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                for comp_node in root.findall("computer"):
+                    name_node = comp_node.find("name")
+                    id_node = comp_node.find("id")
+                    pass_node = comp_node.find("password")
+                    computers.append({
+                        "name": name_node.text if name_node is not None else "",
+                        "id": id_node.text if id_node is not None else "",
+                        "password": pass_node.text if pass_node is not None else ""
+                    })
+                f_node = root.find("fixed_password")
+                if f_node is not None:
+                    fixed_node_text = f_node.text
+            except:
+                pass
+                
+        root = ET.Element("computers")
+        
+        if fixed_node_text:
+            f_node = ET.SubElement(root, "fixed_password")
+            f_node.text = fixed_node_text
+            
+        if value:
+            zalo_node = ET.SubElement(root, "zalo_phone")
+            zalo_node.text = value
+            
+        for comp in computers:
+            comp_node = ET.SubElement(root, "computer")
+            name_node = ET.SubElement(comp_node, "name")
+            name_node.text = comp["name"]
+            
+            id_node = ET.SubElement(comp_node, "id")
+            id_node.text = comp["id"]
+            
+            pass_node = ET.SubElement(comp_node, "password")
+            pass_node.text = comp["password"]
+            
+        if hasattr(ET, "indent"):
+            ET.indent(root, space="  ")
+            
+        try:
+            tree = ET.ElementTree(root)
+            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"[Config] Lỗi lưu Zalo/Điện thoại vào XML: {e}")
+
+
+    def open_set_zalo_phone_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Cài Zalo / Điện thoại")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        w = 340
+        h = 220
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        lbl_title = tk.Label(dialog, text="CÀI ĐẶT ZALO / ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        desc_text = "Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn."
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        lbl_desc.pack(pady=(0, 10))
+
+        entry_frame = tk.Frame(dialog, bg=self.bg_color)
+        entry_frame.pack(fill=tk.X, padx=30)
+
+        entry_val = tk.Entry(entry_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_val.pack(fill=tk.X, pady=(0, 15))
+        
+        current_val = self.load_zalo_phone_from_xml()
+        if current_val:
+            entry_val.insert(0, current_val)
+        entry_val.focus()
+
+        def save_val():
+            new_val = entry_val.get().strip()
+            self.save_zalo_phone_to_xml(new_val)
+            self.show_custom_info("Thành công", "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!", parent=dialog)
+            dialog.destroy()
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=30, pady=5)
+
+        btn_save = tk.Button(
+            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_val
+        )
+        btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        btn_cancel = tk.Button(
+            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
+        )
+        btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+
+    def show_server_settings_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Cài đặt Máy chủ (Signaling Server)")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        w = 360
+        h = 320
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        lbl_title = tk.Label(dialog, text="CẤU HÌNH MÁY CHỦ SIGNALING", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        desc_text = "Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)"
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        lbl_desc.pack(pady=(0, 10))
+
+        form_frame = tk.Frame(dialog, bg=self.bg_color)
+        form_frame.pack(fill=tk.BOTH, expand=True, padx=30)
+
+        lbl_hosts = tk.Label(form_frame, text="Danh sách Máy chủ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_hosts.pack(anchor=tk.W)
+        
+        entry_hosts = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_hosts.pack(fill=tk.X, pady=(3, 10))
+        
+        lbl_port = tk.Label(form_frame, text="Cổng kết nối (Port):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_port.pack(anchor=tk.W)
+        
+        entry_port = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_port.pack(fill=tk.X, pady=(3, 15))
+
+
+        current_hosts = ", ".join(SIGNALING_SERVER_HOSTS)
+        entry_hosts.insert(0, current_hosts)
+        entry_port.insert(0, str(SIGNALING_SERVER_PORT))
+        
+        entry_hosts.focus()
+
+        def save_config():
+            new_hosts_str = entry_hosts.get().strip()
+            new_port_str = entry_port.get().strip()
+            
+            if not new_hosts_str or not new_port_str:
+                self.show_custom_error("Lỗi", "Vui lòng nhập đầy đủ thông tin!", parent=dialog)
+                return
+                
+            try:
+                new_port = int(new_port_str)
+            except ValueError:
+                self.show_custom_error("Lỗi", "Cổng kết nối (Port) phải là số!", parent=dialog)
+                return
+                
+            global SIGNALING_SERVER_HOSTS, SIGNALING_SERVER_PORT
+            SIGNALING_SERVER_HOSTS = [h.strip() for h in new_hosts_str.split(',') if h.strip()]
+            SIGNALING_SERVER_PORT = new_port
+            
+            try:
+                import configparser
+                config = configparser.ConfigParser()
+                config.read('server.ini', encoding='utf-8')
+                if 'server' not in config:
+                    config.add_section('server')
+                config['server']['host'] = new_hosts_str
+                config['server']['port'] = str(new_port)
+                with open('server.ini', 'w', encoding='utf-8') as f:
+                    config.write(f)
+                
+                self.show_custom_info("Thành công", "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.", parent=dialog)
+                dialog.destroy()
+            except Exception as e:
+                self.show_custom_error("Lỗi", f"Không thể lưu file server.ini: {e}", parent=dialog)
+
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=30, pady=10)
+        
+        btn_save = tk.Button(
+            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_config
+        )
+        btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        
+        btn_cancel = tk.Button(
+            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
+        )
+        btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+
+    def update_fixed_password_indicator(self):
+        if hasattr(self, 'fixed_pass_indicator'):
+            if self.fixed_password:
+                self.fixed_pass_indicator.config(text="● Mật khẩu cố định: Đang hoạt động")
+            else:
+                self.fixed_pass_indicator.config(text="")
+
+
+    def open_set_fixed_password_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Mật khẩu cố định")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        w = 340
+        h = 240
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        lbl_title = tk.Label(dialog, text="CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        desc_text = "Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)"
+        lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
+        lbl_desc.pack(pady=(0, 10))
+
+        # Entry and show password check
+        entry_frame = tk.Frame(dialog, bg=self.bg_color)
+        entry_frame.pack(fill=tk.X, padx=30)
+
+        show_pass = tk.BooleanVar(value=False)
+        
+        entry_pass = tk.Entry(entry_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, show="*", insertbackground=self.text_white)
+        entry_pass.pack(fill=tk.X, pady=(0, 5))
+        if self.fixed_password:
+            entry_pass.insert(0, self.fixed_password)
+
+        def toggle_password():
+            if show_pass.get():
+                entry_pass.config(show="")
+            else:
+                entry_pass.config(show="*")
+
+        chk_show = tk.Checkbutton(
+            dialog, text="Hiển thị mật khẩu", font=("Segoe UI", 8),
+            variable=show_pass, onvalue=True, offvalue=False,
+            command=toggle_password, bg=self.bg_color, fg=self.text_gray,
+            activebackground=self.bg_color, activeforeground=self.text_white,
+            selectcolor=self.bg_color, bd=0, highlightthickness=0
+        )
+        chk_show.pack(pady=(0, 15))
+
+        def save_password():
+            new_pass = entry_pass.get().strip()
+            self.save_fixed_password(new_pass)
+            self.update_fixed_password_indicator()
+            
+            if new_pass:
+                self.show_custom_info("Thành công", "Đã lưu mật khẩu cố định thành công!", parent=dialog)
+            else:
+                self.show_custom_info("Thành công", "Đã tắt mật khẩu cố định thành công!", parent=dialog)
+            dialog.destroy()
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=30, pady=(5, 10))
+
+        btn_save = tk.Button(
+            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_password
+        )
+        btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        btn_cancel = tk.Button(
+            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
+        )
+        btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+
+    def is_startup_enabled(self):
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        key_name = "RemoteDesktopP2P"
+        approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
+            try:
+                value, _ = winreg.QueryValueEx(key, key_name)
+                winreg.CloseKey(key)
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return False
+            
+            # Check if StartupApproved has disabled it (Windows 11)
+            try:
+                approved_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_key_path, 0, winreg.KEY_READ)
+                approved_val, _ = winreg.QueryValueEx(approved_key, key_name)
+                winreg.CloseKey(approved_key)
+                # First byte: 02=enabled, 03/06=disabled
+                if isinstance(approved_val, bytes) and len(approved_val) >= 1 and approved_val[0] != 0x02:
+                    return False
+            except FileNotFoundError:
+                pass  # No approved entry = not blocked
+            except Exception:
+                pass
+            
+            return True
+        except Exception:
+            return False
+
+
+    def toggle_startup(self):
+        import winreg
+        import sys
+        import os
+        
+        enabled = self.startup_var.get()
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        key_name = "RemoteDesktopP2P"
+        approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+        
+        if getattr(sys, 'frozen', False):
+            exe_path = sys.executable
+        else:
+            exe_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+            
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
+            if enabled:
+                winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, exe_path)
+                # Mark as Enabled in StartupApproved (required for Windows 11)
+                try:
+                    approved_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, approved_key_path)
+                    # 12 bytes: first byte 02 = enabled
+                    enabled_value = b'\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                    winreg.SetValueEx(approved_key, key_name, 0, winreg.REG_BINARY, enabled_value)
+                    winreg.CloseKey(approved_key)
+                    print("[Startup] Set StartupApproved = Enabled for Windows 11")
+                except Exception as e:
+                    print(f"[Startup] Warning: Could not set StartupApproved: {e}")
+                print(f"[Startup] Enabled run on startup: {exe_path}")
+                self.show_custom_info("Thành công", "Đã bật tính năng chạy khi mở máy thành công!")
+            else:
+                try:
+                    winreg.DeleteValue(key, key_name)
+                except FileNotFoundError:
+                    pass
+                # Also remove from StartupApproved
+                try:
+                    approved_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_key_path, 0, winreg.KEY_ALL_ACCESS)
+                    winreg.DeleteValue(approved_key, key_name)
+                    winreg.CloseKey(approved_key)
+                except Exception:
+                    pass
+                self.show_custom_info("Thành công", "Đã tắt tính năng chạy khi mở máy thành công!")
+            winreg.CloseKey(key)
+        except Exception as e:
+            print(f"[Startup] Failed to modify registry: {e}")
+            self.show_custom_error("Thất bại", f"Không thể thay đổi cài đặt Registry: {e}")
+            self.startup_var.set(not enabled)
+
+
+
+    def open_zalo(self):
+        import webbrowser
+        
+        # Clean up dead viewer processes
+        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        
+        phone_val = ""
+        comp_name = ""
+        
+        if len(self.active_viewers) == 1:
+            phone_val = self.active_viewers[0]["zalo_phone"]
+            comp_name = self.active_viewers[0]["computer_name"]
+        elif len(self.active_viewers) > 1:
+            # Multiple active sessions
+            dialog = tk.Toplevel(self)
+            dialog.title("Liên hệ Zalo")
+            dialog.resizable(False, False)
+            dialog.configure(bg=self.bg_color)
+            dialog.transient(self)
+            dialog.grab_set()
+            
+            # Center dialog
+            dialog.update_idletasks()
+            w = 340
+            h = 80 + len(self.active_viewers) * 45
+            x = self.winfo_x() + (self.winfo_width() - w) // 2
+            y = self.winfo_y() + (self.winfo_height() - h) // 2
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            
+            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title.pack(pady=(12, 10))
+            
+            for v in self.active_viewers:
+                c_name = v["computer_name"] or "Không rõ"
+                p_val = v["zalo_phone"]
+                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                
+                def contact(val=p_val, name=c_name):
+                    dialog.destroy()
+                    if val:
+                        webbrowser.open(f"https://zalo.me/{val}")
+                    else:
+                        self.show_zalo_error_popup(name)
+                        
+                btn = tk.Button(
+                    dialog, text=display_text, font=("Segoe UI", 9),
+                    fg=self.text_white, bg=self.card_color, activebackground=self.entry_bg,
+                    relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=contact
+                )
+                btn.pack(fill=tk.X, padx=30, pady=4)
+            return
+        else:
+            phone_val = self.load_zalo_phone_from_xml()
+            comp_name = ""
+            
+        if phone_val:
+            webbrowser.open(f"https://zalo.me/{phone_val}")
+        else:
+            self.show_zalo_error_popup(comp_name)
+
+
+    def show_zalo_error_popup(self, comp_name=""):
+        dialog = tk.Toplevel(self)
+        dialog.title("Liên hệ Zalo")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        w = 340
+        h = 160
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        title_text = "LIÊN HỆ ZALO"
+        if comp_name:
+            title_text = f"ZALO: {comp_name.upper()}"
+            
+        lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        lbl_phone = tk.Label(dialog, text="Chưa có liên lạc", font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
+        lbl_phone.pack(pady=(5, 15))
+
+        btn_ok = tk.Button(
+            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
+        )
+        btn_ok.pack()
+
+
+    def open_phone_dialog(self):
+        # Get phone number
+        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        
+        phone_val = ""
+        comp_name = ""
+        
+        if len(self.active_viewers) == 1:
+            phone_val = self.active_viewers[0]["zalo_phone"]
+            comp_name = self.active_viewers[0]["computer_name"]
+        elif len(self.active_viewers) > 1:
+            # Let them select which computer's phone number to view
+            dialog = tk.Toplevel(self)
+            dialog.title("Chọn đối tác")
+            dialog.resizable(False, False)
+            dialog.configure(bg=self.bg_color)
+            dialog.transient(self)
+            dialog.grab_set()
+            
+            # Center dialog
+            dialog.update_idletasks()
+            w = 340
+            h = 80 + len(self.active_viewers) * 45
+            x = self.winfo_x() + (self.winfo_width() - w) // 2
+            y = self.winfo_y() + (self.winfo_height() - h) // 2
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            
+            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title.pack(pady=(12, 10))
+            
+            for v in self.active_viewers:
+                c_name = v["computer_name"] or "Không rõ"
+                p_val = v["zalo_phone"]
+                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                
+                def show_phone(val=p_val, name=c_name):
+                    dialog.destroy()
+                    self.show_phone_number_popup(val, name)
+                    
+                btn = tk.Button(
+                    dialog, text=display_text, font=("Segoe UI", 9),
+                    fg=self.text_white, bg=self.card_color, activebackground=self.entry_bg,
+                    relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=show_phone
+                )
+                btn.pack(fill=tk.X, padx=30, pady=4)
+            return
+        else:
+            phone_val = self.load_zalo_phone_from_xml()
+            comp_name = ""
+            
+        self.show_phone_number_popup(phone_val, comp_name)
+
+
+    def show_phone_number_popup(self, phone_val, comp_name=""):
+        dialog = tk.Toplevel(self)
+        dialog.title("Điện thoại liên hệ")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        w = 340
+        h = 160
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        title_text = "SỐ ĐIỆN THOẠI LIÊN HỆ"
+        if comp_name:
+            title_text = f"ĐIỆN THOẠI: {comp_name.upper()}"
+            
+        lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title.pack(pady=(15, 10))
+
+        display_text = phone_val if phone_val else "Chưa có liên lạc"
+        lbl_phone = tk.Label(dialog, text=display_text, font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
+        lbl_phone.pack(pady=(5, 15))
+
+        btn_ok = tk.Button(
+            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
+        )
+        btn_ok.pack()
+
+
+    def show_about_dialog(self):
+        # Tạo cửa sổ Toplevel mới đóng vai trò Modal
+        about = tk.Toplevel(self)
+        about.title("About")
+        about.resizable(False, False)
+        about.configure(bg=self.bg_color)
+        
+        # Thiết lập thuộc tính Modal (nổi lên trên cửa sổ chính và chặn tương tác bên ngoài)
+        about.transient(self)
+        about.grab_set()
+        
+        # Thiết kế giao diện premium cho dialog About
+        title_label = tk.Label(about, text="Easy Remote Desktop", font=("Inter", 13, "bold"), fg=self.text_white, bg=self.bg_color)
+        title_label.pack(pady=(15, 2))
+        
+        ai_label = tk.Label(about, text="AI Pro Version", font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
+        ai_label.pack(pady=(0, 5))
+        
+        contact_label = tk.Label(about, text="Liên hệ: Mr. Tuyến - 0941 261 771", font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
+        contact_label.pack(pady=(0, 15))
+        
+        close_btn = tk.Button(about, text="Đóng", font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
+                              activeforeground=self.text_white, activebackground="#C04242",
+                              bd=0, padx=25, pady=6, cursor="hand2", command=about.destroy)
+        close_btn.pack(pady=(0, 15))
+        
+        # Cập nhật layout để lấy kích thước hình học chính xác
+        about.update_idletasks()
+        
+        # Kích thước cố định của dialog About
+        dialog_w = 320
+        dialog_h = 175
+        
+        # Lấy thông số tọa độ và kích thước của cửa sổ chính UnifiedApp
+        parent_x = self.winfo_x()
+        parent_y = self.winfo_y()
+        parent_w = self.winfo_width()
+        parent_h = self.winfo_height()
+        
+        # Tính toán tọa độ x, y để căn chính xác giữa cửa sổ chính
+        x = parent_x + (parent_w - dialog_w) // 2
+        y = parent_y + (parent_h - dialog_h) // 2
+        
+        # Áp dụng hình học hình chữ nhật căn giữa
+        about.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        
+        # Khóa tương tác của luồng cho đến khi Modal đóng
+        self.wait_window(about)
+
+
+    def query_computer_status(self, clean_id):
+        if clean_id == self.my_id_clean:
+            self.update_saved_computer_status(clean_id, True)
+            return
+
+        sock = getattr(self, 'primary_signaling_socket', None)
+        if sock:
+            try:
+                print(f"[StatusQuery] Đang gửi yêu cầu kiểm tra trạng thái ID: {clean_id}")
+                req = json.dumps({"action": "check_online", "target": clean_id})
+                with self.signaling_lock:
+                    send_msg(sock, req.encode('utf-8'), APP_KEY)
+                
+                # Sau 1.5s nếu đèn LED vẫn là màu xám (chưa có phản hồi) thì tự động chuyển sang màu đỏ (Offline)
+                self.after(1500, lambda cid=clean_id: self.check_and_default_offline(cid))
+            except Exception as e:
+                print(f"[StatusQuery] Lỗi gửi yêu cầu status {clean_id}: {e}")
+                self.update_saved_computer_status(clean_id, False)
+        else:
+            print(f"[StatusQuery] Chưa kết nối Signaling, mặc định {clean_id} là Offline")
+            self.update_saved_computer_status(clean_id, False)
+
+
+    def check_and_default_offline(self, clean_id):
+        if clean_id in self.status_dots_widgets:
+            widgets = self.status_dots_widgets[clean_id]
+            for dot_widget in widgets:
+                try:
+                    if dot_widget.winfo_exists() and dot_widget.cget("fg") == "#8A8A9A":
+                        dot_widget.config(fg="#E05252")  # Đỏ (Offline)
+                except Exception:
+                    pass
+            if hasattr(self, '_reorder_saved_computers_func'):
+                self.after(50, self._reorder_saved_computers_func)
+
+
+    def update_saved_computer_status(self, partner_id, is_online):
+        clean_id = partner_id.replace(" ", "")
+        if clean_id in self.status_dots_widgets:
+            widgets = self.status_dots_widgets[clean_id]
+            status_changed = False
+            for dot_widget in widgets:
+                try:
+                    if dot_widget.winfo_exists():
+                        current_color = dot_widget.cget("fg")
+                        new_color = "#00F5D4" if is_online else "#E05252"
+                        if current_color != new_color:
+                            dot_widget.config(fg=new_color)
+                            status_changed = True
+                except Exception:
+                    pass
+            if status_changed and hasattr(self, '_reorder_saved_computers_func'):
+                self.after(50, self._reorder_saved_computers_func)
+
+    def show_custom_info(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Info] {title}: {message}")
+            return
+        import tkinter as tk
+        p = parent if parent else self
+        
+        dialog = tk.Toplevel(p)
+        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
+        dialog.transient(p)
+        dialog.grab_set()
+        
+        # Center calculations relative to parent
+        dialog.update_idletasks()
+        w = 400
+        h = 180
+        x = p.winfo_x() + (p.winfo_width() - w) // 2
+        y = p.winfo_y() + (p.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        
+        # Content frame
+        content_frame = tk.Frame(dialog, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
+        
+        # Icon & Message side-by-side
+        icon_lbl = tk.Label(content_frame, text="ℹ", font=("Segoe UI", 22), fg=self.btn_color, bg=self.bg_color)
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
+        
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
+        
+        # OK Button at bottom
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
+        
+        btn_ok = tk.Button(
+            btn_frame, text="OK", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
+        )
+        btn_ok.pack(side=tk.RIGHT)
+        
+        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        self.wait_window(dialog)
+
+
+    def show_custom_error(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Error] {title}: {message}", file=sys.stderr)
+            return
+        import tkinter as tk
+        p = parent if parent else self
+        
+        dialog = tk.Toplevel(p)
+        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(p)
+        dialog.grab_set()
+        
+        # Center calculations relative to parent
+        dialog.update_idletasks()
+        w = 400
+        h = 180
+        x = p.winfo_x() + (p.winfo_width() - w) // 2
+        y = p.winfo_y() + (p.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        
+        # Content frame
+        content_frame = tk.Frame(dialog, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
+        
+        # Icon & Message side-by-side
+        icon_lbl = tk.Label(content_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color)
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
+        
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
+        
+        # OK Button at bottom
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
+        
+        btn_ok = tk.Button(
+            btn_frame, text="OK", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg="#E05252", activebackground="#C0392B",
+            relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
+        )
+        btn_ok.pack(side=tk.RIGHT)
+        
+        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        self.wait_window(dialog)
+
+
+    def _show_lan_error_dialog(self, public_ip=""):
+        if getattr(self, 'is_headless', False):
+            print("[LAN Error] Kết nối LAN thất bại - Firewall có thể đang chặn kết nối.")
+            return
+        import tkinter as tk
+
+        dialog = tk.Toplevel(self)
+        dialog.withdraw()
+        dialog.title("Lỗi kết nối mạng LAN")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        W = 460
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - W) // 2
+        y = self.winfo_y() + (self.winfo_height() - 420) // 2
+        dialog.geometry(f"{W}x420+{x}+{y}")
+        dialog.deiconify()
+
+        # ── HEADER ──────────────────────────────────────────────
+        hdr = tk.Frame(dialog, bg="#C0392B", height=5)
+        hdr.pack(fill=tk.X)
+
+        title_frame = tk.Frame(dialog, bg=self.bg_color)
+        title_frame.pack(fill=tk.X, padx=20, pady=(14, 0))
+
+        tk.Label(title_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
+        title_col = tk.Frame(title_frame, bg=self.bg_color)
+        title_col.pack(side=tk.LEFT, fill=tk.BOTH)
+        tk.Label(title_col, text="Kết nối mạng LAN thất bại", font=("Segoe UI", 12, "bold"),
+                 fg="#E05252", bg=self.bg_color, anchor="w").pack(anchor="w")
+        tk.Label(title_col, text="Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+                 font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
+
+        # ── SEPARATOR ───────────────────────────────────────────
+        tk.Frame(dialog, bg=self.divider_color, height=1).pack(fill=tk.X, padx=20, pady=(12, 0))
+
+        # ── THÔNG TIN KỸ THUẬT ──────────────────────────────────
+        info_frame = tk.Frame(dialog, bg=self.entry_bg, bd=0, highlightthickness=1, highlightbackground=self.divider_color)
+        info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
+
+        tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
+                 fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
+
+        rows = [
+            ("Public IP phát hiện", public_ip if public_ip else "N/A"),
+            ("Trạng thái",          "Cùng Public IP → cùng Router/Mạng nội bộ"),
+            ("Phương thức thử",     "Kết nối TCP trực tiếp qua Local IP (LAN)"),
+            ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
+        ]
+        for label, value in rows:
+            row = tk.Frame(info_frame, bg=self.entry_bg)
+            row.pack(fill=tk.X, padx=12, pady=2)
+            tk.Label(row, text=f"{label}:", font=("Segoe UI", 8), fg=self.text_gray,
+                     bg=self.entry_bg, width=22, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=value, font=("Segoe UI", 8, "bold"), fg=self.text_white,
+                     bg=self.entry_bg, anchor="w", wraplength=240, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X)
+        tk.Frame(info_frame, bg=self.entry_bg, height=6).pack()
+
+        # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
+        tk.Label(dialog, text="🔧  Cách khắc phục", font=("Segoe UI", 9, "bold"),
+                 fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
+
+        steps = [
+            ("1", "Kiểm tra Tường lửa Windows",
+             "Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network."),
+            ("2", "Kiểm tra phần mềm diệt virus / VPN",
+             "Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ."),
+            ("3", "Kiểm tra cổng mạng đang dùng",
+             f"Ứng dụng dùng cổng {BOUND_PORT}. Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall."),
+        ]
+        for num, title_step, desc in steps:
+            sf = tk.Frame(dialog, bg=self.bg_color)
+            sf.pack(fill=tk.X, padx=20, pady=2)
+            badge = tk.Label(sf, text=num, font=("Segoe UI", 8, "bold"), fg=self.bg_color,
+                             bg=self.btn_color, width=2, height=1)
+            badge.pack(side=tk.LEFT, anchor="n", padx=(0, 8), pady=2)
+            txt_col = tk.Frame(sf, bg=self.bg_color)
+            txt_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            tk.Label(txt_col, text=title_step, font=("Segoe UI", 8, "bold"),
+                     fg=self.text_white, bg=self.bg_color, anchor="w").pack(anchor="w")
+            tk.Label(txt_col, text=desc, font=("Segoe UI", 8), fg=self.text_gray,
+                     bg=self.bg_color, anchor="w", wraplength=360, justify=tk.LEFT).pack(anchor="w")
+
+        # ── BUTTON ──────────────────────────────────────────────
+        tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(10, 0))
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
+        tk.Button(
+            btn_frame, text="Đã hiểu", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg="#E05252", activebackground="#C0392B",
+            relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
+            command=dialog.destroy
+        ).pack(side=tk.RIGHT)
+
+        self.wait_window(dialog)
+
+
+    def show_custom_question(self, title, message, parent=None):
+        if getattr(self, 'is_headless', False):
+            print(f"[Question] {title}: {message} -> Auto-confirmed (Yes)")
+            return True
+
+        import tkinter as tk
+        p = parent if parent else self
+        
+        dialog = tk.Toplevel(p)
+        dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(p)
+        dialog.grab_set()
+        
+        # Center calculations relative to parent
+        dialog.update_idletasks()
+        w = 400
+        h = 180
+        x = p.winfo_x() + (p.winfo_width() - w) // 2
+        y = p.winfo_y() + (p.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
+        
+        # Content frame
+        content_frame = tk.Frame(dialog, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
+        
+        # Icon & Message side-by-side
+        icon_lbl = tk.Label(content_frame, text="❓", font=("Segoe UI", 22), fg="#F39C12", bg=self.bg_color)
+        icon_lbl.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15), pady=(2, 0))
+        
+        msg_lbl = tk.Label(content_frame, text=message, font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color, wraplength=310, justify=tk.LEFT)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.N)
+        
+        result = [False]
+        
+        def on_yes():
+            result[0] = True
+            dialog.destroy()
+            
+        def on_no():
+            result[0] = False
+            dialog.destroy()
+            
+        # Button frame at bottom
+        btn_frame = tk.Frame(dialog, bg=self.bg_color)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
+        
+        # Nút "Không"
+        btn_no = tk.Button(
+            btn_frame, text="Không", font=("Segoe UI", 9, "bold"),
+            fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
+            relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_no
+        )
+        btn_no.pack(side=tk.RIGHT, padx=(4, 0))
+        
+        # Nút "Có"
+        btn_yes = tk.Button(
+            btn_frame, text="Có", font=("Segoe UI", 9, "bold"),
+            fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
+            relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_yes
+        )
+        btn_yes.pack(side=tk.RIGHT, padx=(0, 4))
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_no)
+        
+        # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
+        self.wait_window(dialog)
+        return result[0]
+
+
+    def update_status(self, text, is_error=False, blink=False, is_success=False):
+        def _do_update():
+            self.status_var.set(f"Trạng thái: {text}")
+            
+            if not hasattr(self, 'lbl_status'):
+                return
+                
+            if hasattr(self, '_blink_job') and self._blink_job:
+                self.after_cancel(self._blink_job)
+                self._blink_job = None
+                
+            if blink:
+                self.lbl_status.config(fg="#FF4D4D")
+                self._blink_status()
+            elif is_error:
+                self.lbl_status.config(fg="#FF4D4D")
+            elif is_success or "thành công" in text.lower():
+                self.lbl_status.config(fg="#2ECC71")  # Xanh lục (Emerald Green)
+            else:
+                self.lbl_status.config(fg="#8A8A9A")
+        
+        self.after(0, _do_update)
+
+
+    def _poll_signaling_status(self):
+        """Polling loop chạy trên main Tkinter thread - kiểm tra Signaling mỗi 3s và cập nhật status UI đáng tin cậy."""
+        if not getattr(self, 'running_server', True):
+            return
+        try:
+            current_status = self.status_var.get()
+            # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
+            is_pending = any(kw in current_status for kw in [
+                "Không thể kết nối Signaling",
+                "Chưa kết nối Signaling",
+                "Đang kết nối Signaling",
+                "Đang thử lại",
+                "chế độ nền",
+                "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
+            ])
+            if is_pending and getattr(self, 'signaling_sockets', {}):
+                self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối.")
+        except Exception:
+            pass
+        self.after(3000, self._poll_signaling_status)
+
+
+    def _blink_status(self):
+        if not hasattr(self, 'lbl_status'): return
+        current_color = self.lbl_status.cget("fg")
+        next_color = self.entry_bg if current_color == "#FF4D4D" else "#FF4D4D"
+        self.lbl_status.config(fg=next_color)
+        self._blink_job = self.after(500, self._blink_status)
+        
+    # Background Network Initialization
+
+    def add_firewall_rule_for_app(self):
+        try:
+            import sys, os, subprocess
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
+            rule_name = "EasyRemoteDesktop_P2P"
+            subprocess.run(f'netsh advfirewall firewall delete rule name="{rule_name}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow program="{exe_path}" enable=yes profile=any', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
+    def configure_uac_registry(self):
+        if sys.platform != "win32":
+            return
+        try:
+            import winreg
+            path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+            winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+            winreg.CloseKey(key)
+            print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
+        except PermissionError:
+            # Không có quyền Admin → UAC vẫn sẽ dùng Secure Desktop → cảnh báo người dùng ở console/log
+            print("[Host] WARNING: No Admin rights → PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
+        except Exception as e:
+            print(f"[Host] Failed to configure registry for UAC: {e}")
+
+
+    def wake_on_lan(self, mac_str):
+        # mac_str can be multiple MACs separated by comma
+        for m in mac_str.split(','):
+            m = m.strip()
+            if not m: continue
+            try:
+                # Remove common separators
+                mac = m.replace(':', '').replace('-', '').replace('.', '')
+                if len(mac) != 12:
+                    continue
+                data = bytes.fromhex('F' * 12 + mac * 16)
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                try:
+                    sock.sendto(data, ('255.255.255.255', 9))
+                except:
+                    pass
+                # Try subnet broadcasts
+                try:
+                    local_ips = getattr(self, 'local_ip', get_local_ip()).split(',')
+                    for lip in local_ips:
+                        lip = lip.strip()
+                        if lip and not lip.startswith('127.'):
+                            parts = lip.split('.')
+                            if len(parts) == 4:
+                                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                                sock.sendto(data, (subnet_broadcast, 9))
+                except:
+                    pass
+                sock.close()
+                self.update_status(f"Đã gửi Wake-On-Lan tới MAC {m}")
+            except Exception as e:
+                print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
+
+    # ==================== LAN DISCOVERY (UDP Broadcast) ====================
+
+    def on_close_window(self):
+        # Lưu tọa độ hiện tại trước khi ẩn cửa sổ
+        self.save_window_position()
+        
+        # Nếu tùy chọn "Chạy khi mở máy" được bật thì thu nhỏ xuống system tray
+        if getattr(self, 'startup_var', None) and self.startup_var.get():
+            self.withdraw()
+            print("[Tray] App minimized to system tray.")
+        else:
+            # Nếu không, đóng hoàn toàn ứng dụng
+            self.destroy()
+
+
+    def setup_tray_icon(self):
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            return
+            
+        try:
+            # Tải icon từ file png nếu tồn tại, ngược lại vẽ icon mặc định
+            icon_path = os.path.join(app_dir, "app_icon.png")
+            image = None
+            if os.path.exists(icon_path):
+                try:
+                    image = Image.open(icon_path)
+                except Exception as e:
+                    print(f"[Tray] Không thể mở file app_icon.png: {e}")
+            
+            if image is None:
+                image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+                dc = ImageDraw.Draw(image)
+                dc.ellipse((4, 4, 60, 60), fill="#1E2022", outline="#00ADB5", width=3)
+                dc.ellipse((16, 16, 48, 48), fill="#00ADB5")
+            
+            menu = pystray.Menu(
+                item('Hiện (Show)', self.show_gui_from_tray, default=True),
+                item('Thoát (Exit)', self.exit_from_tray)
+            )
+            
+            self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, "Easy Remote Desktop", menu)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            print("[Tray] System tray icon started successfully.")
+        except Exception as e:
+            print(f"[Tray] Failed to initialize system tray icon: {e}")
+
+
+
+
+    def show_gui_from_tray(self, icon=None, item=None):
+        self.after(0, self._restore_window)
+        
+
+    def _restore_window(self):
+        if self.state() == "normal":
+            try:
+                if self.attributes("-alpha") == 1.0:
+                    self.lift()
+                    self.focus_force()
+                    return
+            except:
+                pass
+                
+        import re
+        geom = self.geometry()
+        m = re.match(r"(\d+)x(\d+)([-+]\d+)([-+]\d+)", geom)
+        if m:
+            end_w, end_h = int(m.group(1)), int(m.group(2))
+            end_x, end_y = int(m.group(3)), int(m.group(4))
+        else:
+            end_w, end_h, end_x, end_y = 1000, 700, 100, 100 # Fallback
+            
+        self.geometry(f"{end_w}x{end_h}+{end_x}+{end_y}")
+        try:
+            self.attributes("-alpha", 1.0)
+        except:
+            pass
+            
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        print("[Tray] Main window restored.")
+        
+
+    def exit_from_tray(self, icon=None, item=None):
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            try:
+                self.tray_icon.visible = False
+                self.tray_icon.stop()
+            except:
+                pass
+        self.after(0, self.destroy)
+
+
+    def destroy(self):
+        # Force terminate in a background thread to prevent any hanging issues on Windows 11
+        # Force terminate in a background thread to prevent any hanging issues on Windows 11
+        def force_terminate():
+            import time
+            time.sleep(1.0)
+            try:
+                import os, subprocess
+                subprocess.run(f"taskkill /F /PID {os.getpid()} /T", shell=True, creationflags=0x08000000)
+            except:
+                pass
+            try:
+                import os
+                os._exit(0)
+            except:
+                pass
+                
+        import threading
+        threading.Thread(target=force_terminate, daemon=True).start()
+
+        # Graceful exit on closing window
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            try:
+                self.tray_icon.visible = False
+                self.tray_icon.stop()
+            except:
+                pass
+        self.save_window_position()
+        self.running_server = False
+        if getattr(self, 'server_socket', None):
+            try: self.server_socket.close()
+            except: pass
+        
+        if hasattr(self, 'signaling_sockets'):
+            for sock in self.signaling_sockets.values():
+                try: force_close_socket(sock)
+                except: pass
+                
+        # Terminate any running child processes (viewers)
+        if hasattr(self, 'active_viewers'):
+            for viewer in self.active_viewers:
+                try:
+                    p = viewer.get("process")
+                    if p and p.is_alive():
+                        p.terminate()
+                        p.join(timeout=0.5)
+                except:
+                    pass
+                
+        try:
+            super().destroy()
+        except:
+            pass
+            
+        try:
+            import os
+            os._exit(0)
+        except:
+            pass
+
+
+if __name__ == '__main__':
+    import multiprocessing as mp
+    mp.freeze_support()
+    
+    import sys
+    import ctypes
+    import time
+    
+
+    is_headless = "--headless" in sys.argv
+    is_clipboard_agent = "--clipboard-agent" in sys.argv
+    
+    # --- Chế độ Clipboard Agent: Chỉ lắng nghe Pipe và nạp Clipboard, thoát sớm ---
+    if is_clipboard_agent:
+        if sys.platform == "win32":
+            import win32event, win32api, winerror
+            
+            # Mutex riêng cho Clipboard Agent (index 3) để tránh chạy trùng
+            try:
+                sid = ctypes.c_ulong()
+                ctypes.windll.kernel32.ProcessIdToSessionId(
+                    ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)
+                )
+                session_id = sid.value
+            except:
+                session_id = 1
+                
+            mutex_name = f"Global\\AntigravityP2PClipboardAgentMutex_{session_id}"
+            try:
+                mutex = win32event.CreateMutex(None, False, mutex_name)
+            except Exception as e:
+                # Fallback to Local namespace if Global access is denied (common for non-admin users)
+                mutex_name = f"Local\\AntigravityP2PClipboardAgentMutex_{session_id}"
+                try:
+                    mutex = win32event.CreateMutex(None, False, mutex_name)
+                except Exception as ex:
+                    # If even Local fails, print warning but proceed
+                    print(f"[ClipboardAgent] Error creating Local mutex: {ex}", flush=True)
+                    mutex = None
+            
+            if mutex and win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                sys.exit(0)
+        
+        # Redirect stdout/stderr cho clipboard agent mode
+        try:
+            log_path = os.path.join(app_dir, "clipboard_agent.log")
+            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stderr = sys.stdout
+        except:
+            pass
+        
+        run_clipboard_agent_mode()  # Vòng lặp vô tận, không return
+        sys.exit(0)
+    
+
+    if sys.platform == "win32":
+        import win32event, win32api, winerror, win32security
+        
+        def get_session_id():
+            try:
+                sid = ctypes.c_ulong()
+                if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+                    return sid.value
+            except:
+                pass
+            return 1
+            
+        def get_desktop_name():
+            try:
+                h_desk = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+                name = ctypes.create_unicode_buffer(256)
+                size = ctypes.c_ulong(256)
+                if ctypes.windll.user32.GetUserObjectInformationW(h_desk, 2, name, size, None):
+                    return name.value.lower()
+            except:
+                pass
+            return "default"
+            
+        session_id = get_session_id()
+        desktop_name = get_desktop_name()
+        
+        if is_headless:
+            # Service headless helper uses mutex index 1
+            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"
+            mutex = win32event.CreateMutex(None, False, mutex_name)
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                sys.exit(0)
+        else:
+            # GUI client uses mutex index 2
+            mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_2_{session_id}_{desktop_name}"
+            
+            is_delay = "--delay-startup" in sys.argv
+            wait_time = 0
+            while True:
+                mutex = win32event.CreateMutex(None, False, mutex_name)
+                if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                    if is_delay and wait_time < 100:
+                        win32api.CloseHandle(mutex)
+                        time.sleep(0.1)
+                        wait_time += 1
+                        continue
+                    else:
+                        # Topmost native message dialog
+                        msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
+                        msg_title = "Thông báo"
+                        # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
+                        ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
+                        
+                        # Signal restore event to primary GUI instance
+                        restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+                        try:
+                            h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, restore_event_name)
+                            if h_event:
+                                win32event.SetEvent(h_event)
+                                win32api.CloseHandle(h_event)
+                        except Exception as e:
+                            print(f"Failed to signal restore event: {e}")
+                        sys.exit(0)
+                else:
+                    break
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            try: ctypes.windll.user32.SetProcessDPIAware()
+            except: pass
+            
+    try:
+        app = UnifiedApp()
+        app.mainloop()
+        with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
+            f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
+        # Keep the process alive just in case
+        if "--headless" in sys.argv:
+            import time
+            while True:
+                time.sleep(1)
+    except BaseException as e:
+        import traceback
+        try:
+            with open("C:\\Apps\\P2P\\agent_crash.txt", "w", encoding="utf-8") as f:
+                f.write(f"Exception: {e}\n\n")
+                traceback.print_exc(file=f)
+                f.flush()
+        except:
+            pass
+        raise

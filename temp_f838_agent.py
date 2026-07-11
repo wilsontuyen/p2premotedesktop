@@ -1,9 +1,9 @@
 ﻿"""
-Clipboard Agent - Chß║íy ß╗ƒ quyß╗ün User th╞░ß╗¥ng.
-Lß║»ng nghe Named Pipe tß╗½ Service (headless app) ─æß╗â nhß║¡n ─æ╞░ß╗¥ng dß║½n file
-v├á nß║íp v├áo Clipboard hß╗ç thß╗æng bß║▒ng win32clipboard.
+Clipboard Agent - Chạy ở quyền User thường.
+Lắng nghe Named Pipe từ Service (headless app) để nhận đường dẫn file
+và nạp vào Clipboard hệ thống bằng win32clipboard.
 
-Kiß║┐n tr├║c: Service (SYSTEM) -> Named Pipe -> Agent (User) -> Clipboard
+Kiến trúc: Service (SYSTEM) -> Named Pipe -> Agent (User) -> Clipboard
 """
 
 import os
@@ -12,13 +12,13 @@ import time
 import threading
 import logging
 
-# X├íc ─æß╗ïnh th╞░ mß╗Ñc ß╗⌐ng dß╗Ñng
+# Xác định thư mục ứng dụng
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Cß║Ñu h├¼nh logging
+# Cấu hình logging
 log_file = os.path.join(app_dir, "agent.log")
 logging.basicConfig(
     filename=log_file,
@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 def log_print(msg):
-    """Log ra cß║ú file v├á console."""
+    """Log ra cả file và console."""
     log.info(msg)
     try:
         print(msg)
@@ -38,26 +38,26 @@ def log_print(msg):
         pass
 
 
-# T├¬n Named Pipe m├á Service sß║╜ gß╗¡i ─æ╞░ß╗¥ng dß║½n file qua
+# Tên Named Pipe mà Service sẽ gửi đường dẫn file qua
 PIPE_NAME = r"\\.\pipe\RemoteDesktopClipboardPipe"
 
 
 def set_clipboard_files(file_path):
     """
-    Nß║íp ─æ╞░ß╗¥ng dß║½n file v├áo Clipboard hß╗ç thß╗æng theo chuß║⌐n CF_HDROP.
-    Sß╗¡ dß╗Ñng win32clipboard (pywin32).
+    Nạp đường dẫn file vào Clipboard hệ thống theo chuẩn CF_HDROP.
+    Sử dụng win32clipboard (pywin32).
     """
     try:
         import win32clipboard
 
         if not os.path.exists(file_path):
-            log_print(f"[Agent] File kh├┤ng tß╗ôn tß║íi, bß╗Å qua: {file_path}")
+            log_print(f"[Agent] File không tồn tại, bỏ qua: {file_path}")
             return False
 
         abs_path = os.path.abspath(file_path)
-        log_print(f"[Agent] ─Éang nß║íp file v├áo Clipboard: {abs_path}")
+        log_print(f"[Agent] Đang nạp file vào Clipboard: {abs_path}")
 
-        # Retry loop ─æß╗â chß╗¥ ß╗⌐ng dß╗Ñng kh├íc nhß║ú kh├│a Clipboard
+        # Retry loop để chờ ứng dụng khác nhả khóa Clipboard
         opened = False
         for attempt in range(10):
             try:
@@ -68,71 +68,71 @@ def set_clipboard_files(file_path):
                 time.sleep(0.05)
 
         if not opened:
-            log_print("[Agent] Lß╗ùi: Kh├┤ng thß╗â OpenClipboard sau 10 lß║ºn thß╗¡.")
+            log_print("[Agent] Lỗi: Không thể OpenClipboard sau 10 lần thử.")
             return False
 
         try:
             win32clipboard.EmptyClipboard()
-            # SetClipboardFiles nhß║¡n mß╗Öt tuple chß╗⌐a c├íc ─æ╞░ß╗¥ng dß║½n file
+            # SetClipboardFiles nhận một tuple chứa các đường dẫn file
             win32clipboard.SetClipboardFiles((abs_path,))
             
-            # ─Éß║╖t Preferred DropEffect l├á 2 (DROPEFFECT_MOVE) ─æß╗â file bß╗ï di chuyß╗ân thay v├¼ copy
+            # Đặt Preferred DropEffect là 2 (DROPEFFECT_MOVE) để file bị di chuyển thay vì copy
             try:
                 cf_drop_effect = win32clipboard.RegisterClipboardFormat("Preferred DropEffect")
                 import struct
-                # ─É├│ng g├│i gi├í trß╗ï 2 (DWORD)
+                # Đóng gói giá trị 2 (DWORD)
                 win32clipboard.SetClipboardData(cf_drop_effect, struct.pack("I", 2))
             except Exception as e:
-                log_print(f"[Agent] Kh├┤ng thß╗â ─æß║╖t Preferred DropEffect: {e}")
+                log_print(f"[Agent] Không thể đặt Preferred DropEffect: {e}")
                 
-            log_print(f"[Agent] ─É├ú nß║íp th├ánh c├┤ng file v├áo Clipboard: {abs_path}")
+            log_print(f"[Agent] Đã nạp thành công file vào Clipboard: {abs_path}")
             return True
         finally:
             win32clipboard.CloseClipboard()
 
     except ImportError:
-        log_print("[Agent] Lß╗ùi: Th╞░ viß╗çn win32clipboard (pywin32) ch╞░a ─æ╞░ß╗úc c├ái ─æß║╖t!")
+        log_print("[Agent] Lỗi: Thư viện win32clipboard (pywin32) chưa được cài đặt!")
         return False
     except Exception as e:
-        log_print(f"[Agent] Lß╗ùi khi nß║íp file v├áo Clipboard: {e}")
+        log_print(f"[Agent] Lỗi khi nạp file vào Clipboard: {e}")
         return False
 
 
 def pipe_listener_loop():
     """
-    V├▓ng lß║╖p ch├¡nh: Li├¬n tß╗Ñc kß║┐t nß╗æi tß╗¢i Named Pipe v├á lß║»ng nghe
-    ─æ╞░ß╗¥ng dß║½n file tß╗½ Service.
+    Vòng lặp chính: Liên tục kết nối tới Named Pipe và lắng nghe
+    đường dẫn file từ Service.
     """
     import win32file
     import win32pipe
 
-    log_print(f"[Agent] Bß║»t ─æß║ºu lß║»ng nghe Named Pipe: {PIPE_NAME}")
+    log_print(f"[Agent] Bắt đầu lắng nghe Named Pipe: {PIPE_NAME}")
 
     while True:
         pipe_handle = None
         try:
-            # Chß╗¥ ─æß║┐n khi Pipe sß║╡n s├áng (Service ─æ├ú tß║ío)
-            log_print(f"[Agent] ─Éang chß╗¥ kß║┐t nß╗æi tß╗¢i Pipe...")
+            # Chờ đến khi Pipe sẵn sàng (Service đã tạo)
+            log_print(f"[Agent] Đang chờ kết nối tới Pipe...")
 
             while True:
                 try:
                     pipe_handle = win32file.CreateFile(
                         PIPE_NAME,
                         win32file.GENERIC_READ,
-                        0,        # Kh├┤ng chia sß║╗
-                        None,     # Security Attributes mß║╖c ─æß╗ïnh (─æß╗º cho User th╞░ß╗¥ng)
+                        0,        # Không chia sẻ
+                        None,     # Security Attributes mặc định (đủ cho User thường)
                         win32file.OPEN_EXISTING,
                         0,
                         None
                     )
-                    break  # Kß║┐t nß╗æi th├ánh c├┤ng
+                    break  # Kết nối thành công
                 except Exception:
-                    # Pipe ch╞░a tß╗ôn tß║íi hoß║╖c bß║¡n, chß╗¥ rß╗ôi thß╗¡ lß║íi
+                    # Pipe chưa tồn tại hoặc bận, chờ rồi thử lại
                     time.sleep(1.0)
 
-            log_print(f"[Agent] ─É├ú kß║┐t nß╗æi th├ánh c├┤ng tß╗¢i Pipe.")
+            log_print(f"[Agent] Đã kết nối thành công tới Pipe.")
 
-            # ─Éß║╖t chß║┐ ─æß╗Ö ─æß╗ìc message (byte mode)
+            # Đặt chế độ đọc message (byte mode)
             win32pipe.SetNamedPipeHandleState(
                 pipe_handle,
                 win32pipe.PIPE_READMODE_MESSAGE,
@@ -140,44 +140,44 @@ def pipe_listener_loop():
                 None
             )
 
-            # V├▓ng lß║╖p ─æß╗ìc dß╗» liß╗çu tß╗½ Pipe
+            # Vòng lặp đọc dữ liệu từ Pipe
             while True:
                 try:
                     hr, data = win32file.ReadFile(pipe_handle, 4096)
                     if hr == 0:  # ERROR_SUCCESS
                         file_path = data.decode("utf-8").strip()
                         if file_path:
-                            log_print(f"[Agent] Nhß║¡n ─æ╞░ß╗úc ─æ╞░ß╗¥ng dß║½n tß╗½ Pipe: {file_path}")
+                            log_print(f"[Agent] Nhận được đường dẫn từ Pipe: {file_path}")
 
-                            # Kiß╗âm tra file tß╗ôn tß║íi tr╞░ß╗¢c khi nß║íp Clipboard
+                            # Kiểm tra file tồn tại trước khi nạp Clipboard
                             if os.path.exists(file_path):
                                 set_clipboard_files(file_path)
                             else:
-                                log_print(f"[Agent] File ch╞░a tß╗ôn tß║íi tr├¬n ─æ─⌐a, chß╗¥ 1 gi├óy rß╗ôi thß╗¡ lß║íi...")
+                                log_print(f"[Agent] File chưa tồn tại trên đĩa, chờ 1 giây rồi thử lại...")
                                 time.sleep(1.0)
                                 if os.path.exists(file_path):
                                     set_clipboard_files(file_path)
                                 else:
-                                    log_print(f"[Agent] File vß║½n kh├┤ng tß╗ôn tß║íi sau khi chß╗¥: {file_path}")
+                                    log_print(f"[Agent] File vẫn không tồn tại sau khi chờ: {file_path}")
                     else:
-                        log_print(f"[Agent] ReadFile trß║ú vß╗ü m├ú lß╗ùi: {hr}")
+                        log_print(f"[Agent] ReadFile trả về mã lỗi: {hr}")
                         break
 
                 except Exception as read_err:
                     err_code = getattr(read_err, 'winerror', 0)
                     if err_code == 109:  # ERROR_BROKEN_PIPE
-                        log_print("[Agent] Pipe bß╗ï ngß║»t (Service ─æ├│ng kß║┐t nß╗æi). ─Éang kß║┐t nß╗æi lß║íi...")
+                        log_print("[Agent] Pipe bị ngắt (Service đóng kết nối). Đang kết nối lại...")
                         break
                     elif err_code == 234:  # ERROR_MORE_DATA
-                        # Message lß╗¢n h╞ín buffer, ─æß╗ìc tiß║┐p
-                        log_print("[Agent] Buffer nhß╗Å h╞ín message, cß║ºn ─æß╗ìc tiß║┐p...")
+                        # Message lớn hơn buffer, đọc tiếp
+                        log_print("[Agent] Buffer nhỏ hơn message, cần đọc tiếp...")
                         continue
                     else:
-                        log_print(f"[Agent] Lß╗ùi ─æß╗ìc Pipe: {read_err}")
+                        log_print(f"[Agent] Lỗi đọc Pipe: {read_err}")
                         break
 
         except Exception as e:
-            log_print(f"[Agent] Lß╗ùi kß║┐t nß╗æi Pipe: {e}")
+            log_print(f"[Agent] Lỗi kết nối Pipe: {e}")
 
         finally:
             if pipe_handle is not None:
@@ -186,25 +186,25 @@ def pipe_listener_loop():
                 except:
                     pass
 
-        # Chß╗¥ tr╞░ß╗¢c khi thß╗¡ kß║┐t nß╗æi lß║íi
-        log_print("[Agent] Chß╗¥ 2 gi├óy tr╞░ß╗¢c khi kß║┐t nß╗æi lß║íi Pipe...")
+        # Chờ trước khi thử kết nối lại
+        log_print("[Agent] Chờ 2 giây trước khi kết nối lại Pipe...")
         time.sleep(2.0)
 
 
 def main():
     log_print("=" * 60)
-    log_print(f"[Agent] Clipboard Agent khß╗ƒi ─æß╗Öng. PID: {os.getpid()}")
-    log_print(f"[Agent] Th╞░ mß╗Ñc ß╗⌐ng dß╗Ñng: {app_dir}")
+    log_print(f"[Agent] Clipboard Agent khởi động. PID: {os.getpid()}")
+    log_print(f"[Agent] Thư mục ứng dụng: {app_dir}")
     log_print("=" * 60)
 
-    # Chß║íy pipe_listener_loop trß╗▒c tiß║┐p tr├¬n main thread
-    # (v├¼ Agent n├áy chß╗ë c├│ 1 nhiß╗çm vß╗Ñ duy nhß║Ñt)
+    # Chạy pipe_listener_loop trực tiếp trên main thread
+    # (vì Agent này chỉ có 1 nhiệm vụ duy nhất)
     try:
         pipe_listener_loop()
     except KeyboardInterrupt:
-        log_print("[Agent] Nhß║¡n Ctrl+C. ─Éang tho├ít...")
+        log_print("[Agent] Nhận Ctrl+C. Đang thoát...")
     except Exception as e:
-        log_print(f"[Agent] Lß╗ùi kh├┤ng mong ─æß╗úi: {e}")
+        log_print(f"[Agent] Lỗi không mong đợi: {e}")
 
 
 if __name__ == "__main__":

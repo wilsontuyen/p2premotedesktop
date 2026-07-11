@@ -865,3 +865,516 @@ class NetworkMixin:
 
 
     # TCP Server (Host) functions
+
+
+    def click_connect(self):
+        partner_id = self.partner_id_var.get().strip().replace(" ", "")
+        partner_pass = self.partner_pass_var.get().strip()
+        
+        if not partner_id or len(partner_id) < 12:
+            self.show_custom_error("Lỗi", "Vui lòng nhập mã ID đối tác hợp lệ (12 chữ số)!")
+            return
+            
+        if not partner_pass:
+            self.show_custom_error("Lỗi", "Vui lòng nhập mật khẩu đối tác!")
+            return
+            
+        self.update_status("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...")
+        self.connect_btn.config(state=tk.DISABLED)
+        
+        # Connect inside background thread to prevent UI freezing
+        threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
+        
+    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
+        if partner_id == getattr(self, "my_id_clean", ""):
+            self.after(0, lambda: self.show_custom_info("Thông báo", "Bạn không thể kết nối tới chính bạn :-)"))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            self.update_status("Kết nối bị hủy.")
+            return
+            
+        # Clean up dead viewer processes first
+        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        
+        # Check if we already have an active connection to this partner_id
+        existing_viewer = None
+        for v in self.active_viewers:
+            if v.get("partner_id") == partner_id:
+                existing_viewer = v
+                break
+                
+        if existing_viewer and reconnect_queue is None:
+            print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
+            self.update_status(f"Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...")
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            # Write blink signal file
+            import tempfile
+            blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
+            try:
+                with open(blink_file, "w") as f:
+                    f.write("1")
+            except Exception as write_err:
+                print(f"[Client] Failed to write blink signal: {write_err}")
+            return
+
+        if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
+            self.update_status("Chưa kết nối Signaling Server!")
+            self.after(0, lambda: self.show_custom_error("Lỗi", "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS."))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            return
+
+        req = json.dumps({
+            "action": "connect_request",
+            "target": partner_id,
+            "port": BOUND_PORT,
+            "local_ip": self.local_ip,
+            "local_port": BOUND_PORT
+        }) + '\n'
+        
+        # Thử tìm đối tác trên tất cả các server đang kết nối
+        sockets_to_try = []
+        with self.signaling_lock:
+            if getattr(self, 'primary_signaling_socket', None):
+                sockets_to_try.append(self.primary_signaling_socket)
+            for sock in self.signaling_sockets.values():
+                if sock not in sockets_to_try:
+                    sockets_to_try.append(sock)
+                    
+        success = False
+        self.update_status("Đang tìm và chờ đối tác phản hồi...")
+        
+        for sock in sockets_to_try:
+            self.pending_connection_info = None
+            try:
+                with self.signaling_lock:
+                    send_msg(sock, req.encode('utf-8'), APP_KEY)
+            except Exception as e:
+                continue
+                
+            timeout = 6.0
+            while timeout > 0 and self.pending_connection_info is None:
+                time.sleep(0.2)
+                timeout -= 0.2
+                
+            if self.pending_connection_info and self.pending_connection_info != "error":
+                success = True
+                break
+                
+        if not success:
+            if reconnect_queue and retry_count < 30:
+                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                time.sleep(2)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                return
+                
+            self.update_status("Sẵn sàng kết nối")
+            if not reconnect_queue:
+                self.after(0, lambda: self.show_custom_error("Lỗi", "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối."))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            if reconnect_queue:
+                reconnect_queue.put("FAILED")
+            return
+            
+        if len(self.pending_connection_info) >= 4:
+            public_ip, port, local_ip, local_port = self.pending_connection_info[:4]
+        else:
+            public_ip, port, local_ip = self.pending_connection_info
+            local_port = 12345
+            
+        port = int(port) if port else 0
+        local_port = int(local_port) if local_port else 12345
+            
+        sock = None
+        connected = False
+        handshake_done = False
+        cached_res_payload = None
+        
+        # 1. Try local IP first (LAN) (Chỉ thử nếu không ép buộc Relay)
+        if not self.force_relay_var.get() and local_ip:
+            ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
+            ports_to_try = [local_port]
+            for p in [12345, 12346, 12347, 12348]:
+                if p not in ports_to_try:
+                    ports_to_try.append(p)
+                    
+            self.update_status(f"Đang quét kết nối nội bộ (LAN)...")
+            import select
+            
+            # Quét tuần tự từng port (ưu tiên local_port trước) để tránh lỗi dính Kaspersky/ứng dụng rác ở port 12345
+            for p in ports_to_try:
+                if connected: break
+                sockets = []
+                for ip in ips_to_try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setblocking(False)
+                    try: s.connect((ip, p))
+                    except Exception: pass
+                    sockets.append((s, ip, p))
+                
+                # Chờ tối đa 0.4s cho mỗi port
+                end_time = time.time() + 0.4
+                while time.time() < end_time and not connected:
+                    timeout = max(0.05, end_time - time.time())
+                    try:
+                        sock_list = [item[0] for item in sockets]
+                        if not sock_list: break
+                        _, writable, _ = select.select([], sock_list, [], timeout)
+                        for w_sock in writable:
+                            if w_sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                                try:
+                                    w_sock.getpeername()
+                                    w_sock.setblocking(True)
+                                    
+                                    # Kểm tra handshake ngay để xác minh đây có phải Host thật không
+                                    # (Tránh trường hợp VM NAT hay proxy tự động nhận TCP rồi reset)
+                                    w_sock.settimeout(2.0)
+                                    try:
+                                        socket_passwords[w_sock] = partner_pass
+                                        import platform
+                                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+                                        send_msg(w_sock, hs_data, partner_pass)
+                                        tmp_res_msg = recv_msg(w_sock, [partner_pass, APP_KEY])
+                                        if tmp_res_msg:
+                                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                                            if tmp_res.get("status") == "ok" or tmp_res.get("status") == "error":
+                                                sock = w_sock
+                                                connected = True
+                                                handshake_done = True
+                                                cached_res_payload = tmp_res
+                                                matched = next((item for item in sockets if item[0] == w_sock), None)
+                                                if matched:
+                                                    print(f"[Client] Connected & Handshaked via LAN: {matched[1]}:{matched[2]}")
+                                                break
+                                    except Exception:
+                                        pass
+                                    
+                                    if not connected:
+                                        force_close_socket(w_sock)
+                                except: pass
+                    except: pass
+                    if connected: break
+                    
+                # Đóng các socket không dùng tới trong batch này
+                for s_tuple in sockets:
+                    if s_tuple[0] != sock: force_close_socket(s_tuple[0])
+                
+        # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
+        if not self.force_relay_var.get() and not connected:
+            if hasattr(self, 'current_ip') and self.current_ip == public_ip:
+                print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
+                self.update_status("Sẵn sàng kết nối")
+                self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                return
+            self.update_status(f"Đang đục lỗ Tường lửa (TCP Hole Punching) tới {public_ip}:{port}...")
+            print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
+            
+            # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
+            if getattr(self, 'server_socket', None):
+                try:
+                    self.server_socket.close()
+                except: pass
+            
+            # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
+            for _ in range(20):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind(('0.0.0.0', BOUND_PORT))
+                except:
+                    pass
+                sock.settimeout(0.5)
+                try:
+                    sock.connect((public_ip, port))
+                    connected = True
+                    print(f"[Client] Hole punch successful to {public_ip}:{port}!")
+                    break
+                except Exception:
+                    force_close_socket(sock)
+                    time.sleep(0.1)
+                    
+            # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
+            try:
+                try:
+                    if hasattr(socket, 'AF_INET6'):
+                        self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                            try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                            except: pass
+                        self.server_socket.bind(("", BOUND_PORT))
+                    else:
+                        raise Exception("No IPv6")
+                except Exception:
+                    self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+                self.server_socket.listen(5)
+                print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+            except Exception as e:
+                print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
+
+        if not connected:
+            self.update_status("Sẵn sàng kết nối")
+            self.after(0, lambda: self.show_custom_error("Lỗi kết nối", 
+                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
+                f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
+            ))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            if sock: force_close_socket(sock)
+            return
+                
+        # Connection succeeded, proceed with handshake
+        sock.settimeout(None) # Reset back to blocking
+        
+        # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa cho cả đo tốc độ và điều khiển
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as e:
+            print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+            
+        # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
+        except Exception as e:
+            print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
+            
+        try:
+            if not handshake_done:
+                # Register the socket password
+                socket_passwords[sock] = partner_pass
+                # Send handshake password
+                import platform
+                handshake = json.dumps({
+                    "password": partner_pass,
+                    "client_id": self.my_id_clean,
+                    "computer_name": platform.node()
+                }).encode('utf-8')
+                send_msg(sock, handshake, partner_pass)
+                
+                # Read verification response (allow APP_KEY fallback to receive error messages)
+                res_msg = recv_msg(sock, [partner_pass, APP_KEY])
+                if not res_msg:
+                    self.update_status("Sẵn sàng kết nối")
+                    self.after(0, lambda: self.show_custom_error("Lỗi", "Đối tác ngắt kết nối đột ngột!"))
+                    self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                    force_close_socket(sock)
+                    return
+                    
+                res = json.loads(res_msg.decode('utf-8'))
+            else:
+                res = cached_res_payload
+                
+            if res.get("status") == "ok":
+                host_w = res.get("width")
+                host_h = res.get("height")
+                computer_name = res.get("computer_name", "")
+                zalo_phone = res.get("zalo_phone", "")
+                is_domain = res.get("is_domain", False)
+                
+                # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
+                self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...")
+                net_class = "medium"
+                net_class_viet = "Trung bình (Medium)"
+                avg_ping = 50.0
+                bandwidth = 10.0
+                try:
+                    runs = []
+                    for run_idx in range(2):
+                        if run_idx > 0:
+                            self.update_status("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...")
+                        # 1. Ping / Latency test
+                        rtts = []
+                        for _ in range(3):
+                            t0 = time.time()
+                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), partner_pass)
+                            pong_msg = recv_msg(sock, partner_pass)
+                            if pong_msg:
+                                pong_data = json.loads(pong_msg.decode('utf-8'))
+                                if pong_data.get("action") == "speed_test_pong":
+                                    rtts.append(time.time() - t0)
+                            time.sleep(0.05)
+                        
+                        run_ping = 50.0
+                        if rtts:
+                            run_ping = (sum(rtts) / len(rtts)) * 1000.0
+                            
+                        # 2. Bandwidth test
+                        run_bw = 10.0
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'), partner_pass)
+                        bw_start_msg = recv_msg(sock, partner_pass)
+                        if bw_start_msg:
+                            bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
+                            if bw_start_data.get("action") == "speed_test_bw_start":
+                                dummy_size = bw_start_data.get("size", 1572864)
+                                warm_size = 1048576 # 1 MB warm-up để vượt qua TCP slow-start
+                                measure_size = dummy_size - warm_size
+                                
+                                warm_data = b''
+                                while len(warm_data) < warm_size:
+                                    chunk = sock.recv(warm_size - len(warm_data))
+                                    if not chunk:
+                                        break
+                                    warm_data += chunk
+                                    
+                                t_start = time.time()
+                                measured_data = b''
+                                while len(measured_data) < measure_size:
+                                    chunk = sock.recv(measure_size - len(measured_data))
+                                    if not chunk:
+                                        break
+                                    measured_data += chunk
+                                t_end = time.time()
+                                
+                                duration = t_end - t_start
+                                total_len = len(warm_data) + len(measured_data)
+                                if duration > 0 and total_len == dummy_size:
+                                    run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
+                        
+                        runs.append((run_ping, run_bw))
+                        if run_idx == 0:
+                            time.sleep(0.2) # Small gap between runs
+                            
+                    if runs:
+                        # Compare and select the run with the highest bandwidth speed
+                        best_run = max(runs, key=lambda x: x[1])
+                        avg_ping = best_run[0]
+                        bandwidth = best_run[1]
+                                                                        
+                    # 3. Network quality classification
+                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 10ms.
+                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 50 - 100ms.
+                    # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
+                    if bandwidth > 20.0 and avg_ping < 10.0:
+                        net_class = "high"
+                        net_class_viet = "Tốt (High-speed)"
+                    elif bandwidth < 5.0 or avg_ping > 50.0:
+                        net_class = "low"
+                        net_class_viet = "Yếu (Low-speed)"
+                    else:
+                        net_class = "medium"
+                        net_class_viet = "Trung bình (Medium)"
+                        
+                    # 4. Report speed test results to Host
+                    send_msg(sock, json.dumps({
+                        "action": "speed_test_result",
+                        "net_class": net_class,
+                        "ping": avg_ping,
+                        "bandwidth": bandwidth
+                    }).encode('utf-8'), partner_pass)
+                    
+                    status_text = f"Đo tốc độ (Lớn nhất 2 lần): Ping {avg_ping:.1f}ms, Băng thông {bandwidth:.2f} Mbps. Chất lượng: {net_class_viet}."
+                    print(f"[Client] {status_text}")
+                    self.update_status(status_text)
+                    time.sleep(0.5)
+                except Exception as ste:
+                    print(f"[Client] Speed test error: {ste}")
+                    # Send default result to host to avoid locking
+                    try:
+                        send_msg(sock, json.dumps({
+                            "action": "speed_test_result",
+                            "net_class": "medium",
+                            "ping": 50.0,
+                            "bandwidth": 10.0
+                        }).encode('utf-8'), partner_pass)
+                    except: pass
+                    
+                # Pygame window sẽ mở đúng với độ phân giải thật của host. 
+                # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
+                self.update_status("Kết nối thành công! Đang khởi động màn hình...")
+                if reconnect_queue:
+                    try:
+                        if viewer_pid and sys.platform == "win32":
+                            sock_data = sock.share(viewer_pid)
+                            reconnect_queue.put(("SHARED_SOCK", sock_data))
+                        else:
+                            reconnect_queue.put(sock)
+                    except Exception as e:
+                        print(f"Failed to put socket in reconnect queue: {e}")
+                        reconnect_queue.put("FAILED")
+                        force_close_socket(sock)
+                        socket_passwords.pop(sock, None)
+                else:
+                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
+            else:
+                msg = res.get("message", "Sai mật khẩu!")
+                self.update_status("Bị từ chối kết nối")
+                if reconnect_queue:
+                    reconnect_queue.put("FAILED")
+                self.after(0, lambda: self.show_custom_error("Từ chối kết nối", f"Kết nối bị từ chối:\n{msg}"))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                force_close_socket(sock)
+                socket_passwords.pop(sock, None)
+        except Exception as e:
+            if reconnect_queue and retry_count < 30:
+                self.update_status(f"Mất kết nối. Đang thử kết nối lại lần {retry_count + 1}/30...")
+                if sock:
+                    force_close_socket(sock)
+                    socket_passwords.pop(sock, None)
+                time.sleep(2)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                return
+
+            self.update_status("Sẵn sàng kết nối")
+            if reconnect_queue:
+                reconnect_queue.put("FAILED")
+            else:
+                self.after(0, lambda err=str(e): self.show_custom_error("Lỗi bắt tay", f"Lỗi xác thực handshake:\n{err}"))
+            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+            if sock:
+                force_close_socket(sock)
+                socket_passwords.pop(sock, None)
+            
+    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
+        try:
+            import multiprocessing as mp
+            reconnect_queue = mp.Queue()
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass), daemon=True)
+            p.start()
+            
+            # Track active viewer
+            self.active_viewers.append({
+                "process": p,
+                "computer_name": computer_name,
+                "zalo_phone": zalo_phone,
+                "partner_id": partner_id
+            })
+            
+            # Close the socket handle in the parent process to prevent port leakage
+            # on Windows, which causes Hole Punching to fail on the second connection
+            try:
+                sock.close()
+            except Exception:
+                pass
+            
+            # Reconnection Monitor Thread
+            if partner_id and partner_pass:
+                def monitor_reconnect(process, pid, ppass, req_queue):
+                    while process.is_alive():
+                        try:
+                            msg = req_queue.get(timeout=1.0)
+                            if msg == "RECONNECT_REQUEST":
+                                print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
+                                self.after(0, lambda: self.update_status(f"Đang tự động kết nối lại..."))
+                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
+                            else:
+                                req_queue.put(msg)
+                                time.sleep(0.5)
+                        except:
+                            pass
+                    
+                    code = process.exitcode
+                    print(f"[Client Monitor] Pygame viewer process exited with code: {code}")
+                    
+                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
+            
+            self.connect_btn.config(state=tk.NORMAL)
+            self.update_status("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)")
+            print(f"[Client] Đã mở tiến trình điều khiển cho {computer_name or 'đối tác'}")
+            
+        except Exception as e:
+            print(f"[Client] Lỗi khởi chạy tiến trình điều khiển: {e}")
+            self.connect_btn.config(state=tk.NORMAL)
+            try: force_close_socket(sock)
+            except: pass
+            

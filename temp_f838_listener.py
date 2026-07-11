@@ -1,7 +1,7 @@
 ﻿WM_CLIPBOARDUPDATE = 0x031D
 HWND_MESSAGE = -3
 
-# ─Éß╗ïnh ngh─⌐a c├íc kiß╗âu dß╗» liß╗çu t╞░╞íng th├¡ch 64-bit ─æß╗â tr├ính lß╗ùi OverflowError tr├¬n Windows 64-bit
+# Định nghĩa các kiểu dữ liệu tương thích 64-bit để tránh lỗi OverflowError trên Windows 64-bit
 WPARAM_64 = ctypes.c_size_t
 LPARAM_64 = ctypes.c_ssize_t
 LRESULT_64 = ctypes.c_ssize_t
@@ -18,7 +18,7 @@ try:
 except:
     pass
 
-# Khß╗ƒi tß║ío tr╞░ß╗¢c th├┤ng sß╗æ kiß╗âu dß╗» liß╗çu cß╗ºa DefWindowProcW ─æß╗â tr├ính lß╗ùi trong qu├í tr├¼nh tß║ío cß╗¡a sß╗ò
+# Khởi tạo trước thông số kiểu dữ liệu của DefWindowProcW để tránh lỗi trong quá trình tạo cửa sổ
 try:
     ctypes.windll.user32.DefWindowProcW.argtypes = [ctypes.c_void_p, ctypes.c_uint, WPARAM_64, LPARAM_64]
     ctypes.windll.user32.DefWindowProcW.restype = LRESULT_64
@@ -42,7 +42,7 @@ class ClipboardEventListener:
             if wParam in (0x0204, 0x0205, 0x00A4, 0x00A5):
                 if self.manager:
                     self.manager.last_rbutton_time = time.time()
-                    log_debug(f"[MouseHook] Ph├ít hiß╗çn click chuß╗Öt phß║úi l├║c: {self.manager.last_rbutton_time}")
+                    log_debug(f"[MouseHook] Phát hiện click chuột phải lúc: {self.manager.last_rbutton_time}")
             # WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_NCLBUTTONDOWN = 0x00A1, WM_NCLBUTTONUP = 0x00A2
             elif wParam in (0x0201, 0x0202, 0x00A1, 0x00A2):
                 if self.manager:
@@ -56,22 +56,22 @@ class ClipboardEventListener:
         WM_SETUP_DELAYED_RENDERING = 0x0400 + 101
         
         if msg == WM_CLIPBOARDUPDATE:
-            log_debug(f"[WndProc] Nhß║¡n WM_CLIPBOARDUPDATE")
+            log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
             self.callback()
             return 0
         elif msg == WM_RENDERFORMAT:
-            log_debug(f"[WndProc] Nhß║¡n WM_RENDERFORMAT. wparam={wparam}")
+            log_debug(f"[WndProc] Nhận WM_RENDERFORMAT. wparam={wparam}")
             if wparam == 15: # CF_HDROP
                 if self.manager:
                     self.manager.render_format(15)
                 return 0
         elif msg == WM_DESTROYCLIPBOARD:
-            log_debug(f"[WndProc] Nhß║¡n WM_DESTROYCLIPBOARD")
+            log_debug(f"[WndProc] Nhận WM_DESTROYCLIPBOARD")
             if self.manager:
                 self.manager.lost_ownership()
             return 0
         elif msg == WM_SETUP_DELAYED_RENDERING:
-            log_debug(f"[WndProc] Nhß║¡n WM_SETUP_DELAYED_RENDERING. ─Éang tiß║┐n h├ánh thiß║┐t lß║¡p delayed rendering...")
+            log_debug(f"[WndProc] Nhận WM_SETUP_DELAYED_RENDERING. Đang tiến hành thiết lập delayed rendering...")
             if self.manager:
                 self.manager._execute_setup_delayed_rendering()
             return 0
@@ -83,19 +83,19 @@ class ClipboardEventListener:
 
     def _run(self):
         try:
-            log_debug("[Listener] Bß║»t ─æß║ºu thread ─æ─âng k├╜ Clipboard listener.")
+            log_debug("[Listener] Bắt đầu thread đăng ký Clipboard listener.")
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
             
-            # ─Éß╗ïnh ngh─⌐a types cho GetModuleHandleW tr╞░ß╗¢c khi gß╗ìi
+            # Định nghĩa types cho GetModuleHandleW trước khi gọi
             kernel32.GetModuleHandleW.restype = ctypes.c_void_p
             h_mod = kernel32.GetModuleHandleW(None)
             
-            # ─Éß╗ïnh ngh─⌐a types cho CallNextHookEx ─æß╗â tr├ính lß╗ùi OverflowError tr├¬n 64-bit Windows
+            # Định nghĩa types cho CallNextHookEx để tránh lỗi OverflowError trên 64-bit Windows
             user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, WPARAM_64, LPARAM_64]
             user32.CallNextHookEx.restype = LRESULT_64
             
-            # ─É─âng k├╜ Low-level Mouse Hook ─æß╗â theo d├╡i chuß╗Öt phß║úi to├án hß╗ç thß╗æng
+            # Đăng ký Low-level Mouse Hook để theo dõi chuột phải toàn hệ thống
             try:
                 HOOKPROC = ctypes.WINFUNCTYPE(LRESULT_64, ctypes.c_int, WPARAM_64, LPARAM_64)
                 self.mouse_hook_callback = HOOKPROC(self._mouse_hook_proc)
@@ -108,9 +108,9 @@ class ClipboardEventListener:
                     h_mod,
                     0
                 )
-                log_debug(f"[Listener] ─É├ú ─æ─âng k├╜ Low-level Mouse Hook th├ánh c├┤ng: {self.mouse_hook}")
+                log_debug(f"[Listener] Đã đăng ký Low-level Mouse Hook thành công: {self.mouse_hook}")
             except Exception as e:
-                log_debug(f"[Listener] Lß╗ùi ─æ─âng k├╜ Mouse Hook: {e}")
+                log_debug(f"[Listener] Lỗi đăng ký Mouse Hook: {e}")
 
             user32.CreateWindowExW.argtypes = [
                 ctypes.c_uint, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -121,7 +121,7 @@ class ClipboardEventListener:
             kernel32.GetModuleHandleW.restype = ctypes.c_void_p
 
             wndproc = WNDPROCTYPE(self._wndproc)
-            self.wndproc_ref = wndproc  # Giß╗» reference ─æß╗â tr├ính bß╗ï garbage collected
+            self.wndproc_ref = wndproc  # Giữ reference để tránh bị garbage collected
             wndclass = WNDCLASSEX()
             wndclass.cbSize = ctypes.sizeof(WNDCLASSEX)
             wndclass.lpfnWndProc = wndproc
@@ -129,13 +129,13 @@ class ClipboardEventListener:
             wndclass.hInstance = kernel32.GetModuleHandleW(None)
             
             reg_res = user32.RegisterClassExW(ctypes.byref(wndclass))
-            log_debug(f"[Listener] RegisterClassExW trß║ú vß╗ü: {reg_res}")
+            log_debug(f"[Listener] RegisterClassExW trả về: {reg_res}")
             
             self.hwnd = user32.CreateWindowExW(0, wndclass.lpszClassName, "HiddenWindow", 0, 0, 0, 0, 0, ctypes.c_void_p(HWND_MESSAGE), None, wndclass.hInstance, None)
-            log_debug(f"[Listener] CreateWindowExW trß║ú vß╗ü HWND: {self.hwnd}")
+            log_debug(f"[Listener] CreateWindowExW trả về HWND: {self.hwnd}")
             
             add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))
-            log_debug(f"[Listener] AddClipboardFormatListener trß║ú vß╗ü: {add_res}")
+            log_debug(f"[Listener] AddClipboardFormatListener trả về: {add_res}")
             
             msg = wintypes.MSG()
             while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
@@ -146,16 +146,16 @@ class ClipboardEventListener:
             user32.DestroyWindow(ctypes.c_void_p(self.hwnd))
             user32.UnregisterClassW(wndclass.lpszClassName, wndclass.hInstance)
         except Exception as e:
-            print("[ClipboardEvent] Lß╗ùi Listener:", e)
+            print("[ClipboardEvent] Lỗi Listener:", e)
 
     def stop(self):
         self.running = False
         if self.mouse_hook:
             try:
                 ctypes.windll.user32.UnhookWindowsHookEx(self.mouse_hook)
-                log_debug("[Listener] ─É├ú gß╗í bß╗Å Low-level Mouse Hook.")
+                log_debug("[Listener] Đã gỡ bỏ Low-level Mouse Hook.")
             except Exception as e:
-                log_debug(f"[Listener] Lß╗ùi gß╗í bß╗Å Mouse Hook: {e}")
+                log_debug(f"[Listener] Lỗi gỡ bỏ Mouse Hook: {e}")
         if self.hwnd:
             try: ctypes.windll.user32.PostMessageW(ctypes.c_void_p(self.hwnd), 0, 0, 0)
             except: pass
