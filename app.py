@@ -1,4 +1,6 @@
 from core.config import *
+from core.i18n import _, load_language, get_available_languages, export_template
+
 import socket
 import threading
 import json
@@ -241,6 +243,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.last_normal_geometry = None
         self.bind("<Configure>", self.on_window_configure)
         self.load_window_position()
+        # Load language setting
+        self.current_lang = tk.StringVar(value="vi")
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, "r") as f:
+                    cfg = json.load(f)
+                    saved_lang = cfg.get("language", "vi")
+                    self.current_lang.set(saved_lang)
+                    load_language(saved_lang)
+        except:
+            pass
+
         
         # Migrate old JSON list to new encrypted XML format
         old_json_file = "saved_computers.json"
@@ -495,6 +509,116 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def change_theme(self):
         from gui.themes import change_app_theme
         change_app_theme(self)
+
+    
+    def export_lang_template(self):
+        try:
+            template = {
+    "+ Thêm Mới": "+ Thêm Mới",
+    "4 chữ số": "4 chữ số",
+    "5 chữ số": "5 chữ số",
+    "8 ký tự (chữ + số)": "8 ký tự (chữ + số)",
+    "AI Pro Version": "AI Pro Version",
+    "About": "About",
+    "CHO PHÉP ĐIỀU KHIỂN": "CHO PHÉP ĐIỀU KHIỂN",
+    "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI": "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI",
+    "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO": "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO",
+    "Cam": "Cam",
+    "Chưa có liên lạc": "Chưa có liên lạc",
+    "Chạy khi mở máy (Run on Startup)": "Chạy khi mở máy (Run on Startup)",
+    "Chọn tất cả (Select All)": "Chọn tất cả (Select All)",
+    "Chọn đối tác": "Chọn đối tác",
+    "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH": "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH",
+    "CÀI ĐẶT ZALO / ĐIỆN THOẠI": "CÀI ĐẶT ZALO / ĐIỆN THOẠI",
+    "Cài Zalo / Điện thoại": "Cài Zalo / Điện thoại",
+    "Cài mật khẩu cố định...": "Cài mật khẩu cố định...",
+    "Cài đặt Máy chủ (Signaling Server)": "Cài đặt Máy chủ (Signaling Server)",
+    "Cài đặt máy chủ...": "Cài đặt máy chủ...",
+    "Có": "Có",
+    "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp": "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+    "CẤU HÌNH MÁY CHỦ SIGNALING": "CẤU HÌNH MÁY CHỦ SIGNALING",
+    "CẬP NHẬT THÔNG TIN": "CẬP NHẬT THÔNG TIN",
+    "Cắt (Cut)": "Cắt (Cut)",
+    "Cổng kết nối (Port):": "Cổng kết nối (Port):",
+    "DANH SÁCH MÁY TÍNH ĐÃ LƯU": "DANH SÁCH MÁY TÍNH ĐÃ LƯU",
+    "Danh sách (Saved Computers)": "Danh sách (Saved Computers)",
+    "Danh sách Máy chủ:": "Danh sách Máy chủ:",
+    "Danh sách Máy tính": "Danh sách Máy tính",
+    "Dán (Paste)": "Dán (Paste)",
+    "Easy Remote Desktop": "Easy Remote Desktop",
+    "File": "File",
+    "Giao diện": "Giao diện",
+    "Help": "Help",
+    "Hiển thị mật khẩu": "Hiển thị mật khẩu",
+    "Hồng": "Hồng",
+    "Hủy": "Hủy",
+    "Hủy bỏ": "Hủy bỏ",
+    "ID đối tác:": "ID đối tác:",
+    "Không": "Không",
+    "KẾT NỐI (CONNECT)": "KẾT NỐI (CONNECT)",
+    "Kết nối": "Kết nối",
+    "Kết nối mạng LAN thất bại": "Kết nối mạng LAN thất bại",
+    "Liên hệ Zalo": "Liên hệ Zalo",
+    "Liên hệ: Mr. Tuyến - 0941 261 771": "Liên hệ: Mr. Tuyến - 0941 261 771",
+    "Lưu": "Lưu",
+    "Lưu lại": "Lưu lại",
+    "Lỗi kết nối mạng LAN": "Lỗi kết nối mạng LAN",
+    "Mã ID của bạn:": "Mã ID của bạn:",
+    "Mật khẩu (Password)": "Mật khẩu (Password)",
+    "Mật khẩu cố định": "Mật khẩu cố định",
+    "Mật khẩu kết nối:": "Mật khẩu kết nối:",
+    "Mật khẩu mới:": "Mật khẩu mới:",
+    "Mật khẩu:": "Mật khẩu:",
+    "Nhóm (Tùy chọn):": "Nhóm (Tùy chọn):",
+    "Nhập ID đối tác:": "Nhập ID đối tác:",
+    "Nhập Mật khẩu đối tác:": "Nhập Mật khẩu đối tác:",
+    "OK": "OK",
+    "Options": "Options",
+    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
+    "Pha lê": "Pha lê",
+    "Sao chép (Copy)": "Sao chép (Copy)",
+    "Sáng": "Sáng",
+    "Sửa thông tin": "Sửa thông tin",
+    "THÊM MÁY TÍNH MỚI": "THÊM MÁY TÍNH MỚI",
+    "Thay đổi thông tin": "Thay đổi thông tin",
+    "Thoát (Exit)": "Thoát (Exit)",
+    "Thêm Máy tính": "Thêm Máy tính",
+    "Tên gọi gợi nhớ:": "Tên gọi gợi nhớ:",
+    "Tùy chỉnh": "Tùy chỉnh",
+    "Tối": "Tối",
+    "Xám": "Xám",
+    "Xóa máy tính": "Xóa máy tính",
+    "Zalo": "Zalo",
+    "ĐIỀU KHIỂN ĐỐI TÁC": "ĐIỀU KHIỂN ĐỐI TÁC",
+    "Điều khiển trực tuyến máy tính bằng HWID": "Điều khiển trực tuyến máy tính bằng HWID",
+    "Điện thoại": "Điện thoại",
+    "Điện thoại liên hệ": "Điện thoại liên hệ",
+    "Đã hiểu": "Đã hiểu",
+    "Đóng": "Đóng",
+    "Đỏ": "Đỏ",
+    "Đổi tên nhóm": "Đổi tên nhóm",
+    "● Mật khẩu cố định: Đang hoạt động": "● Mật khẩu cố định: Đang hoạt động",
+    "📁 Danh sách máy tính đã lưu": "📁 Danh sách máy tính đã lưu",
+    "📋  Thông tin kỹ thuật": "📋  Thông tin kỹ thuật",
+    "📋 Sao chép cả ID & Mật khẩu": "📋 Sao chép cả ID & Mật khẩu",
+    "📡 Quét mạng LAN (LAN Discovery)": "📡 Quét mạng LAN (LAN Discovery)",
+    "📡 Quét mạng LAN (LAN Only)": "📡 Quét mạng LAN (LAN Only)",
+    "🔄 Làm mới": "🔄 Làm mới",
+    "🔄 Làm mới (30s)": "🔄 Làm mới (30s)",
+    "🔧  Cách khắc phục": "🔧  Cách khắc phục"
+}
+            template_path = export_template(template)
+            if template_path:
+                messagebox.showinfo(_("Lưu lại"), f"File ngôn ngữ mẫu đã được lưu tại:\n{template_path}\nBạn có thể sao chép và đổi tên thành 'en.json' để dịch.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def change_language(self, *args):
+        lang = self.current_lang.get()
+        load_language(lang)
+        self.save_window_position()
+        messagebox.showinfo(_("Thay đổi thông tin"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+
         
     def setup_ui(self):
         # Setup Window Menu Bar
@@ -502,11 +626,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Danh sách (Saved Computers)", command=self.show_saved_computers_dialog)
-        file_menu.add_command(label="📡 Quét mạng LAN (LAN Discovery)", command=self.show_lan_computers_dialog)
+        file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
+        file_menu.add_command(label=_("📡 Quét mạng LAN (LAN Discovery)"), command=self.show_lan_computers_dialog)
         file_menu.add_separator()
-        file_menu.add_command(label="Thoát (Exit)", command=self.destroy)
-        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
+        menubar.add_cascade(label=_("File"), menu=file_menu)
         
         # 2. Options Menu
         options_menu = tk.Menu(menubar, tearoff=0)
@@ -519,24 +643,24 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="5 chữ số",
+            label=_("5 chữ số"),
             variable=self.pass_type_var, value="5 chữ số",
             command=self.refresh_password
         )
         password_menu.add_radiobutton(
-            label="8 ký tự (chữ + số)",
+            label=_("8 ký tự (chữ + số)"),
             variable=self.pass_type_var, value="8 ký tự (chữ + số)",
             command=self.refresh_password
         )
         password_menu.add_separator()
         password_menu.add_command(
-            label="Cài mật khẩu cố định...",
+            label=_("Cài mật khẩu cố định..."),
             command=self.open_set_fixed_password_dialog
         )
-        options_menu.add_cascade(label="Mật khẩu (Password)", menu=password_menu)
+        options_menu.add_cascade(label=_("Mật khẩu (Password)"), menu=password_menu)
         options_menu.add_separator()
         options_menu.add_checkbutton(
-            label="Chạy khi mở máy (Run on Startup)",
+            label=_("Chạy khi mở máy (Run on Startup)"),
             variable=self.startup_var,
             command=self.toggle_startup
         )
@@ -546,42 +670,55 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         )
         options_menu.add_separator()
         options_menu.add_command(
-            label="Cài đặt máy chủ...",
+            label=_("Cài đặt máy chủ..."),
             command=self.show_server_settings_dialog
         )
         options_menu.add_separator()
         
+        
+        # Submenu: Language
+        lang_menu = tk.Menu(options_menu, tearoff=0)
+        langs = get_available_languages()
+        for l in langs:
+            lang_menu.add_radiobutton(label=l.upper(), variable=self.current_lang, value=l, command=self.change_language)
+        
+        # Export template
+        lang_menu.add_separator()
+        lang_menu.add_command(label="Xuất file ngôn ngữ mẫu...", command=self.export_lang_template)
+        options_menu.add_cascade(label="Ngôn ngữ (Language)", menu=lang_menu) # Tạm thay thế
+        options_menu.add_separator()
+
         # Submenu: Theme
         theme_menu = tk.Menu(options_menu, tearoff=0)
-        theme_menu.add_radiobutton(label="Sáng", variable=self.current_theme, value="light", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Tối", variable=self.current_theme, value="dark", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Xám", variable=self.current_theme, value="gray", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Hồng", variable=self.current_theme, value="pink", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Pha lê", variable=self.current_theme, value="crystal", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Cam", variable=self.current_theme, value="orange", command=self.change_theme)
-        theme_menu.add_radiobutton(label="Đỏ", variable=self.current_theme, value="red", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Tối"), variable=self.current_theme, value="dark", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Xám"), variable=self.current_theme, value="gray", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Hồng"), variable=self.current_theme, value="pink", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Pha lê"), variable=self.current_theme, value="crystal", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Cam"), variable=self.current_theme, value="orange", command=self.change_theme)
+        theme_menu.add_radiobutton(label=_("Đỏ"), variable=self.current_theme, value="red", command=self.change_theme)
         theme_menu.add_separator()
-        theme_menu.add_radiobutton(label="Tùy chỉnh", variable=self.current_theme, value="custom", command=self.change_theme)
-        options_menu.add_cascade(label="Giao diện", menu=theme_menu)
+        theme_menu.add_radiobutton(label=_("Tùy chỉnh"), variable=self.current_theme, value="custom", command=self.change_theme)
+        options_menu.add_cascade(label=_("Giao diện"), menu=theme_menu)
  
-        menubar.add_cascade(label="Options", menu=options_menu)
+        menubar.add_cascade(label=_("Options"), menu=options_menu)
         
         # 3. Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Zalo", command=self.open_zalo)
-        help_menu.add_command(label="Điện thoại", command=self.open_phone_dialog)
+        help_menu.add_command(label=_("Zalo"), command=self.open_zalo)
+        help_menu.add_command(label=_("Điện thoại"), command=self.open_phone_dialog)
         help_menu.add_command(label="About", command=self.show_about_dialog)
-        menubar.add_cascade(label="Help", menu=help_menu)
+        menubar.add_cascade(label=_("Help"), menu=help_menu)
         
         # Apply menubar to window
         self.config(menu=menubar)
 
         # Header Label
-        header = tk.Label(self, text="P2P REMOTE DESKTOP", font=("Segoe UI", 16, "bold"), fg=self.btn_color, bg=self.bg_color)
+        header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=("Segoe UI", 16, "bold"), fg=self.btn_color, bg=self.bg_color)
         header.pack(pady=(15, 5))
         
         # Sub-header
-        subheader = tk.Label(self, text="Điều khiển trực tuyến máy tính bằng HWID", font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+        subheader = tk.Label(self, text=_("Điều khiển trực tuyến máy tính bằng HWID"), font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.bg_color)
         subheader.pack(pady=(0, 15))
         
         # Main Panels Container
@@ -594,10 +731,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._left_panel = left_panel
         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
         
-        lbl_allow = tk.Label(left_panel, text="CHO PHÉP ĐIỀU KHIỂN", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
         
-        lbl_id = tk.Label(left_panel, text="Mã ID của bạn:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_id = tk.Label(left_panel, text=_("Mã ID của bạn:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_id.pack(anchor=tk.W, padx=20)
         
         id_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -611,7 +748,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_id_btn, "Sao chép")
         
-        lbl_pass = tk.Label(left_panel, text="Mật khẩu kết nối:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_pass.pack(anchor=tk.W, padx=20)
         
         pass_frame = tk.Frame(left_panel, bg=self.card_color)
@@ -635,11 +772,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
-        copy_all_btn = tk.Button(left_panel, text="📋 Sao chép cả ID & Mật khẩu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
+        copy_all_btn = tk.Button(left_panel, text=_("📋 Sao chép cả ID & Mật khẩu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = tk.Button(left_panel, text="📁 Danh sách máy tính đã lưu", font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
+        saved_list_btn = tk.Button(left_panel, text=_("📁 Danh sách máy tính đã lưu"), font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
         
         # RIGHT PANEL: Control Remote Computer
@@ -647,16 +784,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._right_panel = right_panel
         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
         
-        lbl_control = tk.Label(right_panel, text="ĐIỀU KHIỂN ĐỐI TÁC", font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
+        lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
         
-        lbl_p_id = tk.Label(right_panel, text="Nhập ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=4)
         self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
         
-        lbl_p_pass = tk.Label(right_panel, text="Nhập Mật khẩu đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+        lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
@@ -672,7 +809,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = tk.Button(btn_container, text="KẾT NỐI (CONNECT)", font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
+        self.connect_btn = tk.Button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=("Segoe UI", 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
@@ -681,7 +818,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         ToolTip(self.add_partner_btn, "Thêm máy tính")
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = tk.Button(right_panel, text="📡 Quét mạng LAN (LAN Only)", font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
+        lan_btn = tk.Button(right_panel, text=_("📡 Quét mạng LAN (LAN Only)"), font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
 
         # Attach Context Menus for Copy & Paste
@@ -831,6 +968,116 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def change_theme(self):
         from gui.themes import change_app_theme
         change_app_theme(self)
+
+    
+    def export_lang_template(self):
+        try:
+            template = {
+    "+ Thêm Mới": "+ Thêm Mới",
+    "4 chữ số": "4 chữ số",
+    "5 chữ số": "5 chữ số",
+    "8 ký tự (chữ + số)": "8 ký tự (chữ + số)",
+    "AI Pro Version": "AI Pro Version",
+    "About": "About",
+    "CHO PHÉP ĐIỀU KHIỂN": "CHO PHÉP ĐIỀU KHIỂN",
+    "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI": "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI",
+    "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO": "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO",
+    "Cam": "Cam",
+    "Chưa có liên lạc": "Chưa có liên lạc",
+    "Chạy khi mở máy (Run on Startup)": "Chạy khi mở máy (Run on Startup)",
+    "Chọn tất cả (Select All)": "Chọn tất cả (Select All)",
+    "Chọn đối tác": "Chọn đối tác",
+    "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH": "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH",
+    "CÀI ĐẶT ZALO / ĐIỆN THOẠI": "CÀI ĐẶT ZALO / ĐIỆN THOẠI",
+    "Cài Zalo / Điện thoại": "Cài Zalo / Điện thoại",
+    "Cài mật khẩu cố định...": "Cài mật khẩu cố định...",
+    "Cài đặt Máy chủ (Signaling Server)": "Cài đặt Máy chủ (Signaling Server)",
+    "Cài đặt máy chủ...": "Cài đặt máy chủ...",
+    "Có": "Có",
+    "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp": "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+    "CẤU HÌNH MÁY CHỦ SIGNALING": "CẤU HÌNH MÁY CHỦ SIGNALING",
+    "CẬP NHẬT THÔNG TIN": "CẬP NHẬT THÔNG TIN",
+    "Cắt (Cut)": "Cắt (Cut)",
+    "Cổng kết nối (Port):": "Cổng kết nối (Port):",
+    "DANH SÁCH MÁY TÍNH ĐÃ LƯU": "DANH SÁCH MÁY TÍNH ĐÃ LƯU",
+    "Danh sách (Saved Computers)": "Danh sách (Saved Computers)",
+    "Danh sách Máy chủ:": "Danh sách Máy chủ:",
+    "Danh sách Máy tính": "Danh sách Máy tính",
+    "Dán (Paste)": "Dán (Paste)",
+    "Easy Remote Desktop": "Easy Remote Desktop",
+    "File": "File",
+    "Giao diện": "Giao diện",
+    "Help": "Help",
+    "Hiển thị mật khẩu": "Hiển thị mật khẩu",
+    "Hồng": "Hồng",
+    "Hủy": "Hủy",
+    "Hủy bỏ": "Hủy bỏ",
+    "ID đối tác:": "ID đối tác:",
+    "Không": "Không",
+    "KẾT NỐI (CONNECT)": "KẾT NỐI (CONNECT)",
+    "Kết nối": "Kết nối",
+    "Kết nối mạng LAN thất bại": "Kết nối mạng LAN thất bại",
+    "Liên hệ Zalo": "Liên hệ Zalo",
+    "Liên hệ: Mr. Tuyến - 0941 261 771": "Liên hệ: Mr. Tuyến - 0941 261 771",
+    "Lưu": "Lưu",
+    "Lưu lại": "Lưu lại",
+    "Lỗi kết nối mạng LAN": "Lỗi kết nối mạng LAN",
+    "Mã ID của bạn:": "Mã ID của bạn:",
+    "Mật khẩu (Password)": "Mật khẩu (Password)",
+    "Mật khẩu cố định": "Mật khẩu cố định",
+    "Mật khẩu kết nối:": "Mật khẩu kết nối:",
+    "Mật khẩu mới:": "Mật khẩu mới:",
+    "Mật khẩu:": "Mật khẩu:",
+    "Nhóm (Tùy chọn):": "Nhóm (Tùy chọn):",
+    "Nhập ID đối tác:": "Nhập ID đối tác:",
+    "Nhập Mật khẩu đối tác:": "Nhập Mật khẩu đối tác:",
+    "OK": "OK",
+    "Options": "Options",
+    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
+    "Pha lê": "Pha lê",
+    "Sao chép (Copy)": "Sao chép (Copy)",
+    "Sáng": "Sáng",
+    "Sửa thông tin": "Sửa thông tin",
+    "THÊM MÁY TÍNH MỚI": "THÊM MÁY TÍNH MỚI",
+    "Thay đổi thông tin": "Thay đổi thông tin",
+    "Thoát (Exit)": "Thoát (Exit)",
+    "Thêm Máy tính": "Thêm Máy tính",
+    "Tên gọi gợi nhớ:": "Tên gọi gợi nhớ:",
+    "Tùy chỉnh": "Tùy chỉnh",
+    "Tối": "Tối",
+    "Xám": "Xám",
+    "Xóa máy tính": "Xóa máy tính",
+    "Zalo": "Zalo",
+    "ĐIỀU KHIỂN ĐỐI TÁC": "ĐIỀU KHIỂN ĐỐI TÁC",
+    "Điều khiển trực tuyến máy tính bằng HWID": "Điều khiển trực tuyến máy tính bằng HWID",
+    "Điện thoại": "Điện thoại",
+    "Điện thoại liên hệ": "Điện thoại liên hệ",
+    "Đã hiểu": "Đã hiểu",
+    "Đóng": "Đóng",
+    "Đỏ": "Đỏ",
+    "Đổi tên nhóm": "Đổi tên nhóm",
+    "● Mật khẩu cố định: Đang hoạt động": "● Mật khẩu cố định: Đang hoạt động",
+    "📁 Danh sách máy tính đã lưu": "📁 Danh sách máy tính đã lưu",
+    "📋  Thông tin kỹ thuật": "📋  Thông tin kỹ thuật",
+    "📋 Sao chép cả ID & Mật khẩu": "📋 Sao chép cả ID & Mật khẩu",
+    "📡 Quét mạng LAN (LAN Discovery)": "📡 Quét mạng LAN (LAN Discovery)",
+    "📡 Quét mạng LAN (LAN Only)": "📡 Quét mạng LAN (LAN Only)",
+    "🔄 Làm mới": "🔄 Làm mới",
+    "🔄 Làm mới (30s)": "🔄 Làm mới (30s)",
+    "🔧  Cách khắc phục": "🔧  Cách khắc phục"
+}
+            template_path = export_template(template)
+            if template_path:
+                messagebox.showinfo(_("Lưu lại"), f"File ngôn ngữ mẫu đã được lưu tại:\n{template_path}\nBạn có thể sao chép và đổi tên thành 'en.json' để dịch.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def change_language(self, *args):
+        lang = self.current_lang.get()
+        load_language(lang)
+        self.save_window_position()
+        messagebox.showinfo(_("Thay đổi thông tin"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+
     def save_window_position(self):
         try:
             # Ưu tiên lấy tọa độ hoạt động bình thường cuối cùng được ghi nhận
@@ -851,9 +1098,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             config_data = {"geometry": geom}
             if hasattr(self, 'current_theme'):
                 config_data["theme"] = self.current_theme.get()
+            if hasattr(self, 'current_lang'):
+                config_data["language"] = self.current_lang.get()
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f)
-            print(f"[Config] Saved window position & theme: {geom}")
+            print(f"[Config] Saved window position & theme & language: {geom}")
         except Exception as e:
             print(f"[Config] Error saving window config: {e}")
 
@@ -873,10 +1122,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def make_context_menu(self, entry):
         menu = tk.Menu(entry, tearoff=0)
-        menu.add_command(label="Cắt (Cut)", command=lambda: entry.event_generate("<<Cut>>"))
-        menu.add_command(label="Sao chép (Copy)", command=lambda: entry.event_generate("<<Copy>>"))
-        menu.add_command(label="Dán (Paste)", command=lambda: entry.event_generate("<<Paste>>"))
-        menu.add_command(label="Chọn tất cả (Select All)", command=lambda: entry.event_generate("<<SelectAll>>"))
+        menu.add_command(label=_("Cắt (Cut)"), command=lambda: entry.event_generate("<<Cut>>"))
+        menu.add_command(label=_("Sao chép (Copy)"), command=lambda: entry.event_generate("<<Copy>>"))
+        menu.add_command(label=_("Dán (Paste)"), command=lambda: entry.event_generate("<<Paste>>"))
+        menu.add_command(label=_("Chọn tất cả (Select All)"), command=lambda: entry.event_generate("<<SelectAll>>"))
         
         # Giữ tham chiếu mạnh (Strong Reference) tránh rác hệ thống làm mất menu
         entry.menu = menu
@@ -941,7 +1190,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
         # Top title
-        lbl_title = tk.Label(dialog, text="DANH SÁCH MÁY TÍNH ĐÃ LƯU", font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text=_("DANH SÁCH MÁY TÍNH ĐÃ LƯU"), font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
         # Thanh Tìm kiếm
@@ -1193,10 +1442,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             btn_frame = tk.Frame(rn_win, bg=self.bg_color)
             btn_frame.pack(fill=tk.X, padx=20)
             
-            btn_save = tk.Button(btn_frame, text="Lưu", font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=do_rename)
+            btn_save = tk.Button(btn_frame, text=_("Lưu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=do_rename)
             btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
             
-            btn_cancel = tk.Button(btn_frame, text="Hủy", font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35", relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=rn_win.destroy)
+            btn_cancel = tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35", relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=rn_win.destroy)
             btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
         def reorder_list():
@@ -1337,10 +1586,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 id_lbl.pack(fill=tk.X, pady=(2, 0))
 
                 context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
-                context_menu.add_command(label="Kết nối", command=lambda c=comp: connect_computer(c))
+                context_menu.add_command(label=_("Kết nối"), command=lambda c=comp: connect_computer(c))
                 context_menu.add_separator()
-                context_menu.add_command(label="Thay đổi thông tin", command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
-                context_menu.add_command(label="Xóa máy tính", command=lambda c=comp: delete_computer(c))
+                context_menu.add_command(label=_("Thay đổi thông tin"), command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
+                context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
 
                 def show_context_menu(event, menu=context_menu):
                     try:
@@ -1390,23 +1639,23 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 else:
                     if dialog.winfo_exists():
                         btn_refresh.config(
-                            state="normal", text="🔄 Làm mới",
+                            state="normal", text=_("🔄 Làm mới"),
                             fg=self.text_white, bg="#2ECC71",
                             cursor="hand2"
                         )
                         
-            btn_refresh.config(state="disabled", text="🔄 Làm mới (30s)", bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
+            btn_refresh.config(state="disabled", text=_("🔄 Làm mới (30s)"), bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
             update_timer()
 
         btn_add = tk.Button(
-            bottom_frame, text="+ Thêm Mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("+ Thêm Mới"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=open_add_dialog
         )
         btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
 
         btn_refresh = tk.Button(
-            bottom_frame, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("🔄 Làm mới"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
             command=lambda: [refresh_list(), start_refresh_cooldown()]
@@ -1414,7 +1663,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_refresh.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
         btn_close = tk.Button(
-            bottom_frame, text="Đóng", font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=_("Đóng"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2", command=on_dialog_destroy
         )
@@ -1460,30 +1709,30 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
         add_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
-        lbl_add_title = tk.Label(add_win, text="THÊM MÁY TÍNH MỚI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_add_title = tk.Label(add_win, text=_("THÊM MÁY TÍNH MỚI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_add_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(add_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(add_win, text=_("Tên gọi gợi nhớ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(add_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(add_win, text=_("ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         if initial_id:
             entry_comp_id.insert(0, initial_id)
 
-        lbl_comp_pass = tk.Label(add_win, text="Mật khẩu:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(add_win, text=_("Mật khẩu:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
         if initial_pass:
             entry_comp_pass.insert(0, initial_pass)
 
-        lbl_group = tk.Label(add_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group = tk.Label(add_win, text=_("Nhóm (Tùy chọn):"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_group.pack(anchor=tk.W, padx=20)
         entry_group = tk.Entry(add_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -1527,14 +1776,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_add_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_add_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_new
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_add_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_add_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
         )
@@ -1561,29 +1810,29 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
         edit_win.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
-        lbl_edit_title = tk.Label(edit_win, text="CẬP NHẬT THÔNG TIN", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_edit_title = tk.Label(edit_win, text=_("CẬP NHẬT THÔNG TIN"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_edit_title.pack(pady=(12, 10))
 
-        lbl_name = tk.Label(edit_win, text="Tên gọi gợi nhớ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_name = tk.Label(edit_win, text=_("Tên gọi gợi nhớ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_name.pack(anchor=tk.W, padx=20)
         entry_name = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_name.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_name.insert(0, item["name"])
         entry_name.focus()
 
-        lbl_comp_id = tk.Label(edit_win, text="ID đối tác:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_id = tk.Label(edit_win, text=_("ID đối tác:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_id.pack(anchor=tk.W, padx=20)
         entry_comp_id = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_id.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_comp_id.insert(0, item["id"])
 
-        lbl_comp_pass = tk.Label(edit_win, text="Mật khẩu mới:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_comp_pass = tk.Label(edit_win, text=_("Mật khẩu mới:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_comp_pass.pack(anchor=tk.W, padx=20)
         entry_comp_pass = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_comp_pass.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_comp_pass.insert(0, item["password"])
 
-        lbl_group = tk.Label(edit_win, text="Nhóm (Tùy chọn):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_group = tk.Label(edit_win, text=_("Nhóm (Tùy chọn):"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_group.pack(anchor=tk.W, padx=20)
         entry_group = tk.Entry(edit_win, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
@@ -1628,14 +1877,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_edit_frame.pack(fill=tk.X, padx=20, pady=5)
 
         btn_save = tk.Button(
-            btn_edit_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=save_edit
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_edit_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_edit_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
         )
@@ -1941,7 +2190,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CÀI ĐẶT ZALO / ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT ZALO / ĐIỆN THOẠI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
         desc_text = "Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn."
@@ -1970,14 +2219,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame.pack(fill=tk.X, padx=30, pady=5)
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_val
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -1999,7 +2248,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CẤU HÌNH MÁY CHỦ SIGNALING", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text=_("CẤU HÌNH MÁY CHỦ SIGNALING"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
         desc_text = "Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)"
@@ -2009,13 +2258,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         form_frame = tk.Frame(dialog, bg=self.bg_color)
         form_frame.pack(fill=tk.BOTH, expand=True, padx=30)
 
-        lbl_hosts = tk.Label(form_frame, text="Danh sách Máy chủ:", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_hosts = tk.Label(form_frame, text=_("Danh sách Máy chủ:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_hosts.pack(anchor=tk.W)
         
         entry_hosts = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_hosts.pack(fill=tk.X, pady=(3, 10))
         
-        lbl_port = tk.Label(form_frame, text="Cổng kết nối (Port):", font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_port = tk.Label(form_frame, text=_("Cổng kết nối (Port):"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color)
         lbl_port.pack(anchor=tk.W)
         
         entry_port = tk.Entry(form_frame, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
@@ -2066,14 +2315,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame.pack(fill=tk.X, padx=30, pady=10)
         
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_config
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
         
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -2104,7 +2353,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        lbl_title = tk.Label(dialog, text="CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+        lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
         desc_text = "Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)"
@@ -2129,7 +2378,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 entry_pass.config(show="*")
 
         chk_show = tk.Checkbutton(
-            dialog, text="Hiển thị mật khẩu", font=("Segoe UI", 8),
+            dialog, text=_("Hiển thị mật khẩu"), font=("Segoe UI", 8),
             variable=show_pass, onvalue=True, offvalue=False,
             command=toggle_password, bg=self.bg_color, fg=self.text_gray,
             activebackground=self.bg_color, activeforeground=self.text_white,
@@ -2153,14 +2402,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame.pack(fill=tk.X, padx=30, pady=(5, 10))
 
         btn_save = tk.Button(
-            btn_frame, text="Lưu lại", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Lưu lại"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=save_password
         )
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
         btn_cancel = tk.Button(
-            btn_frame, text="Hủy bỏ", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Hủy bỏ"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -2280,7 +2529,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             y = self.winfo_y() + (self.winfo_height() - h) // 2
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             
-            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title = tk.Label(dialog, text=_("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
@@ -2335,11 +2584,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        lbl_phone = tk.Label(dialog, text="Chưa có liên lạc", font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
+        lbl_phone = tk.Label(dialog, text=_("Chưa có liên lạc"), font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
         lbl_phone.pack(pady=(5, 15))
 
         btn_ok = tk.Button(
-            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            dialog, text=_("Đóng"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -2373,7 +2622,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             y = self.winfo_y() + (self.winfo_height() - h) // 2
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             
-            lbl_title = tk.Label(dialog, text="CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI", font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title = tk.Label(dialog, text=_("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
@@ -2427,7 +2676,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_phone.pack(pady=(5, 15))
 
         btn_ok = tk.Button(
-            dialog, text="Đóng", font=("Segoe UI", 9, "bold"),
+            dialog, text=_("Đóng"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
@@ -2449,13 +2698,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         title_label = tk.Label(about, text="Easy Remote Desktop", font=("Inter", 13, "bold"), fg=self.text_white, bg=self.bg_color)
         title_label.pack(pady=(15, 2))
         
-        ai_label = tk.Label(about, text="AI Pro Version", font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
+        ai_label = tk.Label(about, text=_("AI Pro Version"), font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
         ai_label.pack(pady=(0, 5))
         
-        contact_label = tk.Label(about, text="Liên hệ: Mr. Tuyến - 0941 261 771", font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
+        contact_label = tk.Label(about, text=_("Liên hệ: Mr. Tuyến - 0941 261 771"), font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
         contact_label.pack(pady=(0, 15))
         
-        close_btn = tk.Button(about, text="Đóng", font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
+        close_btn = tk.Button(about, text=_("Đóng"), font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
                               activeforeground=self.text_white, activebackground="#C04242",
                               bd=0, padx=25, pady=6, cursor="hand2", command=about.destroy)
         close_btn.pack(pady=(0, 15))
@@ -2579,7 +2828,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
         
         btn_ok = tk.Button(
-            btn_frame, text="OK", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("OK"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
         )
@@ -2629,7 +2878,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 12))
         
         btn_ok = tk.Button(
-            btn_frame, text="OK", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("OK"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#E05252", activebackground="#C0392B",
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
         )
@@ -2671,9 +2920,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         tk.Label(title_frame, text="⚠", font=("Segoe UI", 22), fg="#E05252", bg=self.bg_color).pack(side=tk.LEFT, padx=(0, 10))
         title_col = tk.Frame(title_frame, bg=self.bg_color)
         title_col.pack(side=tk.LEFT, fill=tk.BOTH)
-        tk.Label(title_col, text="Kết nối mạng LAN thất bại", font=("Segoe UI", 12, "bold"),
+        tk.Label(title_col, text=_("Kết nối mạng LAN thất bại"), font=("Segoe UI", 12, "bold"),
                  fg="#E05252", bg=self.bg_color, anchor="w").pack(anchor="w")
-        tk.Label(title_col, text="Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
+        tk.Label(title_col, text=_("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"),
                  font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color, anchor="w").pack(anchor="w")
 
         # ── SEPARATOR ───────────────────────────────────────────
@@ -2683,7 +2932,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         info_frame = tk.Frame(dialog, bg=self.entry_bg, bd=0, highlightthickness=1, highlightbackground=self.divider_color)
         info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
 
-        tk.Label(info_frame, text="📋  Thông tin kỹ thuật", font=("Segoe UI", 8, "bold"),
+        tk.Label(info_frame, text=_("📋  Thông tin kỹ thuật"), font=("Segoe UI", 8, "bold"),
                  fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
@@ -2702,7 +2951,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         tk.Frame(info_frame, bg=self.entry_bg, height=6).pack()
 
         # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
-        tk.Label(dialog, text="🔧  Cách khắc phục", font=("Segoe UI", 9, "bold"),
+        tk.Label(dialog, text=_("🔧  Cách khắc phục"), font=("Segoe UI", 9, "bold"),
                  fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
 
         steps = [
@@ -2731,7 +2980,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
         tk.Button(
-            btn_frame, text="Đã hiểu", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Đã hiểu"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg="#E05252", activebackground="#C0392B",
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
             command=dialog.destroy
@@ -2792,7 +3041,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Nút "Không"
         btn_no = tk.Button(
-            btn_frame, text="Không", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Không"), font=("Segoe UI", 9, "bold"),
             fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_no
         )
@@ -2800,7 +3049,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Nút "Có"
         btn_yes = tk.Button(
-            btn_frame, text="Có", font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Có"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=on_yes
         )

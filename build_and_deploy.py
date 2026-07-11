@@ -149,6 +149,18 @@ def main():
             except Exception as e:
                 log(f"Failed to copy {file_name}: {e}")
 
+    # Copy lang directory to app.dist
+    lang_src = os.path.join(workspace_dir, "lang")
+    lang_dst = os.path.join(app_dist_dir, "lang")
+    if os.path.exists(lang_src):
+        try:
+            if os.path.exists(lang_dst):
+                shutil.rmtree(lang_dst)
+            shutil.copytree(lang_src, lang_dst)
+            log("Copied lang directory to app.dist")
+        except Exception as e:
+            log(f"Failed to copy lang directory: {e}")
+
     # Make zip archive
     log("Creating RemoteDesktopP2P.zip archive...")
     zip_path = os.path.join(workspace_dir, "RemoteDesktopP2P")
