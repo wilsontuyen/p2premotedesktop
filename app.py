@@ -316,7 +316,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 pass
 
             if is_installed_version:
-                for _ in range(10): # Wait up to 5 seconds for the service to spawn headless agent
+                for i in range(10): # Wait up to 5 seconds for the service to spawn headless agent
                     for d_name in ["default", "winlogon"]:
                         m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
                         try:
@@ -395,7 +395,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.running_server = True
         self.active_clients = {}
         self.active_viewers = []
-        self.current_ip = "Đang lấy IP..."
+        self.current_ip = _("Đang lấy IP...")
         self.local_ip = "127.0.0.1"
         self.ipv6 = None
         self.client_viewer_w = 1280
@@ -412,7 +412,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.received_first_pong = False
         
         # Form variables
-        self.status_var = tk.StringVar(value="Đang kết nối tới mạng đăng ký...")
+        self.status_var = tk.StringVar(value=_("Đang kết nối tới mạng đăng ký..."))
         self.partner_id_var = tk.StringVar()
         self.partner_pass_var = tk.StringVar()
         self.force_relay_var = tk.BooleanVar(value=False)
@@ -513,103 +513,17 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     
     def export_lang_template(self):
         try:
-            template = {
-    "+ Thêm Mới": "+ Thêm Mới",
-    "4 chữ số": "4 chữ số",
-    "5 chữ số": "5 chữ số",
-    "8 ký tự (chữ + số)": "8 ký tự (chữ + số)",
-    "AI Pro Version": "AI Pro Version",
-    "About": "About",
-    "CHO PHÉP ĐIỀU KHIỂN": "CHO PHÉP ĐIỀU KHIỂN",
-    "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI": "CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI",
-    "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO": "CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO",
-    "Cam": "Cam",
-    "Chưa có liên lạc": "Chưa có liên lạc",
-    "Chạy khi mở máy (Run on Startup)": "Chạy khi mở máy (Run on Startup)",
-    "Chọn tất cả (Select All)": "Chọn tất cả (Select All)",
-    "Chọn đối tác": "Chọn đối tác",
-    "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH": "CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH",
-    "CÀI ĐẶT ZALO / ĐIỆN THOẠI": "CÀI ĐẶT ZALO / ĐIỆN THOẠI",
-    "Cài Zalo / Điện thoại": "Cài Zalo / Điện thoại",
-    "Cài mật khẩu cố định...": "Cài mật khẩu cố định...",
-    "Cài đặt Máy chủ (Signaling Server)": "Cài đặt Máy chủ (Signaling Server)",
-    "Cài đặt máy chủ...": "Cài đặt máy chủ...",
-    "Có": "Có",
-    "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp": "Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp",
-    "CẤU HÌNH MÁY CHỦ SIGNALING": "CẤU HÌNH MÁY CHỦ SIGNALING",
-    "CẬP NHẬT THÔNG TIN": "CẬP NHẬT THÔNG TIN",
-    "Cắt (Cut)": "Cắt (Cut)",
-    "Cổng kết nối (Port):": "Cổng kết nối (Port):",
-    "DANH SÁCH MÁY TÍNH ĐÃ LƯU": "DANH SÁCH MÁY TÍNH ĐÃ LƯU",
-    "Danh sách (Saved Computers)": "Danh sách (Saved Computers)",
-    "Danh sách Máy chủ:": "Danh sách Máy chủ:",
-    "Danh sách Máy tính": "Danh sách Máy tính",
-    "Dán (Paste)": "Dán (Paste)",
-    "Easy Remote Desktop": "Easy Remote Desktop",
-    "File": "File",
-    "Giao diện": "Giao diện",
-    "Help": "Help",
-    "Hiển thị mật khẩu": "Hiển thị mật khẩu",
-    "Hồng": "Hồng",
-    "Hủy": "Hủy",
-    "Hủy bỏ": "Hủy bỏ",
-    "ID đối tác:": "ID đối tác:",
-    "Không": "Không",
-    "KẾT NỐI (CONNECT)": "KẾT NỐI (CONNECT)",
-    "Kết nối": "Kết nối",
-    "Kết nối mạng LAN thất bại": "Kết nối mạng LAN thất bại",
-    "Liên hệ Zalo": "Liên hệ Zalo",
-    "Liên hệ: Mr. Tuyến - 0941 261 771": "Liên hệ: Mr. Tuyến - 0941 261 771",
-    "Lưu": "Lưu",
-    "Lưu lại": "Lưu lại",
-    "Lỗi kết nối mạng LAN": "Lỗi kết nối mạng LAN",
-    "Mã ID của bạn:": "Mã ID của bạn:",
-    "Mật khẩu (Password)": "Mật khẩu (Password)",
-    "Mật khẩu cố định": "Mật khẩu cố định",
-    "Mật khẩu kết nối:": "Mật khẩu kết nối:",
-    "Mật khẩu mới:": "Mật khẩu mới:",
-    "Mật khẩu:": "Mật khẩu:",
-    "Nhóm (Tùy chọn):": "Nhóm (Tùy chọn):",
-    "Nhập ID đối tác:": "Nhập ID đối tác:",
-    "Nhập Mật khẩu đối tác:": "Nhập Mật khẩu đối tác:",
-    "OK": "OK",
-    "Options": "Options",
-    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
-    "Pha lê": "Pha lê",
-    "Sao chép (Copy)": "Sao chép (Copy)",
-    "Sáng": "Sáng",
-    "Sửa thông tin": "Sửa thông tin",
-    "THÊM MÁY TÍNH MỚI": "THÊM MÁY TÍNH MỚI",
-    "Thay đổi thông tin": "Thay đổi thông tin",
-    "Thoát (Exit)": "Thoát (Exit)",
-    "Thêm Máy tính": "Thêm Máy tính",
-    "Tên gọi gợi nhớ:": "Tên gọi gợi nhớ:",
-    "Tùy chỉnh": "Tùy chỉnh",
-    "Tối": "Tối",
-    "Xám": "Xám",
-    "Xóa máy tính": "Xóa máy tính",
-    "Zalo": "Zalo",
-    "ĐIỀU KHIỂN ĐỐI TÁC": "ĐIỀU KHIỂN ĐỐI TÁC",
-    "Điều khiển trực tuyến máy tính bằng HWID": "Điều khiển trực tuyến máy tính bằng HWID",
-    "Điện thoại": "Điện thoại",
-    "Điện thoại liên hệ": "Điện thoại liên hệ",
-    "Đã hiểu": "Đã hiểu",
-    "Đóng": "Đóng",
-    "Đỏ": "Đỏ",
-    "Đổi tên nhóm": "Đổi tên nhóm",
-    "● Mật khẩu cố định: Đang hoạt động": "● Mật khẩu cố định: Đang hoạt động",
-    "📁 Danh sách máy tính đã lưu": "📁 Danh sách máy tính đã lưu",
-    "📋  Thông tin kỹ thuật": "📋  Thông tin kỹ thuật",
-    "📋 Sao chép cả ID & Mật khẩu": "📋 Sao chép cả ID & Mật khẩu",
-    "📡 Quét mạng LAN (LAN Discovery)": "📡 Quét mạng LAN (LAN Discovery)",
-    "📡 Quét mạng LAN (LAN Only)": "📡 Quét mạng LAN (LAN Only)",
-    "🔄 Làm mới": "🔄 Làm mới",
-    "🔄 Làm mới (30s)": "🔄 Làm mới (30s)",
-    "🔧  Cách khắc phục": "🔧  Cách khắc phục"
-}
+            # Đọc template từ file lang_template.json (được tạo bởi gen_lang_template.py)
+            from core.i18n import get_lang_dir
+            template_file = os.path.join(get_lang_dir(), "lang_template.json")
+            if os.path.exists(template_file):
+                with open(template_file, "r", encoding="utf-8") as f:
+                    template = json.load(f)
+            else:
+                template = {}
             template_path = export_template(template)
             if template_path:
-                messagebox.showinfo(_("Lưu lại"), f"File ngôn ngữ mẫu đã được lưu tại:\n{template_path}\nBạn có thể sao chép và đổi tên thành 'en.json' để dịch.")
+                messagebox.showinfo(_("Lưu lại"), _("File ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'en.json' để dịch."))
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -638,7 +552,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Submenu: Password type
         password_menu = tk.Menu(options_menu, tearoff=0)
         password_menu.add_radiobutton(
-            label="4 chữ số",
+            label=_("4 chữ số"),
             variable=self.pass_type_var, value="4 chữ số",
             command=self.refresh_password
         )
@@ -665,7 +579,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             command=self.toggle_startup
         )
         options_menu.add_command(
-            label="Cài Zalo / Điện thoại",
+            label=_("Cài Zalo / Điện thoại"),
             command=self.open_set_zalo_phone_dialog
         )
         options_menu.add_separator()
@@ -684,8 +598,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Export template
         lang_menu.add_separator()
-        lang_menu.add_command(label="Xuất file ngôn ngữ mẫu...", command=self.export_lang_template)
-        options_menu.add_cascade(label="Ngôn ngữ (Language)", menu=lang_menu) # Tạm thay thế
+        lang_menu.add_command(label=_("Xuất file ngôn ngữ mẫu..."), command=self.export_lang_template)
+        options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
         options_menu.add_separator()
 
         # Submenu: Theme
@@ -707,7 +621,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label=_("Zalo"), command=self.open_zalo)
         help_menu.add_command(label=_("Điện thoại"), command=self.open_phone_dialog)
-        help_menu.add_command(label="About", command=self.show_about_dialog)
+        help_menu.add_command(label=_("About"), command=self.show_about_dialog)
         menubar.add_cascade(label=_("Help"), menu=help_menu)
         
         # Apply menubar to window
@@ -746,7 +660,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         copy_id_btn = tk.Button(id_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        ToolTip(copy_id_btn, "Sao chép")
+        ToolTip(copy_id_btn, _("Sao chép"))
         
         lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
         lbl_pass.pack(anchor=tk.W, padx=20)
@@ -760,11 +674,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         copy_pass_btn = tk.Button(pass_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        ToolTip(copy_pass_btn, "Sao chép")
+        ToolTip(copy_pass_btn, _("Sao chép"))
         
         refresh_btn = tk.Button(pass_frame, text="↻", font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=self.refresh_password)
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        ToolTip(refresh_btn, "Đổi mật khẩu")
+        ToolTip(refresh_btn, _("Đổi mật khẩu"))
 
         # Nhãn hiển thị trạng thái mật khẩu cố định
         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=("Segoe UI", 8, "italic"), fg="#2ECC71", bg=self.card_color)
@@ -815,7 +729,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Add button with a blue "+"
         self.add_partner_btn = tk.Button(btn_container, text="➕", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
-        ToolTip(self.add_partner_btn, "Thêm máy tính")
+        ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
         lan_btn = tk.Button(right_panel, text=_("📡 Quét mạng LAN (LAN Only)"), font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
@@ -973,6 +887,35 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def export_lang_template(self):
         try:
             template = {
+    "Đang kết nối tới mạng đăng ký...": "Đang kết nối tới mạng đăng ký...",
+    "Đã sao chép cả ID & Mật khẩu!": "Đã sao chép cả ID & Mật khẩu!",
+    "Đã sao chép vào bộ nhớ tạm: ": "Đã sao chép vào bộ nhớ tạm: ",
+    "Lỗi": "Lỗi",
+    "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!": "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!",
+    "Tìm kiếm theo tên hoặc ID...": "Tìm kiếm theo tên hoặc ID...",
+    "tìm kiếm theo tên hoặc id...": "tìm kiếm theo tên hoặc id...",
+    "Lỗi nhập liệu": "Lỗi nhập liệu",
+    "Vui lòng điền đầy đủ các thông tin!": "Vui lòng điền đầy đủ các thông tin!",
+    "Trùng lặp": "Trùng lặp",
+    "Máy tính này đã tồn tại trong danh sách!": "Máy tính này đã tồn tại trong danh sách!",
+    "Sửa thông tin": "Sửa thông tin",
+    "Không tìm thấy máy tính tương ứng để sửa!": "Không tìm thấy máy tính tương ứng để sửa!",
+    "Vui lòng nhập đầy đủ thông tin!": "Vui lòng nhập đầy đủ thông tin!",
+    "Cổng kết nối (Port) phải là số!": "Cổng kết nối (Port) phải là số!",
+    "Không thể lưu file server.ini: ": "Không thể lưu file server.ini: ",
+    "Thất bại": "Thất bại",
+    "Không thể thay đổi cài đặt Registry: ": "Không thể thay đổi cài đặt Registry: ",
+    "Sao chép": "Sao chép",
+    "Đổi mật khẩu": "Đổi mật khẩu",
+    "Thêm máy tính": "Thêm máy tính",
+    "Thành công": "Thành công",
+    "Đã lưu máy tính '{name}' vào danh sách thành công!": "Đã lưu máy tính '{name}' vào danh sách thành công!",
+    "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!": "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!",
+    "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.": "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.",
+    "Đã lưu mật khẩu cố định thành công!": "Đã lưu mật khẩu cố định thành công!",
+    "Đã tắt mật khẩu cố định thành công!": "Đã tắt mật khẩu cố định thành công!",
+    "Đã bật tính năng chạy khi mở máy thành công!": "Đã bật tính năng chạy khi mở máy thành công!",
+    "Đã tắt tính năng chạy khi mở máy thành công!": "Đã tắt tính năng chạy khi mở máy thành công!",
     "+ Thêm Mới": "+ Thêm Mới",
     "4 chữ số": "4 chữ số",
     "5 chữ số": "5 chữ số",
@@ -1068,7 +1011,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 }
             template_path = export_template(template)
             if template_path:
-                messagebox.showinfo(_("Lưu lại"), f"File ngôn ngữ mẫu đã được lưu tại:\n{template_path}\nBạn có thể sao chép và đổi tên thành 'en.json' để dịch.")
+                messagebox.showinfo(_("Lưu lại"), _("File ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'en.json' để dịch."))
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -1111,13 +1054,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.update_status("Đã sao chép cả ID & Mật khẩu!")
+        self.update_status(_("Đã sao chép cả ID & Mật khẩu!"))
 
 
     def copy_to_clipboard(self, text):
         self.clipboard_clear()
         self.clipboard_append(text.strip())
-        self.update_status(f"Đã sao chép vào bộ nhớ tạm: {text.strip()}")
+        self.update_status(_("Đã sao chép vào bộ nhớ tạm: ") + text.strip())
 
 
     def make_context_menu(self, entry):
@@ -1157,7 +1100,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except Exception as e:
                 print(f"[Host] Failed to save refreshed session password: {e}")
                 self.my_password = old_password
-                self.show_custom_error("Lỗi", "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!")
+                self.show_custom_error(_("Lỗi"), _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"))
                 
         self.my_pass_label.config(text=self.my_password)
         
@@ -1175,7 +1118,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         dialog = tk.Toplevel(self)
         dialog.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy ở góc trên bên trái màn hình
         self.saved_computers_dialog = dialog
-        dialog.title("Danh sách Máy tính")
+        dialog.title(_("Danh sách Máy tính"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -1208,17 +1151,17 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4, padx=(0, 8))
         
         # Thiết lập Placeholder chuyên nghiệp
-        entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+        entry_search.insert(0, _("Tìm kiếm theo tên hoặc ID..."))
         entry_search.configure(fg=self.text_gray)
         
         def on_focus_in(event):
-            if entry_search.get() == "Tìm kiếm theo tên hoặc ID...":
+            if entry_search.get() == _("Tìm kiếm theo tên hoặc ID..."):
                 entry_search.delete(0, tk.END)
                 entry_search.configure(fg=self.text_white)
                 
         def on_focus_out(event):
             if entry_search.get() == "":
-                entry_search.insert(0, "Tìm kiếm theo tên hoặc ID...")
+                entry_search.insert(0, _("Tìm kiếm theo tên hoặc ID..."))
                 entry_search.configure(fg=self.text_gray)
                 
         entry_search.bind("<FocusIn>", on_focus_in)
@@ -1226,7 +1169,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         def on_search_change(*args):
             val = search_var.get()
-            if val == "Tìm kiếm theo tên hoặc ID...":
+            if val == _("Tìm kiếm theo tên hoặc ID..."):
                 return
             refresh_list()
             
@@ -1284,7 +1227,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.click_connect()
 
         def delete_computer(item):
-            if self.show_custom_question("Xóa máy tính", f"Bạn có chắc muốn xóa '{item['name']}' khỏi danh sách?", parent=dialog):
+            if self.show_custom_question(_("Xóa máy tính"), _("Bạn có chắc muốn xóa") + f" '{item['name']}' " + _("khỏi danh sách?"), parent=dialog):
                 computers = load_computers()
                 computers = [c for c in computers if not (c["id"] == item["id"] and c["name"] == item["name"])]
                 save_computers(computers)
@@ -1403,7 +1346,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         def rename_group_dialog(old_group_name):
             rn_win = tk.Toplevel(dialog)
             rn_win.withdraw()
-            rn_win.title("Đổi tên nhóm")
+            rn_win.title(_("Đổi tên nhóm"))
             rn_win.resizable(False, False)
             rn_win.configure(bg=self.bg_color)
             rn_win.transient(dialog)
@@ -1416,7 +1359,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             rn_win.geometry(f"{rw}x{rh}+{rx}+{ry}")
             rn_win.deiconify()
 
-            lbl = tk.Label(rn_win, text=f"Nhập tên mới cho nhóm:\n'{old_group_name if old_group_name else 'Chưa phân nhóm'}'", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
+            lbl = tk.Label(rn_win, text=_("Nhập tên mới cho nhóm:") + f"\n'{old_group_name if old_group_name else _("Chưa phân nhóm")}'", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
             lbl.pack(pady=(15, 10))
 
             entry_var = tk.StringVar(value=old_group_name)
@@ -1503,7 +1446,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.status_dots_widgets.clear()
 
             query = search_var.get().strip().lower()
-            if query == "tìm kiếm theo tên hoặc id...":
+            if query == _("tìm kiếm theo tên hoặc id..."):
                 query = ""
 
             computers = load_computers()
@@ -1513,7 +1456,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
 
             if not computers:
-                txt = "Không tìm thấy máy tính phù hợp." if query else "Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới."
+                txt = _("Không tìm thấy máy tính phù hợp.") if query else _("Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới.")
                 lbl_empty = tk.Label(scrollable_frame, text=txt, font=("Segoe UI", 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
                 lbl_empty.pack(pady=40, fill=tk.X, expand=True)
                 return
@@ -1523,7 +1466,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 unique_groups.add(c.get("group", "").strip())
             
             for grp in unique_groups:
-                grp_display = grp if grp else "Chưa phân nhóm"
+                grp_display = grp if grp else _("Chưa phân nhóm")
                 icon = "▶" if grp in self.collapsed_groups else "▼"
                 header_text = f"{icon} {grp_display.upper()}"
                 
@@ -1537,7 +1480,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     else:
                         self.collapsed_groups.add(g)
                     new_icon = "▶" if g in self.collapsed_groups else "▼"
-                    event.widget.config(text=f"{new_icon} {(g if g else 'Chưa phân nhóm').upper()}")
+                    event.widget.config(text=f"{new_icon} {(g if g else _("Chưa phân nhóm")).upper()}")
                     reorder_list()
                     self.save_group_states_only()
                     
@@ -1545,7 +1488,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 header.bind("<ButtonRelease-1>", on_drop)
 
                 grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
-                grp_context_menu.add_command(label="Đổi tên nhóm", command=lambda g=grp: rename_group_dialog(g))
+                grp_context_menu.add_command(label=_("Đổi tên nhóm"), command=lambda g=grp: rename_group_dialog(g))
 
                 def show_grp_context(event, menu=grp_context_menu):
                     try:
@@ -1632,7 +1575,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             def update_timer():
                 nonlocal seconds_left
                 if seconds_left > 0:
-                    btn_refresh.config(text=f"🔄 Làm mới ({seconds_left}s)")
+                    btn_refresh.config(text=_("🔄 Làm mới") + f" ({seconds_left}s)")
                     seconds_left -= 1
                     if dialog.winfo_exists():
                         dialog.after(1000, update_timer)
@@ -1694,7 +1637,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         add_win = tk.Toplevel(parent)
         add_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        add_win.title("Thêm Máy tính")
+        add_win.title(_("Thêm Máy tính"))
         add_win.resizable(False, False)
         add_win.configure(bg=self.bg_color)
         add_win.transient(parent)
@@ -1750,13 +1693,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             cgroup = entry_group.get().strip()
 
             if not name or not cid or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=add_win)
+                self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=add_win)
                 return
 
             computers = load_computers()
             for c in computers:
                 if c["id"] == cid and c["name"] == name:
-                    self.show_custom_error("Trùng lặp", "Máy tính này đã tồn tại trong danh sách!", parent=add_win)
+                    self.show_custom_error(_("Trùng lặp"), _("Máy tính này đã tồn tại trong danh sách!"), parent=add_win)
                     return
 
             computers.append({
@@ -1769,7 +1712,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if on_save:
                 on_save()
             if not parent_win:
-                self.show_custom_info("Thành công", f"Đã lưu máy tính '{name}' vào danh sách thành công!", parent=add_win)
+                self.show_custom_info(_("Thành công"), _("Đã lưu máy tính '{name}' vào danh sách thành công!").replace("{name}", name), parent=add_win)
             add_win.destroy()
 
         btn_add_frame = tk.Frame(add_win, bg=self.bg_color)
@@ -1795,7 +1738,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         edit_win = tk.Toplevel(parent)
         edit_win.withdraw()  # Ẩn ngay khi khởi tạo để tránh bị nháy
-        edit_win.title("Sửa thông tin")
+        edit_win.title(_("Sửa thông tin"))
         edit_win.resizable(False, False)
         edit_win.configure(bg=self.bg_color)
         edit_win.transient(parent)
@@ -1851,7 +1794,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             cgroup = entry_group.get().strip()
 
             if not name or not new_id or not cpass:
-                self.show_custom_error("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin!", parent=edit_win)
+                self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=edit_win)
                 return
 
             computers = load_computers()
@@ -1871,7 +1814,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     on_save()
                 edit_win.destroy()
             else:
-                self.show_custom_error("Lỗi", "Không tìm thấy máy tính tương ứng để sửa!", parent=edit_win)
+                self.show_custom_error(_("Lỗi"), _("Không tìm thấy máy tính tương ứng để sửa!"), parent=edit_win)
 
         btn_edit_frame = tk.Frame(edit_win, bg=self.bg_color)
         btn_edit_frame.pack(fill=tk.X, padx=20, pady=5)
@@ -2176,7 +2119,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def open_set_zalo_phone_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Cài Zalo / Điện thoại")
+        dialog.title(_("Cài Zalo / Điện thoại"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -2193,7 +2136,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT ZALO / ĐIỆN THOẠI"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn."
+        desc_text = _("Nhập số điện thoại hoặc liên kết Zalo của bạn.\nClient điều khiển máy bạn có thể click Help -> Zalo\nđể trực tiếp nhắn tin cho bạn.")
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
@@ -2211,7 +2154,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         def save_val():
             new_val = entry_val.get().strip()
             self.save_zalo_phone_to_xml(new_val)
-            self.show_custom_info("Thành công", "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!", parent=dialog)
+            self.show_custom_info(_("Thành công"), _("Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!"), parent=dialog)
             dialog.destroy()
 
         # Buttons
@@ -2235,7 +2178,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def show_server_settings_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Cài đặt Máy chủ (Signaling Server)")
+        dialog.title(_("Cài đặt Máy chủ (Signaling Server)"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -2251,7 +2194,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CẤU HÌNH MÁY CHỦ SIGNALING"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)"
+        desc_text = _("Nhập danh sách tên miền hoặc IP máy chủ\n(Cách nhau bằng dấu phẩy để dự phòng)")
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
@@ -2282,13 +2225,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             new_port_str = entry_port.get().strip()
             
             if not new_hosts_str or not new_port_str:
-                self.show_custom_error("Lỗi", "Vui lòng nhập đầy đủ thông tin!", parent=dialog)
+                self.show_custom_error(_("Lỗi"), _("Vui lòng nhập đầy đủ thông tin!"), parent=dialog)
                 return
                 
             try:
                 new_port = int(new_port_str)
             except ValueError:
-                self.show_custom_error("Lỗi", "Cổng kết nối (Port) phải là số!", parent=dialog)
+                self.show_custom_error(_("Lỗi"), _("Cổng kết nối (Port) phải là số!"), parent=dialog)
                 return
                 
             global SIGNALING_SERVER_HOSTS, SIGNALING_SERVER_PORT
@@ -2306,10 +2249,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 with open('server.ini', 'w', encoding='utf-8') as f:
                     config.write(f)
                 
-                self.show_custom_info("Thành công", "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.", parent=dialog)
+                self.show_custom_info(_("Thành công"), _("Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo."), parent=dialog)
                 dialog.destroy()
             except Exception as e:
-                self.show_custom_error("Lỗi", f"Không thể lưu file server.ini: {e}", parent=dialog)
+                self.show_custom_error(_("Lỗi"), _("Không thể lưu file server.ini: ") + str(e), parent=dialog)
 
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=30, pady=10)
@@ -2332,14 +2275,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def update_fixed_password_indicator(self):
         if hasattr(self, 'fixed_pass_indicator'):
             if self.fixed_password:
-                self.fixed_pass_indicator.config(text="● Mật khẩu cố định: Đang hoạt động")
+                self.fixed_pass_indicator.config(text=_("● Mật khẩu cố định: Đang hoạt động"))
             else:
                 self.fixed_pass_indicator.config(text="")
 
 
     def open_set_fixed_password_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Mật khẩu cố định")
+        dialog.title(_("Mật khẩu cố định"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -2356,7 +2299,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_title = tk.Label(dialog, text=_("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        desc_text = "Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)"
+        desc_text = _("Đặt mật khẩu cố định giúp đối tác kết nối vào\nmáy của bạn mà không cần hỏi mật khẩu ngẫu nhiên.\n(Để trống để tắt tính năng này)")
         lbl_desc = tk.Label(dialog, text=desc_text, font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color, justify=tk.CENTER)
         lbl_desc.pack(pady=(0, 10))
 
@@ -2392,9 +2335,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.update_fixed_password_indicator()
             
             if new_pass:
-                self.show_custom_info("Thành công", "Đã lưu mật khẩu cố định thành công!", parent=dialog)
+                self.show_custom_info(_("Thành công"), _("Đã lưu mật khẩu cố định thành công!"), parent=dialog)
             else:
-                self.show_custom_info("Thành công", "Đã tắt mật khẩu cố định thành công!", parent=dialog)
+                self.show_custom_info(_("Thành công"), _("Đã tắt mật khẩu cố định thành công!"), parent=dialog)
             dialog.destroy()
 
         # Buttons
@@ -2424,7 +2367,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
             try:
-                value, _ = winreg.QueryValueEx(key, key_name)
+                value, _type = winreg.QueryValueEx(key, key_name)
                 winreg.CloseKey(key)
             except FileNotFoundError:
                 winreg.CloseKey(key)
@@ -2433,7 +2376,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             # Check if StartupApproved has disabled it (Windows 11)
             try:
                 approved_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_key_path, 0, winreg.KEY_READ)
-                approved_val, _ = winreg.QueryValueEx(approved_key, key_name)
+                approved_val, _type = winreg.QueryValueEx(approved_key, key_name)
                 winreg.CloseKey(approved_key)
                 # First byte: 02=enabled, 03/06=disabled
                 if isinstance(approved_val, bytes) and len(approved_val) >= 1 and approved_val[0] != 0x02:
@@ -2478,7 +2421,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 except Exception as e:
                     print(f"[Startup] Warning: Could not set StartupApproved: {e}")
                 print(f"[Startup] Enabled run on startup: {exe_path}")
-                self.show_custom_info("Thành công", "Đã bật tính năng chạy khi mở máy thành công!")
+                self.show_custom_info(_("Thành công"), _("Đã bật tính năng chạy khi mở máy thành công!"))
             else:
                 try:
                     winreg.DeleteValue(key, key_name)
@@ -2491,11 +2434,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     winreg.CloseKey(approved_key)
                 except Exception:
                     pass
-                self.show_custom_info("Thành công", "Đã tắt tính năng chạy khi mở máy thành công!")
+                self.show_custom_info(_("Thành công"), _("Đã tắt tính năng chạy khi mở máy thành công!"))
             winreg.CloseKey(key)
         except Exception as e:
             print(f"[Startup] Failed to modify registry: {e}")
-            self.show_custom_error("Thất bại", f"Không thể thay đổi cài đặt Registry: {e}")
+            self.show_custom_error(_("Thất bại"), _("Không thể thay đổi cài đặt Registry: ") + str(e))
             self.startup_var.set(not enabled)
 
 
@@ -2515,7 +2458,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         elif len(self.active_viewers) > 1:
             # Multiple active sessions
             dialog = tk.Toplevel(self)
-            dialog.title("Liên hệ Zalo")
+            dialog.title(_("Liên hệ Zalo"))
             dialog.resizable(False, False)
             dialog.configure(bg=self.bg_color)
             dialog.transient(self)
@@ -2533,9 +2476,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else _('Không có số')})"
                 
                 def contact(val=p_val, name=c_name):
                     dialog.destroy()
@@ -2563,7 +2506,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def show_zalo_error_popup(self, comp_name=""):
         dialog = tk.Toplevel(self)
-        dialog.title("Liên hệ Zalo")
+        dialog.title(_("Liên hệ Zalo"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -2577,9 +2520,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "LIÊN HỆ ZALO"
+        title_text = _("LIÊN HỆ ZALO")
         if comp_name:
-            title_text = f"ZALO: {comp_name.upper()}"
+            title_text = _("ZALO:") + f" {comp_name.upper()}"
             
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
@@ -2608,7 +2551,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         elif len(self.active_viewers) > 1:
             # Let them select which computer's phone number to view
             dialog = tk.Toplevel(self)
-            dialog.title("Chọn đối tác")
+            dialog.title(_("Chọn đối tác"))
             dialog.resizable(False, False)
             dialog.configure(bg=self.bg_color)
             dialog.transient(self)
@@ -2626,9 +2569,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             lbl_title.pack(pady=(12, 10))
             
             for v in self.active_viewers:
-                c_name = v["computer_name"] or "Không rõ"
+                c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
-                display_text = f"{c_name} ({p_val if p_val else 'Không có số'})"
+                display_text = f"{c_name} ({p_val if p_val else _('Không có số')})"
                 
                 def show_phone(val=p_val, name=c_name):
                     dialog.destroy()
@@ -2650,7 +2593,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def show_phone_number_popup(self, phone_val, comp_name=""):
         dialog = tk.Toplevel(self)
-        dialog.title("Điện thoại liên hệ")
+        dialog.title(_("Điện thoại liên hệ"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)
@@ -2664,14 +2607,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
 
-        title_text = "SỐ ĐIỆN THOẠI LIÊN HỆ"
+        title_text = _("SỐ ĐIỆN THOẠI LIÊN HỆ")
         if comp_name:
-            title_text = f"ĐIỆN THOẠI: {comp_name.upper()}"
+            title_text = _("ĐIỆN THOẠI:") + f" {comp_name.upper()}"
             
         lbl_title = tk.Label(dialog, text=title_text, font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
         lbl_title.pack(pady=(15, 10))
 
-        display_text = phone_val if phone_val else "Chưa có liên lạc"
+        display_text = phone_val if phone_val else _("Chưa có liên lạc")
         lbl_phone = tk.Label(dialog, text=display_text, font=("Segoe UI", 16, "bold"), fg="#2ECC71", bg=self.entry_bg, bd=0, height=1, width=20)
         lbl_phone.pack(pady=(5, 15))
 
@@ -2686,7 +2629,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def show_about_dialog(self):
         # Tạo cửa sổ Toplevel mới đóng vai trò Modal
         about = tk.Toplevel(self)
-        about.title("About")
+        about.title(_("About"))
         about.resizable(False, False)
         about.configure(bg=self.bg_color)
         
@@ -2896,7 +2839,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         dialog = tk.Toplevel(self)
         dialog.withdraw()
-        dialog.title("Lỗi kết nối mạng LAN")
+        dialog.title(_("Lỗi kết nối mạng LAN"))
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
         dialog.attributes("-topmost", True)
@@ -2936,10 +2879,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                  fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
-            ("Public IP phát hiện", public_ip if public_ip else "N/A"),
-            ("Trạng thái",          "Cùng Public IP → cùng Router/Mạng nội bộ"),
-            ("Phương thức thử",     "Kết nối TCP trực tiếp qua Local IP (LAN)"),
-            ("Kết quả",             "❌  Tất cả địa chỉ LAN đều không phản hồi"),
+            (_("Public IP phát hiện"), public_ip if public_ip else "N/A"),
+            (_("Trạng thái"),          _("Cùng Public IP → cùng Router/Mạng nội bộ")),
+            (_("Phương thức thử"),     _("Kết nối TCP trực tiếp qua Local IP (LAN)")),
+            (_("Kết quả"),             _("❌  Tất cả địa chỉ LAN đều không phản hồi")),
         ]
         for label, value in rows:
             row = tk.Frame(info_frame, bg=self.entry_bg)
@@ -2955,12 +2898,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                  fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
 
         steps = [
-            ("1", "Kiểm tra Tường lửa Windows",
-             "Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network."),
-            ("2", "Kiểm tra phần mềm diệt virus / VPN",
-             "Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ."),
-            ("3", "Kiểm tra cổng mạng đang dùng",
-             f"Ứng dụng dùng cổng {BOUND_PORT}. Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall."),
+            ("1", _("Kiểm tra Tường lửa Windows"),
+             _("Vào Windows Defender Firewall → Allow an app → đảm bảo RemoteDesktopP2P.exe được phép trên Private & Public network.")),
+            ("2", _("Kiểm tra phần mềm diệt virus / VPN"),
+             _("Tắt tạm thời các phần mềm Antivirus hoặc VPN có thể đang chặn kết nối nội bộ.")),
+            ("3", _("Kiểm tra cổng mạng đang dùng"),
+             _("Ứng dụng dùng cổng") + f" {BOUND_PORT}. " + _("Đảm bảo cổng này chưa bị chiếm hoặc bị chặn bởi Firewall.")),
         ]
         for num, title_step, desc in steps:
             sf = tk.Frame(dialog, bg=self.bg_color)
@@ -3064,7 +3007,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def update_status(self, text, is_error=False, blink=False, is_success=False):
         def _do_update():
-            self.status_var.set(f"Trạng thái: {text}")
+            self.status_var.set(_("Trạng thái:") + f" {text}")
             
             if not hasattr(self, 'lbl_status'):
                 return
@@ -3102,7 +3045,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 "Sẵn sàng kết nối",  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
             ])
             if is_pending and getattr(self, 'signaling_sockets', {}):
-                self.update_status("Kết nối Signaling thành công! Sẵn sàng kết nối.")
+                self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."))
         except Exception:
             pass
         self.after(3000, self._poll_signaling_status)
@@ -3176,7 +3119,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 except:
                     pass
                 sock.close()
-                self.update_status(f"Đã gửi Wake-On-Lan tới MAC {m}")
+                self.update_status(_("Đã gửi Wake-On-Lan tới MAC") + f" {m}")
             except Exception as e:
                 print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
 
@@ -3216,8 +3159,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 dc.ellipse((16, 16, 48, 48), fill="#00ADB5")
             
             menu = pystray.Menu(
-                item('Hiện (Show)', self.show_gui_from_tray, default=True),
-                item('Thoát (Exit)', self.exit_from_tray)
+                item(_('Hiện (Show)'), self.show_gui_from_tray, default=True),
+                item(_('Thoát (Exit)'), self.exit_from_tray)
             )
             
             self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, "Easy Remote Desktop", menu)
@@ -3438,8 +3381,8 @@ if __name__ == '__main__':
                         continue
                     else:
                         # Topmost native message dialog
-                        msg_text = "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống"
-                        msg_title = "Thông báo"
+                        msg_text = _("Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống")
+                        msg_title = _("Thông báo")
                         # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
                         ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
                         
