@@ -22,6 +22,7 @@ from network.socket_utils import socket_passwords, force_close_socket, APP_KEY
 from network.socket_utils import send_msg, recv_msg
 from utils.logger import log_debug
 from network.upnp import attempt_upnp_forward
+from core.viewer import run_client_viewer_loop
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)

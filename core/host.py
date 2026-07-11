@@ -351,6 +351,8 @@ class HostMixin:
                     self.server_socket.bind(('0.0.0.0', port))
                     
                 BOUND_PORT = port
+                import core.config; core.config.BOUND_PORT = port
+                import core.network_manager; core.network_manager.BOUND_PORT = port
                 self.server_socket.listen(5)
                 print(f"[Host] TCP server successfully listening on port {BOUND_PORT} (Dual-Stack)...")
                 bound = True

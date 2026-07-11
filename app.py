@@ -344,6 +344,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if getattr(self, "is_service_active", False):
                 global BOUND_PORT
                 BOUND_PORT = 12346 # Prevent using port 12345 to avoid conflicting with the service
+                import core.config; core.config.BOUND_PORT = 12346
+                import core.network_manager; core.network_manager.BOUND_PORT = 12346
+                import core.host; core.host.BOUND_PORT = 12346
                 pass_path = os.path.join(app_dir, "session_pass.txt")
                 if os.path.exists(pass_path):
                     try:
