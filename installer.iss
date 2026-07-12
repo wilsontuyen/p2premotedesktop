@@ -45,8 +45,8 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Easy
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopAgent"" dir=in action=allow program=""{app}\RemoteDesktopP2P.exe"" enable=yes profile=any"; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopService"" dir=in action=allow program=""{app}\RemoteDesktopService.exe"" enable=yes profile=any"; Flags: runhidden
 
-; Register background system service (Scheduled Task)
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$Action = New-ScheduledTaskAction -Execute '{app}\RemoteDesktopService.exe'; $Trigger = New-ScheduledTaskTrigger -AtStartup; $Principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Compatibility Win8; Register-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force;"""; Flags: runhidden
+; Register background system service (Scheduled Task) using schtasks for Windows 7 compatibility
+Filename: "schtasks.exe"; Parameters: "/create /tn ""EasyRemoteDesktopAgent"" /tr ""'""{app}\RemoteDesktopService.exe""'"" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f"; Flags: runhidden
 
 ; Start background service
 Filename: "schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden

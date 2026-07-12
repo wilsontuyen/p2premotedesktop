@@ -50,7 +50,6 @@ def main():
     # 1. Stop Scheduled Task
     log("Stopping scheduled task 'EasyRemoteDesktopAgent'...")
     subprocess.run("schtasks /end /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("powershell -Command \"Stop-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 2. Terminate running instances to release file locks
     log("Terminating any running instances of agent and service...")
@@ -69,6 +68,7 @@ def main():
     service_desc = "Background Service for P2P Remote Desktop"
     nuitka_service_cmd = (
         f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+        f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
@@ -85,6 +85,7 @@ def main():
     app_desc = "Client GUI for P2P Remote Desktop"
     nuitka_cmd = (
         f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
+        f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon '
         f'--no-deployment-flag=excluded-module-usage '
         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
@@ -242,8 +243,8 @@ def main():
 
     # 8. Re-enable & Start Scheduled Task (Service sẽ tự spawn --headless agent)
     log("Re-enabling and starting scheduled task 'EasyRemoteDesktopAgent'...")
-    subprocess.run("powershell -Command \"Enable-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("powershell -Command \"Start-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run("schtasks /change /tn \"EasyRemoteDesktopAgent\" /enable", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run("schtasks /run /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # 9. Chờ Service khởi động và hoàn tất bước cleanup
     log("Waiting for service to initialize and complete cleanup (5s)...")

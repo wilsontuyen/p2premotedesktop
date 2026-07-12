@@ -3,4 +3,9 @@ pygame-ce
 pynput
 pystray
 Pillow
-cryptography
+cryptography==38.0.4
+opencv-python
+numpy
+psutil
+pywin32
+nuitka

@@ -40,6 +40,128 @@ def log(msg):
     except:
         pass
 
+def enable_all_privileges():
+    try:
+        h_process = win32api.GetCurrentProcess()
+        h_token = win32security.OpenProcessToken(
+            h_process, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+        )
+        privs = []
+        for priv_name in [
+            win32security.SE_DEBUG_NAME, 
+            win32security.SE_TCB_NAME, 
+            win32security.SE_ASSIGNPRIMARYTOKEN_NAME, 
+            win32security.SE_INCREASE_QUOTA_NAME,
+            win32security.SE_IMPERSONATE_NAME
+        ]:
+            try:
+                luid = win32security.LookupPrivilegeValue(None, priv_name)
+                privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
+            except:
+                pass
+        if privs:
+            win32security.AdjustTokenPrivileges(h_token, False, privs)
+        win32api.CloseHandle(h_token)
+        log("Đã kích hoạt toàn bộ đặc quyền (Privileges) cho tiến trình Service.")
+    except Exception as e:
+        log(f"Lỗi khi cấp đặc quyền hệ thống: {e}")
+
+def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, cwd, environment=None):
+    """
+    Attempts to create a process using CreateProcessAsUser. 
+    If it fails with ERROR_PRIVILEGE_NOT_HELD (1314) on Windows 7,
+    it automatically falls back to CreateProcessWithTokenW.
+    """
+    startup_info = win32process.STARTUPINFO()
+    startup_info.lpDesktop = desktop
+    if environment is not None:
+        startup_info.dwFlags = win32process.STARTF_USESHOWWINDOW
+        startup_info.wShowWindow = win32con.SW_HIDE
+
+    try:
+        h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+            h_token,
+            exe_path,
+            cmd_line,
+            None, None, False,
+            creation_flags,
+            environment,
+            cwd,
+            startup_info
+        )
+        win32api.CloseHandle(h_process)
+        win32api.CloseHandle(h_thread)
+        return dwProcessId
+    except Exception as e:
+        err_code = getattr(e, 'winerror', 0)
+        if not err_code and hasattr(e, 'args') and len(e.args) > 0:
+            err_code = e.args[0]
+            
+        if err_code == 1314:
+            log(f"CreateProcessAsUser bị từ chối đặc quyền (1314). Kích hoạt CreateProcessWithTokenW (Win 7 fallback)...")
+            try:
+                import ctypes
+                from ctypes import wintypes
+                
+                ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+                CreateProcessWithTokenW = ADVAPI32.CreateProcessWithTokenW
+                CreateProcessWithTokenW.argtypes = [
+                    wintypes.HANDLE, wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPWSTR,
+                    wintypes.DWORD, wintypes.LPVOID, wintypes.LPCWSTR, ctypes.c_void_p, ctypes.c_void_p
+                ]
+                CreateProcessWithTokenW.restype = wintypes.BOOL
+                
+                class STARTUPINFOW(ctypes.Structure):
+                    _fields_ = [("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR), ("lpDesktop", wintypes.LPWSTR), ("lpTitle", wintypes.LPWSTR), ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD), ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD), ("dwXCountChars", wintypes.DWORD), ("dwYCountChars", wintypes.DWORD), ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD), ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD), ("lpReserved2", wintypes.LPBYTE), ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE), ("hStdError", wintypes.HANDLE)]
+                
+                class PROCESS_INFORMATION(ctypes.Structure):
+                    _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE), ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
+                    
+                si = STARTUPINFOW()
+                si.cb = ctypes.sizeof(STARTUPINFOW)
+                si.lpDesktop = desktop
+                if environment is not None:
+                    si.dwFlags = win32process.STARTF_USESHOWWINDOW
+                    si.wShowWindow = win32con.SW_HIDE
+                
+                pi = PROCESS_INFORMATION()
+                
+                LOGON_WITH_PROFILE = 1
+                cmd_line_buf = ctypes.create_unicode_buffer(cmd_line) if cmd_line else None
+                
+                # Convert environment block to LPVOID
+                env_ptr = None
+                if environment is not None:
+                    # Actually passing environment to CreateProcessWithTokenW via ctypes is complex, 
+                    # we will just pass None for fallback. The process will inherit the token's environment.
+                    pass
+                
+                res = CreateProcessWithTokenW(
+                    int(h_token),
+                    LOGON_WITH_PROFILE,
+                    exe_path,
+                    cmd_line_buf,
+                    creation_flags,
+                    None,
+                    cwd,
+                    ctypes.byref(si),
+                    ctypes.byref(pi)
+                )
+                
+                if not res:
+                    log(f"CreateProcessWithTokenW cũng thất bại với lỗi: {ctypes.get_last_error()}")
+                    raise e
+                
+                ctypes.windll.kernel32.CloseHandle(pi.hProcess)
+                ctypes.windll.kernel32.CloseHandle(pi.hThread)
+                return pi.dwProcessId
+            except Exception as fb_err:
+                log(f"Lỗi khi chạy fallback: {fb_err}")
+                raise e
+        else:
+            raise e
+
+
 def configure_uac_registry():
     """
     Configure registry to disable UAC secure desktop switching (PromptOnSecureDesktop = 0).
@@ -136,15 +258,6 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
         return None
 
     try:
-        # Enable SeDebugPrivilege
-        h_process_self = win32api.GetCurrentProcess()
-        h_token_self = win32security.OpenProcessToken(
-            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-        )
-        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
-        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
-        win32api.CloseHandle(h_token_self)
-
         # Open winlogon and its token
         h_winlogon = win32api.OpenProcess(
             win32con.PROCESS_QUERY_INFORMATION, False, winlogon_pid
@@ -155,7 +268,10 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
         win32api.CloseHandle(h_winlogon)
         
         # Target appropriate initial desktop based on active state
-        if is_screen_locked:
+        if not is_logged_in:
+            desktop = "winsta0\\winlogon"
+            log(f"Không có người dùng đăng nhập. Nhắm tới desktop Winlogon cho session {session_id} bằng token SYSTEM")
+        elif is_screen_locked:
             desktop = "winsta0\\winlogon"
             log(f"Đang nhắm tới desktop màn hình khóa (Winlogon) cho session {session_id} bằng token SYSTEM")
         else:
@@ -175,30 +291,23 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
             )
             win32api.CloseHandle(h_token)
 
-            startup_info = win32process.STARTUPINFO()
-            startup_info.lpDesktop = desktop
-
-            # Run process in active user session context with correct working directory
-            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+            # Run process in active user session context with robust fallback
+            dwProcessId = create_process_robust(
                 h_token_dup,
                 exe_path,
                 cmd_line,
-                None,
-                None,
-                False,
+                desktop,
                 win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
-                None,
-                os.path.dirname(exe_path),
-                startup_info
+                os.path.dirname(exe_path)
             )
-            win32api.CloseHandle(h_process)
-            win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
 
             log(f"Đã khởi chạy Agent thành công với PID {dwProcessId} trên desktop {desktop}")
             return dwProcessId
         except Exception as e:
-            log(f"CreateProcessAsUser thất bại: {e}")
+            log(f"Khởi chạy Agent thất bại toàn diện: {e}")
+            try: win32api.CloseHandle(h_token_dup)
+            except: pass
     return None
 
 def spawn_clipboard_agent(session_id):
@@ -229,32 +338,25 @@ def spawn_clipboard_agent(session_id):
             
             environment = win32profile.CreateEnvironmentBlock(h_token_dup, False)
             
-            startup_info = win32process.STARTUPINFO()
-            startup_info.lpDesktop = "winsta0\\default"
-            startup_info.dwFlags = win32process.STARTF_USESHOWWINDOW
-            startup_info.wShowWindow = win32con.SW_HIDE
-
             creation_flags = win32process.CREATE_UNICODE_ENVIRONMENT | win32process.CREATE_NEW_CONSOLE
 
-            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+            dwProcessId = create_process_robust(
                 h_token_dup,
                 exe_path,
                 cmd_line,
-                None, None, False,
+                "winsta0\\default",
                 creation_flags,
-                environment,
                 os.path.dirname(exe_path),
-                startup_info
+                environment
             )
-            
-            win32api.CloseHandle(h_process)
-            win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
 
             log(f"Đã khởi chạy Clipboard Agent với PID {dwProcessId} trên winsta0\\default (quyền User thường)")
             return dwProcessId
         except Exception as e:
-            log(f"CreateProcessAsUser cho Clipboard Agent thất bại: {e}")
+            log(f"Khởi chạy Clipboard Agent thất bại toàn diện: {e}")
+            try: win32api.CloseHandle(h_token_dup)
+            except: pass
     return None
 
 
@@ -272,25 +374,6 @@ def trigger_sas_system():
         log("Đã cấu hình SoftwareSASGeneration = 3 trong Registry.")
     except Exception as e:
         log(f"Lỗi khi cấu hình SoftwareSASGeneration trong service: {e}")
-
-    try:
-        h_process = win32api.GetCurrentProcess()
-        h_token = win32security.OpenProcessToken(
-            h_process, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-        )
-        privs = []
-        for priv_name in [win32security.SE_TCB_NAME, win32security.SE_DEBUG_NAME]:
-            try:
-                luid = win32security.LookupPrivilegeValue(None, priv_name)
-                privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
-            except:
-                pass
-        if privs:
-            win32security.AdjustTokenPrivileges(h_token, False, privs)
-        win32api.CloseHandle(h_token)
-        log("Đã điều chỉnh đặc quyền token cho SeTcbPrivilege trong service.")
-    except Exception as priv_err:
-        log(f"Thất bại khi điều chỉnh đặc quyền trong Service: {priv_err}")
 
     try:
         sas_dll = ctypes.windll.LoadLibrary("sas.dll")
@@ -311,24 +394,6 @@ def spawn_taskmgr_system():
         if is_screen_locked:
             log("Màn hình đang khóa, bỏ qua việc chạy Task Manager.")
             return
-
-        desktop = "winsta0\\default"
-
-        # Enable privileges
-        h_process_self = win32api.GetCurrentProcess()
-        h_token_self = win32security.OpenProcessToken(
-            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-        )
-        privs = []
-        for priv_name in [win32security.SE_DEBUG_NAME, win32security.SE_TCB_NAME]:
-            try:
-                luid = win32security.LookupPrivilegeValue(None, priv_name)
-                privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
-            except:
-                pass
-        if privs:
-            win32security.AdjustTokenPrivileges(h_token_self, False, privs)
-        win32api.CloseHandle(h_token_self)
 
         try:
             h_user_token = win32ts.WTSQueryUserToken(active_session_id)
@@ -355,28 +420,14 @@ def spawn_taskmgr_system():
             )
             win32api.CloseHandle(h_user_token)
 
-            startup_info = win32process.STARTUPINFO()
-            startup_info.lpDesktop = desktop
-
-            sys32 = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32")
-            taskmgr_exe = os.path.join(sys32, "taskmgr.exe")
-            if not os.path.exists(taskmgr_exe):
-                taskmgr_exe = "taskmgr.exe"
-
-            h_process, h_thread, dwProcessId, dwThreadId = win32process.CreateProcessAsUser(
+            dwProcessId = create_process_robust(
                 h_token_dup,
-                None,
                 taskmgr_exe,
                 None,
-                None,
-                False,
+                desktop,
                 win32con.NORMAL_PRIORITY_CLASS,
-                None,
-                sys32,
-                startup_info
+                sys32
             )
-            win32api.CloseHandle(h_process)
-            win32api.CloseHandle(h_thread)
             win32api.CloseHandle(h_token_dup)
             log(f"Đã khởi chạy thành công Task Manager với PID {dwProcessId} trên desktop {desktop} dưới quyền SYSTEM")
     except Exception as e:
@@ -413,17 +464,6 @@ def terminate_process_with_pid(pid):
     if not pid:
         return
     log(f"Đang cố gắng dừng tiến trình {pid}")
-    try:
-        h_process_self = win32api.GetCurrentProcess()
-        h_token_self = win32security.OpenProcessToken(
-            h_process_self, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
-        )
-        privs = [(win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME), win32security.SE_PRIVILEGE_ENABLED)]
-        win32security.AdjustTokenPrivileges(h_token_self, False, privs)
-        win32api.CloseHandle(h_token_self)
-    except Exception as e:
-        log(f"Thất bại khi kích hoạt SeDebugPrivilege để dừng tiến trình: {e}")
-
     success = False
     try:
         h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, pid)
@@ -461,6 +501,7 @@ def is_process_alive(pid):
     return False
 
 def main():
+    enable_all_privileges()
     log("Vòng lặp service Easy Remote Desktop Agent bắt đầu chạy.")
     configure_uac_registry()
     

@@ -1,3 +1,16 @@
+import sys
+import traceback
+import os
+try:
+    import tempfile
+    crash_log_path = os.path.join(tempfile.gettempdir(), "early_crash.log")
+    _f = open(crash_log_path, "w", encoding="utf-8", buffering=1)
+    sys.stderr = _f
+    sys.stdout = _f
+    print("Bắt đầu khởi chạy ứng dụng...")
+except:
+    pass
+
 from core.config import *
 from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
 
@@ -1359,7 +1372,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             rn_win.geometry(f"{rw}x{rh}+{rx}+{ry}")
             rn_win.deiconify()
 
-            lbl = tk.Label(rn_win, text=_("Nhập tên mới cho nhóm:") + f"\n_('{old_group_name if old_group_name else _("Chưa phân nhóm")}')", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
+            display_group = old_group_name if old_group_name else _("Chưa phân nhóm")
+            lbl = tk.Label(rn_win, text=_("Nhập tên mới cho nhóm:") + f"\n({display_group})", font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color)
             lbl.pack(pady=(15, 10))
 
             entry_var = tk.StringVar(value=old_group_name)
@@ -1480,7 +1494,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     else:
                         self.collapsed_groups.add(g)
                     new_icon = "▶" if g in self.collapsed_groups else "▼"
-                    event.widget.config(text=f"{new_icon} {(g if g else _("Chưa phân nhóm")).upper()}")
+                    g_display = g if g else _("Chưa phân nhóm")
+                    event.widget.config(text=f"{new_icon} {g_display.upper()}")
                     reorder_list()
                     self.save_group_states_only()
                     
