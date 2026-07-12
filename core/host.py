@@ -605,7 +605,7 @@ class HostMixin:
                 try:
                     for run_idx in range(2):
                         # 1. Ping / Latency test (3 pings per round)
-                        for _ in range(3):
+                        for _i in range(3):
                             ping_msg = recv_msg(conn, client_pass)
                             if ping_msg:
                                 ping_data = json.loads(ping_msg.decode('utf-8'))

@@ -884,9 +884,25 @@ class NetworkMixin:
         self.update_status(_("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ..."))
         self.connect_btn.config(state=tk.DISABLED)
         
+        # Lưu biến UI vào thuộc tính thông thường để thread chạy ngầm đọc (Tránh lỗi Tcl deadlock khi đọc biến UI từ thread khác)
+        self._current_force_relay = False
+        if hasattr(self, 'force_relay_var'):
+            self._current_force_relay = self.force_relay_var.get()
+            
         # Connect inside background thread to prevent UI freezing
-        threading.Thread(target=self.connect_to_partner, args=(partner_id, partner_pass), daemon=True).start()
+        def run_connect():
+            try:
+                self.connect_to_partner(partner_id, partner_pass)
+            except Exception as e:
+                import traceback
+                try:
+                    with open(r"C:\Apps\P2P\crash_connect.log", "a") as f:
+                        f.write(traceback.format_exc() + "\n")
+                except:
+                    pass
+                print(f"[Client] Background thread crashed: {e}")
         
+        threading.Thread(target=run_connect, daemon=True).start()
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
@@ -918,216 +934,236 @@ class NetworkMixin:
                 print(f"[Client] Failed to write blink signal: {write_err}")
             return
 
-        if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-            self.update_status(_("Chưa kết nối Signaling Server!"))
-            self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS.")))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            return
-
-        req = json.dumps({
-            "action": "connect_request",
-            "target": partner_id,
-            "port": BOUND_PORT,
-            "local_ip": self.local_ip,
-            "local_port": BOUND_PORT
-        }) + '\n'
-        
-        # Thử tìm đối tác trên tất cả các server đang kết nối
-        sockets_to_try = []
-        with self.signaling_lock:
-            if getattr(self, 'primary_signaling_socket', None):
-                sockets_to_try.append(self.primary_signaling_socket)
-            for sock in self.signaling_sockets.values():
-                if sock not in sockets_to_try:
-                    sockets_to_try.append(sock)
-                    
-        success = False
-        self.update_status(_("Đang tìm và chờ đối tác phản hồi..."))
-        
-        for sock in sockets_to_try:
-            self.pending_connection_info = None
-            try:
-                with self.signaling_lock:
-                    send_msg(sock, req.encode('utf-8'), APP_KEY)
-            except Exception as e:
-                continue
-                
-            timeout = 6.0
-            while timeout > 0 and self.pending_connection_info is None:
-                time.sleep(0.2)
-                timeout -= 0.2
-                
-            if self.pending_connection_info and self.pending_connection_info != "error":
-                success = True
-                break
-                
-        if not success:
-            if reconnect_queue and retry_count < 30:
-                self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
-                time.sleep(2)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
-                return
-                
-            self.update_status(_("Sẵn sàng kết nối"))
-            if not reconnect_queue:
-                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối.")))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if reconnect_queue:
-                reconnect_queue.put("FAILED")
-            return
-            
-        if len(self.pending_connection_info) >= 4:
-            public_ip, port, local_ip, local_port = self.pending_connection_info[:4]
-        else:
-            public_ip, port, local_ip = self.pending_connection_info
-            local_port = 12345
-            
-        port = int(port) if port else 0
-        local_port = int(local_port) if local_port else 12345
-            
         sock = None
         connected = False
         handshake_done = False
         cached_res_payload = None
-        
-        # 1. Try local IP first (LAN) (Chỉ thử nếu không ép buộc Relay)
-        if not self.force_relay_var.get() and local_ip:
+        force_relay = getattr(self, '_current_force_relay', False)
+
+        # ====== BƯỚC 1: Quét mạng LAN để tìm ID (5 lần) ======
+        lan_target = None
+        if not force_relay and hasattr(self, 'lan_peers'):
+            for attempt in range(5):
+                self.update_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
+                current_time = time.time()
+                with self.lan_peers_lock:
+                    # Clean up old peers
+                    self.lan_peers = {k: v for k, v in self.lan_peers.items() if current_time - v.get("last_seen", 0) < 15}
+                    if partner_id in self.lan_peers:
+                        lan_target = self.lan_peers[partner_id]
+                
+                if lan_target:
+                    print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN!")
+                    break
+                
+                time.sleep(1.0) # Đợi 1s giữa các lần tìm
+
+        if lan_target:
+            self.update_status(_("Đang thử kết nối LAN trực tiếp..."))
+            local_ip = lan_target.get("local_ip", "")
+            local_port = lan_target.get("port", 12345)
             ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
             ports_to_try = [local_port]
             for p in [12345, 12346, 12347, 12348]:
                 if p not in ports_to_try:
                     ports_to_try.append(p)
-                    
-            self.update_status(_("Đang quét kết nối nội bộ (LAN)..."))
-            import select
             
-            # Quét tuần tự từng port (ưu tiên local_port trước) để tránh lỗi dính Kaspersky/ứng dụng rác ở port 12345
-            for p in ports_to_try:
+            for try_ip in ips_to_try:
                 if connected: break
-                sockets = []
-                for ip in ips_to_try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.setblocking(False)
-                    try: s.connect((ip, p))
-                    except Exception: pass
-                    sockets.append((s, ip, p))
-                
-                # Chờ tối đa 0.4s cho mỗi port
-                end_time = time.time() + 0.4
-                while time.time() < end_time and not connected:
-                    timeout = max(0.05, end_time - time.time())
-                    try:
-                        sock_list = [item[0] for item in sockets]
-                        if not sock_list: break
-                        _r, writable, _e = select.select([], sock_list, [], timeout)
-                        for w_sock in writable:
-                            if w_sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
-                                try:
-                                    w_sock.getpeername()
-                                    w_sock.setblocking(True)
-                                    
-                                    # Kểm tra handshake ngay để xác minh đây có phải Host thật không
-                                    # (Tránh trường hợp VM NAT hay proxy tự động nhận TCP rồi reset)
-                                    w_sock.settimeout(2.0)
-                                    try:
-                                        socket_passwords[w_sock] = partner_pass
-                                        import platform
-                                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
-                                        send_msg(w_sock, hs_data, partner_pass)
-                                        tmp_res_msg = recv_msg(w_sock, [partner_pass, APP_KEY])
-                                        if tmp_res_msg:
-                                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
-                                            if tmp_res.get("status") == "ok" or tmp_res.get("status") == "error":
-                                                sock = w_sock
-                                                connected = True
-                                                handshake_done = True
-                                                cached_res_payload = tmp_res
-                                                matched = next((item for item in sockets if item[0] == w_sock), None)
-                                                if matched:
-                                                    print(f"[Client] Connected & Handshaked via LAN: {matched[1]}:{matched[2]}")
-                                                break
-                                    except Exception:
-                                        pass
-                                    
-                                    if not connected:
-                                        force_close_socket(w_sock)
-                                except: pass
-                    except: pass
+                for p in ports_to_try:
                     if connected: break
-                    
-                # Đóng các socket không dùng tới trong batch này
-                for s_tuple in sockets:
-                    if s_tuple[0] != sock: force_close_socket(s_tuple[0])
-                
-        # 2. Kỹ thuật đục lỗ Tường lửa (TCP Hole Punching) (Chỉ thử nếu không ép buộc Relay)
-        if not self.force_relay_var.get() and not connected:
-            if hasattr(self, 'current_ip') and self.current_ip == public_ip:
-                print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                self.update_status(_("Sẵn sàng kết nối"))
-                self.after(0, lambda pip=public_ip: self._show_lan_error_dialog(pip))
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(1.0)
+                        s.connect((try_ip, p))
+                        s.settimeout(None)
+                        # Handshake
+                        socket_passwords[s] = partner_pass
+                        import platform
+                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+                        send_msg(s, hs_data, partner_pass)
+                        tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
+                        if tmp_res_msg:
+                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                            if tmp_res.get("status") in ("ok", "error"):
+                                sock = s
+                                connected = True
+                                handshake_done = True
+                                cached_res_payload = tmp_res
+                                print(f"[Client] Connected & Handshaked via LAN Direct: {try_ip}:{p}")
+                                break
+                        if not connected:
+                            force_close_socket(s)
+                    except Exception as e:
+                        try:
+                            with open(r"C:\Apps\P2P\lan_debug.log", "a") as f:
+                                f.write(f"LAN connect to {try_ip}:{p} failed: {e}\n")
+                        except: pass
+                        try: s.close()
+                        except: pass
+        
+        # ====== BƯỚC 2: Hỏi Signaling Server (nếu LAN thất bại hoặc không tìm thấy) ======
+        public_ip, port = None, None
+        specific_host = getattr(self, 'current_signaling_host', None)
+        
+        if not connected:
+            if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
+                self.update_status(_("Chưa kết nối Máy chủ Tín hiệu!"))
+                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng.")))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
-            self.update_status(_("Đang đục lỗ Tường lửa (TCP Hole Punching) tới {ip}:{port}...").format(ip=public_ip, port=port))
-            print(f"[Client] Initiating Simultaneous Open to {public_ip}:{port}...")
+
+            req = json.dumps({
+                "action": "connect_request",
+                "target": partner_id,
+                "port": BOUND_PORT,
+                "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
+                "local_port": BOUND_PORT
+            }) + '\n'
             
-            # Tạm thời đóng server_socket bên Client để nhường port cho outbound connect
-            if getattr(self, 'server_socket', None):
-                try:
-                    self.server_socket.close()
-                except: pass
+            sockets_to_try = []
+            with self.signaling_lock:
+                if getattr(self, 'primary_signaling_socket', None):
+                    sockets_to_try.append(self.primary_signaling_socket)
+                for s in getattr(self, 'signaling_sockets', {}).values():
+                    if s not in sockets_to_try:
+                        sockets_to_try.append(s)
+                        
+            self.update_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
             
-            # Liên tục spam kết nối cực nhanh để đục lỗ (20 lần, mỗi lần 100ms)
-            for _i in range(20):
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            signaling_success = False
+            for s in sockets_to_try:
+                self.pending_connection_info = None
                 try:
-                    sock.bind(('0.0.0.0', BOUND_PORT))
-                except:
-                    pass
-                sock.settimeout(0.5)
-                try:
-                    sock.connect((public_ip, port))
-                    connected = True
-                    print(f"[Client] Hole punch successful to {public_ip}:{port}!")
-                    break
+                    with self.signaling_lock:
+                        send_msg(s, req.encode('utf-8'), APP_KEY)
                 except Exception:
-                    force_close_socket(sock)
-                    time.sleep(0.1)
+                    continue
                     
-            # Mở lại server_socket bất kể đục lỗ thành công hay thất bại
-            try:
+                wait_timeout = 6.0
+                while wait_timeout > 0 and self.pending_connection_info is None:
+                    time.sleep(0.2)
+                    wait_timeout -= 0.2
+                    
+                if self.pending_connection_info and self.pending_connection_info != "error":
+                    signaling_success = True
+                    break
+                    
+            if not signaling_success:
+                if reconnect_queue and retry_count < 30:
+                    self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
+                    time.sleep(2)
+                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                    return
+                self.update_status(_("Sẵn sàng kết nối"))
+                if not reconnect_queue:
+                    self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Không thể tìm thấy hoặc đối tác đang Offline.")))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                if reconnect_queue:
+                    reconnect_queue.put("FAILED")
+                return
+                
+            if len(self.pending_connection_info) >= 4:
+                public_ip, port_str, _dummy1, _dummy2 = self.pending_connection_info[:4]
+            else:
+                public_ip, port_str, _dummy1 = self.pending_connection_info
+                
+            port = int(port_str) if port_str else 0
+
+        # ====== BƯỚC 3: Đục lỗ Tường lửa (TCP Hole Punching) 10 lần ======
+        if not connected and not force_relay and public_ip and port:
+            skip_hole_punch = False
+            if hasattr(self, 'current_ip') and self.current_ip == public_ip:
+                print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
+                skip_hole_punch = True
+            
+            if not skip_hole_punch:
+                self.update_status(_("Đang đục lỗ Tường lửa tới {ip}:{port}...").format(ip=public_ip, port=port))
+                
+                if getattr(self, 'server_socket', None):
+                    try: self.server_socket.close()
+                    except: pass
+                
+                for attempt in range(10):
+                    self.update_status(_("Đang đục lỗ Tường lửa lần {n}/10...").format(n=attempt + 1))
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    try: s.bind(('0.0.0.0', BOUND_PORT))
+                    except: pass
+                    s.settimeout(0.5)
+                    try:
+                        s.connect((public_ip, port))
+                        connected = True
+                        sock = s
+                        print(f"[Client] Hole punch successful!")
+                        break
+                    except Exception:
+                        force_close_socket(s)
+                        time.sleep(0.1)
+                        
+                # Phục hồi server_socket
                 try:
-                    if hasattr(socket, 'AF_INET6'):
-                        self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                    try:
+                        if hasattr(socket, 'AF_INET6'):
+                            self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                                try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                                except: pass
+                            self.server_socket.bind(("", BOUND_PORT))
+                        else:
+                            raise Exception("No IPv6")
+                    except Exception:
+                        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
-                            try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-                            except: pass
-                        self.server_socket.bind(("", BOUND_PORT))
+                        self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+                    self.server_socket.listen(5)
+                except Exception as e:
+                    pass
+
+        # ====== BƯỚC 4: Server Trung Chuyển (Relay) Fallback ======
+        if not connected:
+            display_host = specific_host or 'Relay'
+            self.update_status(_("Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
+            try:
+                relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
+                relay_req = json.dumps({
+                    "action": "relay_request",
+                    "target": partner_id,
+                    "session_id": relay_session_id,
+                    "relay_host": specific_host
+                }) + '\n'
+                with self.signaling_lock:
+                    if getattr(self, 'primary_signaling_socket', None):
+                        send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
                     else:
-                        raise Exception("No IPv6")
-                except Exception:
-                    self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    self.server_socket.bind(('0.0.0.0', BOUND_PORT))
-                self.server_socket.listen(5)
-                print(f"[Client] Đã phục hồi TCP server lắng nghe trên port {BOUND_PORT}")
+                        raise Exception("Chưa kết nối tới Signaling Server!")
+                
+                host_to_connect = specific_host if specific_host else core.config.SIGNALING_SERVER_HOSTS[0]
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5.0)
+                s.connect((host_to_connect, core.config.SIGNALING_SERVER_PORT))
+                s.settimeout(None)
+                header = f"RELAY_CLIENT:{relay_session_id}\n"
+                s.sendall(header.encode('utf-8'))
+                
+                time.sleep(1.5)
+                sock = s
+                connected = True
+                self.update_status(_("Đã kết nối qua Relay Server!"))
             except Exception as e:
-                print(f"[Client] Cảnh báo: Không thể phục hồi server_socket: {e}")
+                connected = False
 
         if not connected:
             self.update_status(_("Sẵn sàng kết nối"))
-            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối"), 
-                f"Kỹ thuật Đục Lỗ Tường Lửa (Hole Punching) thất bại!\n\n"
-                f"Lý do: Không thể thiết lập kết nối trực tiếp P2P tới đối tác."
-            ))
+            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối"), _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại).")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock: force_close_socket(sock)
             return
-                
-        # Connection succeeded, proceed with handshake
-        sock.settimeout(None) # Reset back to blocking
-        
+
+        # ======================================================================
+        # Hoàn tất kết nối và handshake
+        # ======================================================================
         # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa cho cả đo tốc độ và điều khiển
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -1321,7 +1357,10 @@ class NetworkMixin:
             if reconnect_queue:
                 reconnect_queue.put("FAILED")
             else:
-                self.after(0, lambda err=str(e): self.show_custom_error(_("Lỗi bắt tay"), _("Lỗi xác thực handshake:\n{err}").format(err=err)))
+                err_str = str(e)
+                if "10054" in err_str:
+                    err_str = "Kết nối bị ngắt đột ngột bởi máy đích hoặc Relay Server (WinError 10054)."
+                self.after(0, lambda err=err_str: self.show_custom_error(_("Lỗi bắt tay"), _("Lỗi xác thực handshake:\n{err}").format(err=err)))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)
