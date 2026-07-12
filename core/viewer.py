@@ -244,6 +244,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             with open("window_config.json", "r", encoding="utf-8") as f:
                 cfg = json.load(f)
                 pygame_theme = cfg.get("theme", "dark")
+                
+                # Cấu hình lại ngôn ngữ cho tiến trình mới
+                from core.i18n import load_language
+                load_language(cfg.get("language", "vi"))
         except:
             pass
 
@@ -297,9 +301,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except: pass
                 
         if computer_name:
-            pygame.display.set_caption(f"P2P Remote Desktop  |  {computer_name}")
+            pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=computer_name))
         else:
-            pygame.display.set_caption("P2P Remote Desktop Viewer")
+            pygame.display.set_caption(_("P2P Remote Desktop Viewer"))
             
         try:
             icon_path = os.path.join(app_dir, "app_icon.png")
@@ -470,9 +474,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                         
                         if computer_name:
-                            pygame.display.set_caption(f"P2P Remote Desktop  |  {computer_name}")
+                            pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=computer_name))
                         else:
-                            pygame.display.set_caption("P2P Remote Desktop Viewer")
+                            pygame.display.set_caption(_("P2P Remote Desktop Viewer"))
                         try:
                             icon_path = os.path.join(app_dir, "app_icon.png")
                             if os.path.exists(icon_path):
