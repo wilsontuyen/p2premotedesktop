@@ -1,0 +1,462 @@
+========== USER ==========
+bạn vừa test tính năng khóa chuột phải ko? máy đang làm ma bạn test vậy sao làm tiếp được?
+
+[Action: run_command]
+  CommandLine: "taskkill /F /IM python.exe"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: false
+  MatchPerLine: true
+  Query: "WH_MOUSE_LL"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: true
+  MatchPerLine: true
+  Query: "hook|mouse|lock"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Get-Process | Where-Object {$_.ProcessName -match \"python\"}"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Xin lỗi bạn, mình (AI) không hề tự động chạy bất kỳ bài test hay tính năng khóa chuột nào trên máy của bạn cả. Các lệnh mình chạy đều phải hiển thị trên màn hình và thường cần bạn đồng ý thì mới thực thi được.
+
+Có thể một đoạn code trong ứng dụng `app.py` hoặc các file bạn vừa chạy thử (từ các phiên làm việc trước về tính năng màn hình riêng tư / khóa nhập liệu) đã vô tình kích hoạt hook khóa chuột. 
+
+Mình vừa kiểm tra hệ thống thì **không thấy có tiến trình Python nào đang chạy ngầm** nữa.
+
+**Nếu chuột của bạn vẫn đang bị khóa:**
+1. Bạn thử nhấn tổ hợp phím **`Ctrl + Alt + Delete`** (thao tác này của Windows sẽ tự động vô hiệu hóa các block/hook cấp thấp đối với chuột và bàn phím). Sau đó bấm `Esc` để thoát ra.
+<truncated 330 bytes>
+
+========== USER ==========
+ok, vậy do máy mình bị đứng, mình vừa khởi động lại rồi, bạn làm tiếp phần khóa chuột ở host khi kích hoạt màn hình phủ đi
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "taskkill /F /IM python.exe"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: true
+  MatchPerLine: true
+  Query: "privacy|screen_privacy|hook|lock_input"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: true
+  MatchPerLine: true
+  Query: "overlay|black_screen|black_out|blank_screen"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Get-ChildItem -Path d:\\Data\\AG\\remote_desktop -Filter \"*.py\" | Select-Object Name"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "cat d:\\Data\\AG\\remote_desktop\\activity_log.txt -Tail 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "C:\\Users\\Tuyen\\.gemini\\antigravity\\knowledge\\metadata.json"
+
+[Action: run_command]
+  CommandLine: "Get-ChildItem -Path C:\\Users\\Tuyen\\.gemini\\antigravity\\knowledge -Recurse -Filter \"metadata.json\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: false
+  MatchPerLine: true
+  Query: "CallNextHookEx"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: ["*.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "WH_MOUSE_LL"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10720
+  StartLine: 10640
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: true
+  MatchPerLine: true
+  Query: "privacy|overlay|cover_screen|black_screen"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: true
+  MatchPerLine: true
+  Query: "WS_DISABLED|HTTRANSPARENT|NCHITTEST|host_block_input_active"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: false
+  MatchPerLine: true
+  Query: "host_block_input_active"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python search.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: false
+  MatchPerLine: true
+  Query: "host_block_input_active"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10740
+  StartLine: 10660
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10820
+  StartLine: 10740
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10860
+  StartLine: 10820
+
+[Action: multi_replace_file_content]
+  Description: "Fix 64-bit OverflowError in CallNextHookEx for screen privacy input lockdown in app.py"
+  Instruction: "Replace the hook types and hook functions to use ctypes.c_void_p and add exception handling to prevent crash."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":10686,"ReplacementContent":"        # Use c_void_p instead of wintypes.WPARAM/LPARAM to prevent 64-bit OverflowError and truncation\n        user32.CallNextHookEx.arg...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python test_tk_daemon.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "taskkill /F /IM python.exe"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Mình đã sửa lỗi trong `app.py` gây ra hiện tượng treo máy (đóng băng chuột/bàn phím) rồi nhé.
+
+**Nguyên nhân lỗi vừa nãy:**
+Trên phiên bản Python 64-bit, các biến con trỏ nhớ (`lParam` và `wParam`) của Windows API bị chuyển đổi sai kiểu (`OverflowError` hoặc truncation) khi truyền vào hàm `CallNextHookEx`. Việc này khiến luồng xử lý (thread) bị crash *trong khi* hook khóa chuột/phím vẫn đang được hệ thống ghi nhận, dẫn tới việc Windows vứt bỏ toàn bộ các sự kiện bấm phím và di chuột vật lý.
+
+**Cách mình đã fix:**
+1. Mình đã đổi cấu trúc khai báo tham số của các Hook thành kiểu con trỏ an toàn bộ nhớ `ctypes.c_void_p` (phù hợp với cả 32-bit và 64-bit mà không bị lỗi ép kiểu).
+<truncated 990 bytes>
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "4f1a9497-faeb-45d8-a6cd-9b9efb2405a3"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 20
+
+[Action: command_status]
+  CommandId: "4f1a9497-faeb-45d8-a6cd-9b9efb2405a3"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 20
+
+[Action: command_status]
+  CommandId: "4f1a9497-faeb-45d8-a6cd-9b9efb2405a3"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 20
+
+[Action: command_status]
+  CommandId: "4f1a9497-faeb-45d8-a6cd-9b9efb2405a3"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 20
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\build_and_deploy.py"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\build_deploy.log"
+
+========== MODEL ==========
+Tiến trình build và deploy đã được khởi chạy nhé. 
+
+Do đây là quá trình biên dịch (compile) bằng **Nuitka** thành file thực thi `.exe` độc lập cho cả `windows_service_loop.py` và `app.py`, nên sẽ mất vài phút. 
+
+Hiện tại theo log thì:
+1. Đã build xong `RemoteDesktopService` thành công.
+2. Đang trong quá trình build `RemoteDesktopP2P` (`app.py`). Quá trình này sẽ hơi lâu một chút vì nó phải biên dịch kèm các thư viện đồ họa và OpenCV.
+
+Sau khi build xong, script sẽ tự động chép các file vào thư mục `C:\Apps\P2P`, khởi động lại background Service (`EasyRemoteDesktopAgent`) và tự động bật lại ứng dụng GUI cho bạn. Mình sẽ tiếp tục theo dõi ngầm và báo bạn ngay khi tiến trình hoàn tất! Bạn cứ để máy chạy một lát nhé.
+
+========== USER ==========
+tôi thấy có 1 logic như thế này:
+- khi kích hoạt nút màn hình phủ thì "chỉ hiện màn hình phủ khi app hiện giao diện", khi app không hiện giao diện thì bấm nút màn hình phủ thì "màn hình phủ là trong suốt và bàn phím bị khóa nhưng chuột vẫn kích hoạt"
+- có thể ignore chuột phải + chuột trái thay vì khóa chuột (có vẻ khó hơn) được không?
+
+========== USER ==========
+The USER performed the following action:
+Show the contents of file d:\Data\AG\remote_desktop\build_and_deploy.py from lines 93 to 120
+File Path: `file:///d:/Data/AG/remote_desktop/build_and_deploy.py`
+Total Lines: 260
+Total Bytes: 11600
+Showing lines 93 to 120
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+93:         f'--output-dir=dist_nuitka app.py'
+94:     )
+95:     if not run_cmd(nuitka_cmd):
+96:         log("ERROR: Nuitka build failed. Aborting deployment.")
+97:         return
+98: 
+99: 
+100:     # 5. Post-build renaming and asset preparation
+101:     log("Preparing build outputs...")
+102:     app_dist_dir = os.path.join(workspace_dir, "dist_nuitka", "app.dist")
+103:     
+104:     # Rename app.exe -> RemoteDesktopP2P.exe
+105:     old_exe = os.path.join(app_dist_dir, "app.exe")
+<truncated 781 bytes>
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10950
+  StartLine: 10820
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11000
+  StartLine: 10950
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11050
+  StartLine: 11000
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10780
+  StartLine: 10720
+
+[Action: multi_replace_file_content]
+  Description: "Allow physical mouse movement but block physical clicks in screen privacy mode."
+  Instruction: "Update mouse_hook_proc to allow WM_MOUSEMOVE (0x0200) and block other physical mouse events (clicks, scrolls)."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":10695,"ReplacementContent":"        def mouse_hook_proc(nCode, wParam, lParam):\n            try:\n                if nCode == 0:\n                    lParam_addr = l...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  Includes: []
+  IsRegex: false
+  MatchPerLine: true
+  Query: "AntigravityP2PRemoteDesktopScreenCoverEvent"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python search.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"app.py\" -Pattern \"AntigravityP2PRemoteDesktopScreenCoverEvent\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 6320
+  StartLine: 6260
+
+[Action: multi_replace_file_content]
+  Description: "Fix transparent screen cover issue on hybrid graphics by removing WS_EX_LAYERED and relying entirely on WM_NCHITTEST for click-through."
+  Instruction: "Update _run_cover_win32 window creation ex_style to remove WS_EX_LAYERED and WS_EX_TRANSPARENT, and remove SetLayeredWindowAttributes."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":11003,"ReplacementContent":"        ex_style = win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_TOPMOST\n        style = win32con.WS_POPUP | win32con.WS_VISIBLE\n        \n...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Mình đã sửa xong cả 2 vấn đề bạn nêu rồi nhé! Mình cũng vừa gọi lại lệnh `build_and_deploy.py` để bạn cài đặt lại cấu hình mới, bạn chịu khó chờ lúc nó tự deploy xong (như lúc nãy) là có thể test nha.
+
+**Chi tiết các thay đổi:**
+1. **Chỉ khóa click, vẫn cho di chuột:** Trong `mouse_hook_proc`, mình đã thêm điều kiện cho phép sự kiện di chuột vật lý (`WM_MOUSEMOVE` mã `0x0200`) được gửi đến hệ thống bình thường. Tất cả các sự kiện khác của chuột vật lý (click trái, phải, cuộn chuột) vẫn sẽ bị chặn. Host có thể vẩy chuột tự do nhưng không click được gì.
+<truncated 703 bytes>
+
+========== USER ==========
+sửa lại 1 chút: bên client cũng đang bị khóa phím + chuột cùng với host luôn rồi
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10710
+  StartLine: 10660
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 450
+  StartLine: 380
+
+[Action: multi_replace_file_content]
+  Description: "Restore WS_EX_LAYERED and WS_EX_TRANSPARENT to fix client click-through, and add WS_EX_NOACTIVATE to prevent focus stealing."
+  Instruction: "Restore the layered attributes so the window is click-through for injected inputs, and add WS_EX_NOACTIVATE. Add UpdateWindow to force drawing."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":11000,"ReplacementContent":"        ex_style = win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_TOPMOST | win32con.WS_...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+À, hóa ra là việc gỡ bỏ cờ `WS_EX_LAYERED` lúc nãy đã làm mất đi tính năng "xuyên thấu click chuột" (`HTTRANSPARENT`) của Windows đối với các cửa sổ khác luồng (out-of-process).
+
+**Giải thích hiện tượng:**
+Khi không có cờ `WS_EX_LAYERED`, cửa sổ màn hình phủ trở thành một cửa sổ Opaque (đục) thông thường. Mặc dù ở phía code của mình đã set cho nó tính năng "không bắt chuột", nhưng Windows sẽ từ chối truyền click chuột xuyên qua cửa sổ này nếu cửa sổ bên dưới nó không nằm cùng một process. Do đó, các click chuột mô phỏng (từ xa của client truyền tới) đều bị màn hình phủ hấp thụ hết nhưng nó lại không làm gì cả -> thành ra Client không click được. Đồng thời cửa sổ màn hình đen cũng giành mất "focus", khiến Client gõ phím toàn bộ bị rơi vào hư không.
+
+**Cách khắc phục:**
+<truncated 789 bytes>
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\build_deploy.log"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11020
+  StartLine: 10990
+
+[Action: multi_replace_file_content]
+  Description: "Fix syntax error from previous update."
+  Instruction: "Remove the double except blocks."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":11012,"ReplacementContent":"        try:\n            win32gui.UpdateWindow(hwnd)\n        except:\n            pass\n            \n        try:\n            win32gui...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Xin lỗi bạn, lúc nãy mình thao tác lỗi cú pháp (Syntax Error ở dòng `except:`) nên tiến trình build trước đó đã bị hỏng giữa chừng và chưa cập nhật được code mới sang app. 
+
+Mình vừa sửa lại code và kích hoạt lại `build_and_deploy.py` rồi. Tiến trình biên dịch (compile Nuitka) đang chạy lại, mất khoảng 4-5 phút. Bạn chờ một xíu cho nó hoàn tất (như mọi khi) rồi hẵng test lại nha!
+
+========== USER ==========
+sao nhiều process vậy?
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\windows_service_loop.py"
+
+========== MODEL ==========
+Đây là thiết kế hoàn toàn bình thường và là chủ đích của phần mềm bạn nhé! 
+
+Mặc dù trong Task Manager hiển thị cả 3 cái tên giống nhau (do chúng dùng chung file `RemoteDesktopP2P.exe` đã biên dịch), nhưng nếu bạn bật cột **Command Line** trong Task Manager lên sẽ thấy chúng đang làm 3 nhiệm vụ độc lập ở các phân hệ quyền (Context) khác nhau:
+
+1. **Tiến trình thứ 1 (GUI Agent - Không tham số):** Đây là giao diện chính của phần mềm và biểu tượng dưới góc phải màn hình (System Tray). Nó chạy ở quyền của User hiện tại.
+<truncated 1000 bytes>
+
+========== USER ==========
+bên máy thật chưa ignore double click + right click khi màn hình phủ kích hoạt
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10710
+  StartLine: 10680
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 280
+  StartLine: 240
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 10720
+  StartLine: 10660
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 520
+  StartLine: 450
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 580
+  StartLine: 510
+
+[Action: multi_replace_file_content]
+  Description: "Use dwExtraInfo to reliably tag remote injected inputs instead of LLMHF_INJECTED, which can be triggered by physical trackpad gestures (e.g. double tap, two-finger tap)."
+  Instruction: "Define MAGIC_EXTRA_INFO = 0x41474147. Update all KEYBDINPUT and MOUSEINPUT calls to pass this magic number in dwExtraInfo instead of None. Update keyboard_hook_proc and mouse_hook_proc to define KBDL...
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":249,"ReplacementContent":"KEYEVENTF_UNICODE = 0x0004\nMAGIC_EXTRA_INFO = 0x41474147\n\nclass MOUSEINPUT(ctypes.Structure):","StartLine":248,"TargetContent":"KEYEVENTF...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+À mình hiểu rồi! Việc chuột trái bị chặn nhưng double-click hay click chuột phải (thường thông qua touchpad) vẫn bị lọt qua là do đặc thù của driver Touchpad (như Precision Touchpad hay Synaptics).
+
+Khi bạn chạm 2 ngón (chuột phải) hoặc chạm 2 lần (double click) trên Touchpad, bản chất phần cứng Touchpad không gửi tín hiệu click thẳng vào hệ điều hành. Thay vào đó, driver Touchpad phân tích hành vi của bạn rồi **dùng phần mềm giả lập (inject) lại** cú click đó vào hệ thống.
+Vì nó là thao tác giả lập, cờ `LLMHF_INJECTED` (vốn được mình dùng để nhận diện thao tác điều khiển từ xa) sẽ bị bật lên, làm cho Hook tưởng lầm đó là click từ xa (Remote Client) và cho phép nó đi qua.
+
+**Cách khắc phục:**
+<truncated 784 bytes>
+

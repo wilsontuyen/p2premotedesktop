@@ -1,0 +1,113 @@
+========== USER ==========
+xem giùm thư mục / trên điện thoại Xiao & Samsung không hiển thị gì hết
+
+[Action: grep_search]
+  Query: "\"list_dir\""
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  Query: "\"Máy điều khiển\""
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  Query: "Remote Host"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Remote Host"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "Remote Host"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "findstr /I \"FileManager\" d:\\Data\\AG\\remote_desktop\\*.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 2000
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "def "
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Get-Content d:\\Data\\AG\\remote_desktop\\app.py | Select-Object -First 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 800
+  StartLine: 1
+
+[Action: run_command]
+  CommandLine: "findstr /n /i \"list_dir list_files listdir request\" d:\\Data\\AG\\remote_desktop\\app.py | head -n 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 2000
+
+[Action: run_command]
+  CommandLine: "Select-String -Path d:\\Data\\AG\\remote_desktop\\app.py -Pattern \"Máy điều khiển\" -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 4400
+  StartLine: 4300
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "request_list_dir"
+  SearchPath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote"
+
+[Action: view_file]
+  AbsolutePath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\DataTransferClient.kt"
+  EndLine: 620
+  StartLine: 570
+
+[Action: run_command]
+  CommandLine: "Get-Content d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\DataTransferClient.kt | Select-Object -Skip 580 -First 25"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Add fallback directory listing for strict Android devices where listing / and /storage returns null."
+  EndLine: 595
+  Instruction: "Add a fallback logic to list known root and storage directories when dir.listFiles() returns null on some Android devices (like newer Xiaomi and Samsung)."
+  ReplacementContent: "                        var files = dir.listFiles()\n                        if (files == null) {\n                            if (path == \"/\") {\n                                val knownPaths = l...
+  StartLine: 587
+  TargetContent: "                        if (dir.exists() && dir.isDirectory) {\n                            dir.listFiles()?.forEach { file ->\n                                val item = JSONObject()\n              ...
+  TargetFile: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\DataTransferClient.kt"
+
+[Action: run_command]
+  CommandLine: "./gradlew assembleDebug"
+  Cwd: "d:\\SOFT\\Coder\\Android"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 5000
+
+[Action: run_command]
+  CommandLine: "echo \"Code looks good\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Chào bạn, 
+
+Lỗi thư mục gốc `/` (và đôi khi là `/storage`) không hiển thị gì trên các máy Xiaomi, Samsung (thường là các máy chạy Android 11 trở lên) là do cơ chế **Scoped Storage và SELinux** của Android. Các cơ chế bảo mật này ngăn chặn các ứng dụng thông thường (kể cả khi đã cấp quyền `MANAGE_EXTERNAL_STORAGE`) gọi hàm liệt kê danh sách tệp `listFiles()` trực tiếp trên thư mục hệ thống ở cấp cao nhất (trả về giá trị `null`), dẫn đến giao diện PC nhận được mảng rỗng và không hiển thị gì.
+
+Mình đã chỉnh sửa mã nguồn Android trong file `DataTransferClient.kt` (phần xử lý sự kiện `request_list_dir`) để thêm một cơ chế **dự phòng (fallback)**. 
+
+Cụ thể:
+<truncated 860 bytes>
+

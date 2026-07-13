@@ -1,0 +1,115 @@
+========== USER ==========
+thêm cho tôi nút "Danh sách máy tính đã lưu" vào vị trí ô hình chữ nhật màu đỏ, màu sắc giống "Quét mạng LAN (LAN Only)" để gọi menu File -> Danh sách  cho nhanh
+
+[Action: grep_search]
+  Query: "Quét mạng LAN"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Quét mạng LAN"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "LAN Only"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "CONNECT"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 400
+  StartLine: 1
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "Quét mạng LAN"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "CONNECT"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "tk.Button"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python -c \"for i, line in enumerate(open('app.py', encoding='utf-8')): \n    if 'LAN Only' in line: print(i+1, line.strip())\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "python -c \"import sys; sys.stdout.reconfigure(encoding='utf-8');\nfor i, line in enumerate(open('app.py', encoding='utf-8')):\n    if 'LAN Only' in line or 'Danh sách' in line:\n        print(f'{i+1...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5085
+  StartLine: 5060
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5025
+  StartLine: 4995
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5060
+  StartLine: 5020
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Add 'Danh sách máy tính đã lưu' button in the left panel under 'Sao chép' button, styled like 'Quét mạng LAN' button to quickly open saved computers dialog."
+  EndLine: 5031
+  Instruction: "Insert the new button code immediately following the copy_all_btn code."
+  ReplacementContent: "        # Button to Copy both ID & Password at once\n        copy_all_btn = tk.Button(left_panel, text=\"📋 Sao chép cả ID & Mật khẩu\", font=(\"Segoe UI\", 9, \"bold\"), fg=self.text_white, bg=self.b...
+  StartLine: 5028
+  TargetContent: "        # Button to Copy both ID & Password at once\n        copy_all_btn = tk.Button(left_panel, text=\"📋 Sao chép cả ID & Mật khẩu\", font=(\"Segoe UI\", 9, \"bold\"), fg=self.text_white, bg=self.b...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+========== MODEL ==========
+Tôi đã thêm nút **"Danh sách máy tính đã lưu"** vào giao diện chính tại vị trí bạn yêu cầu (dưới nút "Sao chép cả ID & Mật khẩu" bên phần Cho phép điều khiển). 
+
+Nút mới được thiết kế với màu tím và hiệu ứng di chuột (hover) hoàn toàn giống với nút "Quét mạng LAN (LAN Only)" và được kết nối trực tiếp với chức năng mở danh sách máy tính của menu `File -> Danh sách`.
+
+Bạn có thể chạy lại ứng dụng để kiểm tra giao diện mới nhé!
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "86a40ba1-e297-4972-a980-5ac9c09bd4a9"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Tiến trình đóng gói và triển khai ứng dụng bằng `build_and_deploy.py` đã hoàn tất thành công!
+
+- **Đóng gói (Nuitka)**: Hoàn tất build executable cho `app.py` và `windows_service_loop.py`.
+- **Inno Setup**: Đã tạo file cài đặt `EasyRemoteDesktop_Installer.exe`.
+- **Deploy**: Ứng dụng đã được copy vào `C:\Apps\P2P`.
+- **Khởi chạy**: Đã tự động khởi động lại service background và giao diện GUI Agent lên Desktop của bạn.
+
+Bây giờ bạn có thể mở cửa sổ ứng dụng mới xuất hiện để kiểm tra xem nút **"Danh sách máy tính đã lưu"** ở tab điều khiển đã hoạt động và hiển thị đúng như mong đợi chưa nhé!
+

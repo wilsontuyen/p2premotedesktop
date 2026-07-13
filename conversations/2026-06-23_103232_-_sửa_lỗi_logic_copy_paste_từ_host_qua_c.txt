@@ -1,0 +1,281 @@
+========== USER ==========
+- sửa lỗi logic copy paste từ host qua client: dialog "Truyền tải file" chạy trước khi bấm Paste
+
+[Action: grep_search]
+  Query: "Truyền tải"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Truyền tải"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: list_dir]
+  DirectoryPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "FileTransferDialog"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "transfer"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "file app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 100
+  StartLine: 1
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "ClipboardSyncManager"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python -c \"import chardet; print(chardet.detect(open('app.py', 'rb').read()))\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "python -c \"import sys; lines = open('app.py', 'rb').read().decode('utf-8', errors='ignore').split('\\n'); res = [(i+1, l) for i, l in enumerate(lines) if 'Truyền tải' in l]; print(res)\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"Truyền\" -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2850
+  StartLine: 2780
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"def check_is_menu_query\" -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1950
+  StartLine: 1915
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2000
+  StartLine: 1951
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2050
+  StartLine: 2001
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"last_lbutton_time =\" -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1780
+  StartLine: 1750
+
+[Action: run_command]
+  CommandLine: "python -c \"import ctypes; user32 = ctypes.windll.user32; pt = ctypes.wintypes.POINT(); user32.GetCursorPos(ctypes.byref(pt)); hwnd = user32.WindowFromPoint(pt); buf = ctypes.create_unicode_buffer(25...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1790
+  StartLine: 1760
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "last_lbutton_time"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"check_is_menu_query\" -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8765
+  StartLine: 8725
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1775
+  StartLine: 1760
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1945
+  StartLine: 1925
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2805
+  StartLine: 2780
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2040
+  StartLine: 2009
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 7800
+  StartLine: 7785
+
+[Action: write_to_file]
+  CodeContent: "import codecs\n\ndef patch_app():\n    with codecs.open('app.py', 'r', 'utf-8') as f:\n        content = f.read()\n\n    # 1. Update _mouse_poll_loop in ClipboardEventListener\n    old_poll_loop = \"...
+  Description: "Create script to patch app.py to fix file transfer logic"
+  IsArtifact: false
+  Overwrite: true
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\patch.py"
+
+[Action: run_command]
+  CommandLine: "python patch.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "66c6def2-4ceb-4c72-9184-7e788d564e54"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"_agent_last_lbutton_class\" -Context 3,3 -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"def _agent_mouse_poll_loop\" -Context 10,10 -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8765
+  StartLine: 8745
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Update _agent_mouse_poll_loop to track window class"
+  EndLine: 8764
+  Instruction: "Update the mouse poll loop to save the window class on left clicks"
+  ReplacementContent: "    _agent_last_lbutton_time = 0.0\n    _agent_last_rbutton_time = 0.0\n    _agent_meta_arrival_time = 0.0\n    _agent_last_lbutton_class = \"\"\n\n    def _agent_mouse_poll_loop():\n        nonlocal...
+  StartLine: 8749
+  TargetContent: "    _agent_last_lbutton_time = 0.0\n    _agent_last_rbutton_time = 0.0\n    _agent_meta_arrival_time = 0.0\n\n    def _agent_mouse_poll_loop():\n        nonlocal _agent_last_lbutton_time, _agent_last...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: write_to_file]
+  CodeContent: "import codecs\n\ndef patch_app2():\n    with codecs.open('app.py', 'r', 'utf-8') as f:\n        content = f.read()\n\n    old_agent_decl = \"\"\"    _agent_last_lbutton_time = 0.0\n    _agent_last_rb...
+  Description: "Patch script 2"
+  IsArtifact: false
+  Overwrite: true
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\patch2.py"
+
+[Action: run_command]
+  CommandLine: "python patch2.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"def _agent_mouse_poll_loop\" -Context 8,12 -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Fix agent mouse poll loop"
+  EndLine: 8764
+  Instruction: "Fix agent mouse poll loop"
+  ReplacementContent: "    _agent_last_lbutton_time = 0.0\n    _agent_last_rbutton_time = 0.0\n    _agent_meta_arrival_time = 0.0\n    _agent_last_lbutton_class = \"\"\n\n    def _agent_mouse_poll_loop():\n        nonlocal...
+  StartLine: 8749
+  TargetContent: "    _agent_last_lbutton_time = 0.0\n    _agent_last_rbutton_time = 0.0\n    _agent_meta_arrival_time = 0.0\n\n    def _agent_mouse_poll_loop():\n        nonlocal _agent_last_lbutton_time, _agent_last...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python -c \"import re, codecs; content = codecs.open('app.py', 'r', 'utf-8').read(); content = re.sub(r'    _agent_last_lbutton_time = 0\\.0\\s+    _agent_last_rbutton_time = 0\\.0\\s+    _agent_meta...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path app.py -Pattern \"def _agent_mouse_poll_loop\" -Context 8,12 -Encoding UTF8"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: write_to_file]
+  CodeContent: "import codecs\n\ndef patch_app3():\n    with codecs.open('app.py', 'r', 'utf-8') as f:\n        lines = f.readlines()\n        \n    start_idx = -1\n    for i, line in enumerate(lines):\n        if \...
+  Description: "Patch agent mouse poll loop"
+  IsArtifact: false
+  Overwrite: true
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\patch3.py"
+
+[Action: run_command]
+  CommandLine: "python patch3.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "c47da0b3-f565-4516-8292-0ee31f93a33f"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+[Action: command_status]
+  CommandId: "c47da0b3-f565-4516-8292-0ee31f93a33f"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Đã sửa xong lỗi logic hiển thị hộp thoại "Truyền tải file" trước khi bạn thực sự nhấn Paste!
+
+**Nguyên nhân:**
+Khi bạn vừa click chuột trái (ví dụ: click chọn một thư mục hoặc nhấp ra nền trống trên Explorer), Windows Explorer sẽ tự động dò hỏi Clipboard (`WM_RENDERFORMAT`) trong nền để quyết định xem có nên bật sáng/hiển thị nút "Paste" trên thanh Ribbon hay không. 
+Vì thời gian từ lúc bạn click chuột trái đến lúc Explorer hỏi là rất ngắn (< 1 giây), code cũ đã nhầm tưởng rằng cú click chuột trái đó chính là thao tác bạn chọn menu "Paste", dẫn đến việc ứng dụng tự động khởi chạy tiến trình tải file.
+
+**Giải pháp đã triển khai:**
+1. Thêm cơ chế **kiểm tra Window Class** dưới con trỏ chuột tại thời điểm click chuột trái (cả ở chế độ giao diện Viewer lẫn chế độ Clipboard Agent chạy nền).
+<truncated 960 bytes>
+

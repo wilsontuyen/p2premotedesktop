@@ -1,0 +1,421 @@
+========== USER ==========
+xem giùm mình khi client kết nối với host mà host có dùng bộ gõ Unikey thì phía client không gõ được tiếng Việt (phần mềm Ultraviewer , Anydesk không bị hiện tượng này)
+
+========== MODEL ==========
+Tôi sẽ xem xét cách ứng dụng xử lý bàn phím để hiểu vấn đề với bộ gõ Unikey. Để bắt đầu, tôi cần xem code hiện tại.
+
+[Action: list_dir]
+  DirectoryPath: "d:\\Data\\AG\\remote_desktop"
+  toolAction: "Listing project files"
+  toolSummary: "Project structure"
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Viewing main app"
+  toolSummary: "Main application code"
+
+========== MODEL ==========
+File rất lớn (9523 dòng). Tôi cần tìm phần xử lý keyboard event khi client gửi tới host, đặc biệt là hàm `send_input_keyboard_event` và cách client gửi phím.
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "key_down"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching key handling"
+  toolSummary: "Key down events"
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "KEYDOWN"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching KEYDOWN"
+  toolSummary: "Pygame KEYDOWN events"
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "TEXTINPUT"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching TEXTINPUT"
+  toolSummary: "Text input events"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "pygame.KEYDOWN"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching pygame keydown"
+  toolSummary: "Pygame key events"
+[Action: grep_search]
+  Includes: ["*.py"]
+  MatchPerLine: true
+  Query: "keyboard"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching keyboard usage"
+  toolSummary: "Keyboard handling"
+
+========== MODEL ==========
+Hmm, the file is too large and maybe the encoding is causing issues. Let me try searching with different terms.
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "send_input_keyboard_event"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching keyboard function"
+  toolSummary: "Keyboard event calls"
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "key_name"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Searching key_name usage"
+  toolSummary: "Key name references"
+
+========== MODEL ==========
+The grep seems to have issues with this file. Let me try using a command instead.
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"key\" -CaseSensitive | Select-Object -First 30 | ForEach-Object { \"$($_.LineNumber): $($_.Line.Trim())\" }"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 10000
+  toolAction: "Searching for key handling"
+  toolSummary: "Keyboard code search"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"key\" -CaseSensitive | Select-Object -Skip 30 -First 30 | ForEach-Object { \"$($_.LineNumber): $($_.Line.Trim())\" }"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 10000
+  toolAction: "Searching more key handling"
+  toolSummary: "More keyboard results"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"key_event|pygame\\.K_|pygame\\.key|KEYDOWN|KEYUP|TEXTINPUT|unicode\" -CaseSensitive | Select-Object -First 50 | ForEach-Object ...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 10000
+  toolAction: "Searching key event types"
+  toolSummary: "Event type search"
+
+========== MODEL ==========
+Bây giờ tôi thấy vấn đề. Hãy xem phần xử lý keyboard event ở client (gửi) và host (nhận).
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3570
+  StartLine: 3490
+  toolAction: "Viewing keyboard hook"
+  toolSummary: "Client keyboard hook"
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3970
+  StartLine: 3750
+  toolAction: "Viewing key event handling"
+  toolSummary: "Client pygame events"
+
+========== MODEL ==========
+Bây giờ tôi cần xem phần host nhận và xử lý key_event:
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8070
+  StartLine: 8000
+  toolAction: "Viewing host key handler"
+  toolSummary: "Host key event processing"
+
+========== MODEL ==========
+Giờ tôi đã hiểu đầy đủ vấn đề. Hãy phân tích:
+
+**Vấn đề cốt lõi:**
+
+Khi client gõ phím, Pygame bắt event `KEYDOWN`/`KEYUP` và gửi `key_name` hoặc `event.unicode` sang host. Ở phía host, hàm `send_input_keyboard_event` sử dụng `KEYEVENTF_UNICODE` cho ký tự đơn lẻ (dòng 388-397) hoặc VK code cho phím đặc biệt.
+
+**Vấn đề với Unikey:** Unikey (và các bộ gõ tiếng Việt tương tự) hoạt động bằng cách hook vào keyboard input trên **máy local** và xử lý chuỗi phím gõ (ví dụ: `a` `a` → `â`, `o` `w` → `ơ`). Khi dùng `KEYEVENTF_UNICODE` với `SendInput`, các phím gửi qua sẽ **bypass** bộ gõ Unikey vì:
+
+1. `KEYEVENTF_UNICODE` gửi ký tự Unicode trực tiếp, bỏ qua keyboard layout và IME/bộ gõ
+2. Unikey hook vào `WM_KEYDOWN`/`WM_KEYUP` với virtual key code, nhưng `KEYEVENTF_UNICODE` tạo ra các message với `wVk = 0` nên Unikey không nhận diện được
+
+<truncated 320 bytes>
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 430
+  StartLine: 366
+  toolAction: "Viewing keyboard function"
+  toolSummary: "Full keyboard event handler"
+
+========== MODEL ==========
+Giờ tôi hiểu rõ vấn đề. Tôi cần sửa logic để:
+
+1. Khi ký tự là a-z, 0-9 (và các ký tự có VK code), dùng **VK code** thay vì `KEYEVENTF_UNICODE` — để Unikey có thể hook được
+2. Chỉ dùng `KEYEVENTF_UNICODE` cho ký tự đặc biệt KHÔNG có VK code (ví dụ: ký tự Unicode đặc biệt)
+
+Ngoài ra, phía client cũng cần điều chỉnh — hiện tại client gửi `event.unicode` (ký tự đã qua bộ gõ local), nhưng cần gửi **raw key name** để host side Unikey có thể tự xử lý.
+
+Hãy xem lại phần client gửi:
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3960
+  StartLine: 3940
+  toolAction: "Viewing client key sending"
+  toolSummary: "Client key event code"
+
+========== MODEL ==========
+Bây giờ tôi hiểu rõ vấn đề hoàn toàn. Đây là flow:
+
+**Client side (pygame):**
+- Bắt `KEYDOWN` → lấy `event.unicode` (ký tự đã qua IME của client) → gửi sang host
+- Ví dụ: user gõ `a` → `event.unicode = 'a'` → gửi `'a'` sang host
+
+**Host side:**
+- Nhận `'a'` → `use_unicode = True` (vì len('a')==1 và không modifier) → dùng `KEYEVENTF_UNICODE` để inject
+- `KEYEVENTF_UNICODE` inject **trực tiếp ký tự**, bypass keyboard hook → **Unikey không thấy phím này** → không thể xử lý telex/VNI
+
+**Tại sao UltraViewer/AnyDesk không bị?** Vì họ gửi raw VK code + scan code qua `SendInput` bằng VK mode, Unikey hook được `WM_KEYDOWN` bình thường.
+
+**Giải pháp:**
+1. **Client**: Luôn gửi `key_name` (raw key) thay vì `event.unicode` cho các phím a-z, 0-9 — để host-side Unikey tự xử lý
+<truncated 329 bytes>
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Fix Vietnamese IME (Unikey) compatibility. Previously all single characters were sent via KEYEVENTF_UNICODE which bypasses keyboard hooks, making Unikey unable to intercept and compose Vietnamese cha...
+  EndLine: 425
+  Instruction: "Rewrite send_input_keyboard_event to use VK code + scan code for standard alphanumeric keys (a-z, 0-9) and common punctuation, so that Vietnamese input methods like Unikey can hook and process them. ...
+  ReplacementContent: "def send_input_keyboard_event(key_name, pressed):\n    try:\n        # Update remote modifier state tracker\n        if key_name in _remote_modifier_names:\n            if pressed:\n                _...
+  StartLine: 366
+  TargetContent: "def send_input_keyboard_event(key_name, pressed):\n    try:\n        # Update remote modifier state tracker\n        if key_name in _remote_modifier_names:\n            if pressed:\n                _...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Fixing keyboard event handler"
+  toolSummary: "IME compatibility fix"
+
+========== MODEL ==========
+Bây giờ cần sửa phía **client** — hiện tại client gửi `event.unicode` (ký tự đã qua IME local), nhưng cần gửi **raw key name** để Unikey phía host tự xử lý:
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3970
+  StartLine: 3941
+  toolAction: "Viewing client key code"
+  toolSummary: "Client key event sending"
+
+========== MODEL ==========
+Bây giờ cần sửa client side. Vấn đề là phải cẩn thận: nếu client gõ Shift+1 để ra `!`, `event.unicode = '!'` nhưng `key_name = '1'`. Nếu gửi raw key name `'1'` thì host sẽ gõ `1` thay vì `!`. 
+
+Tuy nhiên, cái chính cần xử lý là: khi client KHÔNG dùng bộ gõ (hoặc bộ gõ tắt), `event.unicode` cho ký tự bình thường (a-z, 0-9) sẽ giống `key_name`. Nhưng khi client CÓ bộ gõ (Unikey), ví dụ gõ `aa` sẽ thành `â` ở phía client trước khi gửi sang host → host nhận `â` là ký tự Unicode → không qua Unikey host nữa.
+
+**Vấn đề thực sự là:** Client gõ `a`, Unikey client xử lý trước → `event.unicode` vẫn là `'a'` (vì chỉ 1 phím). Nhưng host nhận `'a'` rồi inject bằng `KEYEVENTF_UNICODE` → bypass Unikey host → host không compose được.
+
+<truncated 1542 bytes>
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 435
+  StartLine: 366
+  toolAction: "Viewing updated function"
+  toolSummary: "Updated keyboard handler"
+
+========== MODEL ==========
+Tôi thấy có vấn đề tiềm ẩn với `VkKeyScanW` cho ký tự cần Shift (ví dụ `!`, `@`, `#`). `VkKeyScanW('!')` trả `0x0131` trong đó:
+- Low byte `0x31` = VK_1 (phím `1`)  
+- High byte `0x01` = Shift required
+
+Nếu chỉ gửi VK_1 mà không có Shift → sẽ gõ `1` thay vì `!`. Tuy nhiên, trong flow hiện tại, khi user gõ `Shift+1` trên client:
+1. Client gửi `left shift` DOWN trước
+2. Rồi gửi `event.unicode = '!'` 
+3. Host nhận `!` → `VkKeyScanW('!') = VK_1` → inject VK_1 
+4. Nhưng Shift đã được held từ bước trước → kết quả đúng là `!`
+
+Vậy nên OK. Nhưng chờ đã — xem lại flow client:
+
+Dòng 3957: `if hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32` → client gửi `event.unicode = '!'`
+
+<truncated 1783 bytes>
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Changed client keyboard event logic: for alphanumeric keys (a-z, 0-9), always send raw key_name instead of event.unicode. This prevents the client-side IME (Unikey) from composing Vietnamese characte...
+  EndLine: 3970
+  Instruction: "Change the client key event logic to send raw key_name for a-z and 0-9 keys (bypassing client-side IME composition), and only use event.unicode for shifted/special characters that can't be derived fr...
+  ReplacementContent: "                    elif event.type in (pygame.KEYDOWN, pygame.KEYUP):\n                        key_name = pygame.key.name(event.key)\n                        \n                        char_to_send =...
+  StartLine: 3952
+  TargetContent: "                    elif event.type in (pygame.KEYDOWN, pygame.KEYUP):\n                        key_name = pygame.key.name(event.key)\n                        \n                        char_to_send =...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+  toolAction: "Fixing client key sending"
+  toolSummary: "Client IME bypass fix"
+
+========== MODEL ==========
+Giờ tôi sẽ tạo artifact giải thích vấn đề và giải pháp:
+
+[Action: write_to_file]
+  ArtifactMetadata: {"ArtifactType":"walkthrough","RequestFeedback":true,"Summary":"Analysis of why Vietnamese input (Unikey) doesn't work when a client connects to a host running Unikey in the P2P Remote Desktop app. Ex...
+  CodeContent: "# Phân Tích & Sửa Lỗi: Unikey Không Gõ Được Tiếng Việt Qua Remote Desktop\n\n## Nguyên Nhân Gốc\n\n### Cách Unikey Hoạt Động\nUnikey (và các bộ gõ tiếng Việt tương tự) hoạt động bằng cách **hook vào ...
+  Description: "Analysis document explaining the Unikey Vietnamese IME compatibility issue and the fix applied."
+  IsArtifact: true
+  Overwrite: false
+  TargetFile: "C:\\Users\\Tuyen\\.gemini\\antigravity\\brain\\efcde7b4-e53e-4b44-842b-5227c0c18ea4\\artifacts\\unikey_fix_analysis.md"
+
+========== MODEL ==========
+## Tóm Tắt
+
+Đã tìm ra và sửa lỗi **Unikey không gõ được tiếng Việt qua Remote Desktop**:
+
+### Nguyên nhân gốc
+Code cũ dùng `KEYEVENTF_UNICODE` để inject ký tự — cách này gửi Unicode **trực tiếp** vào app mà bỏ qua keyboard hook. Unikey hook vào `WM_KEYDOWN` cần **VK code thực** để nhận diện chuỗi phím (aa→â, ow→ơ), nhưng `KEYEVENTF_UNICODE` gửi với `wVk=0` nên Unikey "mù".
+
+### 2 thay đổi đã áp dụng
+
+| Vị trí | Thay đổi |
+|--------|----------|
+| **Host** (`send_input_keyboard_event`, ~dòng 366) | Dùng **VK code + scan code** (qua `MapVirtualKeyW`) thay vì `KEYEVENTF_UNICODE`. Chỉ fallback Unicode cho ký tự không có VK mapping. |
+| **Client** (pygame event loop, ~dòng 3952) | Gửi **raw key_name** cho a-z/0-9 thay vì `event.unicode`, tránh client-side Unikey compose trước khi gửi sang host. |
+
+### Lưu ý
+<truncated 213 bytes>
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 10000
+  toolAction: "Running build and deploy script"
+  toolSummary: "Deploying application"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 30
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 60
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+[Action: command_status]
+  CommandId: "e7d36112-d554-475f-84b5-5db3e8f26160"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 60
+  toolAction: "Checking build progress"
+  toolSummary: "Checking build status"
+
+========== MODEL ==========
+Quá trình build và deploy đã hoàn tất thành công! Ứng dụng đã được biên dịch lại, deploy vào `C:\Apps\P2P`, và khởi động lại với các thay đổi mới nhất (bao gồm cả bản fix lỗi gõ tiếng Việt Unikey vừa rồi). 
+
+Bạn có thể kiểm tra lại xem lỗi Unikey đã được khắc phục hoàn toàn trên ứng dụng chưa nhé!
+
+========== USER ==========
+tạm ổn nhưng xem lại giùm phím space bar không hoạt động
+
+========== USER ==========
+The USER performed the following action:
+Show the contents of file d:\Data\AG\remote_desktop\app.py from lines 3952 to 3977
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 9540
+Total Bytes: 455037
+Showing lines 3952 to 3977
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+3952:                     elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
+3953:                         key_name = pygame.key.name(event.key)
+3954:                         
+3955:                         char_to_send = key_name
+3956:                         if event.type == pygame.KEYDOWN:
+3957:                             # For a-z and 0-9, always send raw key_name (not event.unicode)
+3958:                             # so host-side Vietnamese IME (Unikey) can compose characters.
+<truncated 1439 bytes>
+
+========== MODEL ==========
+Tôi hiểu vấn đề. Hãy trace qua flow cho phím Space:
+
+**Client side:** `key_name = "space"` (5 ký tự) → không match `len(key_name) == 1` → rơi vào elif `event.unicode = " "` → `char_to_send = " "` (ký tự space, không phải chuỗi "space")
+
+**Host side:** Nhận `" "` → không có trong `vk_map` (vì `vk_map` có key `'space'`, không phải `' '`) → vào `VkKeyScanW` fallback → có thể có vấn đề marshalling ctypes.
+
+**Giải pháp:** Thêm `'space'` vào exclusion list ở client để gửi `"space"` (chuỗi) thay vì `" "` (ký tự) — host đã có `'space': 0x20` trong `vk_map`.
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Space bar was broken because client sent \" \" (single space char via event.unicode) which the host couldn't find in vk_map (which maps the string 'space' to VK_SPACE). Adding 'space' to the exclusio...
+  EndLine: 3964
+  Instruction: "Add 'space' to the exclusion list so the space key sends the key_name \"space\" instead of event.unicode \" \". This ensures it goes through vk_map on host side."
+  ReplacementContent: "                                if key_name not in ['space', 'delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:"
+  StartLine: 3964
+  TargetContent: "                                if key_name not in ['delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:"
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+========== MODEL ==========
+Build lại:
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 10000
+  toolAction: "Running build and deploy"
+  toolSummary: "Build and deploy"
+
+[Action: command_status]
+  CommandId: "18eb8067-4ca5-404e-af07-cb30b650dfb8"
+  OutputCharacterCount: 1500
+  WaitDurationSeconds: 300
+  toolAction: "Waiting for build"
+  toolSummary: "Build completion"
+
+[Action: command_status]
+  CommandId: "18eb8067-4ca5-404e-af07-cb30b650dfb8"
+  OutputCharacterCount: 1500
+  WaitDurationSeconds: 300
+  toolAction: "Waiting for build"
+  toolSummary: "Build completion"
+
+========== MODEL ==========
+Build và deploy thành công!
+
+**Nguyên nhân lỗi Space:** Client gửi `" "` (ký tự space qua `event.unicode`) nhưng host `vk_map` chỉ có key `'space'` (chuỗi) chứ không có `' '` (ký tự). Khi rơi vào fallback `VkKeyScanW`, có thể gặp vấn đề marshalling ctypes khiến space không hoạt động.
+
+**Sửa:** Thêm `'space'` vào exclusion list → client gửi `"space"` (chuỗi) → host match `vk_map['space'] = 0x20` → VK_SPACE + scan code → hoạt động bình thường.
+

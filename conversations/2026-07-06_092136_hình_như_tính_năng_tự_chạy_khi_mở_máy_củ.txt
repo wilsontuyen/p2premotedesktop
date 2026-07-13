@@ -1,0 +1,51 @@
+========== USER ==========
+hình như tính năng tự chạy khi mở máy của app Android không được
+
+[Action: grep_search]
+  Query: "BOOT_COMPLETED"
+  SearchPath: "d:\\SOFT\\Coder\\Android\\app\\src\\main"
+
+[Action: view_file]
+  AbsolutePath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\AndroidManifest.xml"
+[Action: view_file]
+  AbsolutePath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\BootReceiver.kt"
+
+[Action: grep_search]
+  Query: "CaptureRequestActivity"
+  SearchPath: "d:\\SOFT\\Coder\\Android\\app\\src\\main"
+
+[Action: view_file]
+  AbsolutePath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\CaptureRequestActivity.kt"
+
+[Action: view_file]
+  AbsolutePath: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\java\\com\\example\\p2pdroidremote\\MainActivity.kt"
+
+[Action: multi_replace_file_content]
+  Description: "Register CaptureRequestActivity in AndroidManifest.xml to fix boot crash"
+  Instruction: "Register CaptureRequestActivity in AndroidManifest.xml"
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":44,"ReplacementContent":"        <activity\n            android:name=\".ViewerActivity\"\n            android:exported=\"false\"\n            android:label=\"P2P View...
+  TargetFile: "d:\\SOFT\\Coder\\Android\\app\\src\\main\\AndroidManifest.xml"
+
+[Action: run_command]
+  CommandLine: ".\\gradlew assembleDebug"
+  Cwd: "d:\\SOFT\\Coder\\Android"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Chào bạn, nguyên nhân tính năng tự chạy khi mở máy (auto-start on boot) không hoạt động là do **`CaptureRequestActivity` chưa được khai báo trong file `AndroidManifest.xml`**.
+
+Khi thiết bị khởi động xong, `BootReceiver` sẽ cố gắng gọi `CaptureRequestActivity` để tự động xin quyền quay màn hình, nhưng vì Activity này chưa được đăng ký trong manifest nên hệ điều hành đã báo lỗi (`ActivityNotFoundException`) và làm tính năng này thất bại.
+
+Tôi đã thêm đoạn mã đăng ký `CaptureRequestActivity` vào file `AndroidManifest.xml` cho bạn:
+```xml
+        <activity
+            android:name=".CaptureRequestActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.P2PDroidRemote" />
+```
+
+### Lưu ý quan trọng để chạy ngầm trên Android:
+<truncated 1322 bytes>
+

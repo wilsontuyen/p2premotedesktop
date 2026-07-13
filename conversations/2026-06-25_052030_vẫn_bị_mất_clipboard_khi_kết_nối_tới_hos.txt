@@ -1,0 +1,710 @@
+========== USER ==========
+vẫn bị mất clipboard khi kết nối tới host là máy ảo
+
+[Action: grep_search]
+  Query: "Clipboard"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Clipboard"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  MatchPerLine: true
+  Query: "clipboard"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 20
+  StartLine: 1
+
+[Action: grep_search]
+  CaseInsensitive: true
+  IsRegex: false
+  MatchPerLine: true
+  Query: "clipboard"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"clipboard\" -CaseSensitive:$false | Select-Object -First 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"class Clipboard\" -Context 0, 0"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2100
+  StartLine: 1750
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2400
+  StartLine: 2100
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2700
+  StartLine: 2400
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def get_clipboard_text\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"EmptyClipboard\" -Context 2, 2"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def set_clipboard_text\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def setup_clipboard_exclusions\" -Context 0, 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"last_received_text\" -Context 3, 3"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def _run_clipboard_agent_loop\" -Context 0, 50"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"run_clipboard_agent\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern 'elif msg_type == \"TEXT\":' -Context 5, 25"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8950
+  StartLine: 8800
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"action == `\"text`\"\" -Context 5, 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def setup_clipboard_exclusions\" -Context 0, 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def set_clipboard_text\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1210
+  StartLine: 1180
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"set_clipboard_text\" -Context 3, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"AddClipboardFormatListener\" -Context 5, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"class AntigravityClipboardAgentWnd\" -Context 0, 50"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"AntigravityClipboardAgentWnd\" -Context 2, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 9210
+  StartLine: 9180
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"setup_clipboard_exclusions\" -Context 3, 3"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"action == `\"text`\"\" -Context 5, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"set_clipboard_files\" -Context 3, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: multi_replace_file_content]
+  Description: "Pass `_agent_hwnd` when setting clipboard data in `ClipboardAgent` to ensure the clipboard has a valid owner. This prevents VM guest additions from interfering or ignoring the clipboard content."
+  Instruction: "Update `poll_gui_queue` in `ClipboardAgent` to pass `_agent_hwnd` to `set_clipboard_text` and `set_clipboard_files`."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":9248,"ReplacementContent":"                if action == \"text\":\n                    agent_print(f\"[ClipboardAgent] Đang nạp text vào Clipboard...\")\n            ...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"set_clipboard_text\\(val\" -Context 3, 3"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 9252
+  StartLine: 9241
+
+[Action: multi_replace_file_content]
+  Description: "Pass `_agent_hwnd` when setting clipboard data in `ClipboardAgent`."
+  Instruction: "Replace lines 9241 to 9250 to add `_agent_hwnd` inside `set_clipboard_text` and `set_clipboard_files`."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":9248,"ReplacementContent":"                if action == \"text\":\n                    agent_print(f\"[ClipboardAgent] Đang nạp text vào Clipboard...\")\n            ...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def render_format\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"vboxtray\" -Context 3, 3"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 45"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 110"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: multi_replace_file_content]
+  Description: "Distinguish between context menu queries and background clipboard monitors (like VM tools) to avoid an infinite `re_setup` loop which causes the clipboard to be cleared continuously."
+  Instruction: "Update `check_is_menu_query` to return 'MENU', 'BACKGROUND', or `False`. Update `render_format` to handle these return values accordingly (only `re_setup` if it's 'MENU', do nothing if 'BACKGROUND')....
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":1971,"ReplacementContent":"    # 0. Nếu cửa sổ hiện hành là chính Remote Desktop Viewer hoặc GUI của app,\n    # bất kỳ truy vấn clipboard nào cũng chỉ có thể là do h...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def render_format\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Update `render_format` to check for \"MENU\" and \"BACKGROUND\" to only trigger dummy_h / re_setup on \"MENU\"."
+  EndLine: 2826
+  Instruction: "Update the `is_menu` check in `render_format`."
+  ReplacementContent: "        if is_menu == \"MENU\":\n            log_debug(\"[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và lập lịch reset delayed rendering...\")\n            dummy_h = create_hdrop_da...
+  StartLine: 2814
+  TargetContent: "        if is_menu:\n            log_debug(\"[render_format] Phát hiện truy vấn menu/nền. Cung cấp dummy HDROP và lập lịch reset delayed rendering...\")\n            dummy_h = create_hdrop_data([\"C:...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "8f60c7b4-c06e-40dc-9255-c8b33ba9322f"
+  WaitDurationSeconds: 300
+
+[Action: run_command]
+  CommandLine: "type build_and_deploy.py | head -n 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\build_and_deploy.py"
+
+[Action: run_command]
+  CommandLine: "Get-Content build_deploy.log -Tail 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Get-Content build_deploy.log -Tail 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Vấn đề bạn gặp phải (mất clipboard, không thể paste text/file) khi kết nối vào host là máy ảo (như VMware, VirtualBox) bắt nguồn từ một lỗi liên quan đến cơ chế đồng bộ clipboard của phần mềm máy ảo (VM Guest Additions/VMWare Tools):
+
+1. **Vòng lặp `EmptyClipboard` vô tận:** Mình phát hiện ra rằng trước đây, phần mềm sử dụng một phương pháp cung cấp "File rỗng ảo" (Dummy File) để đánh lừa context menu của Windows hiển thị nút "Paste". Tuy nhiên, mỗi lần hệ thống có thay đổi, VM Tools sẽ luôn tự động quét ngầm clipboard. Khi nó quét trúng `dummy file` này, ứng dụng lại thực thi thiết lập lại (re_setup) dẫn tới việc gọi `EmptyClipboard()` liên tục mỗi 200 mili-giây. Do đó, clipboard vừa chứa dữ liệu Text hoặc File đều bị xoá mất ngay lập tức!
+<truncated 1453 bytes>
+
+========== USER ==========
+vẫn chưa được
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 9150
+  StartLine: 9050
+
+[Action: multi_replace_file_content]
+  Description: "Fix the same `WM_RENDERFORMAT` infinite loop in `ClipboardAgent`'s `_wndproc` as well, since the Host runs in headless mode and uses this `_wndproc`."
+  Instruction: "Update `WM_RENDERFORMAT` handler inside `run_clipboard_agent_mode` to handle 'MENU' and 'BACKGROUND' like in `ClipboardSyncManager`."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":9078,"ReplacementContent":"            # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này\n            is_menu = check_is...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "d25938d6-c36f-4505-9e18-b8295ddc08f5"
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Xin lỗi bạn, lúc nãy mình mới chỉ cập nhật bộ lọc chặn vòng lặp cho luồng **Client (ClipboardSyncManager)** mà quên mất rằng khi bạn kết nối đến một máy tính/máy ảo thì nó đóng vai trò là **Host**, và luồng xử lý trên máy Host lại do **ClipboardAgent** đảm nhiệm (hoạt động ở chế độ ngầm).
+
+Do vậy, tuy lúc nãy mình đã fix logic nhưng vì chỉ sửa ở một nơi nên máy ảo Host vẫn bị dính lỗi vòng lặp `EmptyClipboard` mỗi 200ms.
+
+Mình đã vừa cập nhật lại file `app.py`, đồng bộ cơ chế xử lý `"MENU"` và `"BACKGROUND"` cho hàm `_wndproc` bên trong **`ClipboardAgent`** (dòng 9060 - 9078).
+
+<truncated 424 bytes>
+
+========== USER ==========
+vẫn chưa được, hiện tượng bây giờ là: copy xong bật chuột phải thì có hiện menu Paste nhưng bấm vào thì hiện đồng hồ cát quay tầm 5-6 giây rồi thôi, file không được copy ra thư mục đích
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 45"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 40, 50"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"_send_request_files_to_host\" -Context 5, 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 70"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 100"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: multi_replace_file_content]
+  Description: "Move the explicit paste detection (Ctrl+V, Enter, Left-click on Paste menu) to the very top of `check_is_menu_query`. This ensures that actual Paste operations are never misidentified as \"MENU\" que...
+  Instruction: "Reorder the logic in `check_is_menu_query`. Place the Ctrl+V, Shift+Insert, Enter, and Left-click checks at the top (before foreground window and context menu checks)."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":1951,"ReplacementContent":"    t_now = time.time()\n    time_since_lbutton = t_now - last_lbutton\n    time_since_rbutton = t_now - last_rbutton\n    meta_age = t_now...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2030
+  StartLine: 1946
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Move explicit Paste checks to the top of `check_is_menu_query` so they take precedence over context menu detection. This fixes the issue where clicking \"Paste\" from the context menu incorrectly tri...
+  EndLine: 2020
+  Instruction: "Reorder `check_is_menu_query` to prioritize explicit paste checks (Ctrl+V and Left click)."
+  ReplacementContent: "    # --- 1. KIỂM TRA THAO TÁC PASTE RÕ RÀNG (Ưu tiên cao nhất) ---\n    # Phím tắt Ctrl+V hoặc Shift+Insert hoặc phím Enter\n    is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetA...
+  StartLine: 1951
+  TargetContent: "    # 0. Nếu cửa sổ hiện hành là chính Remote Desktop Viewer hoặc GUI của app,\n    # bất kỳ truy vấn clipboard nào cũng chỉ có thể là do hệ thống/nền tự quét sau khi copy\n    try:\n        import w...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "63b39a23-33a3-4cbf-a699-c3c8d849b000"
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Hiện tượng đồng hồ cát quay 5-6 giây rồi thất bại chính là do Windows Explorer đang cố gắng copy cái file mồi (dummy file) `C:\RemoteDesktop_Paste_Trigger.tmp` (file vốn dĩ không có thật) thay vì copy dữ liệu thật của bạn.
+
+**Nguyên nhân gốc rễ:**
+Khi bạn vừa click chuột trái vào chữ "Paste" trong menu, ngay tại khoảnh khắc đó, cửa sổ Menu Chuột Phải vẫn chưa kịp đóng lại (vẫn đang hiển thị trong một phần nghìn giây). 
+Do bộ lọc `check_is_menu_query()` cũ luôn ưu tiên kiểm tra xem "có menu nào đang mở hay không?" lên hàng đầu, nên nó đã nhầm tưởng rằng thao tác Paste thực tế của bạn chỉ là hệ thống đang "quét menu". Kết quả là ứng dụng đã ném cái file mồi ảo (dummy file) ra cho Windows Explorer copy. Explorer sau đó ngâm file này 5-6 giây để tìm trong ổ cứng, không thấy nên báo lỗi và dừng tiến trình.
+
+<truncated 815 bytes>
+
+========== USER ==========
+bạn đang dùng Clipboard Listener hay AddClipboardFormatListener ?
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"AddClipboardFormatListener\" -Context 2, 2"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+========== MODEL ==========
+Trong mã nguồn của ứng dụng (cụ thể tại class `ClipboardEventListener` trong file `app.py`), chúng ta đang sử dụng API **`AddClipboardFormatListener`** của Windows (được gọi thông qua `user32.AddClipboardFormatListener`). 
+
+Đây là API mới, hiện đại và ổn định hơn (được giới thiệu từ thời Windows Vista) để theo dõi các sự thay đổi của Clipboard. Nó giúp ứng dụng tự động nhận được thông điệp `WM_CLIPBOARDUPDATE` mỗi khi Clipboard có sự kiện mới.
+
+Phương pháp này thay thế cho API cũ là `SetClipboardViewer` (Clipboard Viewer Chain) - vốn rất dễ bị đứt chuỗi và lỗi nếu một ứng dụng nào đó trong chuỗi bị treo hoặc không gọi hàm `ChangeClipboardChain`.
+
+========== USER ==========
+bạn có làm theo Cơ chế hoạt động của Clipboard Listener này không?
+1- Đăng ký: Khi ứng dụng khởi chạy, nó gọi hàm này để yêu cầu hệ điều hành gửi một thông điệp (message) có mã là WM_CLIPBOARDUPDATE cho cửa sổ chính của ứng dụng mỗi khi Clipboard có dữ liệu mới.
+2 - Xử lý: Khi nhận được message: 
+-- WM_CLIPBOARDUPDATE, ứng dụng sẽ thực hiện chuỗi hành động:
+-- Mở Clipboard bằng OpenClipboard.
+-- Kiểm tra định dạng (Format) dữ liệu (văn bản, hình ảnh, file).
+-- Đọc dữ liệu bằng GetClipboardData.
+-- Đóng Clipboard bằng CloseClipboard.
+-- Đóng gói dữ liệu này vào luồng mạng để gửi đi.
+
+========== MODEL ==========
+Bạn đã chỉ ra chính xác điểm mấu chốt của vấn đề! 
+
+Đối với **văn bản (TEXT)**, ứng dụng hiện tại đang **tuân thủ chính xác 100%** theo cơ chế 5 bước mà bạn vừa nêu:
+`WM_CLIPBOARDUPDATE` -> `OpenClipboard` -> `GetClipboardData` -> `CloseClipboard` -> Gửi qua mạng ngay lập tức.
+
+Tuy nhiên, đối với **FILE (Tệp tin/Thư mục)**, mình đã cố tình làm "lệch" khỏi cơ chế này bằng cách sử dụng một kỹ thuật gọi là **Delayed Rendering** (trì hoãn tải file). Thay vì đọc và gửi file đi ngay ở bước `WM_CLIPBOARDUPDATE`, mình chỉ gửi cái Tên file (metadata) đi trước, và chờ đến khi nào người dùng thực sự ấn "Paste" thì mới bắt đầu tải file.
+
+Chính sự "đi lệch" này là **nguyên nhân gốc rễ gây ra lỗi đồng hồ cát 5-6 giây**:
+<truncated 1768 bytes>
+
+========== USER ==========
+không phải vấn đề tải file, tôi đang nói tới vấn đề clipboard với máy ảo đang bị xung đột
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def _agent_mouse_poll_loop\" -Context 0, 20"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"poll_gui_queue\" -Context 3, 3"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"REQUEST_FILES\" -Context 3, 10"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def pipe_listener_loop\" -Context 0, 40"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"msg_bytes = buffer\" -Context 0, 40"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"elif ptype == `\"request_files`\":\" -Context 5, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def _start_uppipe_server\" -Context 0, 30"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Get-Content \"C:\\Apps\\P2P\\clipboard_debug.log\" -Tail 50"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Get-Content \"C:\\Apps\\P2P\\agent_debug.log\" -Tail 50"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "python -c \"\nimport ctypes\nfrom ctypes import wintypes\nuser32 = ctypes.windll.user32\nuser32.GetOpenClipboardWindow.restype = wintypes.HWND\nhwnd = user32.GetOpenClipboardWindow()\nprint(f'OpenCli...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def check_is_menu_query\" -Context 0, 10"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Add absolute exclusion for VM clipboard sync tools (vmtoolsd.exe, vboxtray.exe, rdpclip.exe). By checking the process name of the window currently holding the clipboard lock, we can reliably return \...
+  EndLine: 1946
+  Instruction: "Add a process name check for the window holding the clipboard lock at the beginning of `check_is_menu_query`."
+  ReplacementContent: "    user32 = ctypes.windll.user32\n    from ctypes import wintypes\n    \n    # 0. CHẶN TUYỆT ĐỐI CÁC TIẾN TRÌNH QUÉT CLIPBOARD CỦA MÁY ẢO/REMOTE DESKTOP KHÁC\n    try:\n        user32.GetOpenClipboa...
+  StartLine: 1943
+  TargetContent: "    user32 = ctypes.windll.user32\n    from ctypes import wintypes\n    \n    t_now = time.time()"
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "2e7207e1-58ca-4082-9753-20895db6d5f5"
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Chính xác! Khi bạn sử dụng máy ảo (VMware, VirtualBox) hoặc các phần mềm Remote Desktop khác chạy song song, nó có một tiến trình ngầm (như `vmtoolsd.exe`, `VBoxTray.exe`, `rdpclip.exe`) chuyên liên tục quét và đồng bộ Clipboard.
+
+**Nguyên nhân gây xung đột và kẹt đồng hồ cát:**
+Khi tiến trình Agent của ứng dụng vừa set Clipboard thành trạng thái "Chờ Paste", thì ngay lập tức `vmtoolsd.exe` của máy ảo nhảy vào "đòi" đọc Clipboard để đồng bộ ngược ra máy chủ vật lý.
+Vì trước đây ứng dụng không phân biệt được ai đang đòi đọc Clipboard, nó lầm tưởng tiến trình `vmtoolsd.exe` đó chính là **người dùng đang thực sự thao tác Paste** nên nó đã bắt đầu quá trình tải file và khóa (Lock) Clipboard lại. 
+<truncated 1302 bytes>
+
+========== USER ==========
+vẫn chưa được, bạn làm lại theo cách này: kiểm soát nếu cửa sổ host kích hoạt (dùng SetWinEventHook với sự kiện EVENT_SYSTEM_FOREGROUND) thì ném clipboard cho host, nếu không thì giữ clipboard cho máy thật không?
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"ClientViewer\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"class\" -Context 0, 0"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"class Client\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def run_client\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def on_clipboard_changed\" -Context 0, 15"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"run_client_viewer_loop\" -Context 2, 2"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"ClipboardSyncManager\" -Context 2, 2"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"clipboard_sync_manager\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"class ClipboardEventListener\" -Context 0, 10"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def _run\\(self\\):\" -Context 0, 25"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"AddClipboardFormatListener\" -Context 0, 15"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: multi_replace_file_content]
+  Description: "Implement SetWinEventHook to monitor EVENT_SYSTEM_FOREGROUND. When the Pygame viewer window becomes the foreground window, it triggers a clipboard sync. If the viewer window is NOT the foreground win...
+  Instruction: "1. Register `SetWinEventHook` in `ClipboardEventListener._run`.\n2. Clean it up on exit.\n3. Add `on_foreground_changed` to `ClipboardSyncManager`.\n4. Update `on_clipboard_changed` in `ClipboardSync...
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":1871,"ReplacementContent":"            add_res = user32.AddClipboardFormatListener(ctypes.c_void_p(self.hwnd))\n            log_debug(f\"[Listener] AddClipboardFormat...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"user32.TranslateMessage\" -Context 3, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"pygame.display.set_mode\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"try: hwnd = pygame.display.get_wm_info\\(\\).get\\(`\"window`\"\\)\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: multi_replace_file_content]
+  Description: "Assign the Pygame window HWND to `clipboard_sync_manager` so that it can properly identify when the viewer window is in the foreground, enabling the clipboard synchronization logic."
+  Instruction: "Assign `clipboard_sync_manager.pygame_hwnd = hwnd` after retrieving the Pygame window HWND in `run_client_viewer_loop`."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":3626,"ReplacementContent":"        try: hwnd = pygame.display.get_wm_info().get(\"window\")\n        except: pass\n        if hwnd and clipboard_sync_manager:\n      ...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "4d9daff0-b449-47bd-93a7-4b5180d42800"
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Giải pháp này của bạn thực sự cực kỳ thông minh! Việc kiểm soát theo "Foreground Window" sẽ giải quyết tận gốc rễ 100% mọi sự giao thoa, xung đột không mong muốn giữa máy thật (Client) và máy ảo (Host), bởi vì quyền kiểm soát hoàn toàn phụ thuộc vào việc bạn đang "Làm việc ở đâu".
+
+Mình đã thiết kế lại kiến trúc đúng y như gợi ý của bạn:
+
+1. **Gắn Hook Hệ Thống (SetWinEventHook):**
+Mình đã cài đặt một hook `EVENT_SYSTEM_FOREGROUND` (mã `0x0003`) chạy ngầm trong `ClipboardEventListener` để hệ điều hành báo cáo cho ứng dụng biết mỗi khi bạn chuyển đổi cửa sổ làm việc.
+
+2. **Giữ Clipboard cho máy thật (Chặn gửi rác):**
+<truncated 1351 bytes>
+
+========== USER ==========
+tạm ổn, nhưng phần copy file từ host qua client bạn cũng sửa theo logic trên: nếu cửa sổ client không kích hoạt thì giữ lại clipboard trên host, nếu cửa sổ client kích hoạt thì ném clipboard đó cho client
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"def handle_received_packet\" -Context 0, 10"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"ptype == `\"clipboard_text`\"\" -Context 0, 5"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"elif ptype == `\"clipboard_text`\":\" -Context 0, 15"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "Select-String -Path \"d:\\Data\\AG\\remote_desktop\\app.py\" -Pattern \"elif ptype == `\"files_copied_meta`\":\" -Context 0, 15"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3250
+  StartLine: 3174
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Ensure that incoming clipboard packets (text or file metadata) from the Host are only accepted and applied if the Client Viewer window is currently active (in focus). This prevents the local machine'...
+  EndLine: 3181
+  Instruction: "Add a check at the beginning of `handle_received_packet` to filter out `clipboard_text` and `files_copied_meta` if the application is in Client mode and the Pygame Viewer is NOT the foreground window...
+  ReplacementContent: "    def handle_received_packet(self, packet):\n        ptype = packet.get(\"type\")\n        \n        # Chặn nhận clipboard từ Host nếu cửa sổ Client Viewer không được kích hoạt\n        if ptype in...
+  StartLine: 3174
+  TargetContent: "    def handle_received_packet(self, packet):\n        ptype = packet.get(\"type\")\n        \n        # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại\n     ...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: command_status]
+  CommandId: "2f85edd3-6ffb-4523-a500-650f954b6247"
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Yêu cầu vô cùng hợp lý! Việc ngăn máy Host tự động ghi đè lên máy Client khi bạn đang làm việc ngoài cửa sổ Viewer là cần thiết để bảo vệ tính riêng tư và tiến trình làm việc của máy thật.
+
+Mình đã cập nhật xong logic cho chiều từ **Host -> Client** y như cách xử lý chiều Client -> Host lúc nãy:
+
+**Cơ chế hiện tại (Cho cả chiều gửi và chiều nhận):**
+1. **Host -> Client (Khi có file/text copy từ máy ảo):** 
+Tại hàm `handle_received_packet` (nơi máy Client nhận tín hiệu gửi file/text từ máy ảo về), ứng dụng sẽ gọi API Windows kiểm tra xem cửa sổ Foreground hiện hành có phải là cửa sổ Viewer của P2P Remote Desktop không. 
+   - Nếu bạn đang làm việc trên cửa sổ khác (VD: đang gõ Word ở máy ngoài) -> Nó sẽ **âm thầm vứt bỏ (ignore)** gói tin này, không bao giờ ghi đè Clipboard máy thật của bạn.
+<truncated 756 bytes>
+

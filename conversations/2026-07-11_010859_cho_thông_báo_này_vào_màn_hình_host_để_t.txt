@@ -1,0 +1,242 @@
+========== USER ==========
+cho thông báo này vào màn hình host để tránh mất focus của app
+
+[Action: grep_search]
+  Query: "Mất kết nối"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Mất kết nối"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "Mất kết nối"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11180
+  StartLine: 11155
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5650
+  StartLine: 5600
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 900
+  StartLine: 880
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "def update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "def update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  MatchPerLine: true
+  Query: "update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "self.update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: grep_search]
+  CaseInsensitive: true
+  IsRegex: false
+  MatchPerLine: true
+  Query: "update_status"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "findstr -n \"def update_status\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr -n \"Trạng thái:\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr -n \"def update_status\" temp.py scratch_test.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr -n \"def update_status\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr -n \"def update_status\" temp.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: grep_search]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "def _do_update"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "findstr -n \"Tr\" app.py | findstr /i \"thái:\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr -n \"class GUIApp\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: run_command]
+  CommandLine: "findstr /n /c:\"def update_status\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8840
+  StartLine: 8790
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11630
+  StartLine: 11590
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5650
+  StartLine: 5600
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 5640
+  StartLine: 5580
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11180
+  StartLine: 11160
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11570
+  StartLine: 11550
+
+[Action: multi_replace_file_content]
+  Description: "Show reconnect status directly in Pygame host screen to prevent losing focus of the app during auto-reconnect."
+  Instruction: "Modify reconnect_queue parsing to read STATUS strings and display them in the viewer window."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":5648,"ReplacementContent":"                status_msg_text = None\n                \n                while countdown > 0 and outer_running:\n                    for e...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+========== MODEL ==========
+Đã xử lý xong yêu cầu của bạn! 
+
+Tôi đã đưa thông báo **"Trạng thái: Mất kết nối. Đang thử kết nối lại lần X/30..."** hiển thị trực tiếp bên trong màn hình hiển thị (cửa sổ Pygame) của Client (phía "Host" theo cách gọi của bạn là màn hình điều khiển người khác). 
+
+**Những thay đổi cụ thể:**
+1. **Đẩy thông báo Status:** Mỗi khi luồng ẩn phía dưới nỗ lực reconnect lại với số lần thử tương ứng, nó sẽ gửi tin nhắn `STATUS|...` vào luồng giao diện của Pygame.
+2. **Hiển thị trực tiếp trên Pygame:** Cửa sổ Pygame (viewer) đã được nâng cấp để bắt luồng `STATUS|...` này và tự động vẽ chữ màu cam nổi bật ở ngay chính giữa màn hình (cùng với đồng hồ đếm ngược phía dưới).
+<truncated 551 bytes>
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 20000
+
+[Action: command_status]
+  CommandId: "fccd87ba-272e-4008-ada7-92433a516330"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Tiến trình Build và Deploy đã hoàn tất thành công! 
+
+Thay đổi hiển thị trạng thái đang thử kết nối lại trực tiếp lên giao diện màn hình điều khiển (Pygame Viewer) đã được đóng gói và cập nhật. Bạn có thể mở app lên để trải nghiệm ngay. Nếu có bất kỳ vấn đề gì, hãy báo lại cho tôi nhé!
+
+========== USER ==========
+sửa lại 1 chút: tắt hẳn thông báo "Mất kết nối..." trong hình ở Status (Trạng thái)
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11180
+  StartLine: 11160
+
+[Action: grep_search]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "Mất kết nối. Đang thử kết nối lại lần"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "findstr -n \"Mất kết nối. Đang thử kết nối lại lần\" app.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 500
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11200
+  StartLine: 11180
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11590
+  StartLine: 11570
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 11640
+  StartLine: 11620
+
+[Action: multi_replace_file_content]
+  Description: "Remove reconnect status messages from main GUI status bar as requested"
+  Instruction: "Comment out `self.update_status()` calls during auto-reconnect to prevent the GUI status bar from flickering/updating with \"Mất kết nối...\"."
+  ReplacementChunks: [{"AllowMultiple":false,"EndLine":11194,"ReplacementContent":"        if not success:\n            if reconnect_queue and retry_count < 30:\n                msg = f\"Mất kết nối. Đang thử kết nối lại ...
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\app.py"
+
+[Action: run_command]
+  CommandLine: "python build_and_deploy.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 20000
+
+[Action: command_status]
+  CommandId: "beca613f-e213-4b8d-bef4-5a289ddbd77c"
+  OutputCharacterCount: 2000
+  WaitDurationSeconds: 300
+
+========== MODEL ==========
+Tôi đã điều chỉnh lại mã nguồn để **tắt hẳn** việc cập nhật và hiển thị dòng chữ "Mất kết nối. Đang thử kết nối lại..." trên Status (Trạng thái) của GUI chính trong lúc app đang tự động nỗ lực nối lại kết nối.
+
+Tiến trình Build và Deploy cũng đã chạy hoàn tất. Từ bây giờ, thông báo này sẽ chỉ hiển thị ở ngay chính giữa màn hình điều khiển Pygame Viewer (để bạn tập trung và không bị mất focus), còn thanh Status của GUI chính sẽ giữ nguyên trạng thái cũ mà không bị nhấp nháy hay chèn đè chữ nữa. Bạn kiểm tra lại thử nhé!
+

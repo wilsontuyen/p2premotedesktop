@@ -1,0 +1,246 @@
+========== USER ==========
+xem giùmtôi bản build này copy text / file giữa host và client không được
+
+[Action: list_dir]
+  DirectoryPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "ClipboardSyncManager"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2500
+  IsSkillFile: false
+  StartLine: 2000
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "ENABLE_CLIPBOARD_SYNC"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "C:\\Users\\Tuyen\\.gemini\\antigravity\\brain\\ed7e804c-cac7-47d5-962d-925a6e89e43e\\.system_generated\\logs\\overview.txt"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\clipboard_debug.log"
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "class ClipboardEventListener"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1850
+  IsSkillFile: false
+  StartLine: 1730
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\clipboard_agent.py"
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "def run_clipboard_agent_mode"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8700
+  IsSkillFile: false
+  StartLine: 8560
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "TEXT:"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "clipboard_text"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 3130
+  IsSkillFile: false
+  StartLine: 3090
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8700
+  IsSkillFile: false
+  StartLine: 8660
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "poll_gui_queue"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 9100
+  IsSkillFile: false
+  StartLine: 8950
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1200
+  IsSkillFile: false
+  StartLine: 1150
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8800
+  IsSkillFile: false
+  StartLine: 8700
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\clipboard_agent.log"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\agent.log"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 2290
+  IsSkillFile: false
+  StartLine: 2240
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1925
+  IsSkillFile: false
+  StartLine: 1875
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8950
+  IsSkillFile: false
+  StartLine: 8800
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "AddClipboardFormatListener"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["windows_service.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "app.py"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\windows_service.py"
+  EndLine: 250
+  IsSkillFile: false
+  StartLine: 220
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "add_socket"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 8570
+  IsSkillFile: false
+  StartLine: 8470
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 9095
+  IsSkillFile: false
+  StartLine: 9065
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1000
+  IsSkillFile: false
+  StartLine: 900
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "_send_path_to_pipe"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 900
+  IsSkillFile: false
+  StartLine: 850
+
+[Action: view_file]
+  AbsolutePath: "C:\\Apps\\P2P\\clipboard_agent.log"
+
+[Action: view_file]
+  AbsolutePath: "C:\\Apps\\P2P\\clipboard_agent.log"
+  EndLine: 2363
+  IsSkillFile: false
+  StartLine: 2200
+
+[Action: view_file]
+  AbsolutePath: "C:\\Apps\\P2P\\clipboard_debug.log"
+
+[Action: list_dir]
+  DirectoryPath: "C:\\Apps\\P2P"
+
+[Action: view_file]
+  AbsolutePath: "C:\\Apps\\P2P\\agent.log"
+  EndLine: 1000
+  IsSkillFile: false
+  StartLine: 1
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 1150
+  IsSkillFile: false
+  StartLine: 1100
+
+[Action: grep_search]
+  CaseInsensitive: false
+  Includes: ["app.py"]
+  IsRegex: false
+  MatchPerLine: true
+  Query: "def log_debug"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\app.py"
+  EndLine: 160
+  IsSkillFile: false
+  StartLine: 140
+

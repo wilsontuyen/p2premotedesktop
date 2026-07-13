@@ -1,0 +1,48 @@
+========== USER ==========
+
+
+========== MODEL ==========
+It looks like your editor (likely VS Code) is throwing a **"Git: Failed to execute git"** error. 
+
+This usually happens for one of a few reasons:
+1. **Git is not installed** on your computer.
+2. **Git is not in your system's `PATH`** environment variable, so your editor can't find it.
+3. The editor's setting for the Git executable path (like `git.path` in VS Code) is incorrect.
+
+**How we can fix this:**
+- If you don't have Git installed, you can download and install it from [git-scm.com](https://git-scm.com/download/win).
+- If it is installed but your editor can't find it, we might need to add it to your Windows `PATH` or point your editor to the exact `git.exe` location (usually `C:\Program Files\Git\cmd\git.exe`).
+
+Would you like me to run a quick terminal command to check if Git is installed and recognized on your system, or do you already know if you need to install it?
+
+========== USER ==========
+run
+
+[Action: run_command]
+  CommandLine: "git --version; Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 2000
+
+========== MODEL ==========
+Git is indeed installed on your system! It's currently at version `2.54.0` and installed at `C:\Program Files\Git\cmd\git.exe`. 
+
+Since it is installed and in your system's `PATH`, the error in your editor is likely because it hasn't recognized the installation yet. 
+
+Here is how you can fix it:
+
+### 1. The Easiest Fix: Restart your Editor
+If you recently installed Git or updated your system PATH, your editor (like VS Code) might just be using an old environment state.
+* **Close all instances of your editor completely** and then reopen it. This simple restart fixes the issue 90% of the time.
+
+### 2. If restarting doesn't work: Set the Git Path Manually
+If you are using VS Code and the error persists after a restart, you can point VS Code directly to the Git executable:
+1. Open settings in VS Code (`Ctrl` + `,`).
+2. Search for **`git.path`**.
+3. Click on **"Edit in settings.json"**.
+4. Set the value to exactly what we found:
+   ```json
+   "git.path": "C:\\Program Files\\Git\\cmd\\git.exe"
+   ```
+<truncated 112 bytes>
+
