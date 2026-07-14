@@ -556,9 +556,34 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 template = {}
             template_path = export_template(template)
             if template_path:
-                messagebox.showinfo(_("Lưu lại"), _("File ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'en.json' để dịch."))
+                messagebox.showinfo(_("Lưu lại"), _("Tệp ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'yourown.json' để dịch.\nGợi ý: dùng ChatGPT để dịch tự động là 1 lựa chọn\nThank you!"))
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+    def import_custom_language(self):
+        from tkinter import filedialog
+        import shutil
+        from core.i18n import get_lang_dir
+        
+        file_path = filedialog.askopenfilename(
+            title=_("Chọn tệp ngôn ngữ riêng của bạn"),
+            filetypes=[("JSON Files", "*.json")]
+        )
+        if file_path:
+            try:
+                filename = os.path.basename(file_path)
+                if filename in ["lang_template.json", "vi.json"]:
+                    messagebox.showerror(_("Lỗi"), _("Không thể ghi đè tệp ngôn ngữ mặc định!"))
+                    return
+                
+                dest_path = os.path.join(get_lang_dir(), filename)
+                shutil.copy2(file_path, dest_path)
+                
+                lang_code = filename[:-5]
+                self.current_lang.set(lang_code)
+                self.change_language()
+            except Exception as e:
+                messagebox.showerror(_("Lỗi"), str(e))
 
     def change_language(self, *args):
         lang = self.current_lang.get()
@@ -634,7 +659,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Export template
         lang_menu.add_separator()
-        lang_menu.add_command(label=_("Xuất file ngôn ngữ mẫu..."), command=self.export_lang_template)
+        lang_menu.add_command(label=_("Xuất tệp ngôn ngữ mẫu..."), command=self.export_lang_template)
+        lang_menu.add_command(label=_("Ngôn ngữ riêng của bạn"), command=self.import_custom_language)
         options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
         options_menu.add_separator()
 
@@ -1047,7 +1073,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 }
             template_path = export_template(template)
             if template_path:
-                messagebox.showinfo(_("Lưu lại"), _("File ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'en.json' để dịch."))
+                messagebox.showinfo(_("Lưu lại"), _("Tệp ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'yourown.json' để dịch.\nGợi ý: dùng ChatGPT để dịch tự động là 1 lựa chọn\nThank you!"))
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -1324,9 +1350,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                         for c in scrollable_frame.winfo_children():
                             if getattr(c, 'is_group_header', False):
                                 if target_group is not None and c.group_name == target_group:
-                                    c.config(fg=self.btn_color)
+                                    c["fg"] = self.btn_color
                                 else:
-                                    c.config(fg=self.text_gray)
+                                    c["fg"] = self.text_gray
                 except Exception:
                     pass
 
@@ -1342,7 +1368,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 if scrollable_frame.winfo_exists():
                     for c in scrollable_frame.winfo_children():
                         if getattr(c, 'is_group_header', False):
-                            c.config(fg=self.text_gray)
+                            c["fg"] = self.text_gray
             except Exception:
                 pass
                 

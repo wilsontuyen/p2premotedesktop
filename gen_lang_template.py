@@ -22,11 +22,13 @@ for root, dirs, files in os.walk('.'):
                 
                 # Match _("...") but do not cross newlines
                 for m in re.finditer(r'_\("([^"\n\r]+)"\)', content):
-                    strings.add(m.group(1))
+                    val = m.group(1).replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+                    strings.add(val)
                 
                 # Match _('...') but do not cross newlines 
                 for m in re.finditer(r"_\('([^'\n\r]+)'\)", content):
-                    strings.add(m.group(1))
+                    val = m.group(1).replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+                    strings.add(val)
             except Exception as e:
                 pass
 
