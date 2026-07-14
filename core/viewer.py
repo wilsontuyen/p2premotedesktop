@@ -313,7 +313,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         except Exception as e:
             print(f"[App] Lỗi thiết lập icon cửa sổ pygame: {e}")
             
-        try: btn_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
+        import core.i18n
+        lang = getattr(core.i18n, '_current_lang', 'en')
+        if lang == 'jp':
+            font_names = "Meiryo, Yu Gothic, MS Gothic, Segoe UI, Arial"
+        elif lang == 'kr':
+            font_names = "Malgun Gothic, Gulim, Segoe UI, Arial"
+        elif lang in ['cn', 'tw']:
+            font_names = "Microsoft YaHei, Microsoft JhengHei, SimHei, Segoe UI, Arial"
+        else:
+            font_names = "Segoe UI, Arial"
+            
+        try: btn_font = pygame.font.SysFont(font_names, 12, bold=True)
         except:
             try: btn_font = pygame.font.SysFont("Arial", 12, bold=True)
             except: btn_font = pygame.font.Font(None, 20)
@@ -1027,7 +1038,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         switching_start_tick = pygame.time.get_ticks()
                     
                     if "msg_font" not in locals():
-                        try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
+                        try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
                         except: msg_font = pygame.font.Font(None, 32)
                     
                     overlay = pygame.Surface((window_w, window_h))
@@ -1077,7 +1088,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             if exit_due_to_disconnect and reconnect_queue:
                 countdown = 90
                 last_tick = pygame.time.get_ticks()
-                try: msg_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
+                try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
                 except: msg_font = pygame.font.Font(None, 32)
                 
                 print("[Client] Disconnected. Requesting reconnect in background...")

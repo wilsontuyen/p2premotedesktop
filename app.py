@@ -12,6 +12,26 @@ except:
     pass
 
 from core.config import *
+
+import platform
+
+_is_old_win = platform.release() in ["7", "8", "8.1"]
+EMOJI_FONT = ("Segoe UI Symbol", 9) if _is_old_win else ("Segoe UI Emoji", 9)
+EMOJI_FONT_BOLD = ("Segoe UI Symbol", 9, "bold") if _is_old_win else ("Segoe UI Emoji", 9, "bold")
+EMOJI_FONT_LARGE = ("Segoe UI Symbol", 12, "bold") if _is_old_win else ("Segoe UI Emoji", 12, "bold")
+EMOJI_FONT_10 = ("Segoe UI Symbol", 10) if _is_old_win else ("Segoe UI Emoji", 10)
+EMOJI_FONT_8_BOLD = ("Segoe UI Symbol", 8, "bold") if _is_old_win else ("Segoe UI Emoji", 8, "bold")
+
+def E(text):
+    if platform.release() == "7" or platform.release() == "8" or platform.release() == "8.1":
+        mapping = {
+            "📋": "»", "📁": "≡", "📡": "⌂", "🔧": "¤",
+            "🔄": "↻", "🔍": "?", "➕": "+", "❌": "X"
+        }
+        for k, v in mapping.items():
+            text = text.replace(k, v)
+    return text
+
 from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
 
 import socket
@@ -545,6 +565,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         load_language(lang)
         self.save_window_position()
         messagebox.showinfo(_("Thay đổi thông tin"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+        import subprocess
+        subprocess.Popen([sys.executable] + sys.argv[1:])
+        os._exit(0)
 
         
     def setup_ui(self):
@@ -554,7 +577,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
-        file_menu.add_command(label=_("📡 Quét mạng LAN (LAN Discovery)"), command=self.show_lan_computers_dialog)
+        file_menu.add_command(label=E(_("📡 Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
         file_menu.add_separator()
         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label=_("File"), menu=file_menu)
@@ -671,7 +694,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
         self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_id_btn = tk.Button(id_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+        copy_id_btn = tk.Button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_id_btn, _("Sao chép"))
         
@@ -685,7 +708,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=("Segoe UI", 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_pass_btn = tk.Button(pass_frame, text="📋", font=("Segoe UI", 10), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+        copy_pass_btn = tk.Button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_pass_btn, _("Sao chép"))
         
@@ -699,11 +722,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
-        copy_all_btn = tk.Button(left_panel, text=_("📋 Sao chép cả ID & Mật khẩu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
+        copy_all_btn = tk.Button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, command=self.copy_id_and_password)
         copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
         
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = tk.Button(left_panel, text=_("📁 Danh sách máy tính đã lưu"), font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
+        saved_list_btn = tk.Button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
         
         # RIGHT PANEL: Control Remote Computer
@@ -740,12 +763,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
-        self.add_partner_btn = tk.Button(btn_container, text="➕", font=("Segoe UI", 12, "bold"), fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
+        self.add_partner_btn = tk.Button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = tk.Button(right_panel, text=_("📡 Quét mạng LAN (LAN Only)"), font=("Segoe UI", 9), fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
+        lan_btn = tk.Button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
 
         # Attach Context Menus for Copy & Paste
@@ -1032,7 +1055,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lang = self.current_lang.get()
         load_language(lang)
         self.save_window_position()
-        messagebox.showinfo(_("Thay đổi thông tin"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+        messagebox.showinfo(_("Thay đổi thông tin"), _("Ứng dụng sẽ khởi động lại để áp dụng ngôn ngữ mới."))
+        import subprocess
+        subprocess.Popen([sys.executable] + sys.argv[1:])
+        os._exit(0)
 
     def save_window_position(self):
         try:
@@ -1067,13 +1093,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.update_status(_("Đã sao chép cả ID & Mật khẩu!"))
+        self.update_status(_("Đã sao chép cả ID & Mật khẩu!"), is_success=True)
 
 
     def copy_to_clipboard(self, text):
         self.clipboard_clear()
         self.clipboard_append(text.strip())
-        self.update_status(_("Đã sao chép vào bộ nhớ tạm: ") + text.strip())
+        self.update_status(_("Đã sao chép vào bộ nhớ tạm: ") + text.strip(), is_success=True)
 
 
     def make_context_menu(self, entry):
@@ -1156,7 +1182,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         search_inner = tk.Frame(search_frame, bg="#2A2A3D", highlightthickness=1, highlightbackground=self.divider_color)
         search_inner.pack(fill=tk.X)
         
-        lbl_search_icon = tk.Label(search_inner, text="🔍", font=("Segoe UI", 9), fg=self.text_gray, bg="#2A2A3D")
+        lbl_search_icon = tk.Label(search_inner, text=E("🔍"), font=EMOJI_FONT, fg=self.text_gray, bg="#2A2A3D")
         lbl_search_icon.pack(side=tk.LEFT, padx=(8, 5), pady=4)
         
         search_var = tk.StringVar()
@@ -1460,7 +1486,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.status_dots_widgets.clear()
 
             query = search_var.get().strip().lower()
-            if query == _("tìm kiếm theo tên hoặc id..."):
+            if query == _("Tìm kiếm theo tên hoặc ID...").lower() or query == _("tìm kiếm theo tên hoặc id...").lower():
                 query = ""
 
             computers = load_computers()
@@ -1590,19 +1616,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             def update_timer():
                 nonlocal seconds_left
                 if seconds_left > 0:
-                    btn_refresh.config(text=_("🔄 Làm mới") + f" ({seconds_left}s)")
+                    btn_refresh.config(text=E(_("🔄 Làm mới")) + f" ({seconds_left}s)")
                     seconds_left -= 1
                     if dialog.winfo_exists():
                         dialog.after(1000, update_timer)
                 else:
                     if dialog.winfo_exists():
                         btn_refresh.config(
-                            state="normal", text=_("🔄 Làm mới"),
+                            state="normal", text=E(_("🔄 Làm mới")),
                             fg=self.text_white, bg="#2ECC71",
                             cursor="hand2"
                         )
                         
-            btn_refresh.config(state="disabled", text=_("🔄 Làm mới (30s)"), bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
+            btn_refresh.config(state="disabled", text=E(_("🔄 Làm mới (30s)")), bg="#2A2A35", fg="#8A8A9A", cursor="arrow")
             update_timer()
 
         btn_add = tk.Button(
@@ -1613,7 +1639,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
 
         btn_refresh = tk.Button(
-            bottom_frame, text=_("🔄 Làm mới"), font=("Segoe UI", 9, "bold"),
+            bottom_frame, text=E(_("🔄 Làm mới")), font=EMOJI_FONT_BOLD,
             fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
             command=lambda: [refresh_list(), start_refresh_cooldown()]
@@ -2890,7 +2916,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         info_frame = tk.Frame(dialog, bg=self.entry_bg, bd=0, highlightthickness=1, highlightbackground=self.divider_color)
         info_frame.pack(fill=tk.X, padx=20, pady=(12, 0))
 
-        tk.Label(info_frame, text=_("📋  Thông tin kỹ thuật"), font=("Segoe UI", 8, "bold"),
+        tk.Label(info_frame, text=E(_("📋  Thông tin kỹ thuật")), font=EMOJI_FONT_8_BOLD,
                  fg=self.btn_color, bg=self.entry_bg, anchor="w").pack(fill=tk.X, padx=12, pady=(8, 4))
 
         rows = [
@@ -2909,7 +2935,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         tk.Frame(info_frame, bg=self.entry_bg, height=6).pack()
 
         # ── NGUYÊN NHÂN & CÁCH KHẮC PHỤC ───────────────────────
-        tk.Label(dialog, text=_("🔧  Cách khắc phục"), font=("Segoe UI", 9, "bold"),
+        tk.Label(dialog, text=E(_("🔧  Cách khắc phục")), font=EMOJI_FONT_BOLD,
                  fg="#F39C12", bg=self.bg_color, anchor="w").pack(fill=tk.X, padx=20, pady=(12, 4))
 
         steps = [
@@ -3060,7 +3086,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 _("Sẵn sàng kết nối"),  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
             ])
             if is_pending and getattr(self, 'signaling_sockets', {}):
-                self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."))
+                self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."), is_success=True)
         except Exception:
             pass
         self.after(3000, self._poll_signaling_status)
@@ -3134,7 +3160,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 except:
                     pass
                 sock.close()
-                self.update_status(_("Đã gửi Wake-On-Lan tới MAC") + f" {m}")
+                self.update_status(_("Đã gửi Wake-On-Lan tới MAC") + f" {m}", is_success=True)
             except Exception as e:
                 print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
 
