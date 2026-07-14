@@ -21,7 +21,11 @@ SolidCompression=no
 SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\RemoteDesktopP2P.exe
 DisableProgramGroupPage=yes
+ShowLanguageDialog=yes
 
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "vietnamese"; MessagesFile: "Vietnamese.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
