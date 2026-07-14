@@ -103,8 +103,9 @@ def client_receiver_thread(sock, password):
                         client_pending_bbox = event.get("bbox")
                         continue
                     elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result"):
-                        cb = globals().get('file_manager_callback')
-                        if cb: cb(event)
+                        global file_manager_callback
+                        if file_manager_callback:
+                            file_manager_callback(event)
                         continue
                 except Exception as je:
                     print(f"[Client] Lỗi giải mã gói tin JSON: {je}")
@@ -615,7 +616,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     continue
 
                                 from utils.file_manager import open_transfer_window
-                                threading.Thread(target=open_transfer_window, args=(computer_name, is_android, send_event), daemon=True).start()
+                                hwnd = pygame.display.get_wm_info().get("window")
+                                threading.Thread(target=open_transfer_window, args=(computer_name, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
                             continue
                         if show_buttons and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:

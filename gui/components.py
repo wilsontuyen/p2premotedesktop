@@ -4,6 +4,7 @@ import os
 import time
 import sys
 from utils.logger import log_debug
+from core.i18n import _
 
 try:
     from PIL import Image, ImageTk

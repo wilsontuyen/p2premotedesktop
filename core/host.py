@@ -1201,12 +1201,88 @@ class HostMixin:
                                 send_msg(c, json.dumps(chunk_msg).encode('utf-8'), pwd)
                                 time.sleep(0.01)
                                 
-                        end_msg = {"type": "file_end"}
+                        end_msg = {"type": "file_end", "name": name}
                         send_msg(c, json.dumps(end_msg).encode('utf-8'), pwd)
                     except Exception as e:
                         print(f"[Host] File download error: {e}")
                 import threading
                 threading.Thread(target=download_thread, args=(path, target_dir_local, conn, password), daemon=True).start()
+
+        elif ev_type == 'request_download_batch':
+            paths = event.get('paths', [])
+            target_dir_local = event.get('target_dir_local')
+            
+            def download_batch_thread(pts, t_dir, c, pwd):
+                try:
+                    import os, base64, time
+                    all_files = []
+                    total_sz = 0
+                    
+                    for p in pts:
+                        if os.path.isfile(p):
+                            sz = os.path.getsize(p)
+                            all_files.append((p, os.path.basename(p), sz))
+                            total_sz += sz
+                        elif os.path.isdir(p):
+                            for root, dirs, files in os.walk(p):
+                                rel_path = os.path.relpath(root, os.path.dirname(p))
+                                for f in files:
+                                    full_file = os.path.join(root, f)
+                                    if os.path.isfile(full_file):
+                                        sz = os.path.getsize(full_file)
+                                        remote_name = os.path.join(rel_path, f).replace('\\', '/')
+                                        all_files.append((full_file, remote_name, sz))
+                                        total_sz += sz
+
+                    if not all_files:
+                        return
+                        
+                    display_name = all_files[0][1]
+                    if len(pts) > 1:
+                        display_name += f" và {len(pts)-1} mục khác"
+                        
+                    batch_start_msg = {"type": "batch_start", "total_size": total_sz, "display_name": display_name}
+                    send_msg(c, json.dumps(batch_start_msg).encode('utf-8'), pwd)
+                    time.sleep(0.5)
+                        
+                    for fpath, rname, sz in all_files:
+                        parts = rname.split('/')
+                        fname = parts[-1]
+                        sub_dir = "/".join(parts[:-1])
+                        
+                        final_t_dir = t_dir
+                        if not final_t_dir.endswith("/"): final_t_dir += "/"
+                        if sub_dir:
+                            final_t_dir += sub_dir
+                            
+                        start_msg = {"type": "file_start", "name": fname, "size": sz, "target_dir": final_t_dir}
+                        send_msg(c, json.dumps(start_msg).encode('utf-8'), pwd)
+                        time.sleep(0.5)
+                        
+                        with open(fpath, "rb") as f:
+                            while True:
+                                chunk = f.read(65536)
+                                if not chunk: break
+                                chunk_msg = {
+                                    "type": "file_chunk",
+                                    "name": fname,
+                                    "data": base64.b64encode(chunk).decode('utf-8')
+                                }
+                                send_msg(c, json.dumps(chunk_msg).encode('utf-8'), pwd)
+                                time.sleep(0.01)
+                                
+                        end_msg = {"type": "file_end", "name": fname}
+                        send_msg(c, json.dumps(end_msg).encode('utf-8'), pwd)
+                        time.sleep(0.1)
+                        
+                    batch_end_msg = {"type": "batch_end"}
+                    send_msg(c, json.dumps(batch_end_msg).encode('utf-8'), pwd)
+                        
+                except Exception as e:
+                    print(f"[Host] Batch download error: {e}")
+
+            import threading
+            threading.Thread(target=download_batch_thread, args=(paths, target_dir_local, conn, password), daemon=True).start()
 
         elif ev_type == 'request_delete_item':
             path = event.get('path')

@@ -43,13 +43,19 @@ def get_hwid():
         pass
 
     try:
-        # Get MachineGuid from Registry
-        res_guid = subprocess.run(
-            ['powershell', '-Command', '(Get-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Cryptography" -Name "MachineGuid").MachineGuid'],
-            capture_output=True, text=True, check=True, startupinfo=startupinfo
-        )
-        if res_guid and res_guid.stdout:
-            machine_guid = res_guid.stdout.strip()
+        import winreg
+        # Always read from the 64-bit registry view if available to prevent WOW6432Node redirection in 32-bit apps
+        access_flags = winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, access_flags)
+        except FileNotFoundError:
+            # Fallback to standard read if KEY_WOW64_64KEY fails (e.g., on actual 32-bit OS)
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, winreg.KEY_READ)
+            
+        machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        if machine_guid:
+            machine_guid = str(machine_guid).strip()
     except Exception:
         pass
 

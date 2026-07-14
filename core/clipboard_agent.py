@@ -1,3 +1,4 @@
+last_clipboard_set_time = 0.0
 import os
 import sys
 import time
@@ -1634,7 +1635,9 @@ class ClipboardSyncManager:
             log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path}")
 
             try:
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                dirname = os.path.dirname(target_path)
+                if dirname:
+                    os.makedirs(dirname, exist_ok=True)
                 fh = open(target_path, "wb")
                 self.incoming_transfers[filename] = {
                     "path": target_path,
@@ -1694,14 +1697,20 @@ class ClipboardSyncManager:
                                     self.active_dialog.destroy()
                                 self.active_dialog = None
                             except: pass
-                        if 'file_manager_callback' in globals():
-                            globals()['file_manager_callback']({"type": "trigger_local_refresh"})
+                        try:
+                            import core.viewer
+                            if core.viewer.file_manager_callback:
+                                core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
+                        except: pass
                 
         elif ptype == "batch_end":
             self.close_dialog()
             self.transfer_done_event.set()
-            if 'file_manager_callback' in globals():
-                globals()['file_manager_callback']({"type": "trigger_local_refresh"})
+            try:
+                import core.viewer
+                if core.viewer.file_manager_callback:
+                    core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
+            except: pass
             log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
             try: log_activity(_("Nhận file: ") + str(self.batch_display_name) + " - " + str(self.batch_total_size) + _(" byte - Thành công"))
             except: pass

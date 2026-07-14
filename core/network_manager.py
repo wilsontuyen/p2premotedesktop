@@ -1209,6 +1209,7 @@ class NetworkMixin:
                 computer_name = res.get("computer_name", "")
                 zalo_phone = res.get("zalo_phone", "")
                 is_domain = res.get("is_domain", False)
+                is_android = res.get("is_android", False)
                 
                 # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
                 self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
@@ -1333,7 +1334,7 @@ class NetworkMixin:
                         force_close_socket(sock)
                         socket_passwords.pop(sock, None)
                 else:
-                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass)
+                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android)
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
                 self.update_status(_("Bị từ chối kết nối"))
@@ -1366,11 +1367,11 @@ class NetworkMixin:
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
             
-    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass=""):
+    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False):
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass), daemon=True)
+            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android), daemon=True)
             p.start()
             
             # Track active viewer

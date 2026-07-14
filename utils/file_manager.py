@@ -1,3 +1,4 @@
+from core.i18n import _
 import os
 import time
 import base64
@@ -7,7 +8,71 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from gui.components import ProgressDialog
 
-def open_transfer_window(computer_name, is_android, send_event):
+def inline_ask_string(parent, title, prompt, initialvalue=""):
+    import tkinter as tk
+    from tkinter import ttk
+    var = tk.StringVar(parent, value="")
+    result = [None]
+    
+    dim = tk.Toplevel(parent)
+    dim.attributes("-alpha", 0.4)
+    dim.attributes("-topmost", True)
+    dim.configure(bg="black")
+    dim.overrideredirect(True)
+    dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+{parent.winfo_rootx()}+{parent.winfo_rooty()}")
+    
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.transient(parent)
+    dlg.attributes("-topmost", True)
+    dlg.configure(bg="#F0F0F0")
+    dlg.geometry(f"400x150+{parent.winfo_rootx() + parent.winfo_width()//2 - 200}+{parent.winfo_rooty() + parent.winfo_height()//2 - 75}")
+    dlg.resizable(False, False)
+    
+    lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
+    lbl_title.pack(pady=(10, 5), padx=20, anchor=tk.W)
+    
+    lbl_msg = tk.Label(dlg, text=prompt, font=("Segoe UI", 9), bg="#F0F0F0")
+    lbl_msg.pack(pady=(0, 5), padx=20, anchor=tk.W)
+    
+    entry = ttk.Entry(dlg, font=("Segoe UI", 9), width=35)
+    entry.pack(padx=20, pady=(0, 10))
+    if initialvalue:
+        entry.insert(0, initialvalue)
+        entry.select_range(0, tk.END)
+    entry.focus_force()
+    
+    btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+    btn_frame.pack(fill=tk.X, padx=20, pady=(0, 10), side=tk.BOTTOM)
+    
+    def _ok(e=None):
+        result[0] = entry.get()
+        var.set("done")
+        
+    def _cancel(e=None):
+        result[0] = None
+        var.set("done")
+        
+    entry.bind("<Return>", _ok)
+    entry.bind("<Escape>", _cancel)
+    dlg.protocol("WM_DELETE_WINDOW", _cancel)
+    
+    btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10)
+    btn_ok.pack(side=tk.LEFT, padx=(0, 5))
+    
+    btn_cancel = ttk.Button(btn_frame, text=_("Hủy"), command=_cancel, width=10)
+    btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
+    
+    dlg.grab_set()
+    parent.update_idletasks()
+    
+    parent.wait_variable(var)
+    dim.destroy()
+    dlg.destroy()
+    return result[0]
+
+
+def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080):
     try:
         import tkinter as tk
         from tkinter import ttk, filedialog, messagebox
@@ -18,7 +83,7 @@ def open_transfer_window(computer_name, is_android, send_event):
         top.attributes('-alpha', 0.0) # Ẩn đi để tránh nháy khi tạo
 
         host_title = f" - {computer_name}" if computer_name else ""
-        top.title(f"P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}")
+        top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
 
         hwnd = pygame.display.get_wm_info().get("window")
         if hwnd:
@@ -63,6 +128,11 @@ def open_transfer_window(computer_name, is_android, send_event):
 
         mid_frame = tk.Frame(top, width=60, bg="#E5E5E5")
         mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+        
+        btn_upload = tk.Button(mid_frame, text=_("Chuyển qua\n>>"), font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10)
+        btn_upload.pack(pady=(100, 10))
+        btn_download = tk.Button(mid_frame, text=_("Nhận về\n<<"), font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10)
+        btn_download.pack(pady=10)
 
         right_frame = tk.Frame(top, bg="#E5E5E5")
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -86,6 +156,8 @@ def open_transfer_window(computer_name, is_android, send_event):
             try:
                 path = local_entry.get()
                 if path == "This PC":
+                    btn_upload.config(state=tk.DISABLED)
+                    btn_download.config(state=tk.DISABLED)
                     import string
                     import ctypes
                     bitmask = ctypes.windll.kernel32.GetLogicalDrives()
@@ -97,6 +169,9 @@ def open_transfer_window(computer_name, is_android, send_event):
                     for d in drives:
                         local_tree.insert("", "end", text=d, values=("", _("Ổ đĩa"), 0))
                     return
+                else:
+                    btn_upload.config(state=tk.NORMAL)
+                    btn_download.config(state=tk.NORMAL)
 
                 items = os.listdir(path)
                 # Folders first, then files
@@ -171,8 +246,11 @@ def open_transfer_window(computer_name, is_android, send_event):
                     refresh_local()
                 else:
                     local_action("view")
+        def _handle_bs_local(e):
+            go_up_local()
+            return "break"
         local_tree.bind("<Double-1>", local_double_click)
-        local_tree.bind("<BackSpace>", lambda e: go_up_local())
+        local_tree.bind("<BackSpace>", _handle_bs_local)
 
         local_menu = tk.Menu(top, tearoff=0)
         def local_action(action):
@@ -180,14 +258,14 @@ def open_transfer_window(computer_name, is_android, send_event):
                 current_dir = local_entry.get()
                 sel = local_tree.selection()
                 if action == "mkdir":
-                    from tkinter import simpledialog
-                    new_name = simpledialog.askstring("Thư mục mới", "Nhập tên thư mục mới:", parent=top)
+                    
+                    new_name = inline_ask_string(top, _("Thư mục mới"), _("Nhập tên thư mục mới:"))
                     top.focus_force()
                     if new_name:
                         try:
                             folder_path = os.path.join(current_dir, new_name)
                             if os.path.exists(folder_path):
-                                messagebox.showinfo(_("Lỗi"), f'Thư mục "{new_name}" đã tồn tại trên "{current_dir}"', parent=top)
+                                messagebox.showinfo(_("Lỗi"), _('Thư mục "{new_name}" đã tồn tại trên "{current_dir}"').format(new_name=new_name, current_dir=current_dir), parent=top)
                             else:
                                 os.makedirs(folder_path, exist_ok=True)
                                 refresh_local()
@@ -198,9 +276,9 @@ def open_transfer_window(computer_name, is_android, send_event):
 
                 if action == "delete":
                     if len(sel) == 1:
-                        msg = f"Bạn có chắc muốn xóa '{local_tree.item(sel[0])['text']}' không?"
+                        msg = _("Bạn có chắc muốn xóa '{item_name}' không?").format(item_name=local_tree.item(sel[0])['text'])
                     else:
-                        msg = f"Bạn có chắc muốn xóa {len(sel)} mục đã chọn không?"
+                        msg = _("Bạn có chắc muốn xóa {count} mục đã chọn không?").format(count=len(sel))
                     confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
                     top.focus_force()
                     if confirm:
@@ -217,7 +295,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                                 else:
                                     os.remove(full_path)
                             except Exception as e:
-                                messagebox.showerror(_("Lỗi"), f"Lỗi xóa {name}: {e}", parent=top)
+                                messagebox.showerror(_("Lỗi"), _("Lỗi xóa {name}: {e}").format(name=name, e=e), parent=top)
                         refresh_local()
                     return
 
@@ -234,10 +312,10 @@ def open_transfer_window(computer_name, is_android, send_event):
                         with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
                             f.write(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}\n")
                         if is_dir:
-                            messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
+                            messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                         else:
                             text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
-                            _, ext = os.path.splitext(name.lower())
+                            _base, ext = os.path.splitext(name.lower())
                             if ext in text_exts:
                                 try:
                                     with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
@@ -247,7 +325,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                                     with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
                                         f.write(f"{ts} [Local] Read successful, creating window...\n")
                                     np_win = tk.Toplevel(top)
-                                    np_win.title(f"Soạn thảo (Local) - {name}")
+                                    np_win.title(_("Soạn thảo (Local) - {name}").format(name=name))
                                     np_win.geometry("800x600")
                                     np_win.transient(top)
                                     np_win.attributes('-topmost', True)
@@ -266,7 +344,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                                                     fw.write(ta.get("1.0", "end-1c"))
                                                 messagebox.showinfo(_("Thành công"), _("Đã lưu tệp!"), parent=win)
                                             except Exception as e:
-                                                messagebox.showerror(_("Lỗi"), f"Không thể lưu: {e}", parent=win)
+                                                messagebox.showerror(_("Lỗi"), _("Không thể lưu: {e}").format(e=e), parent=win)
                                         return save_file
                                     tk.Button(np_win, text=_("Lưu"), command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
                                     with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
@@ -284,8 +362,8 @@ def open_transfer_window(computer_name, is_android, send_event):
                                 except Exception as e:
                                     messagebox.showerror(_("Lỗi"), str(e), parent=top)
                     elif action == "rename":
-                        from tkinter import simpledialog
-                        new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
+                        
+                        new_name = inline_ask_string(top, _("Đổi tên"), _("Nhập tên mới cho '{name}':").format(name=name), initialvalue=name)
                         top.focus_force()
                         if new_name and new_name != name:
                             try:
@@ -318,7 +396,7 @@ def open_transfer_window(computer_name, is_android, send_event):
             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
 
             if not is_dir:
-                local_menu.add_command(label="Xem file", command=lambda: local_action("view"))
+                local_menu.add_command(label=_("Xem tệp"), command=lambda: local_action("view"))
             local_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: local_action("mkdir"))
             local_menu.add_command(label=_("Đổi tên"), command=lambda: local_action("rename"))
             local_menu.add_separator()
@@ -354,6 +432,12 @@ def open_transfer_window(computer_name, is_android, send_event):
             if evt_type == "list_dir_result":
                 if event.get("path") != remote_entry.get():
                     return
+                if remote_entry.get() == "This PC":
+                    btn_upload.config(state=tk.DISABLED)
+                    btn_download.config(state=tk.DISABLED)
+                elif local_entry.get() != "This PC":
+                    btn_upload.config(state=tk.NORMAL)
+                    btn_download.config(state=tk.NORMAL)
                 for item in remote_tree.get_children():
                     remote_tree.delete(item)
                 items = event.get("items", [])
@@ -385,7 +469,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                         path = event.get("path", "")
                         name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
                         np_win = tk.Toplevel(top)
-                        np_win.title(f"Soạn thảo (Remote) - {name}")
+                        np_win.title(_("Soạn thảo (Remote) - {name}").format(name=name))
                         np_win.geometry("800x600")
                         np_win.transient(top)
                         np_win.attributes('-topmost', True)
@@ -398,7 +482,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                         text_area.pack(expand=True, fill="both")
                         text_area.insert("1.0", content)
                     except Exception as ex:
-                        messagebox.showerror(_("Lỗi Code"), f"Lỗi tạo Notepad: {ex}", parent=top)
+                        messagebox.showerror(_("Lỗi Code"), _("Lỗi tạo Notepad: {ex}").format(ex=ex), parent=top)
                         return
                     def save_remote_file():
                         req = {"type": "request_write_text_file", "path": path, "content": text_area.get("1.0", "end-1c")}
@@ -428,7 +512,8 @@ def open_transfer_window(computer_name, is_android, send_event):
                 top.after(100, process_fm_queue)
 
         top.after(100, process_fm_queue)
-        globals()['file_manager_callback'] = lambda e: fm_event_queue.put(e)
+        import core.viewer
+        core.viewer.file_manager_callback = lambda e: fm_event_queue.put(e)
 
         def go_up_remote():
             p = remote_entry.get().replace("\\", "/").rstrip("/")
@@ -476,8 +561,11 @@ def open_transfer_window(computer_name, is_android, send_event):
                     request_remote_dir(new_path)
                 else:
                     remote_action("view")
+        def _handle_bs_remote(e):
+            go_up_remote()
+            return "break"
         remote_tree.bind("<Double-1>", remote_double_click)
-        remote_tree.bind("<BackSpace>", lambda e: go_up_remote())
+        remote_tree.bind("<BackSpace>", _handle_bs_remote)
 
         remote_menu = tk.Menu(top, tearoff=0)
         def remote_action(action):
@@ -486,8 +574,8 @@ def open_transfer_window(computer_name, is_android, send_event):
             if not current_dir.endswith(sep): current_dir += sep
             sel = remote_tree.selection()
             if action == "mkdir":
-                from tkinter import simpledialog
-                new_name = simpledialog.askstring("Thư mục mới", "Nhập tên thư mục mới:", parent=top)
+                
+                new_name = inline_ask_string(top, _("Thư mục mới"), _("Nhập tên thư mục mới:"))
                 top.focus_force()
                 if new_name:
                     exists = False
@@ -496,7 +584,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                             exists = True
                             break
                     if exists:
-                        messagebox.showinfo(_("Lỗi"), f'Thư mục "{new_name}" đã tồn tại trên "{current_dir}"', parent=top)
+                        messagebox.showinfo(_("Lỗi"), _('Thư mục "{new_name}" đã tồn tại trên "{current_dir}"').format(new_name=new_name, current_dir=current_dir), parent=top)
                     else:
                         req = {"type": "request_create_folder", "parent_path": current_dir, "folder_name": new_name}
                         send_event(req)
@@ -505,9 +593,9 @@ def open_transfer_window(computer_name, is_android, send_event):
 
             if action == "delete":
                 if len(sel) == 1:
-                    msg = f"Bạn có chắc muốn xóa '{remote_tree.item(sel[0])['text']}' khỏi máy điều khiển không?"
+                    msg = _("Bạn có chắc muốn xóa '{item_name}' khỏi máy điều khiển không?").format(item_name=remote_tree.item(sel[0])['text'])
                 else:
-                    msg = f"Bạn có chắc muốn xóa {len(sel)} mục đã chọn khỏi máy điều khiển không?"
+                    msg = _("Bạn có chắc muốn xóa {count} mục đã chọn khỏi máy điều khiển không?").format(count=len(sel))
                 confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
                 top.focus_force()
                 if confirm:
@@ -530,23 +618,23 @@ def open_transfer_window(computer_name, is_android, send_event):
                     ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
                     open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
                     if is_dir:
-                        messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
+                        messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                     else:
                         text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
-                        _, ext = os.path.splitext(name.lower())
+                        _base, ext = os.path.splitext(name.lower())
                         if ext in text_exts:
                             req = {"type": "request_read_text_file", "path": full_path}
                         else:
                             req = {"type": "request_open_file", "path": full_path}
-                            messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
+                            messagebox.showinfo(_("Thông báo"), _("Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.").format(ext=ext), parent=top)
                         try:
                             open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\n")
                             send_event(req)
                         except Exception as ex:
-                            messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)
+                            messagebox.showerror(_("Lỗi"), _("Không thể gửi lệnh: {ex}").format(ex=ex), parent=top)
                 elif action == "rename":
-                    from tkinter import simpledialog
-                    new_name = simpledialog.askstring("Đổi tên", f"Nhập tên mới cho '{name}':", initialvalue=name, parent=top)
+                    
+                    new_name = inline_ask_string(top, _("Đổi tên"), _("Nhập tên mới cho '{name}':").format(name=name), initialvalue=name)
                     top.focus_force()
                     if new_name and new_name != name:
                         req = {"type": "request_rename_item", "old_path": full_path, "new_name": new_name}
@@ -569,7 +657,7 @@ def open_transfer_window(computer_name, is_android, send_event):
             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
 
             if not is_dir:
-                remote_menu.add_command(label="Xem file", command=lambda: remote_action("view"))
+                remote_menu.add_command(label=_("Xem tệp"), command=lambda: remote_action("view"))
             remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
             remote_menu.add_command(label=_("Đổi tên"), command=lambda: remote_action("rename"))
             remote_menu.add_separator()
@@ -617,8 +705,6 @@ def open_transfer_window(computer_name, is_android, send_event):
 
         local_tree.bind("<F5>", lambda e: refresh_local())
         remote_tree.bind("<F5>", lambda e: request_remote_dir(remote_entry.get()))
-        local_tree.bind("<BackSpace>", lambda e: "break" if go_up_local() or True else "")
-        remote_tree.bind("<BackSpace>", lambda e: "break" if go_up_remote() or True else "")
 
         def tree_go_home(event, tree):
             items = tree.get_children()
@@ -694,7 +780,7 @@ def open_transfer_window(computer_name, is_android, send_event):
                 btn_frame.pack(fill="x", side="bottom", pady=20, padx=20)
 
                 item_type = _("Thư mục") if c.get('src_is_dir') else _("Tập tin")
-                lbl_title = tk.Label(frame, text=f"{item_type} với tên \"{c['name']}\" " + _("đã tồn tại."), font=("Segoe UI", 11, "bold"), bg="white", anchor="w")
+                lbl_title = tk.Label(frame, text=_("{item_type} với tên \"{item_name}\" đã tồn tại.").format(item_type=item_type, item_name=c['name']), font=("Segoe UI", 11, "bold"), bg="white", anchor="w")
                 lbl_title.pack(fill="x", padx=20, pady=(20, 10))
 
                 try:
@@ -721,8 +807,14 @@ def open_transfer_window(computer_name, is_android, send_event):
                     src_title = _("Nguồn (Máy từ xa):")
                     dst_title = _("Đích (Máy bạn):")
 
-                src_disp = f"{src_title}\n- Thư mục: {src_path}\n- Dung lượng: {src_sz}\n- Ngày sửa đổi: {src_mtime}"
-                dst_disp = f"{dst_title}\n- Thư mục: {dst_path}\n- Dung lượng: {dst_sz}\n- Ngày sửa đổi: {dst_mtime}"
+                src_disp = _("""{src_title}
+- Thư mục: {src_path}
+- Dung lượng: {src_sz}
+- Ngày sửa đổi: {src_mtime}""").format(src_title=src_title, src_path=src_path, src_sz=src_sz, src_mtime=src_mtime)
+                dst_disp = _("""{dst_title}
+- Thư mục: {dst_path}
+- Dung lượng: {dst_sz}
+- Ngày sửa đổi: {dst_mtime}""").format(dst_title=dst_title, dst_path=dst_path, dst_sz=dst_sz, dst_mtime=dst_mtime)
 
                 tk.Label(frame, text=src_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=2)
                 tk.Label(frame, text=dst_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=(2, 10))
@@ -845,7 +937,7 @@ def open_transfer_window(computer_name, is_android, send_event):
 
             display_name = items_to_upload[0][1]
             if len(items_to_upload) > 1:
-                display_name += f" và {len(items_to_upload)-1} mục khác"
+                display_name += _(" và {count} mục khác").format(count=len(items_to_upload)-1)
 
             class UploadState:
                 is_cancelled = False
@@ -925,7 +1017,7 @@ def open_transfer_window(computer_name, is_android, send_event):
             sel = remote_tree.selection()
             if not sel: return
 
-            target_dir = local_entry.get()
+            target_dir = os.path.abspath(local_entry.get())
 
             # Check conflicts
             conflicts = []
@@ -959,7 +1051,10 @@ def open_transfer_window(computer_name, is_android, send_event):
             else:
                 decisions = {}
 
-            cm = globals().get('clipboard_sync_manager')
+            try:
+                from core.clipboard_agent import clipboard_sync_manager as cm
+            except Exception:
+                cm = None
 
             total_size = 0
             files_to_download = []
@@ -999,7 +1094,7 @@ def open_transfer_window(computer_name, is_android, send_event):
 
                 display_name = display_names[0]
                 if len(display_names) > 1:
-                    display_name += f" và {len(display_names)-1} mục khác"
+                    display_name += _(" và {count} mục khác").format(count=len(display_names)-1)
 
                 def _cancel():
                     cm.cancel_active_transfer(remote_triggered=False)
@@ -1012,8 +1107,8 @@ def open_transfer_window(computer_name, is_android, send_event):
             req = {"type": "request_download_batch", "paths": files_to_download, "target_dir_local": target_dir}
             send_event(req)
 
-        tk.Button(mid_frame, text="Chuyển qua\n>>", font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10, command=do_upload).pack(pady=(100, 10))
-        tk.Button(mid_frame, text="Nhận về\n<<", font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10, command=do_download).pack(pady=10)
+        btn_upload.config(command=do_upload)
+        btn_download.config(command=do_download)
 
         def on_close():
             globals()['fm_is_open'] = False
