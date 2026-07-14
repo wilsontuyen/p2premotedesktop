@@ -956,7 +956,7 @@ class NetworkMixin:
                     print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN!")
                     break
                 
-                time.sleep(1.0) # Đợi 1s giữa các lần tìm
+                time.sleep(0.5) # Đợi 0.5s giữa các lần tìm
 
         if lan_target:
             self.update_status(_("Đang thử kết nối LAN trực tiếp..."))
@@ -1093,6 +1093,7 @@ class NetworkMixin:
                     s.settimeout(0.5)
                     try:
                         s.connect((public_ip, port))
+                        s.settimeout(None)
                         connected = True
                         sock = s
                         print(f"[Client] Hole punch successful!")
@@ -1326,6 +1327,21 @@ class NetworkMixin:
                         if viewer_pid and sys.platform == "win32":
                             sock_data = sock.share(viewer_pid)
                             reconnect_queue.put(("SHARED_SOCK", sock_data))
+                            
+                            # Keep socket alive so child process can call WSASocket before it closes
+                            def delayed_reconnect_close():
+                                try:
+                                    import psutil
+                                    ps_proc = psutil.Process(viewer_pid)
+                                    ps_proc.wait()
+                                except:
+                                    import time
+                                    time.sleep(10.0)
+                                try: sock.close()
+                                except: pass
+                            import threading
+                            threading.Thread(target=delayed_reconnect_close, daemon=True).start()
+                            
                         else:
                             reconnect_queue.put(sock)
                     except Exception as e:
@@ -1382,12 +1398,20 @@ class NetworkMixin:
                 "partner_id": partner_id
             })
             
-            # Close the socket handle in the parent process to prevent port leakage
-            # on Windows, which causes Hole Punching to fail on the second connection
-            try:
-                sock.close()
-            except Exception:
-                pass
+            # Close the socket handle in the parent process ONLY AFTER the viewer process exits.
+            # This ensures the child process has full ownership of the socket without the parent dropping it prematurely,
+            # while still preventing port leakage when the session ends.
+            def wait_and_close():
+                try:
+                    p.join()
+                except:
+                    pass
+                try:
+                    sock.close()
+                except:
+                    pass
+            import threading
+            threading.Thread(target=wait_and_close, daemon=True).start()
             
             # Reconnection Monitor Thread
             if partner_id and partner_pass:
