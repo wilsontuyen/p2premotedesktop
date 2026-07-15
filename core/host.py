@@ -1552,8 +1552,11 @@ class HostMixin:
         self._fade_value = 0
         self._fade_dir = 5
         
-        import os
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
+        import os, sys
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.path.dirname(sys.executable), "app_icon.ico")
+            
         self._cover_hIcon = 0
         try:
             self._cover_hIcon = win32gui.LoadImage(0, icon_path, win32con.IMAGE_ICON, 256, 256, win32con.LR_LOADFROMFILE)
