@@ -193,10 +193,12 @@ def get_clipboard_files(owner_hwnd=None):
 
 def create_hdrop_data(file_paths):
     if not ENABLE_CLIPBOARD_SYNC or not fn_GlobalAlloc: return None
-    if not file_paths: return None
-    abs_paths = [os.path.abspath(p) for p in file_paths]
-    joined_paths = "\x00".join(abs_paths) + "\x00\x00"
-    paths_bytes = joined_paths.encode('utf-16le')
+    if not file_paths:
+        paths_bytes = b'\x00\x00\x00\x00'
+    else:
+        abs_paths = [os.path.abspath(p) for p in file_paths]
+        joined_paths = "\x00".join(abs_paths) + "\x00\x00"
+        paths_bytes = joined_paths.encode('utf-16le')
     
     struct_size = ctypes.sizeof(DROPFILES)
     total_size = struct_size + len(paths_bytes)

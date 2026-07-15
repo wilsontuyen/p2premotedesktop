@@ -422,6 +422,11 @@ class ClipboardSyncManager:
         self.last_received_text = ""
         self._send_cancelled = False
         self._receive_cancelled = False
+        self.overwrite_all = False
+        
+        self.cached_explorer_path = None
+        self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
+        self.cacher_thread.start()
         
         # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
         self._pipe_handle = None
@@ -728,7 +733,17 @@ class ClipboardSyncManager:
         self.gui_queue.put(("create", (title_text, filename, total_size)))
 
     def update_dialog(self, sent_bytes):
-        self.gui_queue.put(("update", sent_bytes))
+        import time
+        current_time = time.time()
+        if not hasattr(self, '_last_update_time'):
+            self._last_update_time = 0
+            self._last_update_bytes = 0
+        
+        # Chỉ cập nhật tối đa 20 lần / giây (50ms) hoặc khi đã tải xong
+        if (current_time - self._last_update_time >= 0.05) or (hasattr(self, 'batch_total_size') and sent_bytes >= self.batch_total_size):
+            self.gui_queue.put(("update", sent_bytes))
+            self._last_update_time = current_time
+            self._last_update_bytes = sent_bytes
 
     def close_dialog(self):
         self.gui_queue.put(("destroy", None))
@@ -1065,82 +1080,149 @@ class ClipboardSyncManager:
         print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
 
     def get_active_explorer_path(self):
+        # Trả về giá trị đã được cache bởi background thread
+        # để tránh lỗi RPC_E_CANTCALLOUT_ININPUTSYNCCALL khi gọi COM trong WM_RENDERFORMAT
+        return getattr(self, 'cached_explorer_path', None)
+
+    def _explorer_path_cacher_loop(self):
+        import pythoncom
+        import time
+        import os
+        import win32gui
+        import win32process
+        import ctypes
+        from ctypes import wintypes
+        import psutil
+        
+        try: pythoncom.CoInitialize()
+        except: pass
+        
         try:
-            import win32gui
             import win32com.client
-            import ctypes
-            from ctypes import wintypes
+            shell = win32com.client.Dispatch("Shell.Application")
+        except:
+            return
             
-            hwnds_to_check = []
-            
-            def get_related_hwnds(h):
-                if not h: return []
-                res = [h]
-                try:
-                    root = ctypes.windll.user32.GetAncestor(h, 2) # GA_ROOT
-                    if root: res.append(root)
-                    owner = ctypes.windll.user32.GetWindow(h, 4) # GW_OWNER
-                    if owner: res.append(owner)
-                    if root:
-                        root_owner = ctypes.windll.user32.GetWindow(root, 4)
-                        if root_owner: res.append(root_owner)
-                except:
-                    pass
-                return res
-            
-            # 1. Cửa sổ đang mở Clipboard (chính xác nhất cho thao tác Paste)
+        def get_related_hwnds(h):
+            if not h: return []
+            res = [h]
             try:
+                root = ctypes.windll.user32.GetAncestor(h, 2)
+                if root and root not in res: res.append(root)
+                owner = ctypes.windll.user32.GetWindow(h, 4)
+                if owner and owner not in res: res.append(owner)
+                parent = ctypes.windll.user32.GetParent(h)
+                if parent and parent not in res: res.append(parent)
+                if root:
+                    root_owner = ctypes.windll.user32.GetWindow(root, 4)
+                    if root_owner and root_owner not in res: res.append(root_owner)
+            except: pass
+            return res
+
+        while True:
+            time.sleep(0.5)
+            try:
+                hwnds_to_check = []
+                
                 hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
                 if hwnd_clip:
-                    for h in get_related_hwnds(hwnd_clip):
-                        if h not in hwnds_to_check: hwnds_to_check.append(h)
-            except: pass
-                
-            # 2. Cửa sổ Foreground hiện tại
-            try:
+                    hwnds_to_check.extend([h for h in get_related_hwnds(hwnd_clip) if h not in hwnds_to_check])
+                    
                 hwnd_fg = win32gui.GetForegroundWindow()
                 if hwnd_fg:
-                    for h in get_related_hwnds(hwnd_fg):
-                        if h not in hwnds_to_check: hwnds_to_check.append(h)
-            except: pass
-                
-            # 3. Cửa sổ nằm dưới con trỏ chuột (phòng trường hợp mất focus vào menu)
-            try:
+                    hwnds_to_check.extend([h for h in get_related_hwnds(hwnd_fg) if h not in hwnds_to_check])
+                    
                 pt = wintypes.POINT()
                 if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
                     hwnd_mouse = ctypes.windll.user32.WindowFromPoint(pt)
                     if hwnd_mouse:
-                        for h in get_related_hwnds(hwnd_mouse):
-                            if h not in hwnds_to_check: hwnds_to_check.append(h)
-            except: pass
-            
-            shell = win32com.client.Dispatch("Shell.Application")
-            
-            for hwnd in hwnds_to_check:
-                if not hwnd: continue
-                try:
-                    desktop_hwnd = win32gui.GetDesktopWindow()
-                    class_name = win32gui.GetClassName(hwnd)
-                    if hwnd == desktop_hwnd or class_name in ("Progman", "WorkerW"):
-                        return os.path.join(os.path.expanduser("~"), "Desktop")
-                except: pass
-                    
-                for window in shell.Windows():
+                        hwnds_to_check.extend([h for h in get_related_hwnds(hwnd_mouse) if h not in hwnds_to_check])
+                
+                found_path = None
+                
+                # 1. Kiểm tra Desktop nhanh
+                for hwnd in hwnds_to_check:
                     try:
-                        if int(window.HWND) == hwnd:
-                            doc = window.Document
-                            if doc:
-                                try:
-                                    sel = doc.SelectedItems()
-                                    if sel.Count == 1 and sel.Item(0).IsFolder:
-                                        return sel.Item(0).Path
+                        desktop_hwnd = win32gui.GetDesktopWindow()
+                        class_name = win32gui.GetClassName(hwnd)
+                        if hwnd == desktop_hwnd or class_name in ("Progman", "WorkerW"):
+                            found_path = os.path.join(os.path.expanduser("~"), "Desktop")
+                            break
+                    except: pass
+
+                if not found_path:
+                    # 2. Lấy danh sách Explorer Windows qua COM
+                    explorer_windows = []
+                    try:
+                        for window in shell.Windows():
+                            try:
+                                w_hwnd = int(window.HWND)
+                                doc = window.Document
+                                if doc:
+                                    path = ""
+                                    try:
+                                        sel = doc.SelectedItems()
+                                        if sel.Count == 1 and sel.Item(0).IsFolder:
+                                            path = sel.Item(0).Path
+                                        else:
+                                            path = doc.Folder.Self.Path
+                                    except:
+                                        try: path = doc.Folder.Self.Path
+                                        except: pass
+                                    if path:
+                                        explorer_windows.append((w_hwnd, path))
+                            except: continue
+                    except: pass
+                        
+                    # 3. So khớp chính xác HWND
+                    for hwnd in hwnds_to_check:
+                        for w_hwnd, path in explorer_windows:
+                            if hwnd == w_hwnd:
+                                found_path = path
+                                break
+                        if found_path: break
+                
+                if not found_path:
+                    # 4. Fallback: Z-order
+                    is_explorer_target = False
+                    for hwnd in hwnds_to_check:
+                        try:
+                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                            if psutil.Process(pid).name().lower() == "explorer.exe":
+                                is_explorer_target = True
+                                break
+                        except: pass
+                        
+                    if is_explorer_target:
+                        if explorer_windows:
+                            if len(explorer_windows) == 1:
+                                found_path = explorer_windows[0][1]
+                            else:
+                                top_explorer_path = None
+                                def enum_windows_callback(hwnd, lParam):
+                                    nonlocal top_explorer_path
+                                    if top_explorer_path is None:
+                                        for w_hwnd, path in explorer_windows:
+                                            if hwnd == w_hwnd:
+                                                top_explorer_path = path
+                                                return False
+                                    return True
+                                try: win32gui.EnumWindows(enum_windows_callback, 0)
                                 except: pass
-                                return doc.Folder.Self.Path
-                    except:
-                        continue
-        except Exception as e:
-            log_debug(f"[get_active_explorer_path] Lỗi COM: {e}")
-        return None
+                                
+                                if top_explorer_path:
+                                    found_path = top_explorer_path
+                        else:
+                            found_path = os.path.join(os.path.expanduser("~"), "Desktop")
+                
+                # Cập nhật cache
+                if found_path:
+                    self.cached_explorer_path = found_path
+                else:
+                    # Giữ nguyên giá trị cũ nếu không tìm thấy gì, vì user có thể đang paste từ menu
+                    pass
+            except Exception:
+                pass
 
     def show_classic_conflict_dialog(self, filename, source_info, dest_info, has_multiple=False):
         if self.app and getattr(self.app, 'is_headless', False):
@@ -1280,11 +1362,16 @@ class ClipboardSyncManager:
                                 continue
                             else: # cancel
                                 log_debug("[render_format] Hủy bỏ truyền tải từ hộp thoại ghi đè.")
+                                empty_hdrop = create_hdrop_data([])
+                                if empty_hdrop:
+                                    self.ignore_destroy_clipboard = True
+                                    res = fn_SetClipboardData(15, empty_hdrop)
+                                    if not res: fn_GlobalFree(empty_hdrop)
+                                self.pending_remote_files = []
                                 self.close_dialog()
                                 if self.app and getattr(self.app, 'is_headless', False):
                                     self._send_progress_signal("CANCEL", "")
                                     self._close_transfer_pipe()
-                                fn_SetClipboardData(15, None)
                                 return
                     else:
                         files_to_download.append(f)
@@ -1293,11 +1380,16 @@ class ClipboardSyncManager:
                 
             if not files_to_download:
                 log_debug("[render_format] Không có tệp tin nào được chọn để tải (người dùng bỏ qua tất cả).")
+                empty_hdrop = create_hdrop_data([])
+                if empty_hdrop:
+                    self.ignore_destroy_clipboard = True
+                    res = fn_SetClipboardData(15, empty_hdrop)
+                    if not res: fn_GlobalFree(empty_hdrop)
+                self.pending_remote_files = []
                 self.close_dialog()
                 if self.app and getattr(self.app, 'is_headless', False):
                     self._send_progress_signal("CANCEL", "")
                     self._close_transfer_pipe()
-                fn_SetClipboardData(15, None)
                 return
                 
             # Đặt lại danh sách tệp tin thực tế cần tải
@@ -1329,43 +1421,65 @@ class ClipboardSyncManager:
                     
             if succeeded and self.batch_paths:
                 print(f"[Clipboard] Tải thành công {len(self.batch_paths)} file vào: {self.target_save_dir}")
-                log_debug(f"[render_format] Tải thành công {len(self.batch_paths)} file. Đang nạp vào Clipboard...")
+                log_debug(f"[render_format] Tải thành công {len(self.batch_paths)} file.")
                 
-                # Tạo HDROP trỏ đến các file đã tải (nằm trực tiếp tại thư mục đích)
-                hGlobal = create_hdrop_data(self.batch_paths)
-                if hGlobal:
-                    self.ignore_destroy_clipboard = True
-                    try:
-                        res = fn_SetClipboardData(15, hGlobal)
-                        if not res:
-                            err = ctypes.GetLastError()
-                            log_debug(f"[render_format] Lỗi SetClipboardData: res={res}, GetLastError={err}")
-                            fn_GlobalFree(hGlobal)
-                        else:
-                            log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. res={res}")
-                            # --- NGĂN CHẶN BOUNCE-BACK ---
-                            # Explorer có thể tự động lấy ownership và cập nhật clipboard sau khi paste.
-                            # Đánh dấu các file này để _process_clipboard_change bỏ qua.
-                            if hasattr(self, 'lock'):
-                                with self.lock:
-                                    self.last_current_files = [os.path.abspath(p) for p in self.batch_paths if os.path.exists(p)]
-                                    self.last_files_time = time.time()
-                                    
-                            # Lưu lại clipboard sequence number ngay sau khi SetClipboardData thành công
-                            seq_after = ctypes.windll.user32.GetClipboardSequenceNumber()
-                            log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. seq_after={seq_after} (Bỏ dọn dẹp để hỗ trợ copy liên tiếp)")
-                    finally:
-                        self.ignore_destroy_clipboard = False
+                temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+                is_direct_dest = (os.path.normcase(os.path.abspath(self.target_save_dir)) != os.path.normcase(os.path.abspath(temp_dir)))
+                
+                if is_direct_dest:
+                    log_debug("[render_format] Tải trực tiếp vào đích. Hủy paste của Explorer để tránh lỗi same-file bằng empty HDROP.")
+                    # Cung cấp empty HDROP để Explorer không báo lỗi "Unspecified error"
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        self.ignore_destroy_clipboard = True
+                        res = fn_SetClipboardData(15, empty_hdrop)
+                        if not res: fn_GlobalFree(empty_hdrop)
+                    
+                    self.pending_remote_files = [] # Tránh bị loop
+                    
+                    # Bỏ qua update_clip để tránh việc Explorer đang treo bỗng nhiên nhận được data thật và tự động chép đè lên chính nó.
                 else:
-                    log_debug("[render_format] Không tạo được hGlobal, hủy render.")
+                    hGlobal = create_hdrop_data(self.batch_paths)
+                    if hGlobal:
+                        self.ignore_destroy_clipboard = True
+                        try:
+                            res = fn_SetClipboardData(15, hGlobal)
+                            if not res:
+                                err = ctypes.GetLastError()
+                                log_debug(f"[render_format] Lỗi SetClipboardData: res={res}, GetLastError={err}")
+                                fn_GlobalFree(hGlobal)
+                            else:
+                                log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. res={res}")
+                                if hasattr(self, 'lock'):
+                                    with self.lock:
+                                        self.last_current_files = [os.path.abspath(p) for p in self.batch_paths if os.path.exists(p)]
+                                        self.last_files_time = time.time()
+                                seq_after = ctypes.windll.user32.GetClipboardSequenceNumber()
+                                log_debug(f"[render_format] Đã nạp thành công CF_HDROP vào Clipboard. seq_after={seq_after} (Bỏ dọn dẹp để hỗ trợ copy liên tiếp)")
+                        finally:
+                            self.ignore_destroy_clipboard = False
+                            self.pending_remote_files = []
+                    else:
+                        log_debug("[render_format] Không tạo được hGlobal, hủy render.")
+                        self.pending_remote_files = []
             else:
                 log_debug(f"[render_format] Tải file thất bại hoặc hết thời gian chờ. succeeded={succeeded}")
+                empty_hdrop = create_hdrop_data([])
+                if empty_hdrop:
+                    self.ignore_destroy_clipboard = True
+                    res = fn_SetClipboardData(15, empty_hdrop)
+                    if not res: fn_GlobalFree(empty_hdrop)
                 self.close_dialog()
                 if self.app and getattr(self.app, 'is_headless', False):
                     self._send_progress_signal("CANCEL", "")
                     self._close_transfer_pipe()
         except Exception as e:
             log_debug(f"[render_format] Lỗi khi xử lý render format: {e}")
+            empty_hdrop = create_hdrop_data([])
+            if empty_hdrop:
+                self.ignore_destroy_clipboard = True
+                res = fn_SetClipboardData(15, empty_hdrop)
+                if not res: fn_GlobalFree(empty_hdrop)
             self.close_dialog()
             if self.app and getattr(self.app, 'is_headless', False):
                 self._send_progress_signal("CANCEL", "")
@@ -1665,7 +1779,7 @@ class ClipboardSyncManager:
                         if not hasattr(self, '_last_progress_time'):
                             self._last_progress_time = 0
                             self._last_progress_bytes = 0
-                        if (current_time - self._last_progress_time > 0.1) or (self.batch_received - self._last_progress_bytes > 100000):
+                        if (current_time - self._last_progress_time >= 0.05) or (hasattr(self, 'batch_total_size') and self.batch_received >= self.batch_total_size):
                             self._send_progress_signal("PROGRESS", str(self.batch_received))
                             self._last_progress_time = current_time
                             self._last_progress_bytes = self.batch_received
@@ -2086,9 +2200,21 @@ def run_clipboard_agent_mode():
                     agent_print("[ClipboardAgent] Đã nạp data thực thành công.")
                 else:
                     agent_print("[ClipboardAgent] Hết thời gian chờ file hoặc bị hủy.")
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        _ignore_destroy = True
+                        res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                        if not res: fn_GlobalFree(empty_hdrop)
+                        _ignore_destroy = False
                     gui_queue.put(("cancel", None))
             except Exception as e:
                 agent_print(f"[ClipboardAgent] Lỗi xử lý WM_RENDERFORMAT: {e}")
+                empty_hdrop = create_hdrop_data([])
+                if empty_hdrop:
+                    _ignore_destroy = True
+                    res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                    if not res: fn_GlobalFree(empty_hdrop)
+                    _ignore_destroy = False
                 gui_queue.put(("cancel", None))
             finally:
                 _is_rendering = False

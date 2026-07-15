@@ -577,7 +577,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     return
                 
                 dest_path = os.path.join(get_lang_dir(), filename)
-                shutil.copy2(file_path, dest_path)
+                try:
+                    shutil.copy2(file_path, dest_path)
+                except shutil.SameFileError:
+                    pass # Bỏ qua nếu người dùng chọn chính tệp trong thư mục lang
                 
                 lang_code = filename[:-5]
                 self.current_lang.set(lang_code)
