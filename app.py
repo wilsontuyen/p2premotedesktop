@@ -1263,6 +1263,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.drag_card_id = None
         
         if hasattr(self, 'saved_computers_dialog') and self.saved_computers_dialog.winfo_exists():
+            if self.saved_computers_dialog.state() == 'withdrawn':
+                if hasattr(self.saved_computers_dialog, 'refresh_list_func'):
+                    self.saved_computers_dialog.refresh_list_func()
+                self.saved_computers_dialog.attributes("-alpha", 0.0)
+                self.saved_computers_dialog.deiconify()
+                def _show_reopen():
+                    if self.saved_computers_dialog.winfo_exists():
+                        self.saved_computers_dialog.attributes("-alpha", 1.0)
+                        self.saved_computers_dialog.lift()
+                        self.saved_computers_dialog.focus_force()
+                self.after(50, _show_reopen)
+                return
             self.saved_computers_dialog.lift()
             self.saved_computers_dialog.focus_force()
             return
@@ -1282,7 +1294,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         x = self.winfo_x() + (self.winfo_width() - w) // 2
         y = self.winfo_y() + (self.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()  # Chỉ hiển thị sau khi đã tính toán căn giữa hoàn hảo!
 
         # Top title
         lbl_title = tk.Label(dialog, text=_("DANH SÁCH MÁY TÍNH ĐÃ LƯU"), font=("Segoe UI", 12, "bold"), fg=self.btn_color, bg=self.bg_color)
@@ -1363,11 +1374,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         def on_dialog_destroy():
-            canvas.unbind_all("<MouseWheel>")
-            self.status_dots_widgets.clear()
-            if hasattr(self, '_reorder_saved_computers_func'):
-                delattr(self, '_reorder_saved_computers_func')
-            dialog.destroy()
+            dialog.withdraw()
             
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
 
@@ -1587,17 +1594,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         self._reorder_saved_computers_func = reorder_list
 
-        def refresh_list():
-            current_online = {}
-            for cid, widgets in self.status_dots_widgets.items():
-                if widgets and widgets[0].winfo_exists():
-                    current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
-
-            # Clear previous items
-            for widget in scrollable_frame.winfo_children():
-                widget.destroy()
-            self.status_dots_widgets.clear()
-
+        def refresh_list(force=False):
             query = search_var.get().strip().lower()
             if query == _("Tìm kiếm theo tên hoặc ID...").lower() or query == _("tìm kiếm theo tên hoặc id...").lower():
                 query = ""
@@ -1607,6 +1604,23 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             # Filter
             if query:
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
+
+            import json
+            current_hash = json.dumps(computers, sort_keys=True)
+            if not force and getattr(dialog, '_last_rendered_hash', None) == current_hash:
+                reorder_list()
+                return
+            dialog._last_rendered_hash = current_hash
+
+            current_online = {}
+            for cid, widgets in self.status_dots_widgets.items():
+                if widgets and widgets[0].winfo_exists():
+                    current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
+
+            # Clear previous items
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+            self.status_dots_widgets.clear()
 
             if not computers:
                 txt = _("Không tìm thấy máy tính phù hợp.") if query else _("Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới.")
@@ -1658,7 +1672,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 card.comp_name = comp["name"]
                 card.comp_group = comp.get("group", "").strip()
 
-                content_frame = tk.Frame(card, bg=self.card_color, pady=8, padx=12)
+                content_frame = tk.Frame(card, bg=self.card_color, pady=5, padx=12)
                 content_frame.pack(fill=tk.X)
                 
                 separator = tk.Frame(card, bg=self.divider_color, height=2)
@@ -1667,20 +1681,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 info_frame = tk.Frame(content_frame, bg=self.card_color)
                 info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-                title_frame = tk.Frame(info_frame, bg=self.card_color)
-                title_frame.pack(fill=tk.X)
-
                 clean_id = card.comp_id
                 is_online = current_online.get(clean_id, False)
                 dot_color = "#00F5D4" if is_online else "#8A8A9A"
-                dot_lbl = tk.Label(title_frame, text="●", font=("Segoe UI", 13, "bold"), fg=dot_color, bg=self.card_color)
+                dot_lbl = tk.Label(info_frame, text="●", font=("Segoe UI", 13, "bold"), fg=dot_color, bg=self.card_color)
                 dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
 
-                name_lbl = tk.Label(title_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
-                name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                # ID label aligned to the right
+                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color, anchor=tk.E)
+                id_lbl.pack(side=tk.RIGHT, padx=(0, 10))
 
-                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.card_color, anchor=tk.W)
-                id_lbl.pack(fill=tk.X, pady=(2, 0))
+                # Name label aligned to the left
+                name_lbl = tk.Label(info_frame, text=comp["name"], font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
+                name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
                 context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
                 context_menu.add_command(label=_("Kết nối"), command=lambda c=comp: connect_computer(c))
@@ -1697,7 +1710,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 def start_drag(event, c_id=clean_id):
                     self.drag_card_id = c_id
 
-                for w in [card, content_frame, separator, info_frame, title_frame, dot_lbl, name_lbl, id_lbl]:
+                for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
                     w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
                     w.bind("<Button-3>", show_context_menu)
                     w.bind("<ButtonPress-1>", start_drag)
@@ -1769,6 +1782,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Pack list_container sau cùng để lấp đầy phần diện tích còn lại ở giữa Search Bar và Bottom Buttons!
         list_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
 
+        dialog.refresh_list_func = refresh_list
         refresh_list()
 
         def auto_refresh_status():
@@ -1778,6 +1792,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             dialog.after(10000, auto_refresh_status)
 
         dialog.after(10000, auto_refresh_status)
+
+        # Hiển thị mượt mà bằng cách ẩn độ mờ trước, đợi Tk vẽ xong rồi mới hiện lên
+        dialog.attributes("-alpha", 0.0)
+        dialog.deiconify()
+        def _show_initial():
+            if dialog.winfo_exists():
+                dialog.attributes("-alpha", 1.0)
+                dialog.lift()
+                dialog.focus_force()
+        dialog.after(50, _show_initial)
 
 
     def add_current_partner_to_saved(self):

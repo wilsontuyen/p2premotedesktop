@@ -42,10 +42,11 @@ client_is_domain = False
 client_is_locked = False
 client_switching_desktop_countdown = 0
 client_host_resolution = None
+client_host_did_shutdown = False
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
-    global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked
+    global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown
     client_pending_bbox = None
     while client_running:
         try:
@@ -89,6 +90,7 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type == "host_shutdown":
                         print("[Client] Received host_shutdown. Exiting viewer immediately.")
+                        client_host_did_shutdown = True
                         import pygame
                         pygame.event.post(pygame.event.Event(pygame.QUIT))
                         continue
@@ -334,10 +336,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         
         while outer_running:
             exit_due_to_disconnect = True
-            global client_latest_frame, client_running, client_is_domain, client_is_locked, client_last_recv_time
+            global client_latest_frame, client_running, client_is_domain, client_is_locked, client_last_recv_time, client_host_did_shutdown
             client_latest_frame = None
             client_last_recv_time = time.time()
             client_running = True
+            client_host_did_shutdown = False
             client_is_domain = is_domain
             
             try:
@@ -1085,8 +1088,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 state['is_recording'] = False
                 globals()['viewer_record_state'] = state
             
-            if exit_due_to_disconnect and reconnect_queue:
-                countdown = 90
+            if exit_due_to_disconnect and not client_host_did_shutdown and reconnect_queue:
+                countdown = 60
                 last_tick = pygame.time.get_ticks()
                 try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
                 except: msg_font = pygame.font.Font(None, 32)

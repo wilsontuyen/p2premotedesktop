@@ -12,6 +12,7 @@ VersionInfoCopyright=Copyright (C) 2026 P2P Remote Desktop
 DefaultDirName={autopf}\Easy Remote Desktop
 DisableDirPage=no
 UsePreviousAppDir=no
+DirExistsWarning=no
 DefaultGroupName=Easy Remote Desktop
 PrivilegesRequired=admin
 OutputDir=.
@@ -95,6 +96,29 @@ begin
     Exec('schtasks.exe', '/end /tn "EasyRemoteDesktopAgent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('taskkill.exe', '/F /IM RemoteDesktopService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('taskkill.exe', '/F /IM RemoteDesktopP2P.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Dir: String;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then
+  begin
+    Dir := ExpandConstant('{app}');
+    if DirExists(Dir) then
+    begin
+      // Sử dụng TaskDialogMsgBox để lấy đúng nút "Có" / "Không" từ file ngôn ngữ thay vì API MessageBox của Windows
+      if TaskDialogMsgBox(
+           SetupMessage(msgDirExistsTitle),
+           FmtMessage(SetupMessage(msgDirExists), [Dir]),
+           mbConfirmation, MB_YESNO, [SetupMessage(msgButtonYes), SetupMessage(msgButtonNo)],
+           0) = IDNO then
+      begin
+        Result := False;
+      end;
+    end;
   end;
 end;
 

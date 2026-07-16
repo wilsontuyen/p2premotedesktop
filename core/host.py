@@ -473,31 +473,85 @@ class HostMixin:
             thickness = 5
             color = "#FF69B4"
             
-            rects = [
-                (0, 0, w, thickness),           # top
-                (0, h - thickness, w, thickness), # bottom
-                (0, 0, thickness, h),           # left
-                (w - thickness, 0, thickness, h)  # right
-            ]
+            # Use a SINGLE window with a border-shaped region instead of 4 windows
+            win = tk.Toplevel(self)
+            win.withdraw()
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.attributes("-alpha", 0.8)
+            win.configure(bg=color)
+            win.geometry(f"{w}x{h}+0+0")
+            win.update_idletasks()
             
-            for x, y, rw, rh in rects:
-                win = tk.Toplevel(self)
-                win.overrideredirect(True)
-                win.attributes("-topmost", True)
-                win.attributes("-alpha", 0.8)
-                win.configure(bg=color)
-                win.geometry(f"{rw}x{rh}+{x}+{y}")
-                win.update_idletasks()
+            try:
+                import ctypes
+                tk_hwnd = win.winfo_id()
+                
+                # Collect ALL unique HWNDs in the parent chain
+                # On Win10, Tkinter creates a wrapper frame that shows on taskbar
+                hwnds_to_style = set()
+                hwnds_to_style.add(tk_hwnd)
+                
+                parent = ctypes.windll.user32.GetParent(tk_hwnd)
+                if parent:
+                    hwnds_to_style.add(parent)
+                
+                GA_ROOT = 2
+                root = ctypes.windll.user32.GetAncestor(tk_hwnd, GA_ROOT)
+                if root and root != ctypes.windll.user32.GetDesktopWindow():
+                    hwnds_to_style.add(root)
+                
+                GA_ROOTOWNER = 3
+                root_owner = ctypes.windll.user32.GetAncestor(tk_hwnd, GA_ROOTOWNER)
+                if root_owner and root_owner != ctypes.windll.user32.GetDesktopWindow():
+                    hwnds_to_style.add(root_owner)
+                
                 try:
-                    import ctypes
-                    hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
-                    if not hwnd:
-                        hwnd = win.winfo_id()
-                    style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
-                    ctypes.windll.user32.SetWindowLongW(hwnd, -20, style | 0x00000020)
+                    frame_id = win.wm_frame()
+                    fh = int(frame_id, 0) if isinstance(frame_id, str) else int(frame_id)
+                    if fh:
+                        hwnds_to_style.add(fh)
                 except:
                     pass
-                self.host_border_wins.append(win)
+                
+                # Set border region on the Tk widget HWND
+                outer = ctypes.windll.gdi32.CreateRectRgn(0, 0, w, h)
+                inner = ctypes.windll.gdi32.CreateRectRgn(thickness, thickness, w - thickness, h - thickness)
+                ctypes.windll.gdi32.CombineRgn(outer, outer, inner, 4)  # RGN_DIFF
+                ctypes.windll.user32.SetWindowRgn(tk_hwnd, outer, True)
+                ctypes.windll.gdi32.DeleteObject(inner)
+                
+                # Also set region on root HWND if different
+                if root and root != tk_hwnd and root != ctypes.windll.user32.GetDesktopWindow():
+                    outer2 = ctypes.windll.gdi32.CreateRectRgn(0, 0, w, h)
+                    inner2 = ctypes.windll.gdi32.CreateRectRgn(thickness, thickness, w - thickness, h - thickness)
+                    ctypes.windll.gdi32.CombineRgn(outer2, outer2, inner2, 4)
+                    ctypes.windll.user32.SetWindowRgn(root, outer2, True)
+                    ctypes.windll.gdi32.DeleteObject(inner2)
+                
+                # Apply WS_EX_TOOLWINDOW on ALL HWNDs to guarantee taskbar hiding
+                GWL_EXSTYLE = -20
+                WS_EX_TRANSPARENT = 0x00000020
+                WS_EX_TOOLWINDOW = 0x00000080
+                WS_EX_APPWINDOW = 0x00040000
+                WS_EX_NOACTIVATE = 0x08000000
+                SWP_NOMOVE = 0x0002
+                SWP_NOSIZE = 0x0001
+                SWP_NOZORDER = 0x0004
+                SWP_FRAMECHANGED = 0x0020
+                
+                for hwnd in hwnds_to_style:
+                    style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    new_style = (style & ~WS_EX_APPWINDOW) | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+                    ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
+                    
+            except Exception as rgn_err:
+                print(f"[Host] Failed to set border region/style: {rgn_err}")
+            
+            win.deiconify()
+            self.host_border_wins.append(win)
                 
             if not getattr(self, '_tracking_border_res', False):
                 self._tracking_border_res = True
@@ -539,6 +593,7 @@ class HostMixin:
                 self.host_border_win = None
         except Exception as e:
             pass
+
 
     def wake_display(self):
         try:

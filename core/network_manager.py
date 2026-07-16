@@ -1063,7 +1063,9 @@ class NetworkMixin:
                     
             if not signaling_success:
                 if reconnect_queue and retry_count < 30:
-                    self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
+                    status_msg = _("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+                    try: reconnect_queue.put(f"STATUS|{status_msg}")
+                    except: pass
                     time.sleep(2)
                     self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
                     return
@@ -1374,7 +1376,9 @@ class NetworkMixin:
                 socket_passwords.pop(sock, None)
         except Exception as e:
             if reconnect_queue and retry_count < 30:
-                self.update_status(_("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1))
+                status_msg = _("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+                try: reconnect_queue.put(f"STATUS|{status_msg}")
+                except: pass
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
