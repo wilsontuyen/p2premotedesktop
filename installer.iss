@@ -50,10 +50,10 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRem
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopService"" dir=in action=allow program=""{app}\RemoteDesktopService.exe"" enable=yes profile=any"; Flags: runhidden
 
 ; Register background system service (Scheduled Task) using schtasks for Windows 7 compatibility
-Filename: "schtasks.exe"; Parameters: "/create /tn ""EasyRemoteDesktopAgent"" /tr ""'""{app}\RemoteDesktopService.exe""'"" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f"; Flags: runhidden
+Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopAgent"" /tr ""\""{app}\RemoteDesktopService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\task_creation.log"" 2>&1"; Flags: runhidden
 
 ; Start background service
-Filename: "schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden
+Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAgent"" > ""{app}\task_run.log"" 2>&1"; Flags: runhidden
 
 ; Wait 5 seconds for service to initialize and connect to signaling server
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden

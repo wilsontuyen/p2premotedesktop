@@ -113,15 +113,29 @@ def check_desktop_change():
         import ctypes
         # Try multiple access levels to open the Input Desktop.
         # SYSTEM processes (headless agent) can access Secure Desktop with higher rights.
-        # Cascade: GENERIC_ALL (0x02000000) -> GENERIC_READ (0x80000000) -> DESKTOP_READOBJECTS (0x0001)
+        # On Windows 11, when an elevated (Administrator) window has focus, OpenInputDesktop fails
+        # with Access Denied (5) if requesting high access rights (GENERIC_ALL/GENERIC_READ/READOBJECTS).
+        # We include DESKTOP_ENUMERATE (0x0040) and zero-mask (0) which succeed to let us read the desktop name.
         h_input = None
-        for access_mask in [0x02000000, 0x80000000, 0x0001]:
+        for access_mask in [0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
             h_input = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
             if h_input:
                 break
         
         if not h_input:
-            # Cannot open input desktop with ANY access level -> truly blocked
+            # OpenInputDesktop failed for ALL masks — likely Secure Desktop is active.
+            # For SYSTEM processes, try opening "Winlogon" desktop directly by name.
+            thread_name = get_desktop_name()
+            if thread_name == "winlogon":
+                # Already on winlogon desktop — no switch needed
+                return False, False
+            # Try to open Winlogon desktop by name (SYSTEM should have access)
+            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
+                h_winlogon = ctypes.windll.user32.OpenDesktopW("Winlogon", 0, False, access_mask)
+                if h_winlogon:
+                    ctypes.windll.user32.CloseDesktop(h_winlogon)
+                    return True, False  # Can switch to Winlogon
+            # Truly blocked (non-SYSTEM process can't access secure desktop)
             return False, True
             
         # Get active input desktop name
@@ -134,7 +148,17 @@ def check_desktop_change():
         thread_name = get_desktop_name()
             
         if input_name != thread_name:
-            return True, False
+            # Try multiple access masks to open the target desktop (not just GENERIC_ALL)
+            # On Windows 11, GENERIC_ALL often fails with Access Denied even for SYSTEM
+            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
+                try:
+                    h_target = ctypes.windll.user32.OpenDesktopW(input_name, 0, False, access_mask)
+                    if h_target:
+                        ctypes.windll.user32.CloseDesktop(h_target)
+                        return True, False
+                except:
+                    pass
+            return False, True
             
         return False, False
     except Exception as e:
@@ -321,6 +345,57 @@ def set_windows_graphics_effects(enabled=True):
 
 
 class HostMixin:
+    def ensure_input_thread_desktop(self, force=False):
+        if getattr(self, 'is_headless', False) is False and sys.platform != "win32":
+            return
+            
+        now = time.time()
+        last_check = getattr(self, '_last_input_desktop_check', 0)
+        if not force and (now - last_check < 0.2):
+            return
+        self._last_input_desktop_check = now
+        
+        try:
+            h_input = None
+            # Try specific desktop rights (0x01FF) first, as it is more likely to succeed for SYSTEM than GENERIC_ALL
+            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                try:
+                    h_input = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
+                    if h_input:
+                        break
+                except:
+                    pass
+                    
+            if not h_input:
+                # Fallback: if OpenInputDesktop fails, try opening the opposite desktop by name
+                thread_name = get_desktop_name()
+                target_name = "Winlogon" if thread_name == "default" else "Default"
+                for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                    try:
+                        h_input = ctypes.windll.user32.OpenDesktopW(target_name, 0, False, access_mask)
+                        if h_input:
+                            print(f"[Host Input] Opened {target_name} desktop by name (fallback)")
+                            break
+                    except:
+                        pass
+
+            if h_input:
+                name_input = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetUserObjectInformationW(h_input, 2, name_input, ctypes.sizeof(name_input), None)
+                
+                h_thread = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+                name_thread = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetUserObjectInformationW(h_thread, 2, name_thread, ctypes.sizeof(name_thread), None)
+                
+                if name_input.value.lower() != name_thread.value.lower():
+                    print(f"[Host Input] Desktop changed from {name_thread.value} to {name_input.value}. Switching input thread...")
+                    result = ctypes.windll.user32.SetThreadDesktop(h_input)
+                    if not result:
+                        print(f"[Host Input] SetThreadDesktop failed. Error code: {ctypes.get_last_error()}")
+                ctypes.windll.user32.CloseDesktop(h_input)
+        except Exception as e:
+            print(f"[Host Input] Error in ensure_input_thread_desktop: {e}")
+
     def start_host_server(self):
         global BOUND_PORT
         bound = False
@@ -739,7 +814,29 @@ class HostMixin:
                     _last_switching_signal_time = 0  # Reset throttle so next block event signals immediately
                     print("[Host] Desktop change detected. Switching thread desktop...")
                     try:
-                        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                        hdesk = None
+                        for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                            try:
+                                hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
+                                if hdesk:
+                                    break
+                            except:
+                                pass
+                        
+                        # Fallback: if OpenInputDesktop fails, try opening desktop by name
+                        if not hdesk:
+                            thread_name = get_desktop_name()
+                            # Try the opposite desktop
+                            target_name = "Winlogon" if thread_name == "default" else "Default"
+                            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                                try:
+                                    hdesk = ctypes.windll.user32.OpenDesktopW(target_name, 0, False, access_mask)
+                                    if hdesk:
+                                        print(f"[Host] Opened {target_name} desktop by name (fallback)")
+                                        break
+                                except:
+                                    pass
+                                
                         if hdesk:
                             result = ctypes.windll.user32.SetThreadDesktop(hdesk)
                             ctypes.windll.user32.CloseDesktop(hdesk)
@@ -747,6 +844,10 @@ class HostMixin:
                                 print("[Host] SetThreadDesktop() failed (thread may have existing windows). Retrying...")
                                 time.sleep(0.3)
                                 continue
+                        else:
+                            print("[Host] OpenInputDesktop failed for all access masks.")
+                            time.sleep(0.3)
+                            continue
                     except Exception as e:
                         print(f"[Host] SetThreadDesktop exception: {e}")
                         time.sleep(0.3)
@@ -1000,7 +1101,21 @@ class HostMixin:
                         _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
                         _cur_name = _buf.value.lower() if _buf.value else None
 
-                        _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, 0x02000000)
+                        _hdesk_new = None
+                        # Try multiple access masks (Win11 blocks GENERIC_ALL for elevated windows)
+                        for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
+                            _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, _am)
+                            if _hdesk_new:
+                                break
+                        
+                        # Fallback: open desktop by name if OpenInputDesktop fails
+                        if not _hdesk_new:
+                            _target_name = "Winlogon" if _cur_name == "default" else "Default"
+                            for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                                _hdesk_new = _ct.windll.user32.OpenDesktopW(_target_name, 0, False, _am)
+                                if _hdesk_new:
+                                    break
+                        
                         if _hdesk_new:
                             # Lấy tên của input desktop mới
                             _buf2 = _ct.create_unicode_buffer(256)
@@ -1075,11 +1190,13 @@ class HostMixin:
     def host_handle_event(self, event, conn, password):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
+            self.ensure_input_thread_desktop(force=False)
             x, y = event['x'], event['y']
             # Single SendInput call with MOUSEEVENTF_ABSOLUTE is sufficient and fastest
             send_input_mouse_move(x, y)
                 
         elif ev_type == 'mouse_click':
+            self.ensure_input_thread_desktop(force=True)
             button_name = event.get('button')
             pressed = event.get('pressed')
             # Primary simulation using standard SendInput API
@@ -1094,11 +1211,13 @@ class HostMixin:
                 pass
                 
         elif ev_type == 'mouse_scroll':
+            self.ensure_input_thread_desktop(force=True)
             dx, dy = event['dx'], event['dy']
             # Primary simulation using standard SendInput API
             send_input_mouse_scroll(dx, dy)
                 
         elif ev_type == 'key_event':
+            self.ensure_input_thread_desktop(force=True)
             key_name = event['key']
             pressed = event['pressed']
             

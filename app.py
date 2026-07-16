@@ -216,13 +216,105 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.is_headless = "--headless" in sys.argv
         if self.is_headless:
             self.withdraw()
+            
+        # Configure logging and stdout redirection for diagnostics
+        try:
+            log_filename = "agent.log" if self.is_headless else "gui.log"
+            log_path = os.path.join(app_dir, log_filename)
+            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stderr = sys.stdout
+            
+            # Override built-in print to flush immediately so logs are unbuffered
+            import builtins
+            orig_print = builtins.print
+            def unbuffered_print(*args, **kwargs):
+                orig_print(*args, **kwargs)
+                try:
+                    sys.stdout.flush()
+                except:
+                    pass
+            builtins.print = unbuffered_print
+            
+            print(f"\n--- App started in {'headless' if self.is_headless else 'GUI'} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+            
+            # Run diagnostics check for both GUI and Headless clients
             try:
-                log_path = os.path.join(app_dir, "agent.log")
-                sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
-                sys.stderr = sys.stdout
-                print(f"\n--- Agent started in headless mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
-            except Exception as e:
-                pass
+                import getpass
+                import win32con
+                import win32api, win32security, winreg
+                
+                username = getpass.getuser()
+                print(f"[Diagnostics] Process running under user: {username}")
+                
+                h_token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+                sid_info = win32security.GetTokenInformation(h_token, win32security.TokenIntegrityLevel)
+                sid = sid_info[0] if sid_info else None
+                il_name = "Unknown"
+                il = 0
+                if sid:
+                    try:
+                        il = sid.GetSubAuthority(0)
+                        if il == 0x0000: il_name = "Untrusted"
+                        elif il == 0x1000: il_name = "Low"
+                        elif il == 0x2000: il_name = "Medium"
+                        elif il == 0x3000: il_name = "High"
+                        elif il >= 0x4000: il_name = "System"
+                    except Exception as e_sub:
+                        print(f"[Diagnostics] GetSubAuthority failed: {e_sub}")
+                print(f"[Diagnostics] Integrity Level: {il_name} ({hex(il) if sid else 'N/A'})")
+                
+                # Token UIAccess Status
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+                    GetTokenInformation = ADVAPI32.GetTokenInformation
+                    GetTokenInformation.argtypes = [
+                        wintypes.HANDLE,
+                        ctypes.c_int,
+                        ctypes.c_void_p,
+                        wintypes.DWORD,
+                        ctypes.POINTER(wintypes.DWORD)
+                    ]
+                    GetTokenInformation.restype = wintypes.BOOL
+                    
+                    uia_val = ctypes.c_ulong(0)
+                    ret_len = wintypes.DWORD(0)
+                    res = GetTokenInformation(
+                        int(h_token),
+                        26, # TokenUIAccess
+                        ctypes.byref(uia_val),
+                        ctypes.sizeof(uia_val),
+                        ctypes.byref(ret_len)
+                    )
+                    if res:
+                        print(f"[Diagnostics] Token UIAccess Status: {'Enabled' if uia_val.value else 'Disabled'}")
+                    else:
+                        print(f"[Diagnostics] GetTokenInformation for UIAccess failed: {ctypes.get_last_error()}")
+                except Exception as uia_err:
+                    print(f"[Diagnostics] UIAccess check error: {uia_err}")
+                
+                reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+                    posd, reg_t = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+                    ssas, reg_t = winreg.QueryValueEx(key, "SoftwareSASGeneration")
+                    winreg.CloseKey(key)
+                    print(f"[Diagnostics] Registry: PromptOnSecureDesktop = {posd}, SoftwareSASGeneration = {ssas}")
+                except Exception as ree:
+                    print(f"[Diagnostics] Registry read failed: {ree}")
+                
+                # Check scheduled task status
+                try:
+                    import subprocess
+                    res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
+                    print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+                except Exception as te:
+                    print(f"[Diagnostics] Failed to query scheduled task: {te}")
+            except Exception as de:
+                print(f"[Diagnostics] Diagnostics gathering failed: {de}")
+        except Exception as e:
+            pass
         
         # Thiết lập icon cho cửa sổ chính
         try:
@@ -328,14 +420,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         if sys.platform == "win32" and not self.is_headless:
             import win32event, win32con
             
-            # Check Windows Service status first to avoid race condition on startup
-            # Check Windows Service status first to avoid race condition on startup
             # Since the service is actually a Scheduled Task (EasyRemoteDesktopAgent),
             # we check if we are running from the installation directory and wait for the headless agent.
             is_installed_version = False
             try:
                 exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
-                if "C:\\Apps\\P2P" in os.path.abspath(exe_path):
+                exe_path_abs = os.path.abspath(exe_path).lower()
+                if "c:\\apps\\p2p" in exe_path_abs or "program files" in exe_path_abs:
                     is_installed_version = True
             except:
                 pass
@@ -349,23 +440,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 pass
 
             if is_installed_version:
-                for i in range(10): # Wait up to 5 seconds for the service to spawn headless agent
-                    for d_name in ["default", "winlogon"]:
-                        m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
-                        try:
-                            h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
-                            if h_mutex:
-                                win32api.CloseHandle(h_mutex)
-                                self.is_service_active = True
-                                break
-                        except Exception:
-                            pass
-                    if self.is_service_active:
-                        break
-                    time.sleep(0.5)
-
-            # Fallback to checking Mutex if not installed version or still not found
-            if not self.is_service_active:
+                # If running from installation directory, always assume service is active to avoid port 12345 hijacking
+                self.is_service_active = True
+            else:
+                # Fallback to checking Mutex for portable versions
                 for d_name in ["default", "winlogon"]:
                     m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
                     try:
@@ -374,8 +452,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                             win32api.CloseHandle(h_mutex)
                             self.is_service_active = True
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        err_code = getattr(e, 'winerror', 0)
+                        if not err_code and hasattr(e, 'args') and len(e.args) > 0:
+                            err_code = e.args[0]
+                        if err_code == 5: # ERROR_ACCESS_DENIED
+                            self.is_service_active = True
+                            break
 
         # Load or generate password
         if self.is_headless:
@@ -3099,10 +3182,76 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.after(0, _do_update)
 
 
+    def check_if_service_active(self):
+        if getattr(self, 'is_headless', False):
+            return False
+            
+        # 1. Quick check if RemoteDesktopService.exe is running in the system process list
+        try:
+            import psutil
+            for proc in psutil.process_iter(['name']):
+                if proc.info['name'] and proc.info['name'].lower() == "remotedesktopservice.exe":
+                    return True
+        except:
+            pass
+            
+        # 2. Mutex fallback check
+        import win32event, win32con, win32api
+        session_id = 1
+        try:
+            sid = ctypes.c_ulong()
+            if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+                session_id = sid.value
+        except:
+            pass
+            
+        for d_name in ["default", "winlogon"]:
+            m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
+            try:
+                h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+                if h_mutex:
+                    win32api.CloseHandle(h_mutex)
+                    return True
+            except Exception as e:
+                err_code = getattr(e, 'winerror', 0)
+                if not err_code and hasattr(e, 'args') and len(e.args) > 0:
+                    err_code = e.args[0]
+                if err_code == 5: # ERROR_ACCESS_DENIED means it exists
+                    return True
+        return False
+
     def _poll_signaling_status(self):
         """Polling loop chạy trên main Tkinter thread - kiểm tra Signaling mỗi 3s và cập nhật status UI đáng tin cậy."""
         if not getattr(self, 'running_server', True):
             return
+            
+        # Check if service became active
+        if not getattr(self, 'is_headless', False) and not getattr(self, 'is_service_active', False):
+            if self.check_if_service_active():
+                print("[Host GUI] Service has started in background. Switching to service-compatible mode...")
+                self.is_service_active = True
+                global BOUND_PORT
+                BOUND_PORT = 12346
+                import core.config; core.config.BOUND_PORT = 12346
+                import core.network_manager; core.network_manager.BOUND_PORT = 12346
+                import core.host; core.host.BOUND_PORT = 12346
+                
+                if getattr(self, 'server_socket', None):
+                    try:
+                        self.server_socket.close()
+                        self.server_socket = None
+                    except:
+                        pass
+                
+                if hasattr(self, 'signaling_sockets'):
+                    sockets_to_close = list(self.signaling_sockets.values())
+                    self.signaling_sockets.clear()
+                    for sock in sockets_to_close:
+                        try:
+                            sock.close()
+                        except:
+                            pass
+                            
         try:
             current_status = self.status_var.get()
             # Chỉ update nếu status đang ở các trạng thái chưa kết nối/đang thử
@@ -3147,7 +3296,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         try:
             import winreg
             path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            except WindowsError:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
             winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
             winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
             winreg.CloseKey(key)
@@ -3430,9 +3582,49 @@ if __name__ == '__main__':
         desktop_name = get_desktop_name()
         
         if is_headless:
+            # Enable SYSTEM privileges (SeTcbPrivilege, SeDebugPrivilege, SeImpersonatePrivilege, etc.)
+            # for the headless agent process to switch desktops and control UAC.
+            try:
+                import win32con
+                h_process = win32api.GetCurrentProcess()
+                h_token = win32security.OpenProcessToken(
+                    h_process, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY
+                )
+                privs = []
+                for priv_name in [
+                    win32security.SE_DEBUG_NAME, 
+                    win32security.SE_TCB_NAME, 
+                    win32security.SE_ASSIGNPRIMARYTOKEN_NAME, 
+                    win32security.SE_INCREASE_QUOTA_NAME,
+                    win32security.SE_IMPERSONATE_NAME
+                ]:
+                    try:
+                        luid = win32security.LookupPrivilegeValue(None, priv_name)
+                        privs.append((luid, win32security.SE_PRIVILEGE_ENABLED))
+                    except:
+                        pass
+                if privs:
+                    win32security.AdjustTokenPrivileges(h_token, False, privs)
+                win32api.CloseHandle(h_token)
+                print("[Headless] All SYSTEM privileges successfully enabled for the agent process.")
+            except Exception as e:
+                print(f"[Headless] Failed to enable SYSTEM privileges: {e}")
+
             # Service headless helper uses mutex index 1
             mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"
-            mutex = win32event.CreateMutex(None, False, mutex_name)
+            # Create mutex with NULL DACL so standard user processes can open/query it
+            try:
+                import win32security
+                sd = win32security.SECURITY_DESCRIPTOR()
+                sd.Initialize()
+                sd.SetSecurityDescriptorDacl(True, None, False)
+                sa = win32security.SECURITY_ATTRIBUTES()
+                sa.bInheritHandle = 1
+                sa.SECURITY_DESCRIPTOR = sd
+                mutex = win32event.CreateMutex(sa, False, mutex_name)
+            except Exception as e:
+                print(f"[Headless] Security descriptor creation failed: {e}")
+                mutex = win32event.CreateMutex(None, False, mutex_name)
             if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
                 sys.exit(0)
         else:

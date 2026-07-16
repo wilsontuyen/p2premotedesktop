@@ -21,8 +21,7 @@ if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):
 app_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
 if not app_dir:
     if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__'):
-        exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
-        app_dir = os.path.dirname(os.path.abspath(exe_path))
+        app_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         app_dir = os.path.dirname(os.path.abspath(__file__))
 log_file = os.path.join(app_dir, "service.log")
@@ -290,6 +289,34 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
                 win32security.TokenPrimary
             )
             win32api.CloseHandle(h_token)
+
+            # Set TokenUIAccess = 1 (True) to bypass UIPI and allow simulated inputs on UAC prompts
+            try:
+                import ctypes
+                from ctypes import wintypes
+                ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+                SetTokenInformation = ADVAPI32.SetTokenInformation
+                SetTokenInformation.argtypes = [
+                    wintypes.HANDLE,
+                    ctypes.c_int,
+                    ctypes.c_void_p,
+                    wintypes.DWORD
+                ]
+                SetTokenInformation.restype = wintypes.BOOL
+                
+                ui_access_val = ctypes.c_ulong(1)
+                res = SetTokenInformation(
+                    int(h_token_dup),
+                    26, # TokenUIAccess
+                    ctypes.byref(ui_access_val),
+                    ctypes.sizeof(ui_access_val)
+                )
+                if res:
+                    log("[Service] Đã kích hoạt TokenUIAccess = 1 cho token SYSTEM nhân bản thành công bằng ctypes.")
+                else:
+                    log(f"[Service] Cảnh báo: SetTokenInformation thất bại qua ctypes với mã lỗi: {ctypes.get_last_error()}")
+            except Exception as uae:
+                log(f"[Service] Cảnh báo: Lỗi khi kích hoạt TokenUIAccess qua ctypes: {uae}")
 
             # Run process in active user session context with robust fallback
             dwProcessId = create_process_robust(

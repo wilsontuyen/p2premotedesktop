@@ -47,7 +47,10 @@ class NetworkMixin:
         try:
             import winreg
             path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
+            except WindowsError:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
             winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
             winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
             winreg.CloseKey(key)
@@ -103,6 +106,10 @@ class NetworkMixin:
         """Phát UDP broadcast beacon mỗi LAN_BEACON_INTERVAL giây."""
         import platform
         while getattr(self, 'running_server', True):
+            if not self.is_headless and getattr(self, "is_service_active", False):
+                # Service is active, GUI app should not broadcast beacon to avoid hijacking LAN connection
+                time.sleep(LAN_BEACON_INTERVAL)
+                continue
             try:
                 beacon = json.dumps({
                     "sig": LAN_APP_SIGNATURE,
@@ -654,7 +661,12 @@ class NetworkMixin:
                 sock.settimeout(None)
                 
                 # Use base HWID if we are the primary instance (port 12345), else append port to avoid stealing ID from background service
-                register_id = self.my_id_clean if BOUND_PORT == PORTS_TO_TRY[0] else f"{self.my_id_clean}_{BOUND_PORT}"
+                is_svc_active = False
+                if hasattr(self, 'check_if_service_active'):
+                    is_svc_active = self.check_if_service_active()
+                else:
+                    is_svc_active = getattr(self, 'is_service_active', False)
+                register_id = self.my_id_clean if (BOUND_PORT == PORTS_TO_TRY[0] and not is_svc_active) else f"{self.my_id_clean}_{BOUND_PORT}"
                 
                 req = json.dumps({"action": "register", "hwid": register_id})
                 req_data = req.encode('utf-8')
