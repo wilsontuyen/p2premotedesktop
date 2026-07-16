@@ -16,11 +16,12 @@ from core.config import *
 import platform
 
 _is_old_win = platform.release() in ["7", "8", "8.1"]
-EMOJI_FONT = ("Segoe UI Symbol", 9) if _is_old_win else ("Segoe UI Emoji", 9)
-EMOJI_FONT_BOLD = ("Segoe UI Symbol", 9, "bold") if _is_old_win else ("Segoe UI Emoji", 9, "bold")
-EMOJI_FONT_LARGE = ("Segoe UI Symbol", 12, "bold") if _is_old_win else ("Segoe UI Emoji", 12, "bold")
-EMOJI_FONT_10 = ("Segoe UI Symbol", 10) if _is_old_win else ("Segoe UI Emoji", 10)
-EMOJI_FONT_8_BOLD = ("Segoe UI Symbol", 8, "bold") if _is_old_win else ("Segoe UI Emoji", 8, "bold")
+EMOJI_FONT = ("Segoe UI", 9)
+EMOJI_FONT_BOLD = ("Segoe UI", 9, "bold")
+EMOJI_FONT_LARGE = ("Segoe UI", 12, "bold")
+EMOJI_FONT_10 = ("Segoe UI", 10)
+EMOJI_FONT_8_BOLD = ("Segoe UI", 8, "bold")
+
 
 def E(text):
     if platform.release() == "7" or platform.release() == "8" or platform.release() == "8.1":

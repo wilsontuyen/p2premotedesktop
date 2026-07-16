@@ -26,8 +26,16 @@ ShowLanguageDialog=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "vietnamese"; MessagesFile: "Vietnamese.isl"
+[CustomMessages]
+english.RunProgram=Start Easy Remote Desktop
+vietnamese.RunProgram=Chạy Easy Remote Desktop
+english.CreateDesktopIcon=Create a desktop shortcut
+vietnamese.CreateDesktopIcon=Tạo biểu tượng ngoài màn hình nền
+english.AdditionalIcons=Additional icons:
+vietnamese.AdditionalIcons=Biểu tượng bổ sung:
+
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Dirs]
 Name: "{app}"; Permissions: users-modify
@@ -59,7 +67,8 @@ Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAg
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
 ; Thêm option khởi chạy ứng dụng sau khi cài đặt
-Filename: "{app}\RemoteDesktopP2P.exe"; Description: "Start Easy Remote Desktop"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\RemoteDesktopP2P.exe"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent
+
 
 [UninstallRun]
 ; Stop existing scheduled task
