@@ -725,7 +725,8 @@ class HostMixin:
                     "computer_name": computer_name,
                     "zalo_phone": self.load_zalo_phone_from_xml(),
                     "is_domain": is_domain,
-                    "chk_reason": chk_reason
+                    "chk_reason": chk_reason,
+                    "os_release": platform.release()
                 }).encode('utf-8')
                 send_msg(conn, res_info, client_pass)
                 

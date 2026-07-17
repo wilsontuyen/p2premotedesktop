@@ -228,7 +228,7 @@ def uninstall_keyboard_hook():
         print("[Client] Keyboard hook uninstalled.")
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release=""):
     global client_switching_desktop_countdown
     
     try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
@@ -240,6 +240,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     if partner_pass:
         socket_passwords[sock] = partner_pass
         
+    globals()['client_host_os_release'] = os_release
+    
     try:
         pygame_theme = "dark"
         try:
@@ -524,9 +526,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 show_file_button = show_buttons and is_android
                 show_power_button = show_buttons and is_android
                 
+                # Hide privacy eye button if host is Windows 7 or 8.
+                host_os = globals().get('client_host_os_release', '10')
+                show_eye_button = show_cad_button and (host_os not in ["7", "8", "8.1", "post2008Server", "post2012Server"])
+                if host_os == "7":
+                    show_eye_button = False
+                
                 total_w = 0
                 if show_buttons:
-                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (eye_btn_w + 10 if show_cad_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
+                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (eye_btn_w + 10 if show_eye_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
@@ -546,13 +554,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     else:
                         file_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         
-                    if show_cad_button:
+                    if show_eye_button:
                         eye_btn_rect = pygame.Rect(current_x, 0, eye_btn_w, eye_btn_h)
                         current_x += eye_btn_w + 10
+                    else:
+                        eye_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
+                        
+                    if show_cad_button:
                         cad_btn_rect = pygame.Rect(current_x, 0, cad_btn_w, cad_btn_h)
                         current_x += cad_btn_w + 10
                     else:
-                        eye_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                         
                     rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)

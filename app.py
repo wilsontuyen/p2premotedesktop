@@ -26,7 +26,7 @@ EMOJI_FONT_8_BOLD = ("Segoe UI", 8, "bold")
 def E(text):
     if platform.release() == "7" or platform.release() == "8" or platform.release() == "8.1":
         mapping = {
-            "📋": "»", "📁": "≡", "📡": "⌂", "🔧": "¤",
+            "📋": "❐", "📁": "≡", "📡": "⌂", "🔧": "¤",
             "🔄": "↻", "🔍": "?", "➕": "+", "❌": "X"
         }
         for k, v in mapping.items():
@@ -1595,6 +1595,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._reorder_saved_computers_func = reorder_list
 
         def refresh_list(force=False):
+            dialog.config(cursor="wait")
+            dialog.update_idletasks()
+            
+            def _refresh_task():
+                try:
+                    _refresh_list_inner(force)
+                finally:
+                    dialog.config(cursor="")
+            
+            dialog.after(10, _refresh_task)
+            
+        def _refresh_list_inner(force=False):
             query = search_var.get().strip().lower()
             if query == _("Tìm kiếm theo tên hoặc ID...").lower() or query == _("tìm kiếm theo tên hoặc id...").lower():
                 query = ""
