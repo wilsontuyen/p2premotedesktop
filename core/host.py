@@ -826,7 +826,11 @@ class HostMixin:
                             final_h = max(10, min(final_h, cap_h))
                             
                             if cap_w != final_w or cap_h != final_h:
-                                pil_img = pil_img.resize((final_w, final_h), Image.Resampling.LANCZOS)
+                                try:
+                                    resample_filter = Image.Resampling.LANCZOS
+                                except AttributeError:
+                                    resample_filter = Image.LANCZOS
+                                pil_img = pil_img.resize((final_w, final_h), resample_filter)
 
                             static_frame = False
                             diff_bbox = None
