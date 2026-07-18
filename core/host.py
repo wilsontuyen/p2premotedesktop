@@ -744,8 +744,14 @@ class HostMixin:
                                     print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
                                 break  # Break inner loop to recreate mss.mss() on new desktop
                                 
-                            sys_w = ctypes.windll.user32.GetSystemMetrics(0)
-                            sys_h = ctypes.windll.user32.GetSystemMetrics(1)
+                            sys_w, sys_h = 0, 0
+                            try:
+                                if sys.platform == "win32":
+                                    sys_w = ctypes.windll.user32.GetSystemMetrics(0)
+                                    sys_h = ctypes.windll.user32.GetSystemMetrics(1)
+                            except Exception:
+                                pass
+                                
                             if sys_w > 0 and sys_h > 0 and (dynamic_monitor['width'] != sys_w or dynamic_monitor['height'] != sys_h):
                                 print("[Host] Resolution change detected via GetSystemMetrics. Breaking capture loop...")
                                 break
@@ -957,56 +963,57 @@ class HostMixin:
                 now = time.monotonic()
                 if now - _last_desk_check_time >= _DESK_CHECK_INTERVAL:
                     _last_desk_check_time = now
-                    try:
-                        import ctypes as _ct
-                        # Lấy tên desktop hiện tại để phát hiện thay đổi (UAC/Winlogon)
-                        _buf = _ct.create_unicode_buffer(256)
-                        _hd_cur = _ct.windll.user32.GetThreadDesktop(_ct.windll.kernel32.GetCurrentThreadId())
-                        _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
-                        _cur_name = _buf.value.lower() if _buf.value else None
+                    if sys.platform == "win32":
+                        try:
+                            import ctypes as _ct
+                            # Lấy tên desktop hiện tại để phát hiện thay đổi (UAC/Winlogon)
+                            _buf = _ct.create_unicode_buffer(256)
+                            _hd_cur = _ct.windll.user32.GetThreadDesktop(_ct.windll.kernel32.GetCurrentThreadId())
+                            _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
+                            _cur_name = _buf.value.lower() if _buf.value else None
 
-                        _hdesk_new = None
-                        # Try multiple access masks (Win11 blocks GENERIC_ALL for elevated windows)
-                        for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
-                            _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, _am)
-                            if _hdesk_new:
-                                break
-                        
-                        # Fallback: open desktop by name if OpenInputDesktop fails
-                        if not _hdesk_new:
-                            _target_name = "Winlogon" if _cur_name == "default" else "Default"
-                            for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                                _hdesk_new = _ct.windll.user32.OpenDesktopW(_target_name, 0, False, _am)
+                            _hdesk_new = None
+                            # Try multiple access masks (Win11 blocks GENERIC_ALL for elevated windows)
+                            for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
+                                _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, _am)
                                 if _hdesk_new:
                                     break
-                        
-                        if _hdesk_new:
-                            # Lấy tên của input desktop mới
-                            _buf2 = _ct.create_unicode_buffer(256)
-                            _ct.windll.user32.GetUserObjectInformationW(_hdesk_new, 2, _buf2, _ct.sizeof(_buf2), None)
-                            _new_name = _buf2.value.lower() if _buf2.value else None
-
-                            if _new_name != _last_desk_name:
-                                # Desktop đã thay đổi → switch thread sang desktop mới
-                                if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
-                                    _last_desk_name = _new_name
-                                    print(f"[Host] Switched input desktop: {_last_desk_name}")
-                                    if getattr(self, 'host_block_input_active', False):
-                                        try:
-                                            _ct.windll.user32.BlockInput(False)
-                                            _ct.windll.user32.BlockInput(True)
-                                        except: pass
-                                    # Đóng handle cũ sau khi switch thành công
-                                    if hasattr(self, '_last_hdesk') and self._last_hdesk:
-                                        _ct.windll.user32.CloseDesktop(self._last_hdesk)
-                                    self._last_hdesk = _hdesk_new
-                                    _hdesk_new = None  # Prevent double-close below
-                                # else: SetThreadDesktop thất bại → giữ nguyên desktop cũ
-                            # Đóng handle nếu không được lưu lại (không có thay đổi hoặc switch fail)
+                            
+                            # Fallback: open desktop by name if OpenInputDesktop fails
+                            if not _hdesk_new:
+                                _target_name = "Winlogon" if _cur_name == "default" else "Default"
+                                for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
+                                    _hdesk_new = _ct.windll.user32.OpenDesktopW(_target_name, 0, False, _am)
+                                    if _hdesk_new:
+                                        break
+                            
                             if _hdesk_new:
-                                _ct.windll.user32.CloseDesktop(_hdesk_new)
-                    except Exception:
-                        pass
+                                # Lấy tên của input desktop mới
+                                _buf2 = _ct.create_unicode_buffer(256)
+                                _ct.windll.user32.GetUserObjectInformationW(_hdesk_new, 2, _buf2, _ct.sizeof(_buf2), None)
+                                _new_name = _buf2.value.lower() if _buf2.value else None
+
+                                if _new_name != _last_desk_name:
+                                    # Desktop đã thay đổi → switch thread sang desktop mới
+                                    if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
+                                        _last_desk_name = _new_name
+                                        print(f"[Host] Switched input desktop: {_last_desk_name}")
+                                        if getattr(self, 'host_block_input_active', False):
+                                            try:
+                                                _ct.windll.user32.BlockInput(False)
+                                                _ct.windll.user32.BlockInput(True)
+                                            except: pass
+                                        # Đóng handle cũ sau khi switch thành công
+                                        if hasattr(self, '_last_hdesk') and self._last_hdesk:
+                                            _ct.windll.user32.CloseDesktop(self._last_hdesk)
+                                        self._last_hdesk = _hdesk_new
+                                        _hdesk_new = None  # Prevent double-close below
+                                    # else: SetThreadDesktop thất bại → giữ nguyên desktop cũ
+                                # Đóng handle nếu không được lưu lại (không có thay đổi hoặc switch fail)
+                                if _hdesk_new:
+                                    _ct.windll.user32.CloseDesktop(_hdesk_new)
+                        except Exception:
+                            pass
                     
                 import select
                 r, _, _ = select.select([conn], [], [], 0.2)
