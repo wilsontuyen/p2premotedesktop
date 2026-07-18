@@ -648,6 +648,10 @@ class NetworkMixin:
                     sock.bind(('0.0.0.0', BOUND_PORT))
                 except Exception as e:
                     print(f"[Signaling] Warning: Could not bind to BOUND_PORT {BOUND_PORT} for signaling: {e}")
+                    try: sock.close()
+                    except: pass
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     
                 try:
                     if os.name == 'nt':
