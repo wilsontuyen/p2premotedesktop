@@ -150,6 +150,9 @@ _keyboard_hook = None
 _keyboard_hook_id = None
 
 def install_keyboard_hook(hwnd, send_event_fn):
+    import sys
+    if sys.platform != "win32":
+        return
     global _keyboard_hook, _keyboard_hook_id
     
     user32 = ctypes.windll.user32
@@ -218,6 +221,9 @@ def install_keyboard_hook(hwnd, send_event_fn):
         print(f"[Client] Keyboard hook installed successfully: {_keyboard_hook_id}")
 
 def uninstall_keyboard_hook():
+    import sys
+    if sys.platform != "win32":
+        return
     global _keyboard_hook_id
     if _keyboard_hook_id:
         user32 = ctypes.windll.user32
@@ -454,9 +460,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             os.remove(blink_file)
                             blink_frames_remaining = 180 # 3 seconds at 60 FPS
                             if hwnd:
-                                import ctypes
-                                ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
-                                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                                import sys
+                                if sys.platform == "win32":
+                                    import ctypes
+                                    ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
+                                    ctypes.windll.user32.SetForegroundWindow(hwnd)
                         except:
                             pass
     
@@ -474,9 +482,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         print(f"[Client] Host resolution changed from {host_w}x{host_h} to {new_host_w}x{new_host_h}")
                         host_w, host_h = new_host_w, new_host_h
                         
-                        import ctypes
-                        client_max_w = ctypes.windll.user32.GetSystemMetrics(0) - 100
-                        client_max_h = ctypes.windll.user32.GetSystemMetrics(1) - 100
+                        import sys
+                        if sys.platform == "win32":
+                            import ctypes
+                            client_max_w = ctypes.windll.user32.GetSystemMetrics(0) - 100
+                            client_max_h = ctypes.windll.user32.GetSystemMetrics(1) - 100
+                        else:
+                            info = pygame.display.Info()
+                            client_max_w = info.current_w - 100 if info.current_w > 100 else 1000
+                            client_max_h = info.current_h - 100 if info.current_h > 100 else 1000
                         
                         ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
                         window_w = int(host_w * ratio)

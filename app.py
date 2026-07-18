@@ -43,10 +43,16 @@ import time
 import mss
 # pyrefly: ignore [missing-import]
 from PIL import Image, ImageDraw, ImageTk
-# pyrefly: ignore [missing-import]
-import pystray
-# pyrefly: ignore [missing-import]
-from pystray import MenuItem as item
+try:
+    # pyrefly: ignore [missing-import]
+    import pystray
+    # pyrefly: ignore [missing-import]
+    from pystray import MenuItem as item
+except Exception as e:
+    print(f"Warning: pystray could not be loaded: {e}")
+    pystray = None
+    item = None
+
 import random
 import subprocess
 import base64
@@ -3460,6 +3466,10 @@ Comment=Remote Desktop P2P AutoStart
 
     def setup_tray_icon(self):
         if hasattr(self, 'tray_icon') and self.tray_icon:
+            return
+            
+        if pystray is None:
+            print("[Tray] pystray is not available, skipping tray icon setup.")
             return
             
         try:
