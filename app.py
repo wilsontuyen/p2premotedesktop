@@ -3243,12 +3243,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             pass
             
         # 2. Mutex fallback check
-        import win32event, win32con, win32api
         session_id = 1
         try:
+            import win32event, win32con, win32api
             sid = ctypes.c_ulong()
             if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
                 session_id = sid.value
+        except Exception:
+            return False
         except:
             pass
             
