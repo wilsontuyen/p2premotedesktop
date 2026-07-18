@@ -723,10 +723,13 @@ class HostMixin:
                     
                 with mss.mss() as sct:
                     # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
-                    if len(sct.monitors) > 1:
-                        dynamic_monitor = sct.monitors[1]
-                    else:
+                    if sys.platform != "win32":
                         dynamic_monitor = sct.monitors[0]
+                    else:
+                        if len(sct.monitors) > 1:
+                            dynamic_monitor = sct.monitors[1]
+                        else:
+                            dynamic_monitor = sct.monitors[0]
                         
                     while client_state.get("running", False):
                         try:
