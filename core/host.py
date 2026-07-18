@@ -267,6 +267,8 @@ class HostMixin:
                 continue
                 
     def show_host_connection_border(self):
+        if sys.platform != "win32":
+            return
         try:
             self.hide_host_connection_border()
             
@@ -388,6 +390,8 @@ class HostMixin:
         self.after(2000, self._check_border_resolution)
 
     def hide_host_connection_border(self):
+        if sys.platform != "win32":
+            return
         try:
             self._tracking_border_res = False
             if hasattr(self, 'host_border_wins'):
@@ -1427,6 +1431,8 @@ class HostMixin:
         print("[Host] Input hooks (KB/Mouse) Disabled.")
 
     def toggle_screen_cover(self):
+        if sys.platform != "win32":
+            return
         import win32event, win32api, ctypes
         
         is_active = not getattr(self, 'head_screen_cover_active', False)
@@ -1459,6 +1465,8 @@ class HostMixin:
                 self.after(0, self.toggle_screen_cover_gui)
 
     def disable_screen_cover(self):
+        if sys.platform != "win32":
+            return
         import win32event, win32api, ctypes
         
         self.head_screen_cover_active = False
