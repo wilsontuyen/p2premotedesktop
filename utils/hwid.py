@@ -94,6 +94,32 @@ def get_hwid():
                 machine_guid = f.read().strip()
         except Exception:
             pass
+            
+        # Get physical MACs safely without relying on uuid.getnode() which might pick volatile virtual interfaces
+        try:
+            eth_macs = []
+            wifi_macs = []
+            for iface in os.listdir('/sys/class/net/'):
+                iface_lower = iface.lower()
+                # Skip loopback and common virtual/bridge interfaces
+                if iface_lower.startswith(('lo', 'docker', 'veth', 'br', 'tun', 'tap', 'virbr', 'vmnet')):
+                    continue
+                    
+                addr_path = f'/sys/class/net/{iface}/address'
+                if os.path.exists(addr_path):
+                    with open(addr_path, 'r') as f:
+                        mac = f.read().strip()
+                        if mac and mac != '00:00:00:00:00:00':
+                            if iface_lower.startswith(('wl', 'wlan')):
+                                wifi_macs.append(mac)
+                            else:
+                                eth_macs.append(mac)
+            if eth_macs:
+                mac_eth = eth_macs[0]
+            if wifi_macs:
+                mac_wifi = wifi_macs[0]
+        except Exception:
+            pass
 
     try:
         import uuid
@@ -104,7 +130,12 @@ def get_hwid():
     if mac_eth == "FALLBACK_ETH_777" and mac_wifi == "FALLBACK_WIFI_777":
         mac_eth = mac_fallback
 
-    combined = f"{cpu}_{hdd}_{machine_guid}_{mac_eth}_{mac_wifi}".strip()
+    if os.name != 'nt' and machine_guid != "FALLBACK_GUID_666":
+        # On Linux, rely exclusively on machine-id if available to guarantee stability across network interface changes
+        combined = f"LINUX_{machine_guid}".strip()
+    else:
+        combined = f"{cpu}_{hdd}_{machine_guid}_{mac_eth}_{mac_wifi}".strip()
+        
     sha = hashlib.sha256(combined.encode('utf-8')).hexdigest()
     # Take first 12 hex characters (48-bit int)
     val = int(sha[:12], 16)
