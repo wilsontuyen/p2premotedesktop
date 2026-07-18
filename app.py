@@ -112,6 +112,9 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
+    # In ra stderr (để hiển thị trên terminal hoặc gui.log)
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    # Ghi vào file
     with open("crash.log", "w", encoding="utf-8") as f:
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
@@ -2551,6 +2554,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def is_startup_enabled(self):
+        if sys.platform != "win32":
+            return False
         import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         key_name = "RemoteDesktopP2P"
@@ -2583,6 +2588,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def toggle_startup(self):
+        if sys.platform != "win32":
+            messagebox.showinfo(_("Thông báo"), _("Tính năng khởi động cùng hệ thống hiện chỉ hỗ trợ trên Windows."))
+            self.startup_var.set(False)
+            return
         import winreg
         import sys
         import os
