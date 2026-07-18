@@ -33,6 +33,9 @@ class ClipboardSyncManager:
 
     def cancel_active_transfer(self, remote_triggered=False):
         pass
+
+    def handle_received_packet(self, packet):
+        pass
         
     def _poll_clipboard(self):
         while self.running:

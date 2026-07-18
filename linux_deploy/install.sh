@@ -12,13 +12,32 @@ INSTALL_DIR="/opt/antigravity_rd"
 sudo mkdir -p $INSTALL_DIR
 sudo cp -r ../* $INSTALL_DIR/
 
-# Phân quyền cho file thực thi (nếu bạn build bằng PyInstaller ra file `app`)
-# sudo chmod +x $INSTALL_DIR/app
+# Lấy username thực sự của người dùng thay vì 'ubuntu'
+ACTUAL_USER=${SUDO_USER:-$USER}
+
+# Tạo service file động với XAUTHORITY chuẩn xác
+cat <<EOF | sudo tee /etc/systemd/system/antigravity_rd.service
+[Unit]
+Description=Antigravity Remote Desktop Service
+After=network.target display-manager.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/antigravity_rd
+ExecStart=/opt/antigravity_rd/app --headless
+Restart=always
+RestartSec=3
+
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 # Cài đặt Systemd service
-sudo cp antigravity_rd.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable antigravity_rd.service
-sudo systemctl start antigravity_rd.service
+sudo systemctl restart antigravity_rd.service
 
 echo "Cài đặt thành công! Dịch vụ đang chạy ngầm."
