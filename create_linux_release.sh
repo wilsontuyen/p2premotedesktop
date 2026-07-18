@@ -24,14 +24,14 @@ mkdir -p $RELEASE_DIR
 cp -r linux_deploy/dist/app/* $RELEASE_DIR/
 
 # Copy systemd service template
-cp linux_deploy/antigravity_rd.service $RELEASE_DIR/
+cp linux_deploy/p2p_remote.service $RELEASE_DIR/
 
 # Create a clean install script for end-users
 cat << 'EOF' > $RELEASE_DIR/install.sh
 #!/bin/bash
 echo "Installing Easy Remote Desktop..."
 
-INSTALL_DIR="/opt/antigravity_rd"
+INSTALL_DIR="/opt/p2p_remote"
 sudo mkdir -p $INSTALL_DIR
 sudo cp -r * $INSTALL_DIR/
 sudo chmod +x $INSTALL_DIR/app
@@ -39,15 +39,15 @@ sudo chmod +x $INSTALL_DIR/app
 ACTUAL_USER=${SUDO_USER:-$USER}
 
 # Generate service with correct XAUTHORITY
-cat <<SVC | sudo tee /etc/systemd/system/antigravity_rd.service
+cat <<SVC | sudo tee /etc/systemd/system/p2p_remote.service
 [Unit]
 Description=Easy Remote Desktop Service
 After=network.target display-manager.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/antigravity_rd
-ExecStart=/opt/antigravity_rd/app --headless
+WorkingDirectory=/opt/p2p_remote
+ExecStart=/opt/p2p_remote/app --headless
 Restart=always
 RestartSec=3
 
@@ -59,13 +59,13 @@ WantedBy=multi-user.target
 SVC
 
 # Create Desktop Shortcut (.desktop file) for the GUI Viewer
-DESKTOP_FILE="/usr/share/applications/antigravity_rd.desktop"
+DESKTOP_FILE="/usr/share/applications/p2p_remote.desktop"
 cat <<DSK | sudo tee $DESKTOP_FILE
 [Desktop Entry]
 Name=Easy Remote Desktop
 Comment=Connect to remote computers
-Exec=/opt/antigravity_rd/app
-Icon=/opt/antigravity_rd/app_icon.png
+Exec=/opt/p2p_remote/app
+Icon=/opt/p2p_remote/app_icon.png
 Terminal=false
 Type=Application
 Categories=Network;RemoteAccess;
@@ -75,13 +75,13 @@ DSK
 USER_DESKTOP="/home/$ACTUAL_USER/Desktop"
 if [ -d "$USER_DESKTOP" ]; then
     sudo cp $DESKTOP_FILE "$USER_DESKTOP/"
-    sudo chown $ACTUAL_USER:$ACTUAL_USER "$USER_DESKTOP/antigravity_rd.desktop"
-    sudo chmod +x "$USER_DESKTOP/antigravity_rd.desktop"
+    sudo chown $ACTUAL_USER:$ACTUAL_USER "$USER_DESKTOP/p2p_remote.desktop"
+    sudo chmod +x "$USER_DESKTOP/p2p_remote.desktop"
 fi
 
 sudo systemctl daemon-reload
-sudo systemctl enable antigravity_rd.service
-sudo systemctl restart antigravity_rd.service
+sudo systemctl enable p2p_remote.service
+sudo systemctl restart p2p_remote.service
 
 echo "Installation complete! The service is running in the background."
 EOF
