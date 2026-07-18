@@ -141,16 +141,27 @@ else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
 
+def get_app_data_dir():
+    import os, sys
+    if sys.platform != "win32":
+        path = os.path.expanduser("~/.config/RemoteDesktopP2P")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+        return path
+    else:
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+        else:
+            return os.path.dirname(os.path.abspath(__file__))
+
 def get_computers_xml_path():
     import os, sys
     installed_path = r"C:\Apps\P2P\saved_computers.xml"
     if os.path.exists(installed_path):
         return installed_path
-    if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, "saved_computers.xml")
+    return os.path.join(get_app_data_dir(), "saved_computers.xml")
 
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 
@@ -369,7 +380,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.is_client_connected = False
         
         # Load saved window position or center it
-        self.config_file = "window_config.json"
+        self.config_file = os.path.join(get_app_data_dir(), "window_config.json")
         self.last_normal_geometry = None
         self.bind("<Configure>", self.on_window_configure)
         self.load_window_position()
@@ -2555,7 +2566,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def is_startup_enabled(self):
         if sys.platform != "win32":
-            return False
+            import os
+            autostart_path = os.path.expanduser("~/.config/autostart/RemoteDesktopP2P.desktop")
+            return os.path.exists(autostart_path)
         import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         key_name = "RemoteDesktopP2P"
@@ -2588,15 +2601,51 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
 
     def toggle_startup(self):
-        if sys.platform != "win32":
-            messagebox.showinfo(_("Thông báo"), _("Tính năng khởi động cùng hệ thống hiện chỉ hỗ trợ trên Windows."))
-            self.startup_var.set(False)
-            return
-        import winreg
         import sys
         import os
         
         enabled = self.startup_var.get()
+
+        if sys.platform != "win32":
+            autostart_dir = os.path.expanduser("~/.config/autostart")
+            autostart_path = os.path.join(autostart_dir, "RemoteDesktopP2P.desktop")
+            if enabled:
+                try:
+                    os.makedirs(autostart_dir, exist_ok=True)
+                    if getattr(sys, 'frozen', False):
+                        exe_path = sys.executable
+                    else:
+                        exe_path = f'{sys.executable} "{os.path.abspath(sys.argv[0])}"'
+                    
+                    desktop_entry = f"""[Desktop Entry]
+Type=Application
+Exec={exe_path}
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Easy Remote Desktop
+Comment=Remote Desktop P2P AutoStart
+"""
+                    with open(autostart_path, "w") as f:
+                        f.write(desktop_entry)
+                    os.chmod(autostart_path, 0o755)
+                    self.show_custom_info(_("Thành công"), _("Đã bật tính năng chạy khi mở máy thành công!"))
+                except Exception as e:
+                    print(f"[Startup] Failed to create autostart entry: {e}")
+                    self.show_custom_error(_("Thất bại"), _("Không thể thay đổi cài đặt autostart: ") + str(e))
+                    self.startup_var.set(False)
+            else:
+                try:
+                    if os.path.exists(autostart_path):
+                        os.remove(autostart_path)
+                    self.show_custom_info(_("Thành công"), _("Đã tắt tính năng chạy khi mở máy thành công!"))
+                except Exception as e:
+                    print(f"[Startup] Failed to remove autostart entry: {e}")
+                    self.show_custom_error(_("Thất bại"), _("Không thể thay đổi cài đặt autostart: ") + str(e))
+                    self.startup_var.set(True)
+            return
+
+        import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         key_name = "RemoteDesktopP2P"
         approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"

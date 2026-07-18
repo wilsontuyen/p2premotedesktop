@@ -16,83 +16,90 @@ def get_hwid():
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0  # SW_HIDE
 
-    try:
-        # Get CPUID
-        res_cpu = subprocess.run(
-            ['powershell', '-Command', '(Get-CimInstance Win32_Processor).ProcessorId'],
-            capture_output=True, text=True, check=True, startupinfo=startupinfo
-        )
-        if res_cpu and res_cpu.stdout:
-            cpu = res_cpu.stdout.strip()
-    except Exception:
-        pass
-        
-    try:
-        # Get HDD Serial (C: drive prioritized, fallback to first drive)
-        script_hdd = """
-        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" | Get-CimAssociatedInstance -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue | Get-CimAssociatedInstance -ResultClassName Win32_DiskDrive -ErrorAction SilentlyContinue
-        if ($disk) { $disk[0].SerialNumber } else { (Get-CimInstance Win32_DiskDrive)[0].SerialNumber }
-        """
-        res_hdd = subprocess.run(
-            ['powershell', '-Command', script_hdd],
-            capture_output=True, text=True, check=True, startupinfo=startupinfo
-        )
-        if res_hdd and res_hdd.stdout:
-            hdd = res_hdd.stdout.strip()
-    except Exception:
-        pass
-
-    try:
-        import winreg
-        # Always read from the 64-bit registry view if available to prevent WOW6432Node redirection in 32-bit apps
-        access_flags = winreg.KEY_READ | winreg.KEY_WOW64_64KEY
         try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, access_flags)
-        except FileNotFoundError:
-            # Fallback to standard read if KEY_WOW64_64KEY fails (e.g., on actual 32-bit OS)
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, winreg.KEY_READ)
+            # Get CPUID
+            res_cpu = subprocess.run(
+                ['powershell', '-Command', '(Get-CimInstance Win32_Processor).ProcessorId'],
+                capture_output=True, text=True, check=True, startupinfo=startupinfo
+            )
+            if res_cpu and res_cpu.stdout:
+                cpu = res_cpu.stdout.strip()
+        except Exception:
+            pass
             
-        machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
-        winreg.CloseKey(key)
-        if machine_guid:
-            machine_guid = str(machine_guid).strip()
-    except Exception:
-        pass
+        try:
+            # Get HDD Serial (C: drive prioritized, fallback to first drive)
+            script_hdd = """
+            $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" | Get-CimAssociatedInstance -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue | Get-CimAssociatedInstance -ResultClassName Win32_DiskDrive -ErrorAction SilentlyContinue
+            if ($disk) { $disk[0].SerialNumber } else { (Get-CimInstance Win32_DiskDrive)[0].SerialNumber }
+            """
+            res_hdd = subprocess.run(
+                ['powershell', '-Command', script_hdd],
+                capture_output=True, text=True, check=True, startupinfo=startupinfo
+            )
+            if res_hdd and res_hdd.stdout:
+                hdd = res_hdd.stdout.strip()
+        except Exception:
+            pass
+
+        try:
+            import winreg
+            # Always read from the 64-bit registry view if available to prevent WOW6432Node redirection in 32-bit apps
+            access_flags = winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, access_flags)
+            except FileNotFoundError:
+                # Fallback to standard read if KEY_WOW64_64KEY fails (e.g., on actual 32-bit OS)
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, winreg.KEY_READ)
+                
+            machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            if machine_guid:
+                machine_guid = str(machine_guid).strip()
+        except Exception:
+            pass
+
+        try:
+            # Get physical MACs (Ethernet and Wi-Fi) excluding virtual adapters
+            script = """
+            $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue
+            $eth = @()
+            $wifi = @()
+            if ($adapters) {
+                foreach ($a in $adapters) {
+                    if ($a.MediaType -match '802.3' -or $a.Name -match 'Ethernet') { $eth += $a.MacAddress }
+                    if ($a.MediaType -match 'Native 802.11' -or $a.Name -match 'Wi-Fi' -or $a.Name -match 'Wireless') { $wifi += $a.MacAddress }
+                }
+            }
+            Write-Output ('ETH:' + ($eth -join ','))
+            Write-Output ('WIFI:' + ($wifi -join ','))
+            """
+            res_mac = subprocess.run(
+                ['powershell', '-Command', script],
+                capture_output=True, text=True, startupinfo=startupinfo
+            )
+            if res_mac and res_mac.stdout:
+                for line in res_mac.stdout.split('\n'):
+                    line = line.strip()
+                    if line.startswith('ETH:') and len(line) > 4:
+                        mac_eth = line[4:].strip()
+                    if line.startswith('WIFI:') and len(line) > 5:
+                        mac_wifi = line[5:].strip()
+        except Exception:
+            pass
+    else:
+        # Linux specific ID generation
+        try:
+            with open('/etc/machine-id', 'r') as f:
+                machine_guid = f.read().strip()
+        except Exception:
+            pass
 
     try:
         import uuid
         mac_fallback = str(uuid.getnode())
     except:
         mac_fallback = "FALLBACK_MAC_777"
-
-    try:
-        # Get physical MACs (Ethernet and Wi-Fi) excluding virtual adapters
-        script = """
-        $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue
-        $eth = @()
-        $wifi = @()
-        if ($adapters) {
-            foreach ($a in $adapters) {
-                if ($a.MediaType -match '802.3' -or $a.Name -match 'Ethernet') { $eth += $a.MacAddress }
-                if ($a.MediaType -match 'Native 802.11' -or $a.Name -match 'Wi-Fi' -or $a.Name -match 'Wireless') { $wifi += $a.MacAddress }
-            }
-        }
-        Write-Output ('ETH:' + ($eth -join ','))
-        Write-Output ('WIFI:' + ($wifi -join ','))
-        """
-        res_mac = subprocess.run(
-            ['powershell', '-Command', script],
-            capture_output=True, text=True, startupinfo=startupinfo
-        )
-        if res_mac and res_mac.stdout:
-            for line in res_mac.stdout.split('\n'):
-                line = line.strip()
-                if line.startswith('ETH:') and len(line) > 4:
-                    mac_eth = line[4:].strip()
-                if line.startswith('WIFI:') and len(line) > 5:
-                    mac_wifi = line[5:].strip()
-    except Exception:
-        pass
 
     if mac_eth == "FALLBACK_ETH_777" and mac_wifi == "FALLBACK_WIFI_777":
         mac_eth = mac_fallback
