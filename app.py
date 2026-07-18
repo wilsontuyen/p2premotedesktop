@@ -241,77 +241,78 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             # Run diagnostics check for both GUI and Headless clients
             try:
                 import getpass
-                import win32con
-                import win32api, win32security, winreg
-                
                 username = getpass.getuser()
                 print(f"[Diagnostics] Process running under user: {username}")
                 
-                h_token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
-                sid_info = win32security.GetTokenInformation(h_token, win32security.TokenIntegrityLevel)
-                sid = sid_info[0] if sid_info else None
-                il_name = "Unknown"
-                il = 0
-                if sid:
-                    try:
-                        il = sid.GetSubAuthority(0)
-                        if il == 0x0000: il_name = "Untrusted"
-                        elif il == 0x1000: il_name = "Low"
-                        elif il == 0x2000: il_name = "Medium"
-                        elif il == 0x3000: il_name = "High"
-                        elif il >= 0x4000: il_name = "System"
-                    except Exception as e_sub:
-                        print(f"[Diagnostics] GetSubAuthority failed: {e_sub}")
-                print(f"[Diagnostics] Integrity Level: {il_name} ({hex(il) if sid else 'N/A'})")
-                
-                # Token UIAccess Status
-                try:
-                    import ctypes
-                    from ctypes import wintypes
-                    ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
-                    GetTokenInformation = ADVAPI32.GetTokenInformation
-                    GetTokenInformation.argtypes = [
-                        wintypes.HANDLE,
-                        ctypes.c_int,
-                        ctypes.c_void_p,
-                        wintypes.DWORD,
-                        ctypes.POINTER(wintypes.DWORD)
-                    ]
-                    GetTokenInformation.restype = wintypes.BOOL
+                if sys.platform == "win32":
+                    import win32con
+                    import win32api, win32security, winreg
                     
-                    uia_val = ctypes.c_ulong(0)
-                    ret_len = wintypes.DWORD(0)
-                    res = GetTokenInformation(
-                        int(h_token),
-                        26, # TokenUIAccess
-                        ctypes.byref(uia_val),
-                        ctypes.sizeof(uia_val),
-                        ctypes.byref(ret_len)
-                    )
-                    if res:
-                        print(f"[Diagnostics] Token UIAccess Status: {'Enabled' if uia_val.value else 'Disabled'}")
-                    else:
-                        print(f"[Diagnostics] GetTokenInformation for UIAccess failed: {ctypes.get_last_error()}")
-                except Exception as uia_err:
-                    print(f"[Diagnostics] UIAccess check error: {uia_err}")
-                
-                reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-                try:
-                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
-                    posd, reg_t = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
-                    ssas, reg_t = winreg.QueryValueEx(key, "SoftwareSASGeneration")
-                    winreg.CloseKey(key)
-                    print(f"[Diagnostics] Registry: PromptOnSecureDesktop = {posd}, SoftwareSASGeneration = {ssas}")
-                except Exception as ree:
-                    print(f"[Diagnostics] Registry read failed: {ree}")
-                
-                # Check scheduled task status
-                try:
-                    import subprocess
-                    res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
-                    print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
-                except Exception as te:
-                    print(f"[Diagnostics] Failed to query scheduled task: {te}")
+                    h_token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+                    sid_info = win32security.GetTokenInformation(h_token, win32security.TokenIntegrityLevel)
+                    sid = sid_info[0] if sid_info else None
+                    il_name = "Unknown"
+                    il = 0
+                    if sid:
+                        try:
+                            il = sid.GetSubAuthority(0)
+                            if il == 0x0000: il_name = "Untrusted"
+                            elif il == 0x1000: il_name = "Low"
+                            elif il == 0x2000: il_name = "Medium"
+                            elif il == 0x3000: il_name = "High"
+                            elif il >= 0x4000: il_name = "System"
+                        except Exception as e_sub:
+                            print(f"[Diagnostics] GetSubAuthority failed: {e_sub}")
+                    print(f"[Diagnostics] Integrity Level: {il_name} ({hex(il) if sid else 'N/A'})")
+                    
+                    # Token UIAccess Status
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+                        GetTokenInformation = ADVAPI32.GetTokenInformation
+                        GetTokenInformation.argtypes = [
+                            wintypes.HANDLE,
+                            ctypes.c_int,
+                            ctypes.c_void_p,
+                            wintypes.DWORD,
+                            ctypes.POINTER(wintypes.DWORD)
+                        ]
+                        GetTokenInformation.restype = wintypes.BOOL
+                        
+                        uia_val = ctypes.c_ulong(0)
+                        ret_len = wintypes.DWORD(0)
+                        res = GetTokenInformation(
+                            int(h_token),
+                            26, # TokenUIAccess
+                            ctypes.byref(uia_val),
+                            ctypes.sizeof(uia_val),
+                            ctypes.byref(ret_len)
+                        )
+                        if res:
+                            print(f"[Diagnostics] Token UIAccess Status: {'Enabled' if uia_val.value else 'Disabled'}")
+                        else:
+                            print(f"[Diagnostics] GetTokenInformation for UIAccess failed: {ctypes.get_last_error()}")
+                    except Exception as uia_err:
+                        print(f"[Diagnostics] UIAccess check error: {uia_err}")
+                    
+                    reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+                    try:
+                        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+                        posd, reg_t = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+                        ssas, reg_t = winreg.QueryValueEx(key, "SoftwareSASGeneration")
+                        winreg.CloseKey(key)
+                        print(f"[Diagnostics] Registry: PromptOnSecureDesktop = {posd}, SoftwareSASGeneration = {ssas}")
+                    except Exception as ree:
+                        print(f"[Diagnostics] Registry read failed: {ree}")
+                    
+                    # Check scheduled task status
+                    try:
+                        import subprocess
+                        res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
+                        print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+                    except Exception as te:
+                        print(f"[Diagnostics] Failed to query scheduled task: {te}")
             except Exception as de:
                 print(f"[Diagnostics] Diagnostics gathering failed: {de}")
         except Exception as e:
