@@ -16,7 +16,7 @@ fi
 
 # 3. Create release folder structure
 echo "[2/3] Preparing release folder..."
-RELEASE_DIR="Antigravity_Linux_Release"
+RELEASE_DIR="EasyRemoteDesktop_Linux_Release"
 rm -rf $RELEASE_DIR
 mkdir -p $RELEASE_DIR
 
@@ -62,7 +62,7 @@ SVC
 DESKTOP_FILE="/usr/share/applications/antigravity_rd.desktop"
 cat <<DSK | sudo tee $DESKTOP_FILE
 [Desktop Entry]
-Name=P2P Remote Desktop
+Name=Easy Remote Desktop
 Comment=Connect to remote computers
 Exec=/opt/antigravity_rd/app
 Icon=/opt/antigravity_rd/app_icon.png
@@ -90,7 +90,7 @@ chmod +x $RELEASE_DIR/install.sh
 
 # 4. Create tar.gz archive
 echo "[3/3] Creating tar.gz archive..."
-tar -czvf Antigravity_Linux_v1.0.tar.gz $RELEASE_DIR/
+tar -czvf EasyRemoteDesktop_Linux_v1.0.tar.gz $RELEASE_DIR/
 
-echo "=== Success! Release package created at: Antigravity_Linux_v1.0.tar.gz ==="
+echo "=== Success! Release package created at: EasyRemoteDesktop_Linux_v1.0.tar.gz ==="
 echo "End-users only need to extract this archive and run sudo ./install.sh"
