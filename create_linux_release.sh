@@ -58,6 +58,27 @@ Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"
 WantedBy=multi-user.target
 SVC
 
+# Create Desktop Shortcut (.desktop file) for the GUI Viewer
+DESKTOP_FILE="/usr/share/applications/antigravity_rd.desktop"
+cat <<DSK | sudo tee $DESKTOP_FILE
+[Desktop Entry]
+Name=P2P Remote Desktop
+Comment=Connect to remote computers
+Exec=/opt/antigravity_rd/app
+Icon=/opt/antigravity_rd/app_icon.png
+Terminal=false
+Type=Application
+Categories=Network;RemoteAccess;
+DSK
+
+# Copy shortcut to user's Desktop if it exists
+USER_DESKTOP="/home/$ACTUAL_USER/Desktop"
+if [ -d "$USER_DESKTOP" ]; then
+    sudo cp $DESKTOP_FILE "$USER_DESKTOP/"
+    sudo chown $ACTUAL_USER:$ACTUAL_USER "$USER_DESKTOP/antigravity_rd.desktop"
+    sudo chmod +x "$USER_DESKTOP/antigravity_rd.desktop"
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable antigravity_rd.service
 sudo systemctl restart antigravity_rd.service
