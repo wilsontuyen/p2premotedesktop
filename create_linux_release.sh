@@ -9,8 +9,8 @@ chmod +x build.sh
 cd ..
 
 # 2. Check if build succeeded
-if [ ! -f "linux_deploy/dist/app/app" ]; then
-    echo "Error: Build failed! Cannot find linux_deploy/dist/app/app"
+if [ ! -f "linux_deploy/dist/EasyRemoteDesktop/EasyRemoteDesktop" ]; then
+    echo "Error: Build failed! Cannot find linux_deploy/dist/EasyRemoteDesktop/EasyRemoteDesktop"
     exit 1
 fi
 
@@ -21,7 +21,7 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 
 # Copy compiled binary and dependencies
-cp -r linux_deploy/dist/app/* "$RELEASE_DIR/"
+cp -r linux_deploy/dist/EasyRemoteDesktop/* "$RELEASE_DIR/"
 
 # Copy necessary assets (icon and languages)
 cp app_icon.png "$RELEASE_DIR/"
@@ -39,7 +39,7 @@ echo "Installing Easy Remote Desktop..."
 INSTALL_DIR="/opt/p2p_remote"
 sudo mkdir -p $INSTALL_DIR
 sudo cp -r * $INSTALL_DIR/
-sudo chmod +x $INSTALL_DIR/app
+sudo chmod +x $INSTALL_DIR/EasyRemoteDesktop
 
 ACTUAL_USER=${SUDO_USER:-$USER}
 
@@ -52,7 +52,7 @@ After=network.target display-manager.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/p2p_remote
-ExecStart=/opt/p2p_remote/app --headless
+ExecStart=/opt/p2p_remote/EasyRemoteDesktop --headless
 Restart=always
 RestartSec=3
 
@@ -69,9 +69,10 @@ cat <<DSK | sudo tee $DESKTOP_FILE
 [Desktop Entry]
 Name=Easy Remote Desktop
 Comment=Connect to remote computers
-Exec=/opt/p2p_remote/app
+Exec=/opt/p2p_remote/EasyRemoteDesktop
 Path=/opt/p2p_remote
 Icon=/opt/p2p_remote/app_icon.png
+StartupWMClass=EasyRemoteDesktop
 Terminal=false
 Type=Application
 Categories=Network;RemoteAccess;
