@@ -16,18 +16,23 @@ fi
 
 # 3. Create release folder structure
 echo "[2/3] Preparing release folder..."
-RELEASE_DIR="EasyRemoteDesktop_Linux_Release"
-rm -rf $RELEASE_DIR
-mkdir -p $RELEASE_DIR
+RELEASE_DIR="Easy Remote Desktop"
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR"
 
 # Copy compiled binary and dependencies
-cp -r linux_deploy/dist/app/* $RELEASE_DIR/
+cp -r linux_deploy/dist/app/* "$RELEASE_DIR/"
+
+# Copy necessary assets (icon and languages)
+cp app_icon.png "$RELEASE_DIR/"
+cp -r lang "$RELEASE_DIR/"
+
 
 # Copy systemd service template
-cp linux_deploy/p2p_remote.service $RELEASE_DIR/
+cp linux_deploy/p2p_remote.service "$RELEASE_DIR/"
 
 # Create a clean install script for end-users
-cat << 'EOF' > $RELEASE_DIR/install.sh
+cat << 'EOF' > "$RELEASE_DIR/install.sh"
 #!/bin/bash
 echo "Installing Easy Remote Desktop..."
 
@@ -65,6 +70,7 @@ cat <<DSK | sudo tee $DESKTOP_FILE
 Name=Easy Remote Desktop
 Comment=Connect to remote computers
 Exec=/opt/p2p_remote/app
+Path=/opt/p2p_remote
 Icon=/opt/p2p_remote/app_icon.png
 Terminal=false
 Type=Application
@@ -86,11 +92,11 @@ sudo systemctl restart p2p_remote.service
 echo "Installation complete! The service is running in the background."
 EOF
 
-chmod +x $RELEASE_DIR/install.sh
+chmod +x "$RELEASE_DIR/install.sh"
 
 # 4. Create tar.gz archive
 echo "[3/3] Creating tar.gz archive..."
-tar -czvf EasyRemoteDesktop_Linux_v1.0.tar.gz $RELEASE_DIR/
+tar -czvf EasyRemoteDesktop_Linux_v1.0.tar.gz "$RELEASE_DIR"/
 
 echo "=== Success! Release package created at: EasyRemoteDesktop_Linux_v1.0.tar.gz ==="
 echo "End-users only need to extract this archive and run sudo ./install.sh"
