@@ -8,9 +8,10 @@ import socket
 import ctypes
 import struct
 import base64
-import winreg
+if sys.platform == "win32":
+    import winreg
+    from ctypes import wintypes
 import zlib
-from ctypes import wintypes
 import mss
 import tkinter as tk
 from core.i18n import _

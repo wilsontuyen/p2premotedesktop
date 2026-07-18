@@ -5,7 +5,7 @@ echo "Bắt đầu cài đặt Antigravity Remote Desktop cho Linux..."
 
 # Cài đặt các thư viện hệ thống cần thiết (nếu thiếu)
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-tk xclip xdotool python3-xlib scrot
+sudo apt-get install -y python3-pip python3-tk xclip xdotool python3-xlib scrot python3-pil.imagetk gir1.2-appindicator3-0.1 gir1.2-ayatanaappindicator3-0.1
 
 # Tạo thư mục cài đặt
 INSTALL_DIR="/opt/antigravity_rd"
