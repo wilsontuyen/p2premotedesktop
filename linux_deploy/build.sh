@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Build Antigravity Remote Desktop for Linux"
+echo "Build Easy Remote Desktop for Linux"
 pip install pyinstaller
 pip install -r ../requirements.txt
 

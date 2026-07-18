@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script cài đặt cơ bản cho Ubuntu
-echo "Bắt đầu cài đặt Antigravity Remote Desktop cho Linux..."
+echo "Bắt đầu cài đặt Easy Remote Desktop cho Linux..."
 
 # Cài đặt các thư viện hệ thống cần thiết (nếu thiếu)
 sudo apt-get update
@@ -18,7 +18,7 @@ ACTUAL_USER=${SUDO_USER:-$USER}
 # Tạo service file động với XAUTHORITY chuẩn xác
 cat <<EOF | sudo tee /etc/systemd/system/antigravity_rd.service
 [Unit]
-Description=Antigravity Remote Desktop Service
+Description=Easy Remote Desktop Service
 After=network.target display-manager.service
 
 [Service]

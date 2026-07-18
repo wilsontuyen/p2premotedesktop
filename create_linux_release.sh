@@ -29,7 +29,7 @@ cp linux_deploy/antigravity_rd.service $RELEASE_DIR/
 # Create a clean install script for end-users
 cat << 'EOF' > $RELEASE_DIR/install.sh
 #!/bin/bash
-echo "Installing Antigravity Remote Desktop..."
+echo "Installing Easy Remote Desktop..."
 
 INSTALL_DIR="/opt/antigravity_rd"
 sudo mkdir -p $INSTALL_DIR
@@ -41,7 +41,7 @@ ACTUAL_USER=${SUDO_USER:-$USER}
 # Generate service with correct XAUTHORITY
 cat <<SVC | sudo tee /etc/systemd/system/antigravity_rd.service
 [Unit]
-Description=Antigravity Remote Desktop Service
+Description=Easy Remote Desktop Service
 After=network.target display-manager.service
 
 [Service]

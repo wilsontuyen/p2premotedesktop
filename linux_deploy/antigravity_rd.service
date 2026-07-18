@@ -1,5 +1,5 @@
 [Unit]
-Description=Antigravity Remote Desktop Service
+Description=Easy Remote Desktop Service
 After=network.target display-manager.service
 
 [Service]
