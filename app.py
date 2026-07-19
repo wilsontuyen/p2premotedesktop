@@ -382,6 +382,21 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 self.shutdown_hwnd = win32gui.CreateWindow(wc.lpszClassName, "ShutdownListener", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
             except Exception as e:
                 print(f"[Host] Failed to setup shutdown listener: {e}")
+        elif sys.platform.startswith("linux") or sys.platform == "darwin":
+            try:
+                import signal
+                def handle_sigterm(signum, frame):
+                    print(f"[Host] System Shutdown/Restart detected (signal {signum})!")
+                    for conn in list(socket_passwords.keys()):
+                        try:
+                            import json
+                            from network.socket_utils import send_msg
+                            send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                        except: pass
+                    sys.exit(0)
+                signal.signal(signal.SIGTERM, handle_sigterm)
+            except Exception as e:
+                print(f"[Host] Failed to setup Linux shutdown listener: {e}")
         
         # Cờ trạng thái chống mở nhiều cửa sổ điều khiển cùng lúc
         self.is_client_connected = False
