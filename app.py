@@ -1699,10 +1699,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 grp_context_menu.add_command(label=_("Đổi tên nhóm"), command=lambda g=grp: rename_group_dialog(g))
 
                 def show_grp_context(event, menu=grp_context_menu):
-                    try:
-                        menu.tk_popup(event.x_root, event.y_root)
-                    finally:
-                        menu.grab_release()
+                    menu.tk_popup(event.x_root, event.y_root)
 
                 header.bind("<ButtonRelease-3>", show_grp_context)
 
@@ -1742,10 +1739,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
 
                 def show_context_menu(event, menu=context_menu):
-                    try:
-                        menu.tk_popup(event.x_root, event.y_root)
-                    finally:
-                        menu.grab_release()
+                    menu.tk_popup(event.x_root, event.y_root)
                         
                 def start_drag(event, c_id=clean_id, c=comp):
                     self.drag_card_id = c_id
