@@ -3848,6 +3848,10 @@ if __name__ == '__main__':
                 signal.signal(signal.SIGINT, graceful_shutdown)
             except: pass
 
+        def check_signals():
+            app.after(500, check_signals)
+        app.after(500, check_signals)
+
         app.mainloop()
         with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
             f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
