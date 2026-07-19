@@ -15,6 +15,9 @@ echo "Bắt đầu build..."
 chmod +x create_linux_release.sh
 ./create_linux_release.sh
 
+echo "Dừng ứng dụng giao diện đang mở..."
+pkill -f EasyRemoteDesktop || true
+
 echo "Dừng service đang chạy ngầm..."
 echo "2946635" | sudo -S systemctl stop p2p_remote.service
 echo "2946635" | sudo -S systemctl disable p2p_remote.service
@@ -33,4 +36,6 @@ echo "Khởi động ứng dụng (GUI)..."
 export DISPLAY=:0
 /opt/p2p_remote/EasyRemoteDesktop > /dev/null 2>&1 &
 
-echo "Hoàn tất quá trình rebuild và khởi động!"
+echo "Hoàn tất quá trình rebuild và khởi động EasyRemoteDesktop!"
+echo "Cửa sổ sẽ tự đóng sau 10 giây..."
+sleep 10

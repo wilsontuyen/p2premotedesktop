@@ -17,6 +17,8 @@ ACTUAL_USER=${SUDO_USER:-$USER}
 
 # Phân quyền sở hữu thư mục cho người dùng hiện tại để ứng dụng có quyền ghi log
 sudo chown -R $ACTUAL_USER:$ACTUAL_USER $INSTALL_DIR
+sudo chmod -R 777 $INSTALL_DIR
+sudo chmod +x $INSTALL_DIR/app 2>/dev/null || true
 
 # Tạo service file động với XAUTHORITY chuẩn xác
 cat <<EOF | sudo tee /etc/systemd/system/p2p_remote.service
@@ -44,3 +46,5 @@ sudo systemctl enable p2p_remote.service
 sudo systemctl restart p2p_remote.service
 
 echo "Cài đặt thành công! Dịch vụ đang chạy ngầm."
+echo "Cửa sổ sẽ tự đóng sau 10 giây..."
+sleep 10

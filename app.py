@@ -3803,6 +3803,26 @@ if __name__ == '__main__':
             
     try:
         app = UnifiedApp()
+        
+        if sys.platform != "win32":
+            import signal
+            def graceful_shutdown(signum, frame):
+                print(f"[App] Caught signal {signum}, notifying clients and shutting down...")
+                if hasattr(app, 'active_clients'):
+                    try:
+                        from network.socket_utils import send_msg
+                        import json
+                        pkt = json.dumps({"type": "host_shutdown"}).encode('utf-8')
+                        for conn in list(app.active_clients):
+                            try: send_msg(conn, pkt)
+                            except: pass
+                    except: pass
+                sys.exit(0)
+            try:
+                signal.signal(signal.SIGTERM, graceful_shutdown)
+                signal.signal(signal.SIGINT, graceful_shutdown)
+            except: pass
+
         app.mainloop()
         with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
             f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
