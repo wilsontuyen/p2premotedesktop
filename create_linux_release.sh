@@ -43,6 +43,17 @@ sudo chmod +x $INSTALL_DIR/EasyRemoteDesktop
 
 ACTUAL_USER=${SUDO_USER:-$USER}
 
+# Setup /dev/uinput for keyboard input at GDM lock screen
+echo "Setting up /dev/uinput for lock screen keyboard input..."
+sudo modprobe uinput
+echo "uinput" | sudo tee /etc/modules-load.d/uinput.conf > /dev/null
+cat <<UDEV | sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null
+KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+UDEV
+sudo udevadm control --reload-rules
+sudo udevadm trigger /dev/uinput 2>/dev/null || true
+sudo usermod -aG input $ACTUAL_USER
+
 # Generate service with correct XAUTHORITY
 cat <<SVC | sudo tee /etc/systemd/system/p2p_remote.service
 [Unit]
@@ -58,6 +69,7 @@ RestartSec=3
 
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"
+SupplementaryGroups=input
 
 [Install]
 WantedBy=multi-user.target

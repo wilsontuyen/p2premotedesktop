@@ -13,6 +13,7 @@ RestartSec=3
 # Các biến môi trường cần thiết để chạy trên Linux X11/Wayland (nếu có GUI ngầm)
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=/home/ubuntu/.Xauthority"
+SupplementaryGroups=input
 
 [Install]
 WantedBy=multi-user.target
