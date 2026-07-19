@@ -365,11 +365,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     if msg == win32con.WM_QUERYENDSESSION:
                         if not (lparam & 0x80000000): # 0x80000000 is ENDSESSION_LOGOFF
                             print("[Host] System Shutdown/Restart detected!")
-                            for conn in list(socket_passwords.keys()):
-                                try:
-                                    import json
-                                    send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
-                                except: pass
+                            try:
+                                from network.socket_utils import socket_passwords, send_msg
+                                import json
+                                for conn in list(socket_passwords.keys()):
+                                    try:
+                                        send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                                    except: pass
+                            except: pass
                         return True
                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
                 
@@ -387,12 +390,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 import signal
                 def handle_sigterm(signum, frame):
                     print(f"[Host] System Shutdown/Restart detected (signal {signum})!")
-                    for conn in list(socket_passwords.keys()):
-                        try:
-                            import json
-                            from network.socket_utils import send_msg
-                            send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
-                        except: pass
+                    try:
+                        from network.socket_utils import socket_passwords, send_msg
+                        import json
+                        for conn in list(socket_passwords.keys()):
+                            try:
+                                send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                            except: pass
+                    except: pass
                     import time
                     time.sleep(1)
                     sys.exit(0)
