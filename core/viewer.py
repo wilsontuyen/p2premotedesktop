@@ -1008,15 +1008,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             pygame.draw.rect(screen, eye_bg, eye_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, eye_btn_rect, width=1, border_radius=4)
                             
-                            try:
-                                symbol_font = pygame.font.SysFont("Webdings", 16)
-                                eye_text_surf = symbol_font.render("N", True, cad_text_color)
-                            except:
-                                eye_text_surf = btn_font.render("N", True, cad_text_color)
-                            
-                            eye_text_rect = eye_text_surf.get_rect(center=eye_btn_rect.center)
-                            eye_text_rect.y -= 2
-                            screen.blit(eye_text_surf, eye_text_rect)
+                            eye_icon_rect = pygame.Rect(0, 0, 16, 10)
+                            eye_icon_rect.center = eye_btn_rect.center
+                            pygame.draw.ellipse(screen, cad_text_color, eye_icon_rect, width=1)
+                            pygame.draw.circle(screen, cad_text_color, eye_icon_rect.center, 3)
 
                             # Draw CAD Button
                             pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
