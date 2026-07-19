@@ -540,11 +540,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 show_file_button = show_buttons and is_android
                 show_power_button = show_buttons and is_android
                 
-                # Hide privacy eye button if host is Windows 7 or 8.
                 host_os = globals().get('client_host_os_release', '10')
-                show_eye_button = show_cad_button and (host_os not in ["7", "8", "8.1", "post2008Server", "post2012Server"])
-                if host_os == "7":
-                    show_eye_button = False
+                is_host_windows = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in host_os
+                if not is_host_windows:
+                    cad_btn_w = 80
+                
+                # Hide privacy eye button if host is Windows 7 or 8.
+                show_eye_button = show_cad_button and is_host_windows and (host_os not in ["7", "8", "8.1", "post2008Server", "post2012Server"])
                 
                 total_w = 0
                 if show_buttons:
@@ -672,8 +674,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             continue
                         if show_buttons and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                                print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
-                                send_event({"type": "trigger_sas"})
+                                is_host_win = globals().get('client_host_os_release', '10') in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in globals().get('client_host_os_release', '10')
+                                if is_host_win:
+                                    print("[Client] CAD Button Clicked. Sending trigger_sas to host.")
+                                    send_event({"type": "trigger_sas"})
+                                else:
+                                    print("[Client] Terminal Button Clicked. Sending trigger_terminal to host.")
+                                    send_event({"type": "trigger_terminal"})
                             continue
                         if show_buttons and rec_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -1015,7 +1022,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
                             pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
                             
-                            cad_text_surf = btn_font.render("Ctrl + Alt + Delete", True, cad_text_color)
+                            is_host_win = globals().get('client_host_os_release', '10') in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in globals().get('client_host_os_release', '10')
+                            cad_text_str = "Ctrl + Alt + Delete" if is_host_win else "Terminal"
+                            cad_text_surf = btn_font.render(cad_text_str, True, cad_text_color)
                             cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
                             screen.blit(cad_text_surf, cad_text_rect)
                     
@@ -1029,9 +1038,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
                     
                     try:
-                        windings_font = pygame.font.SysFont("Wingdings", 14)
-                        icon_char = "n" if state['is_recording'] else "l"
-                        rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
+                        import sys
+                        if sys.platform == "win32":
+                            windings_font = pygame.font.SysFont("Wingdings", 14)
+                            icon_char = "n" if state['is_recording'] else "l"
+                            rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
+                        else:
+                            rec_text_surf = btn_font.render("Rec", True, (255, 0, 0))
                         rec_text_rect = rec_text_surf.get_rect(center=rec_btn_rect.center)
                         screen.blit(rec_text_surf, rec_text_rect)
                     except:

@@ -24,7 +24,8 @@ EMOJI_FONT_8_BOLD = ("Segoe UI", 8, "bold")
 
 
 def E(text):
-    if platform.release() == "7" or platform.release() == "8" or platform.release() == "8.1":
+    import sys
+    if sys.platform != "win32" or platform.release() in ["7", "8", "8.1"]:
         mapping = {
             "📋": "❐", "📁": "≡", "📡": "⌂", "🔧": "¤",
             "🔄": "↻", "🔍": "?", "➕": "+", "❌": "X"

@@ -1121,6 +1121,8 @@ class HostMixin:
             
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
+        elif ev_type == 'trigger_terminal':
+            self.trigger_terminal()
             
         elif ev_type == 'trigger_taskmgr':
             self.trigger_taskmgr()
@@ -1772,9 +1774,22 @@ class HostMixin:
                 win32event.CloseHandle(h_event)
                 print("[Host] Signaled Global\\AntigravityP2P_SAS_Event successfully.")
             else:
-                print("[Host] Failed to open Global\\AntigravityP2P_SAS_Event (event is null).")
-        except Exception as ex:
-            print(f"[Host] Failed to signal SAS event: {ex}")
+                print("[Host] Failed to open Global\\AntigravityP2P_SAS_Event (event is null). Falling back to SendSAS.")
+                import ctypes
+                try: ctypes.windll.sas.SendSAS(False)
+                except: pass
+        except Exception as e:
+            print(f"[Host] Failed to signal SAS event: {e}. Falling back to SendSAS.")
+            import ctypes
+            try: ctypes.windll.sas.SendSAS(False)
+            except: pass
+
+    def trigger_terminal(self):
+        print("[Host] Received trigger_terminal command. Simulating Ctrl+Alt+T.")
+        import sys
+        if sys.platform != "win32":
+            import os
+            os.system("xdotool key ctrl+alt+t")
 
     def host_release_all_modifiers(self):
         try:
