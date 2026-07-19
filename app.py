@@ -1616,14 +1616,20 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._reorder_saved_computers_func = reorder_list
 
         def refresh_list(force=False):
-            dialog.config(cursor="wait")
+            try:
+                dialog.config(cursor="watch")
+            except:
+                pass
             dialog.update_idletasks()
             
             def _refresh_task():
                 try:
                     _refresh_list_inner(force)
                 finally:
-                    dialog.config(cursor="")
+                    try:
+                        dialog.config(cursor="")
+                    except:
+                        pass
             
             dialog.after(10, _refresh_task)
             
@@ -3611,6 +3617,10 @@ Comment=Remote Desktop P2P AutoStart
 if __name__ == '__main__':
     import multiprocessing as mp
     mp.freeze_support()
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass
     
     import sys
     import ctypes

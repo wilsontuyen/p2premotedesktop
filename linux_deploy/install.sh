@@ -12,8 +12,11 @@ INSTALL_DIR="/opt/p2p_remote"
 sudo mkdir -p $INSTALL_DIR
 sudo cp -r ../* $INSTALL_DIR/
 
-# Lấy username thực sự của người dùng thay vì 'ubuntu'
+# Lấy username thực sự của người dùng thay vì 'root'
 ACTUAL_USER=${SUDO_USER:-$USER}
+
+# Phân quyền sở hữu thư mục cho người dùng hiện tại để ứng dụng có quyền ghi log
+sudo chown -R $ACTUAL_USER:$ACTUAL_USER $INSTALL_DIR
 
 # Tạo service file động với XAUTHORITY chuẩn xác
 cat <<EOF | sudo tee /etc/systemd/system/p2p_remote.service
