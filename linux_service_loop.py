@@ -10,30 +10,47 @@ def run_cmd(cmd):
     except:
         return ""
 
+def log_debug(msg):
+    try:
+        with open("/opt/p2p_remote/service_debug.log", "a") as f:
+            f.write(msg + "\n")
+    except:
+        pass
+
 def get_active_session_info():
     """
     Finds the active X11 display and XAUTHORITY file by querying loginctl for the active user,
     then inspecting process lists to find the exact X server command line for that user.
     """
+    log_debug("=== get_active_session_info called ===")
+    
     # 1. Identify the active user/uid via loginctl
     active_session_line = run_cmd("loginctl show-seat seat0 | grep ActiveSession")
+    log_debug(f"loginctl active_session_line: {active_session_line}")
     if not active_session_line:
         return None, None
         
     session_id = active_session_line.split("=")[-1].strip()
+    log_debug(f"session_id: {session_id}")
     if not session_id:
         return None, None
         
     user = run_cmd(f"loginctl show-session {session_id} -p Name --value")
     uid = run_cmd(f"id -u {user}")
+    log_debug(f"user: {user}, uid: {uid}")
     
     if not user or not uid:
         return None, None
 
     # 2. Inspect running X servers to find the one belonging to this user/uid
     output = run_cmd("ps -eo pid,user,command | grep -E 'Xorg|Xwayland' | grep -v grep")
+    log_debug(f"ps output:\n{output}")
     for line in output.splitlines():
         parts = line.split()
+        if len(parts) < 3:
+            continue
+        p_user = parts[1]
+        
         display = None
         auth = None
         for i, part in enumerate(parts):
@@ -42,17 +59,33 @@ def get_active_session_info():
             if part == "-auth" and i + 1 < len(parts):
                 auth = parts[i+1]
                 
-        # Check if this X server belongs to our active user
-        if display and auth:
-            # Does the auth path belong to the user's home or run dir?
-            if f"/run/user/{uid}/" in auth or f"/home/{user}/" in auth or f"/var/run/lightdm/{user}/" in auth:
-                if os.path.exists(auth):
+        log_debug(f"Parsed ps line - user: {p_user}, display: {display}, auth: {auth}")
+        
+        if display:
+            is_our_user = (p_user == user or str(uid) in p_user)
+            has_our_auth = auth and (f"/run/user/{uid}/" in auth or f"/home/{user}/" in auth or f"/var/run/lightdm/{user}/" in auth)
+            log_debug(f"is_our_user: {is_our_user}, has_our_auth: {has_our_auth}")
+            
+            if is_our_user or has_our_auth:
+                log_debug(f"MATCH FOUND in ps! display: {display}, auth: {auth}")
+                if not auth:
+                    for p in [f"/home/{user}/.Xauthority", f"/run/user/{uid}/gdm/Xauthority", f"/run/user/{uid}/Xauthority"]:
+                        if os.path.exists(p):
+                            auth = p
+                            log_debug(f"Guessed auth from standard paths: {auth}")
+                            break
+                if auth and os.path.exists(auth):
+                    log_debug(f"Returning from ps: {display}, {auth}")
                     return display, auth
+                else:
+                    log_debug(f"Auth file {auth} does not exist!")
 
     # 3. Fallback: if X server hides -auth or we couldn't match, guess standard paths
     display = run_cmd(f"loginctl show-session {session_id} -p Display --value")
+    log_debug(f"Fallback loginctl display: {display}")
     if not display:
         display = ":0"
+        log_debug(f"Defaulting fallback display to :0")
     
     auth_paths = [
         f"/home/{user}/.Xauthority",
@@ -62,8 +95,10 @@ def get_active_session_info():
     ]
     for p in auth_paths:
         if os.path.exists(p):
+            log_debug(f"Returning from fallback: {display}, {p}")
             return display, p
 
+    log_debug("FAILED to find any valid display and auth")
     return None, None
 
 def main():
