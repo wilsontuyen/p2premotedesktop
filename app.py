@@ -176,7 +176,10 @@ def get_app_data_dir():
 
 def get_computers_xml_path():
     import os, sys
-    installed_path = r"C:\Apps\P2P\saved_computers.xml"
+    if sys.platform == "win32":
+        installed_path = r"C:\Apps\P2P\saved_computers.xml"
+    else:
+        installed_path = "/opt/p2p_remote/config/saved_computers.xml"
     if os.path.exists(installed_path):
         return installed_path
     return os.path.join(get_app_data_dir(), "saved_computers.xml")
@@ -3873,8 +3876,16 @@ if __name__ == '__main__':
         app.after(500, check_signals)
 
         app.mainloop()
-        with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
-            f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
+        try:
+            import sys
+            if sys.platform == "win32":
+                log_path = "C:\\Apps\\P2P\\agent.log"
+            else:
+                log_path = "/tmp/agent.log"
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
+        except:
+            pass
         # Keep the process alive just in case
         if "--headless" in sys.argv:
             import time
@@ -3882,9 +3893,17 @@ if __name__ == '__main__':
                 time.sleep(1)
     except BaseException as e:
         import traceback
+        import datetime
         try:
-            with open("C:\\Apps\\P2P\\agent_crash.txt", "w", encoding="utf-8") as f:
-                f.write(f"Exception: {e}\n\n")
+            import sys, os
+            if sys.platform == "win32":
+                crash_log_path = "C:\\Apps\\P2P\\agent_crash.txt"
+            else:
+                crash_log_path = "/opt/p2p_remote/agent_crash.txt"
+            
+            with open(crash_log_path, "w", encoding="utf-8") as f:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"[{timestamp}] Exception: {e}\n\n")
                 traceback.print_exc(file=f)
                 f.flush()
         except:
