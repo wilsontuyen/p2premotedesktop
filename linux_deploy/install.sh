@@ -57,6 +57,7 @@ WorkingDirectory=/opt/p2p_remote
 ExecStart=/opt/p2p_remote/app --headless
 Restart=always
 RestartSec=3
+TimeoutStopSec=10
 
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"

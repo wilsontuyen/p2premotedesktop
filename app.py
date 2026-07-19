@@ -3833,12 +3833,21 @@ if __name__ == '__main__':
             def graceful_shutdown(signum, frame):
                 print(f"[App] Caught signal {signum}, notifying clients and shutting down...")
                 try:
+                    with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                        f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Caught signal {signum}, notifying clients and shutting down...\n")
+                except: pass
+                try:
                     from network.socket_utils import socket_passwords, send_msg
                     import json
                     pkt = json.dumps({"type": "host_shutdown"}).encode('utf-8')
                     for conn in list(socket_passwords.keys()):
-                        try: send_msg(conn, pkt, socket_passwords[conn])
-                        except: pass
+                        try:
+                            send_msg(conn, pkt, socket_passwords[conn])
+                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                                f.write(f"  -> Sent host_shutdown to {conn.getpeername() if hasattr(conn, 'getpeername') else conn}\n")
+                        except Exception as e:
+                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                                f.write(f"  -> Failed to send to {conn}: {e}\n")
                 except: pass
                 import time
                 time.sleep(1)
