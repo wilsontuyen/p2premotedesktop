@@ -39,33 +39,8 @@ cat << 'EOF' > "$RELEASE_DIR/install.sh"
 echo "Installing Easy Remote Desktop..."
 
 INSTALL_DIR="/opt/p2p_remote"
-TMP_BACKUP_DIR="/tmp/p2p_remote_backup"
-
-# Backup configurations if they exist
-mkdir -p $TMP_BACKUP_DIR
-if [ -f "$INSTALL_DIR/saved_computers.xml" ]; then
-    cp "$INSTALL_DIR/saved_computers.xml" "$TMP_BACKUP_DIR/"
-fi
-if [ -f "$INSTALL_DIR/window_config.json" ]; then
-    cp "$INSTALL_DIR/window_config.json" "$TMP_BACKUP_DIR/"
-fi
-
-# Remove old installation directory and copy new files
-sudo rm -rf $INSTALL_DIR
 sudo mkdir -p $INSTALL_DIR
 sudo cp -r * $INSTALL_DIR/
-
-# Restore configurations
-if [ -f "$TMP_BACKUP_DIR/saved_computers.xml" ]; then
-    sudo cp "$TMP_BACKUP_DIR/saved_computers.xml" "$INSTALL_DIR/"
-fi
-if [ -f "$TMP_BACKUP_DIR/window_config.json" ]; then
-    sudo cp "$TMP_BACKUP_DIR/window_config.json" "$INSTALL_DIR/"
-fi
-
-# Cleanup temp backup directory
-rm -rf $TMP_BACKUP_DIR
-
 sudo chmod +x $INSTALL_DIR/EasyRemoteDesktop
 
 ACTUAL_USER=${SUDO_USER:-$USER}

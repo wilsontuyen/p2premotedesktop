@@ -36,6 +36,15 @@ echo "Dừng service đang chạy ngầm..."
 echo "2946635" | sudo -S systemctl stop p2p_remote.service
 echo "2946635" | sudo -S systemctl disable p2p_remote.service
 
+echo "Sao lưu cấu hình..."
+mkdir -p /tmp/p2p_remote_backup
+if [ -f "/opt/p2p_remote/saved_computers.xml" ]; then
+    echo "2946635" | sudo -S cp "/opt/p2p_remote/saved_computers.xml" "/tmp/p2p_remote_backup/"
+fi
+if [ -f "/opt/p2p_remote/window_config.json" ]; then
+    echo "2946635" | sudo -S cp "/opt/p2p_remote/window_config.json" "/tmp/p2p_remote_backup/"
+fi
+
 echo "Xóa toàn bộ thư mục ứng dụng..."
 echo "2946635" | sudo -S rm -rf /opt/p2p_remote
 
@@ -45,6 +54,15 @@ tar -xzf EasyRemoteDesktop_Linux_v1.0.tar.gz -C $HOME/
 echo "Đang cài đặt..."
 cd "$HOME/Easy Remote Desktop"
 echo "2946635" | sudo -S ./install.sh
+
+echo "Khôi phục cấu hình..."
+if [ -f "/tmp/p2p_remote_backup/saved_computers.xml" ]; then
+    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/saved_computers.xml" "/opt/p2p_remote/"
+fi
+if [ -f "/tmp/p2p_remote_backup/window_config.json" ]; then
+    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/window_config.json" "/opt/p2p_remote/"
+fi
+echo "2946635" | sudo -S rm -rf /tmp/p2p_remote_backup
 
 echo "Khởi động ứng dụng (GUI)..."
 export DISPLAY=:0
