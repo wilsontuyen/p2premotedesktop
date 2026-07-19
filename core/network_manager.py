@@ -7,6 +7,12 @@ import struct
 import threading
 import subprocess
 import tkinter as tk
+import select
+import traceback
+import tempfile
+import platform
+import psutil
+import multiprocessing as mp
 from tkinter import ttk, messagebox
 try:
     from PIL import Image, ImageTk

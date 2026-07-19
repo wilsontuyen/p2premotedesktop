@@ -8,12 +8,17 @@ import socket
 import ctypes
 import struct
 import base64
+import platform
+import io
+import select
+import traceback
 if sys.platform == "win32":
     import winreg
     from ctypes import wintypes
 import zlib
 import mss
 import tkinter as tk
+from PIL import Image, ImageChops
 from core.i18n import _
 
 from core.config import *
@@ -635,7 +640,8 @@ class HostMixin:
                 force_close_socket(conn)
                 socket_passwords.pop(conn, None)
         except Exception as e:
-            print(f"[Host] Handshake Exception: {e}")
+            import traceback
+            print(f"[Host] Handshake Exception: {e}\n{traceback.format_exc()}")
             try:
                 err_info = json.dumps({
                     "status": "error",
