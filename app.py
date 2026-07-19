@@ -1747,8 +1747,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     finally:
                         menu.grab_release()
                         
-                def start_drag(event, c_id=clean_id):
+                def start_drag(event, c_id=clean_id, c=comp):
                     self.drag_card_id = c_id
+                    import time
+                    now = time.time()
+                    last = getattr(self, "_last_click_time", 0)
+                    last_id = getattr(self, "_last_click_id", "")
+                    if now - last < 0.5 and last_id == c_id:
+                        connect_computer(c)
+                    self._last_click_time = now
+                    self._last_click_id = c_id
 
                 for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
                     w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
