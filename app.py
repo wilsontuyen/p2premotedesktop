@@ -142,6 +142,12 @@ def print_with_timestamp(*args, **kwargs):
 print = print_with_timestamp
 
 # Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
+if sys.platform != "win32":
+    try:
+        import os
+        os.umask(0) # Đảm bảo file cấu hình tạo bởi root (systemd) có quyền rw-rw-rw-
+    except:
+        pass
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:
@@ -151,9 +157,14 @@ os.chdir(app_dir)
 def get_app_data_dir():
     import os, sys
     if sys.platform != "win32":
-        path = os.path.expanduser("~/.config/RemoteDesktopP2P")
+        if os.path.exists("/opt/p2p_remote"):
+            path = "/opt/p2p_remote/config"
+        else:
+            path = os.path.expanduser("~/.config/RemoteDesktopP2P")
         try:
             os.makedirs(path, exist_ok=True)
+            # Đảm bảo quyền ghi cho mọi user (vì root tạo ra thì user không sửa được)
+            os.chmod(path, 0o777)
         except Exception:
             pass
         return path
