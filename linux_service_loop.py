@@ -15,21 +15,7 @@ def get_active_session_info():
     Finds the active X11 display and XAUTHORITY file.
     Works for both GDM (login screen) and logged-in user sessions.
     """
-    # 1. Try process inspection (very robust for typical setups, gets exact -auth path)
-    output = run_cmd("ps -eo pid,user,command | grep -E 'Xorg|Xwayland' | grep -v grep")
-    for line in output.splitlines():
-        parts = line.split()
-        display = None
-        auth = None
-        for i, part in enumerate(parts):
-            if part.startswith(":") and part[1:].isdigit():
-                display = part
-            if part == "-auth" and i + 1 < len(parts):
-                auth = parts[i+1]
-        if display and auth and os.path.exists(auth):
-            return display, auth
-
-    # 2. Fallback to active seat via loginctl
+    # 1. Try to find the active seat via loginctl
     active_session_line = run_cmd("loginctl show-seat seat0 | grep ActiveSession")
     if active_session_line:
         session_id = active_session_line.split("=")[-1].strip()
@@ -51,6 +37,20 @@ def get_active_session_info():
                 for p in auth_paths:
                     if os.path.exists(p):
                         return display, p
+
+    # 2. Fallback to process inspection (very robust for typical setups, gets exact -auth path)
+    output = run_cmd("ps -eo pid,user,command | grep -E 'Xorg|Xwayland' | grep -v grep")
+    for line in output.splitlines():
+        parts = line.split()
+        display = None
+        auth = None
+        for i, part in enumerate(parts):
+            if part.startswith(":") and part[1:].isdigit():
+                display = part
+            if part == "-auth" and i + 1 < len(parts):
+                auth = parts[i+1]
+        if display and auth and os.path.exists(auth):
+            return display, auth
 
     return None, None
 
