@@ -16,7 +16,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['win32api', 'win32con', 'win32gui', 'win32security', 'win32event', 'win32service', 'win32serviceutil', 'win32com'],
+    excludes=['win32api', 'win32con', 'win32gui', 'win32security', 'win32event', 'win32service', 'win32serviceutil', 'win32com', 'gi.repository.GLibUnix'],
     noarchive=False,
     optimize=0,
 )
@@ -51,5 +51,5 @@ coll = COLLECT(
 )
 EOF
 
-pyinstaller app_linux.spec --clean
+pyinstaller app_linux.spec --clean 2>&1 | grep -v "GLibUnix" | grep -v "g-irepository-error-quark" | grep -v "PyInstaller/isolated/_child.py" | grep -v "PyInstaller/utils/hooks/gi.py" | grep -v "output = function(\*args, \*\*kwargs)" | grep -v "repo.require(module, version"
 echo "Build finished. Output is in linux_deploy/dist/"
