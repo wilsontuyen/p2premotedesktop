@@ -1704,7 +1704,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     finally:
                         menu.grab_release()
 
-                header.bind("<Button-3>", show_grp_context)
+                header.bind("<ButtonRelease-3>", show_grp_context)
 
             for comp in computers:
                 card = tk.Frame(scrollable_frame, bg=self.card_color)
@@ -1760,7 +1760,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
                 for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
                     w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
-                    w.bind("<Button-3>", show_context_menu)
+                    w.bind("<ButtonRelease-3>", show_context_menu)
                     w.bind("<ButtonPress-1>", start_drag)
                     w.bind("<B1-Motion>", on_drag_motion)
                     w.bind("<ButtonRelease-1>", on_drop)
