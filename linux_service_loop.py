@@ -126,6 +126,9 @@ def get_active_session_info():
 def main():
     agent_path = "/opt/p2p_remote/EasyRemoteDesktop"
     
+    # Ensure config directory is readable/writable by everyone so the user's GUI can sync passwords
+    run_cmd("mkdir -p /opt/p2p_remote/config && chmod -R 777 /opt/p2p_remote/config 2>/dev/null")
+    
     current_proc = None
     last_auth = None
 
