@@ -45,6 +45,7 @@ def get_active_session_info():
     # 2. Inspect running X servers to find the one belonging to this user/uid
     output = run_cmd("ps -eo pid,user,command | grep -E 'Xorg|Xwayland' | grep -v grep")
     log_debug(f"ps output:\n{output}")
+    found_auth = None
     for line in output.splitlines():
         parts = line.split()
         if len(parts) < 3:
@@ -61,42 +62,63 @@ def get_active_session_info():
                 
         log_debug(f"Parsed ps line - user: {p_user}, display: {display}, auth: {auth}")
         
-        if display:
-            is_our_user = (p_user == user or str(uid) in p_user)
-            has_our_auth = auth and (f"/run/user/{uid}/" in auth or f"/home/{user}/" in auth or f"/var/run/lightdm/{user}/" in auth)
-            log_debug(f"is_our_user: {is_our_user}, has_our_auth: {has_our_auth}")
-            
-            if is_our_user or has_our_auth:
+        is_our_user = (p_user == user or str(uid) in p_user)
+        has_our_auth = auth and (f"/run/user/{uid}/" in auth or f"/home/{user}/" in auth or f"/var/run/lightdm/{user}/" in auth)
+        
+        if is_our_user or has_our_auth:
+            if auth:
+                found_auth = auth
+            if display:
                 log_debug(f"MATCH FOUND in ps! display: {display}, auth: {auth}")
-                if not auth:
-                    for p in [f"/home/{user}/.Xauthority", f"/run/user/{uid}/gdm/Xauthority", f"/run/user/{uid}/Xauthority"]:
-                        if os.path.exists(p):
-                            auth = p
-                            log_debug(f"Guessed auth from standard paths: {auth}")
-                            break
                 if auth and os.path.exists(auth):
-                    log_debug(f"Returning from ps: {display}, {auth}")
                     return display, auth
-                else:
-                    log_debug(f"Auth file {auth} does not exist!")
+                    
+    # 3. If display was hidden (e.g. -displayfd), search user's processes environment
+    log_debug("Display not found in ps, checking user process environments...")
+    env_display = None
+    try:
+        pids = run_cmd(f"pgrep -u {uid}").split()
+        for pid in pids:
+            try:
+                with open(f"/proc/{pid}/environ", "r") as env_file:
+                    env_data = env_file.read()
+                    for item in env_data.split('\0'):
+                        if item.startswith("DISPLAY=:"):
+                            env_display = item.split("=")[1]
+                            break
+            except:
+                pass
+            if env_display:
+                log_debug(f"Found DISPLAY={env_display} in process {pid}")
+                break
+    except Exception as e:
+        log_debug(f"Error checking environ: {e}")
 
-    # 3. Fallback: if X server hides -auth or we couldn't match, guess standard paths
-    display = run_cmd(f"loginctl show-session {session_id} -p Display --value")
-    log_debug(f"Fallback loginctl display: {display}")
+    display = env_display
     if not display:
-        display = ":0"
-        log_debug(f"Defaulting fallback display to :0")
+        display = run_cmd(f"loginctl show-session {session_id} -p Display --value")
+        log_debug(f"Fallback loginctl display: {display}")
+        if not display:
+            display = ":0"
+            log_debug(f"Defaulting fallback display to :0")
     
-    auth_paths = [
-        f"/home/{user}/.Xauthority",
-        f"/run/user/{uid}/gdm/Xauthority",
-        f"/run/user/{uid}/Xauthority",
-        f"/var/run/lightdm/{user}/xauthority"
-    ]
-    for p in auth_paths:
-        if os.path.exists(p):
-            log_debug(f"Returning from fallback: {display}, {p}")
-            return display, p
+    # Resolve auth
+    auth = found_auth
+    if not auth or not os.path.exists(auth):
+        auth_paths = [
+            f"/home/{user}/.Xauthority",
+            f"/run/user/{uid}/gdm/Xauthority",
+            f"/run/user/{uid}/Xauthority",
+            f"/var/run/lightdm/{user}/xauthority"
+        ]
+        for p in auth_paths:
+            if os.path.exists(p):
+                auth = p
+                break
+
+    log_debug(f"Final resolution: display={display}, auth={auth}")
+    if display and auth:
+        return display, auth
 
     log_debug("FAILED to find any valid display and auth")
     return None, None
