@@ -143,6 +143,7 @@ def main():
 
     signal.signal(signal.SIGTERM, handle_exit)
     signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGHUP, handle_exit)
 
     print("[Service Loop] Starting Linux Service Loop...")
 

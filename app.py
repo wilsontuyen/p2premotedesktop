@@ -416,6 +416,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     time.sleep(1)
                     sys.exit(0)
                 signal.signal(signal.SIGTERM, handle_sigterm)
+                signal.signal(signal.SIGHUP, handle_sigterm)
             except Exception as e:
                 print(f"[Host] Failed to setup Linux shutdown listener: {e}")
         
@@ -3874,6 +3875,7 @@ if __name__ == '__main__':
             try:
                 signal.signal(signal.SIGTERM, graceful_shutdown)
                 signal.signal(signal.SIGINT, graceful_shutdown)
+                signal.signal(signal.SIGHUP, graceful_shutdown)
             except: pass
 
         def check_signals():
