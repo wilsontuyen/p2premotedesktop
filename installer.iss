@@ -10,7 +10,9 @@ VersionInfoDescription=Easy Remote Desktop Installer
 VersionInfoProductName=Easy Remote Desktop
 VersionInfoCopyright=Copyright (C) 2026 P2P Remote Desktop
 DefaultDirName={autopf}\Easy Remote Desktop
-DisableDirPage=no
+DisableDirPage=yes
+DisableWelcomePage=yes
+DisableReadyPage=yes
 UsePreviousAppDir=no
 DirExistsWarning=no
 DefaultGroupName=Easy Remote Desktop
@@ -30,13 +32,6 @@ Name: "vietnamese"; MessagesFile: "Vietnamese.isl"
 [CustomMessages]
 english.RunProgram=Start Easy Remote Desktop
 vietnamese.RunProgram=Chạy Easy Remote Desktop
-english.CreateDesktopIcon=Create a desktop shortcut
-vietnamese.CreateDesktopIcon=Tạo biểu tượng ngoài màn hình nền
-english.AdditionalIcons=Additional icons:
-vietnamese.AdditionalIcons=Biểu tượng bổ sung:
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Dirs]
 Name: "{app}"; Permissions: users-modify
@@ -47,7 +42,7 @@ Source: "dist_nuitka\app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 [Icons]
 Name: "{group}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"
 Name: "{group}\Uninstall Easy Remote Desktop"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commondesktop}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"
 
 [Run]
 ; Remove old firewall rules if they exist
@@ -99,26 +94,4 @@ begin
   end;
 end;
 
-function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  Dir: String;
-begin
-  Result := True;
-  if CurPageID = wpSelectDir then
-  begin
-    Dir := ExpandConstant('{app}');
-    if DirExists(Dir) then
-    begin
-      // Sử dụng TaskDialogMsgBox để lấy đúng nút "Có" / "Không" từ file ngôn ngữ thay vì API MessageBox của Windows
-      if TaskDialogMsgBox(
-           SetupMessage(msgDirExistsTitle),
-           FmtMessage(SetupMessage(msgDirExists), [Dir]),
-           mbConfirmation, MB_YESNO, [SetupMessage(msgButtonYes), SetupMessage(msgButtonNo)],
-           0) = IDNO then
-      begin
-        Result := False;
-      end;
-    end;
-  end;
-end;
 

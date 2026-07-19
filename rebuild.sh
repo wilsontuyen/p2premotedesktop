@@ -1,5 +1,8 @@
 #!/bin/bash
 
+#Chuyển vào thư mục p2premotedesktop
+cd ~/p2premotedesktop
+
 # Thiết lập xác thực tự động qua Personal Access Token (PAT)
 git remote set-url origin https://wilsontuyen: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@github.com/wilsontuyen/p2premotedesktop.git
 

@@ -393,6 +393,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                             from network.socket_utils import send_msg
                             send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
                         except: pass
+                    import time
+                    time.sleep(1)
                     sys.exit(0)
                 signal.signal(signal.SIGTERM, handle_sigterm)
             except Exception as e:
