@@ -6,14 +6,11 @@ After=network.target display-manager.service
 Type=simple
 # Thay đổi đường dẫn này trỏ tới thư mục cài đặt thực tế của ứng dụng
 WorkingDirectory=/opt/p2p_remote
-ExecStart=/opt/p2p_remote/EasyRemoteDesktop --headless
+ExecStart=/usr/bin/python3 -u /opt/p2p_remote/linux_service_loop.py
 Restart=always
 RestartSec=3
 TimeoutStopSec=10
 
-# Các biến môi trường cần thiết để chạy trên Linux X11/Wayland (nếu có GUI ngầm)
-Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/ubuntu/.Xauthority"
 SupplementaryGroups=input
 
 [Install]

@@ -28,6 +28,8 @@ cp app_icon.png "$RELEASE_DIR/"
 cp -r lang "$RELEASE_DIR/"
 
 
+cp linux_service_loop.py "$RELEASE_DIR/"
+
 # Copy systemd service template
 cp linux_deploy/p2p_remote.service "$RELEASE_DIR/"
 
@@ -63,13 +65,11 @@ After=network.target display-manager.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/p2p_remote
-ExecStart=/opt/p2p_remote/EasyRemoteDesktop --headless
+ExecStart=/usr/bin/python3 -u /opt/p2p_remote/linux_service_loop.py
 Restart=always
 RestartSec=3
 TimeoutStopSec=10
 
-Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"
 SupplementaryGroups=input
 
 [Install]

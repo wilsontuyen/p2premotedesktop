@@ -54,13 +54,11 @@ After=network.target display-manager.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/p2p_remote
-ExecStart=/opt/p2p_remote/app --headless
+ExecStart=/usr/bin/python3 -u /opt/p2p_remote/linux_service_loop.py
 Restart=always
 RestartSec=3
 TimeoutStopSec=10
 
-Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/$ACTUAL_USER/.Xauthority"
 SupplementaryGroups=input
 
 [Install]
