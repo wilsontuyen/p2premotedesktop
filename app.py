@@ -476,6 +476,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Check if service (headless agent) is active by checking the mutex
         self.is_service_active = False
+        if not self.is_headless:
+            exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
+            exe_path_abs = os.path.abspath(exe_path).lower()
+            if sys.platform != "win32":
+                if "/opt/p2p_remote" in exe_path_abs:
+                    self.is_service_active = True
+                    
         if sys.platform == "win32" and not self.is_headless:
             import win32event, win32con
             
@@ -483,8 +490,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             # we check if we are running from the installation directory and wait for the headless agent.
             is_installed_version = False
             try:
-                exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
-                exe_path_abs = os.path.abspath(exe_path).lower()
                 if "c:\\apps\\p2p" in exe_path_abs or "program files" in exe_path_abs:
                     is_installed_version = True
             except:
