@@ -492,7 +492,7 @@ class HostMixin:
                 try: log_activity(_("Chấp nhận kết nối từ ID {id} ({comp})").format(id=fmt_client_id, comp=client_comp))
                 except: pass
                     
-                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text))
+                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
                 self.after(0, self.show_host_connection_border)
                 
                 self.wake_display()

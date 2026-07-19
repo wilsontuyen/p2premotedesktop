@@ -2992,7 +2992,7 @@ Comment=Remote Desktop P2P AutoStart
             if status_changed and hasattr(self, '_reorder_saved_computers_func'):
                 self.after(50, self._reorder_saved_computers_func)
 
-    def show_custom_info(self, title, message, parent=None):
+    def show_custom_info(self, title, message, parent=None, auto_close_sec=None):
         if getattr(self, 'is_headless', False):
             print(f"[Info] {title}: {message}")
             return
@@ -3035,9 +3035,24 @@ Comment=Remote Desktop P2P AutoStart
         btn_ok = tk.Button(
             btn_frame, text=_("OK"), font=("Segoe UI", 9, "bold"),
             fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover,
-            relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
+            relief=tk.FLAT, bd=0, width=12, pady=3, cursor="hand2", command=dialog.destroy
         )
         btn_ok.pack(side=tk.RIGHT)
+        
+        if auto_close_sec is not None:
+            def update_countdown(remaining):
+                if not dialog.winfo_exists():
+                    return
+                if remaining > 0:
+                    btn_ok.config(text=f"{_('OK')} ({remaining}s)")
+                    if remaining % 2 == 0:
+                        btn_ok.config(bg=self.btn_hover)
+                    else:
+                        btn_ok.config(bg=self.btn_color)
+                    dialog.after(1000, update_countdown, remaining - 1)
+                else:
+                    dialog.destroy()
+            update_countdown(auto_close_sec)
         
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)
