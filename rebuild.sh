@@ -38,11 +38,11 @@ echo "2946635" | sudo -S systemctl disable p2p_remote.service
 
 echo "Sao lưu cấu hình..."
 mkdir -p /tmp/p2p_remote_backup
-if [ -f "/opt/p2p_remote/saved_computers.xml" ]; then
-    echo "2946635" | sudo -S cp "/opt/p2p_remote/saved_computers.xml" "/tmp/p2p_remote_backup/"
+if [ -f "/opt/p2p_remote/config/saved_computers.xml" ]; then
+    echo "2946635" | sudo -S cp "/opt/p2p_remote/config/saved_computers.xml" "/tmp/p2p_remote_backup/"
 fi
-if [ -f "/opt/p2p_remote/window_config.json" ]; then
-    echo "2946635" | sudo -S cp "/opt/p2p_remote/window_config.json" "/tmp/p2p_remote_backup/"
+if [ -f "/opt/p2p_remote/config/window_config.json" ]; then
+    echo "2946635" | sudo -S cp "/opt/p2p_remote/config/window_config.json" "/tmp/p2p_remote_backup/"
 fi
 
 echo "Xóa toàn bộ thư mục ứng dụng..."
@@ -56,11 +56,12 @@ cd "$HOME/Easy Remote Desktop"
 echo "2946635" | sudo -S ./install.sh
 
 echo "Khôi phục cấu hình..."
+echo "2946635" | sudo -S mkdir -p "/opt/p2p_remote/config"
 if [ -f "/tmp/p2p_remote_backup/saved_computers.xml" ]; then
-    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/saved_computers.xml" "/opt/p2p_remote/"
+    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/saved_computers.xml" "/opt/p2p_remote/config/"
 fi
 if [ -f "/tmp/p2p_remote_backup/window_config.json" ]; then
-    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/window_config.json" "/opt/p2p_remote/"
+    echo "2946635" | sudo -S cp "/tmp/p2p_remote_backup/window_config.json" "/opt/p2p_remote/config/"
 fi
 echo "2946635" | sudo -S rm -rf /tmp/p2p_remote_backup
 
