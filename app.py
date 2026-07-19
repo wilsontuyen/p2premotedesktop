@@ -3832,15 +3832,16 @@ if __name__ == '__main__':
             import signal
             def graceful_shutdown(signum, frame):
                 print(f"[App] Caught signal {signum}, notifying clients and shutting down...")
-                if hasattr(app, 'active_clients'):
-                    try:
-                        from network.socket_utils import send_msg
-                        import json
-                        pkt = json.dumps({"type": "host_shutdown"}).encode('utf-8')
-                        for conn in list(app.active_clients):
-                            try: send_msg(conn, pkt)
-                            except: pass
-                    except: pass
+                try:
+                    from network.socket_utils import socket_passwords, send_msg
+                    import json
+                    pkt = json.dumps({"type": "host_shutdown"}).encode('utf-8')
+                    for conn in list(socket_passwords.keys()):
+                        try: send_msg(conn, pkt, socket_passwords[conn])
+                        except: pass
+                except: pass
+                import time
+                time.sleep(1)
                 sys.exit(0)
             try:
                 signal.signal(signal.SIGTERM, graceful_shutdown)
