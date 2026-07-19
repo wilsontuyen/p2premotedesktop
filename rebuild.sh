@@ -11,6 +11,17 @@ git fetch origin
 git reset --hard origin/feature/linux-support
 git pull origin feature/linux-support
 
+# Lấy nội dung commit mới nhất
+LATEST_COMMIT=$(git log -1 --pretty=format:"%s")
+echo ""
+read -p "Bạn có muốn tiếp tục với cập nhật \"$LATEST_COMMIT\" này không ? (y/n) " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]
+then
+    echo "Đã hủy quá trình rebuild."
+    exit 1
+fi
+
 echo "Dọn dẹp thư mục build và dist cũ..."
 rm -rf linux_deploy/build/ linux_deploy/dist/
 
