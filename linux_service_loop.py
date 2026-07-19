@@ -12,33 +12,25 @@ def run_cmd(cmd):
 
 def get_active_session_info():
     """
-    Finds the active X11 display and XAUTHORITY file.
-    Works for both GDM (login screen) and logged-in user sessions.
+    Finds the active X11 display and XAUTHORITY file by querying loginctl for the active user,
+    then inspecting process lists to find the exact X server command line for that user.
     """
-    # 1. Try to find the active seat via loginctl
+    # 1. Identify the active user/uid via loginctl
     active_session_line = run_cmd("loginctl show-seat seat0 | grep ActiveSession")
-    if active_session_line:
-        session_id = active_session_line.split("=")[-1].strip()
-        if session_id:
-            user = run_cmd(f"loginctl show-session {session_id} -p Name --value")
-            display = run_cmd(f"loginctl show-session {session_id} -p Display --value")
-            if not display:
-                display = ":0" # Fallback if loginctl doesn't report display
-            
-            uid = run_cmd(f"id -u {user}")
-            if uid:
-                # Typical Xauthority paths (standard first)
-                auth_paths = [
-                    f"/home/{user}/.Xauthority",
-                    f"/run/user/{uid}/gdm/Xauthority",
-                    f"/run/user/{uid}/Xauthority",
-                    f"/var/run/lightdm/{user}/xauthority"
-                ]
-                for p in auth_paths:
-                    if os.path.exists(p):
-                        return display, p
+    if not active_session_line:
+        return None, None
+        
+    session_id = active_session_line.split("=")[-1].strip()
+    if not session_id:
+        return None, None
+        
+    user = run_cmd(f"loginctl show-session {session_id} -p Name --value")
+    uid = run_cmd(f"id -u {user}")
+    
+    if not user or not uid:
+        return None, None
 
-    # 2. Fallback to process inspection (very robust for typical setups, gets exact -auth path)
+    # 2. Inspect running X servers to find the one belonging to this user/uid
     output = run_cmd("ps -eo pid,user,command | grep -E 'Xorg|Xwayland' | grep -v grep")
     for line in output.splitlines():
         parts = line.split()
@@ -49,8 +41,28 @@ def get_active_session_info():
                 display = part
             if part == "-auth" and i + 1 < len(parts):
                 auth = parts[i+1]
-        if display and auth and os.path.exists(auth):
-            return display, auth
+                
+        # Check if this X server belongs to our active user
+        if display and auth:
+            # Does the auth path belong to the user's home or run dir?
+            if f"/run/user/{uid}/" in auth or f"/home/{user}/" in auth or f"/var/run/lightdm/{user}/" in auth:
+                if os.path.exists(auth):
+                    return display, auth
+
+    # 3. Fallback: if X server hides -auth or we couldn't match, guess standard paths
+    display = run_cmd(f"loginctl show-session {session_id} -p Display --value")
+    if not display:
+        display = ":0"
+    
+    auth_paths = [
+        f"/home/{user}/.Xauthority",
+        f"/run/user/{uid}/gdm/Xauthority",
+        f"/run/user/{uid}/Xauthority",
+        f"/var/run/lightdm/{user}/xauthority"
+    ]
+    for p in auth_paths:
+        if os.path.exists(p):
+            return display, p
 
     return None, None
 
