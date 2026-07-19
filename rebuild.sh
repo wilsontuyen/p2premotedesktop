@@ -22,11 +22,11 @@ echo "2946635" | sudo -S systemctl disable p2p_remote.service
 echo "Xóa toàn bộ thư mục ứng dụng..."
 echo "2946635" | sudo -S rm -rf /opt/p2p_remote
 
-echo "Giải nén bản build vào /home/Tuyen..."
-tar -xzf EasyRemoteDesktop_Linux_v1.0.tar.gz -C /home/Tuyen/
+echo "Giải nén bản build vào thư mục home..."
+tar -xzf EasyRemoteDesktop_Linux_v1.0.tar.gz -C $HOME/
 
 echo "Đang cài đặt..."
-cd "/home/Tuyen/Easy Remote Desktop"
+cd "$HOME/Easy Remote Desktop"
 echo "2946635" | sudo -S ./install.sh
 
 echo "Khởi động ứng dụng (GUI)..."
