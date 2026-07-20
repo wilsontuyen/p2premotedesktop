@@ -1330,6 +1330,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if self.saved_computers_dialog.state() == 'withdrawn':
                 if hasattr(self.saved_computers_dialog, 'refresh_list_func'):
                     self.saved_computers_dialog.refresh_list_func()
+                # Re-bind mousewheel khi mở lại dialog
+                if hasattr(self.saved_computers_dialog, '_bind_mousewheel'):
+                    self.saved_computers_dialog._bind_mousewheel()
                 self.saved_computers_dialog.attributes("-alpha", 0.0)
                 self.saved_computers_dialog.deiconify()
                 def _show_reopen():
@@ -1433,11 +1436,44 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # Mouse wheel support
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            try:
+                if not dialog.winfo_exists() or not canvas.winfo_exists():
+                    return
+                # Chỉ scroll khi con trỏ chuột nằm trong dialog
+                mx, my = dialog.winfo_pointerxy()
+                dx = dialog.winfo_rootx()
+                dy = dialog.winfo_rooty()
+                dw = dialog.winfo_width()
+                dh = dialog.winfo_height()
+                if dx <= mx <= dx + dw and dy <= my <= dy + dh:
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
+
+        def _bind_mousewheel():
+            """Gắn mousewheel binding."""
+            try:
+                if canvas.winfo_exists():
+                    canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            except Exception:
+                pass
+
+        def _unbind_mousewheel():
+            """Gỡ mousewheel binding khi dialog đóng."""
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+
+        # Gắn lên dialog object để có thể gọi lại khi reopen
+        dialog._bind_mousewheel = _bind_mousewheel
+        dialog._unbind_mousewheel = _unbind_mousewheel
+
+        # Kích hoạt scroll ngay lập tức
+        _bind_mousewheel()
 
         def on_dialog_destroy():
+            _unbind_mousewheel()
             dialog.withdraw()
             
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
