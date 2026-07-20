@@ -1045,21 +1045,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
                     pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
                     
-                    try:
-                        import sys
-                        if sys.platform == "win32":
-                            windings_font = pygame.font.SysFont("Wingdings", 14)
-                            icon_char = "n" if state['is_recording'] else "l"
-                            rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
-                        else:
-                            rec_text_surf = btn_font.render("Rec", True, (255, 0, 0))
-                        rec_text_rect = rec_text_surf.get_rect(center=rec_btn_rect.center)
-                        screen.blit(rec_text_surf, rec_text_rect)
-                    except:
-                        if state['is_recording']:
-                            pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
-                        else:
-                            pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
+                    if state['is_recording']:
+                        pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+                    else:
+                        pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
                         
                     if state['is_recording']:
                         import time as _time
