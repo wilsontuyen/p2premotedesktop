@@ -259,7 +259,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     if partner_pass:
         socket_passwords[sock] = partner_pass
         
-    globals()['client_host_os_release'] = os_release
+    globals()['client_host_os_release'] = os_release if os_release else "10"
     
     try:
         pygame_theme = "dark"
