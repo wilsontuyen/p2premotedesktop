@@ -39,22 +39,28 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     def _ok(e=None):
         result[0] = entry.get()
         var.set("done")
+        return "break"
         
     def _cancel(e=None):
         result[0] = None
         var.set("done")
+        return "break"
         
     entry.bind("<Return>", _ok)
+    entry.bind("<KP_Enter>", _ok)
     entry.bind("<Escape>", _cancel)
     dlg.bind("<Return>", _ok)
+    dlg.bind("<KP_Enter>", _ok)
     dlg.bind("<Escape>", _cancel)
     
-    btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10)
+    btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10, default="active")
     btn_ok.bind("<Return>", _ok)
+    btn_ok.bind("<KP_Enter>", _ok)
     btn_ok.pack(side=tk.LEFT, padx=(0, 5))
     
     btn_cancel = ttk.Button(btn_frame, text=_("Hủy"), command=_cancel, width=10)
     btn_cancel.bind("<Return>", _cancel)
+    btn_cancel.bind("<KP_Enter>", _cancel)
     btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
     
     dlg.grab_set()
