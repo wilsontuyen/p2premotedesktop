@@ -13,21 +13,59 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     from tkinter import ttk
     var = tk.StringVar(parent, value="")
     result = [None]
+    import sys
+    use_dim = (sys.platform == "win32")
     
-    dim = tk.Toplevel(parent)
-    dim.attributes("-alpha", 0.4)
-    dim.attributes("-topmost", True)
-    dim.configure(bg="black")
-    dim.overrideredirect(True)
-    dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+{parent.winfo_rootx()}+{parent.winfo_rooty()}")
+    if use_dim:
+        dim = tk.Toplevel(parent)
+        dim.attributes("-alpha", 0.4)
+        dim.attributes("-topmost", True)
+        dim.configure(bg="black")
+        dim.overrideredirect(True)
+        dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+0+0")
+        dim.update_idletasks()
+        try:
+            import ctypes
+            parent_hwnd = int(parent.frame(), 16)
+            dim_hwnd = int(dim.frame(), 16)
+            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+            except: pass
+            style = ctypes.windll.user32.GetWindowLongW(dim_hwnd, -16)
+            style = (style | 0x40000000) & ~0x80000000
+            ctypes.windll.user32.SetWindowLongW(dim_hwnd, -16, style)
+            ctypes.windll.user32.SetParent(dim_hwnd, parent_hwnd)
+            ctypes.windll.user32.SetWindowPos(dim_hwnd, 0, 0, 0, parent.winfo_width(), parent.winfo_height(), 0x0004)
+        except: pass
+    else:
+        dim = None
     
     dlg = tk.Toplevel(parent)
     dlg.title(title)
-    dlg.transient(parent)
-    dlg.attributes("-topmost", True)
-    dlg.configure(bg="#F0F0F0")
-    dlg.geometry(f"400x150+{parent.winfo_rootx() + parent.winfo_width()//2 - 200}+{parent.winfo_rooty() + parent.winfo_height()//2 - 75}")
     dlg.resizable(False, False)
+    
+    if sys.platform == "win32":
+        dlg.geometry(f"400x150")
+        dlg.update_idletasks()
+        try:
+            import ctypes
+            parent_hwnd = int(parent.frame(), 16)
+            dlg_hwnd = int(dlg.frame(), 16)
+            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+            except: pass
+            style = ctypes.windll.user32.GetWindowLongW(dlg_hwnd, -16)
+            style = (style | 0x40000000) & ~0x80000000
+            ctypes.windll.user32.SetWindowLongW(dlg_hwnd, -16, style)
+            ctypes.windll.user32.SetParent(dlg_hwnd, parent_hwnd)
+            
+            x = (parent.winfo_width() - 400) // 2
+            y = (parent.winfo_height() - 150) // 2
+            ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, 400, 150, 0x0004)
+        except: pass
+    else:
+        parent.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() - 400) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - 150) // 2
+        dlg.geometry(f"400x150+{x}+{y}")
     
     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
     lbl_title.pack(pady=(10, 5), padx=20, anchor=tk.W)
@@ -67,7 +105,8 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     parent.update_idletasks()
     
     parent.wait_variable(var)
-    dim.destroy()
+    if dim:
+        dim.destroy()
     dlg.destroy()
     return result[0]
 
@@ -99,26 +138,24 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             pt = wintypes.POINT(0, 0)
             ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
 
-            if host_w >= 1920 and host_h >= 1080:
-                top.update_idletasks()
-                tk_hwnd = int(top.frame(), 16)
-                try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-                except: pass
-                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                style = (style | 0x40000000) & ~0x80000000
-                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
-                x = max(0, (py_w - 900) // 2)
-                y = max(0, (py_h - 600) // 2)
-                top.geometry("900x600")
-                top.update_idletasks()
-                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
-            else:
-                x = max(0, pt.x + (py_w - 900) // 2)
-                y = max(0, pt.y + (py_h - 600) // 2)
-                top.geometry(f"900x600+{x}+{y}")
-        else:
+            top.update_idletasks()
+            tk_hwnd = int(top.frame(), 16)
+            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+            except: pass
+            style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+            style = (style | 0x40000000) & ~0x80000000
+            ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+            ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
+            x = max(0, (py_w - 900) // 2)
+            y = max(0, (py_h - 600) // 2)
             top.geometry("900x600")
+            top.update_idletasks()
+            ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
+        else:
+            top.update_idletasks()
+            sw = top.winfo_screenwidth()
+            sh = top.winfo_screenheight()
+            top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
 
         top.attributes('-topmost', True)
         top.attributes('-alpha', 1.0) # Hiện lại sau khi set geometry
@@ -162,41 +199,31 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             dlg.resizable(False, False)
 
             w, h = 400, 380
-            try:
-                import pygame
-                pygame_hwnd = pygame.display.get_wm_info().get("window")
-            except:
-                pygame_hwnd = None
-
             import sys
-            if pygame_hwnd and host_w >= 1920 and host_h >= 1080 and sys.platform == "win32":
+            if sys.platform == "win32":
+                dlg.geometry(f"{w}x{h}")
                 dlg.update_idletasks()
                 dlg_hwnd = int(dlg.frame(), 16)
                 import ctypes
-                from ctypes import wintypes
                 try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
                 except: pass
                 style = ctypes.windll.user32.GetWindowLongW(dlg_hwnd, -16)
                 style = (style | 0x40000000) & ~0x80000000
                 ctypes.windll.user32.SetWindowLongW(dlg_hwnd, -16, style)
-                ctypes.windll.user32.SetParent(dlg_hwnd, pygame_hwnd)
                 
-                px, py_ = top.winfo_pointerx(), top.winfo_pointery()
-                pt = wintypes.POINT(px, py_)
-                ctypes.windll.user32.ScreenToClient(pygame_hwnd, ctypes.byref(pt))
+                top.update_idletasks()
+                top_hwnd = int(top.frame(), 16)
+                ctypes.windll.user32.SetParent(dlg_hwnd, top_hwnd)
                 
-                rect = wintypes.RECT()
-                ctypes.windll.user32.GetClientRect(pygame_hwnd, ctypes.byref(rect))
-                py_w = rect.right - rect.left
-                py_h = rect.bottom - rect.top
-                
-                x = max(0, min(pt.x - w//2, py_w - w))
-                y = max(0, min(pt.y - h//2, py_h - h))
+                x = max(0, (top.winfo_width() - w) // 2)
+                y = max(0, (top.winfo_height() - h) // 2)
                 ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, w, h, 0x0004)
             else:
                 dlg.attributes('-topmost', True)
-                px, py_ = top.winfo_pointerx(), top.winfo_pointery()
-                dlg.geometry(f"{w}x{h}+{px - w//2}+{py_ - h//2}")
+                top.update_idletasks()
+                px, py_ = top.winfo_rootx(), top.winfo_rooty()
+                pw, ph = top.winfo_width(), top.winfo_height()
+                dlg.geometry(f"{w}x{h}+{px + (pw - w)//2}+{py_ + (ph - h)//2}")
 
             # Title bar
             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
