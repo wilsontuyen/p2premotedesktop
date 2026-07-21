@@ -761,7 +761,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         cm.process_clipboard_event(event)
                 except Exception:
                     pass
-                refresh_local()
+                top.after(500, refresh_local)
 
         import queue
         fm_event_queue = queue.Queue()
@@ -1022,6 +1022,23 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             t.bind("<Next>", lambda e, tr=t: tree_page_down(e, tr))
 
         # --- Transfer Actions ---
+        def get_dir_stats(path):
+            total_size = 0
+            file_count = 0
+            folder_count = 0
+            try:
+                for root, dirs, files in os.walk(path):
+                    folder_count += len(dirs)
+                    file_count += len(files)
+                    for f in files:
+                        try:
+                            total_size += os.path.getsize(os.path.join(root, f))
+                        except:
+                            pass
+            except:
+                pass
+            return total_size, file_count, folder_count
+
         def resolve_conflicts(conflicts, parent, is_upload):
             results = {}
             overwrite_all = False
@@ -1080,14 +1097,30 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     src_title = _("Nguồn (Máy từ xa):")
                     dst_title = _("Đích (Máy bạn):")
 
+                src_fc = c.get('src_file_count')
+                if src_fc is not None:
+                    src_extra = _("\n- Chứa: {fc} tệp, {dc} thư mục").format(fc=src_fc, dc=c.get('src_folder_count', 0))
+                elif c.get('src_is_dir'):
+                    src_extra = _("\n- Chứa: Không rõ (Remote)")
+                else:
+                    src_extra = ""
+
+                dst_fc = c.get('dst_file_count')
+                if dst_fc is not None:
+                    dst_extra = _("\n- Chứa: {fc} tệp, {dc} thư mục").format(fc=dst_fc, dc=c.get('dst_folder_count', 0))
+                elif c.get('dst_is_dir'):
+                    dst_extra = _("\n- Chứa: Không rõ (Remote)")
+                else:
+                    dst_extra = ""
+
                 src_disp = _("""{src_title}
-- Thư mục: {src_path}
-- Dung lượng: {src_sz}
-- Ngày sửa đổi: {src_mtime}""").format(src_title=src_title, src_path=src_path, src_sz=src_sz, src_mtime=src_mtime)
+- Vị trí: {src_path}
+- Dung lượng: {src_sz}{src_extra}
+- Ngày sửa đổi: {src_mtime}""").format(src_title=src_title, src_path=src_path, src_sz=src_sz, src_extra=src_extra, src_mtime=src_mtime)
                 dst_disp = _("""{dst_title}
-- Thư mục: {dst_path}
-- Dung lượng: {dst_sz}
-- Ngày sửa đổi: {dst_mtime}""").format(dst_title=dst_title, dst_path=dst_path, dst_sz=dst_sz, dst_mtime=dst_mtime)
+- Vị trí: {dst_path}
+- Dung lượng: {dst_sz}{dst_extra}
+- Ngày sửa đổi: {dst_mtime}""").format(dst_title=dst_title, dst_path=dst_path, dst_sz=dst_sz, dst_extra=dst_extra, dst_mtime=dst_mtime)
 
                 tk.Label(frame, text=src_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=2)
                 tk.Label(frame, text=dst_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=(2, 10))
@@ -1151,8 +1184,15 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 name = local_tree.item(s, "text")
                 if name in remote_items:
                     fpath = os.path.join(local_entry.get(), name)
-                    sz = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
                     is_dir = os.path.isdir(fpath)
+                    
+                    src_file_count = None
+                    src_folder_count = None
+                    if is_dir:
+                        sz, src_file_count, src_folder_count = get_dir_stats(fpath)
+                    else:
+                        sz = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
+
                     try:
                         import datetime
                         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1163,8 +1203,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     conflicts.append({
                         "name": name,
                         "src_size": sz, "src_is_dir": is_dir, "src_path": fpath, "src_mtime": mtime,
+                        "src_file_count": src_file_count, "src_folder_count": src_folder_count,
                         "dst_size": remote_items[name]["size"], "dst_is_dir": remote_items[name]["is_dir"],
-                        "dst_path": dpath, "dst_mtime": _("Không xác định (Remote)")
+                        "dst_path": dpath, "dst_mtime": _("Không xác định (Remote)"),
+                        "dst_file_count": None, "dst_folder_count": None
                     })
 
             if conflicts:
@@ -1303,7 +1345,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 fpath = os.path.join(target_dir, name)
                 if os.path.exists(fpath):
                     dst_is_dir = os.path.isdir(fpath)
-                    dst_sz = os.path.getsize(fpath) if not dst_is_dir else 0
+                    dst_file_count = None
+                    dst_folder_count = None
+                    if dst_is_dir:
+                        dst_sz, dst_file_count, dst_folder_count = get_dir_stats(fpath)
+                    else:
+                        dst_sz = os.path.getsize(fpath) if not dst_is_dir else 0
                     try:
                         import datetime
                         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1315,7 +1362,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     conflicts.append({
                         "name": name,
                         "src_size": src_sz, "src_is_dir": src_is_dir, "src_path": spath, "src_mtime": _("Không xác định (Remote)"),
-                        "dst_size": dst_sz, "dst_is_dir": dst_is_dir, "dst_path": fpath, "dst_mtime": mtime
+                        "src_file_count": None, "src_folder_count": None,
+                        "dst_size": dst_sz, "dst_is_dir": dst_is_dir, "dst_path": fpath, "dst_mtime": mtime,
+                        "dst_file_count": dst_file_count, "dst_folder_count": dst_folder_count
                     })
 
             if conflicts:
