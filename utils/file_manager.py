@@ -86,7 +86,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
 
         hwnd = pygame.display.get_wm_info().get("window")
-        if hwnd:
+        import sys
+        if hwnd and sys.platform == "win32":
             import ctypes
             from ctypes import wintypes
             rect = wintypes.RECT()
@@ -167,7 +168,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             except:
                 pygame_hwnd = None
 
-            if pygame_hwnd and host_w >= 1920 and host_h >= 1080:
+            import sys
+            if pygame_hwnd and host_w >= 1920 and host_h >= 1080 and sys.platform == "win32":
                 dlg.update_idletasks()
                 dlg_hwnd = int(dlg.frame(), 16)
                 import ctypes
@@ -255,22 +257,29 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             for item in local_tree.get_children():
                 local_tree.delete(item)
             try:
+                import sys
                 path = local_entry.get()
                 if path == "This PC":
-                    btn_upload.config(state=tk.DISABLED)
-                    btn_download.config(state=tk.DISABLED)
-                    import string
-                    import ctypes
-                    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-                    drives = []
-                    for letter in string.ascii_uppercase:
-                        if bitmask & 1:
-                            drives.append(f"{letter}:\\")
-                        bitmask >>= 1
-                    for d in drives:
-                        local_tree.insert("", "end", text=d, values=("", _("Ổ đĩa"), 0))
-                    return
-                else:
+                    if sys.platform != "win32":
+                        local_entry.delete(0, tk.END)
+                        local_entry.insert(0, "/")
+                        path = "/"
+                    else:
+                        btn_upload.config(state=tk.DISABLED)
+                        btn_download.config(state=tk.DISABLED)
+                        import string
+                        import ctypes
+                        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+                        drives = []
+                        for letter in string.ascii_uppercase:
+                            if bitmask & 1:
+                                drives.append(f"{letter}:\\")
+                            bitmask >>= 1
+                        for d in drives:
+                            local_tree.insert("", "end", text=d, values=("", _("Ổ đĩa"), 0))
+                        return
+                
+                if path != "This PC":
                     btn_upload.config(state=tk.NORMAL)
                     btn_download.config(state=tk.NORMAL)
 
@@ -301,7 +310,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             if current == "This PC": return
             parent = os.path.dirname(current)
             if parent and parent == current:
-                parent = "This PC"
+                import sys
+                if sys.platform == "win32":
+                    parent = "This PC"
+                else:
+                    return
 
             local_entry.delete(0, tk.END)
             local_entry.insert(0, parent)
@@ -1336,7 +1349,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         import traceback
         err = traceback.format_exc()
         try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(0, err, _("Lỗi File Manager"), 0x10)
+            import sys
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, err, _("Lỗi File Manager"), 0x10)
+            else:
+                messagebox.showerror(_("Lỗi File Manager"), err)
         except: pass
 
