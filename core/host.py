@@ -1365,6 +1365,48 @@ class HostMixin:
                 res = {"type": "write_text_file_result", "success": False, "error": str(e), "path": path}
             send_msg(conn, json.dumps(res).encode('utf-8'), password)
 
+        elif ev_type == 'request_get_properties':
+            path = event.get('path')
+            try:
+                import os
+                from datetime import datetime
+                name = os.path.basename(path.rstrip('/\\'))
+                location = os.path.dirname(path)
+                is_dir = os.path.isdir(path)
+                try:
+                    mtime = os.path.getmtime(path)
+                    modified_time = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    modified_time = ""
+
+                if is_dir:
+                    total_size = 0
+                    file_count = 0
+                    folder_count = 0
+                    try:
+                        for dirpath, dirnames, filenames in os.walk(path):
+                            folder_count += len(dirnames)
+                            for f in filenames:
+                                file_count += 1
+                                try:
+                                    total_size += os.path.getsize(os.path.join(dirpath, f))
+                                except:
+                                    pass
+                    except:
+                        pass
+                    res = {"type": "get_properties_result", "success": True, "name": name,
+                           "is_dir": True, "location": location, "size": total_size,
+                           "file_count": file_count, "folder_count": folder_count,
+                           "modified_time": modified_time}
+                else:
+                    size = os.path.getsize(path)
+                    res = {"type": "get_properties_result", "success": True, "name": name,
+                           "is_dir": False, "location": location, "size": size,
+                           "modified_time": modified_time}
+            except Exception as e:
+                res = {"type": "get_properties_result", "success": False, "error": str(e)}
+            send_msg(conn, json.dumps(res).encode('utf-8'), password)
+
     def _run_input_hooks(self):
         import ctypes
         from ctypes import wintypes

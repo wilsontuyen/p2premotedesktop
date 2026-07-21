@@ -148,7 +148,76 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         def format_size(s):
             if s < 1024: return f"{s} B"
             elif s < 1024*1024: return f"{s/1024:.1f} KB"
-            else: return f"{s/(1024*1024):.1f} MB"
+            elif s < 1024*1024*1024: return f"{s/(1024*1024):.1f} MB"
+            elif s < 1024*1024*1024*1024: return f"{s/(1024*1024*1024):.2f} GB"
+            else: return f"{s/(1024*1024*1024*1024):.2f} TB"
+
+        def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
+            """Show a properties dialog for a file or folder."""
+            dlg = tk.Toplevel(top)
+            dlg.title(_("Thuộc tính"))
+            dlg.transient(top)
+            dlg.attributes('-topmost', True)
+            dlg.configure(bg="#F0F0F0")
+            dlg.resizable(False, False)
+
+            w, h = 400, 340
+            px, py_ = top.winfo_rootx(), top.winfo_rooty()
+            pw, ph = top.winfo_width(), top.winfo_height()
+            dlg.geometry(f"{w}x{h}+{px + (pw-w)//2}+{py_ + (ph-h)//2}")
+
+            # Title bar
+            title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
+            title_frame.pack(fill=tk.X)
+            title_frame.pack_propagate(False)
+            tk.Label(title_frame, text=f"  📋 {name}", font=("Segoe UI", 11, "bold"), bg="#0078D7", fg="white", anchor="w").pack(fill=tk.X, padx=5, pady=8)
+
+            # Content
+            content_frame = tk.Frame(dlg, bg="#F0F0F0")
+            content_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+
+            row = 0
+            def add_row(label_text, value_text, bold_value=False):
+                nonlocal row
+                tk.Label(content_frame, text=label_text, font=("Segoe UI", 9, "bold"), bg="#F0F0F0", fg="#333", anchor="w").grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+                font_style = ("Segoe UI", 9, "bold") if bold_value else ("Segoe UI", 9)
+                lbl = tk.Label(content_frame, text=value_text, font=font_style, bg="#F0F0F0", fg="#111", anchor="w", wraplength=250, justify="left")
+                lbl.grid(row=row, column=1, sticky="w", pady=4)
+                row += 1
+                return lbl
+
+            add_row(_("Tên:"), name)
+
+            # Separator
+            sep1 = tk.Frame(content_frame, bg="#CCC", height=1)
+            sep1.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+            row += 1
+
+            add_row(_("Loại:"), item_type)
+            add_row(_("Vị trí:"), location)
+
+            sep2 = tk.Frame(content_frame, bg="#CCC", height=1)
+            sep2.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+            row += 1
+
+            size_label = add_row(_("Kích thước:"), format_size(size_bytes) + f"  ({size_bytes:,} bytes)" if size_bytes >= 0 else _("Đang tính..."), bold_value=True)
+
+            if file_count is not None:
+                add_row(_("Chứa:"), _("Tệp: {file_count}, Thư mục: {folder_count}").format(file_count=file_count, folder_count=folder_count))
+
+            if modified_time:
+                sep3 = tk.Frame(content_frame, bg="#CCC", height=1)
+                sep3.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+                row += 1
+                add_row(_("Sửa đổi:"), modified_time)
+
+            # Close button
+            btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+            btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
+            ttk.Button(btn_frame, text=_("Đóng"), command=dlg.destroy, width=12).pack(side=tk.RIGHT)
+
+            dlg.grab_set()
+            return dlg, size_label
 
         def refresh_local():
             for item in local_tree.get_children():
@@ -299,6 +368,74 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         refresh_local()
                     return
 
+                if action == "properties":
+                    # Properties for first selected item
+                    item = local_tree.item(sel[0])
+                    name = item['text']
+                    full_path = os.path.join(current_dir, name)
+                    vals = item.get('values', [])
+                    is_dir = (len(vals) > 1 and vals[1] in (_("Thư mục"), _("Ổ đĩa")))
+
+                    from datetime import datetime
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                        mod_time = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        mod_time = _("Không xác định")
+
+                    if is_dir:
+                        # Show dialog immediately with "calculating..." then update in background
+                        dlg, size_label = show_properties_dialog(
+                            name, _("Thư mục"), current_dir, -1,
+                            file_count=0, folder_count=0, modified_time=mod_time
+                        )
+                        size_label.config(text=_("Đang tính..."))
+
+                        def calc_dir_size(fp, lbl, dialog):
+                            total_size = 0
+                            file_count = 0
+                            folder_count = 0
+                            try:
+                                for dirpath, dirnames, filenames in os.walk(fp):
+                                    folder_count += len(dirnames)
+                                    for f in filenames:
+                                        file_count += 1
+                                        try:
+                                            total_size += os.path.getsize(os.path.join(dirpath, f))
+                                        except:
+                                            pass
+                            except:
+                                pass
+                            try:
+                                if dialog.winfo_exists():
+                                    dialog.after(0, lambda: _update_props_labels(lbl, dialog, total_size, file_count, folder_count))
+                            except:
+                                pass
+
+                        def _update_props_labels(lbl, dialog, total_size, file_count, folder_count):
+                            try:
+                                if dialog.winfo_exists():
+                                    lbl.config(text=format_size(total_size) + f"  ({total_size:,} bytes)")
+                                    # Find and update the "Chứa" label
+                                    for widget in dialog.winfo_children():
+                                        for child in widget.winfo_children():
+                                            try:
+                                                if hasattr(child, 'cget') and child.cget('text').startswith(_("Tệp:")):
+                                                    child.config(text=_("Tệp: {file_count}, Thư mục: {folder_count}").format(file_count=file_count, folder_count=folder_count))
+                                            except:
+                                                pass
+                            except:
+                                pass
+
+                        threading.Thread(target=calc_dir_size, args=(full_path, size_label, dlg), daemon=True).start()
+                    else:
+                        try:
+                            size = os.path.getsize(full_path)
+                        except:
+                            size = 0
+                        show_properties_dialog(name, _("Tệp"), current_dir, size, modified_time=mod_time)
+                    return
+
                 for s in sel:
                     item = local_tree.item(s)
                     name = item['text']
@@ -401,6 +538,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             local_menu.add_command(label=_("Đổi tên"), command=lambda: local_action("rename"))
             local_menu.add_separator()
             local_menu.add_command(label=_("Xóa"), command=lambda: local_action("delete"))
+            local_menu.add_separator()
+            local_menu.add_command(label=_("Thuộc tính"), command=lambda: local_action("properties"))
 
             try:
                 local_menu.tk_popup(event.x_root, event.y_root)
@@ -451,6 +590,21 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 for f in files:
                     sz = f.get("size", 0)
                     remote_tree.insert("", "end", text=f.get("name"), values=(format_size(sz), _("Tệp"), sz))
+            elif evt_type == "get_properties_result":
+                success = event.get("success")
+                if success:
+                    name = event.get("name", "")
+                    item_type = _("Thư mục") if event.get("is_dir") else _("Tệp")
+                    location = event.get("location", "")
+                    size_bytes = event.get("size", 0)
+                    file_count = event.get("file_count")
+                    folder_count = event.get("folder_count")
+                    mod_time = event.get("modified_time", _("Không xác định"))
+                    show_properties_dialog(name, item_type, location, size_bytes,
+                                          file_count=file_count, folder_count=folder_count,
+                                          modified_time=mod_time)
+                else:
+                    messagebox.showerror(_("Lỗi"), event.get("error", _("Không thể lấy thuộc tính")), parent=top)
             elif evt_type in ("delete_item_result", "rename_item_result", "create_folder_result", "open_file_result"):
                 success = event.get("success")
                 error = event.get("error")
@@ -639,6 +793,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     if new_name and new_name != name:
                         req = {"type": "request_rename_item", "old_path": full_path, "new_name": new_name}
                         send_event(req)
+                elif action == "properties":
+                    req = {"type": "request_get_properties", "path": full_path}
+                    send_event(req)
+                    return
         def show_remote_menu(event):
             remote_menu.delete(0, 'end')
             row = remote_tree.identify_row(event.y)
@@ -662,6 +820,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             remote_menu.add_command(label=_("Đổi tên"), command=lambda: remote_action("rename"))
             remote_menu.add_separator()
             remote_menu.add_command(label=_("Xóa"), command=lambda: remote_action("delete"))
+            remote_menu.add_separator()
+            remote_menu.add_command(label=_("Thuộc tính"), command=lambda: remote_action("properties"))
 
             remote_menu.post(event.x_root, event.y_root)
         remote_tree.bind("<Button-3>", show_remote_menu)
