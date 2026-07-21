@@ -1233,6 +1233,20 @@ class NetworkMixin:
                 host_w = res.get("width")
                 host_h = res.get("height")
                 computer_name = res.get("computer_name", "")
+                
+                # Replace with saved name from list to make it easier to identify the host
+                if hasattr(self, 'load_saved_computers'):
+                    try:
+                        saved_comps = self.load_saved_computers()
+                        for c in saved_comps:
+                            # The saved ID might contain spaces (e.g. "123 456 789 012")
+                            if c.get("id", "").replace(" ", "") == partner_id:
+                                if c.get("name"):
+                                    computer_name = c.get("name")
+                                break
+                    except Exception:
+                        pass
+                        
                 zalo_phone = res.get("zalo_phone", "")
                 os_release = res.get("os_release", "")
                 is_domain = res.get("is_domain", False)

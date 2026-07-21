@@ -3150,6 +3150,7 @@ Comment=Remote Desktop P2P AutoStart
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
         dialog.transient(p)
         dialog.grab_set()
         
@@ -3302,6 +3303,7 @@ Comment=Remote Desktop P2P AutoStart
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.configure(bg=self.bg_color)
+        dialog.attributes("-topmost", True)
         dialog.transient(p)
         dialog.grab_set()
         

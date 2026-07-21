@@ -996,19 +996,27 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             screen.blit(file_text_surf, file_text_rect)
 
                         if show_power_button:
-                            power_bg = (240, 240, 240) if power_is_hover else (255, 255, 255)
-                            pygame.draw.rect(screen, power_bg, power_btn_rect, border_radius=4)
-                            pygame.draw.rect(screen, btn_border_color, power_btn_rect, width=1, border_radius=4)
+                            import math
+                            cx, cy = power_btn_rect.center
                             
-                            try:
-                                symbol_font = pygame.font.SysFont("Wingdings", 16)
-                                power_text_surf = symbol_font.render("¤", True, (0, 0, 0))
-                            except:
-                                power_text_surf = btn_font.render("¤", True, (0, 0, 0))
-                            power_text_rect = power_text_surf.get_rect(center=power_btn_rect.center)
-                            # Shift a bit up for symbol centering
-                            power_text_rect.y -= 1
-                            screen.blit(power_text_surf, power_text_rect)
+                            # Nền nút hình chữ nhật xám giống nút quay video
+                            power_bg_color = (80, 80, 80) if power_is_hover else (50, 50, 50)
+                            if pygame_theme in ["light", "crystal", "orange", "red"]:
+                                power_bg_color = (220, 220, 235) if power_is_hover else (245, 245, 255)
+                            pygame.draw.rect(screen, power_bg_color, power_btn_rect, border_radius=4)
+                            pygame.draw.rect(screen, btn_border_color, power_btn_rect, width=1, border_radius=4)
+
+                            # Nền hình tròn xanh lá như hình đính kèm
+                            bg_color = (40, 190, 80) if power_is_hover else (30, 170, 70)
+                            pygame.draw.circle(screen, bg_color, (cx, cy), 10)
+                            pygame.draw.circle(screen, btn_border_color, (cx, cy), 10, 1)
+
+                            # Icon Power màu trắng, nét đơn (1px)
+                            r = 5
+                            # Vòng cung khuyết ở trên
+                            pygame.draw.arc(screen, (255, 255, 255), (cx - r, cy - r, r * 2, r * 2), math.pi/2 + 0.65, 2.5 * math.pi - 0.65, 1)
+                            # Dấu | ở giữa (nét đơn)
+                            pygame.draw.line(screen, (255, 255, 255), (cx, cy - r - 1), (cx, cy + 1), 1)
 
                         if show_cad_button:
                             # Draw Eye Button
