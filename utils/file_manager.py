@@ -551,6 +551,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                     px, py = top.winfo_rootx(), top.winfo_rooty()
                                     pw, ph = top.winfo_width(), top.winfo_height()
                                     np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                                    np_win.lift()
+                                    np_win.focus_force()
                                     text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
                                     text_area.pack(expand=True, fill="both")
                                     text_area.insert("1.0", file_content)
@@ -710,7 +712,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     try:
                         from datetime import datetime
                         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                        open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
+                        print(f"{ts} [Remote] Remote read success, creating Toplevel Notepad")
                         content = event.get("content", "")
                         path = event.get("path", "")
                         name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
@@ -724,6 +726,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         px, py = top.winfo_rootx(), top.winfo_rooty()
                         pw, ph = top.winfo_width(), top.winfo_height()
                         np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                        np_win.lift()
+                        np_win.focus_force()
                         text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
                         text_area.pack(expand=True, fill="both")
                         text_area.insert("1.0", content)
@@ -881,7 +885,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 if action == "view":
                     from datetime import datetime
                     ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                    open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
+                    print(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}")
                     if is_dir:
                         messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                     else:
@@ -893,7 +897,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             req = {"type": "request_open_file", "path": full_path}
                             messagebox.showinfo(_("Thông báo"), _("Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.").format(ext=ext), parent=top)
                         try:
-                            open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\n")
+                            print(f"{ts} [Remote] Sending file read request: {req}")
                             send_event(req)
                         except Exception as ex:
                             messagebox.showerror(_("Lỗi"), _("Không thể gửi lệnh: {ex}").format(ex=ex), parent=top)
