@@ -134,11 +134,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             try: hwnd = pygame.display.get_wm_info().get("window")
             except: pass
             
-        if hwnd and sys.platform != "win32":
-            try: top = tk.Tk(use=str(hwnd))
-            except: top = tk.Tk()
-        else:
-            top = tk.Tk()
+        top = tk.Tk()
             
         globals()['fm_top'] = top
         top.attributes('-alpha', 0.0) # Ẩn đi để tránh nháy khi tạo
@@ -172,9 +168,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
         else:
             top.update_idletasks()
-            x = max(0, (host_w - 900) // 2)
-            y = max(0, (host_h - 600) // 2)
-            top.geometry(f"900x600+{x}+{y}")
+            sw = top.winfo_screenwidth()
+            sh = top.winfo_screenheight()
+            top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
 
         top.attributes('-topmost', True)
         top.attributes('-alpha', 1.0) # Hiện lại sau khi set geometry

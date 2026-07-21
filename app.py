@@ -373,7 +373,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         try:
             icon_path = os.path.join(app_dir, "app_icon.png")
             if os.path.exists(icon_path):
-                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                try:
+                    icon_img = tk.PhotoImage(file=icon_path)
+                except Exception:
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path))
                 self.iconphoto(True, icon_img)
                 self._app_icon_img = icon_img  # Giữ reference tránh GC
         except Exception as e:

@@ -377,7 +377,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             try:
                 icon_path = os.path.join(app_dir, "app_icon.png")
                 if os.path.exists(icon_path):
-                    hidden_icon = ImageTk.PhotoImage(Image.open(icon_path))
+                    try:
+                        hidden_icon = tk.PhotoImage(file=icon_path)
+                    except Exception:
+                        hidden_icon = ImageTk.PhotoImage(Image.open(icon_path))
                     hidden_root.iconphoto(True, hidden_icon)
                     hidden_root._hidden_icon_ref = hidden_icon
             except Exception:
