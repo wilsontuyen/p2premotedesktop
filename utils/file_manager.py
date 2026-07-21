@@ -915,16 +915,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
                 remote_menu.add_separator()
                 remote_menu.add_command(label=_("Làm mới"), command=lambda: request_remote_dir(remote_entry.get()))
-                remote_tree.focus_set()
-                try:
-                    remote_menu.tk_popup(event.x_root, event.y_root)
-                finally:
-                    remote_menu.grab_release()
+                remote_menu.tk_popup(event.x_root, event.y_root)
                 return
 
             if row not in remote_tree.selection():
                 remote_tree.selection_set(row)
-            remote_tree.focus(row)
 
             vals = remote_tree.item(row, "values")
             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
@@ -938,7 +933,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             remote_menu.add_separator()
             remote_menu.add_command(label=_("Thuộc tính"), command=lambda: remote_action("properties"))
             
-            remote_tree.focus_set()
             try:
                 remote_menu.tk_popup(event.x_root, event.y_root)
             finally:
