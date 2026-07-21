@@ -769,10 +769,15 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             try:
                 while True:
                     evt = fm_event_queue.get_nowait()
-                    if evt.get("type") == "trigger_local_refresh":
-                        refresh_local()
-                    else:
-                        on_remote_dir_result(evt)
+                    try:
+                        if evt.get("type") == "trigger_local_refresh":
+                            refresh_local()
+                        else:
+                            on_remote_dir_result(evt)
+                    except Exception as e:
+                        import traceback
+                        with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
+                            f.write(f"Error in process_fm_queue: {e}\n{traceback.format_exc()}\n")
             except queue.Empty:
                 pass
             if top.winfo_exists():
@@ -917,7 +922,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
                 remote_menu.add_separator()
                 remote_menu.add_command(label=_("Làm mới"), command=lambda: request_remote_dir(remote_entry.get()))
-                remote_menu.post(event.x_root, event.y_root)
+                try:
+                    remote_menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    remote_menu.grab_release()
                 return
 
             if row not in remote_tree.selection():
@@ -936,7 +944,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             remote_menu.add_separator()
             remote_menu.add_command(label=_("Thuộc tính"), command=lambda: remote_action("properties"))
 
-            remote_menu.post(event.x_root, event.y_root)
+            try:
+                remote_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                remote_menu.grab_release()
         remote_tree.bind("<Button-3>", show_remote_menu)
 
         def select_all_remote(event):
