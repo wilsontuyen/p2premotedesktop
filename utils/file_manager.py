@@ -71,10 +71,113 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     return result[0]
 
 
+def inline_messagebox(parent, title, message, m_type="info"):
+    import tkinter as tk
+    from tkinter import ttk
+    var = tk.StringVar(parent, value="")
+    result = [False]
+    
+    dlg = tk.Frame(parent, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+    dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=400, height=180)
+    dlg.lift()
+    
+    icons = {
+        "info": ("ℹ", "#0078D7"),
+        "error": ("❌", "#D32F2F"),
+        "warning": ("⚠", "#F57C00"),
+        "askyesno": ("❓", "#0078D7")
+    }
+    icon_char, icon_color = icons.get(m_type, ("", "black"))
+    
+    top_frame = tk.Frame(dlg, bg="#F0F0F0")
+    top_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+    
+    lbl_icon = tk.Label(top_frame, text=icon_char, font=("Segoe UI", 36), bg="#F0F0F0", fg=icon_color)
+    lbl_icon.pack(side=tk.LEFT, padx=(0, 15))
+    
+    lbl_msg = tk.Label(top_frame, text=message, font=("Segoe UI", 10), bg="#F0F0F0", wraplength=280, justify="left")
+    lbl_msg.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    
+    btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+    btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+    
+    def _yes(e=None):
+        result[0] = True
+        var.set("done")
+        return "break"
+        
+    def _no(e=None):
+        result[0] = False
+        var.set("done")
+        return "break"
+        
+    dlg.bind("<Return>", _yes)
+    dlg.bind("<KP_Enter>", _yes)
+    dlg.bind("<Escape>", _no)
+    
+    if m_type == "askyesno":
+        btn_yes = ttk.Button(btn_frame, text=_("Đồng ý"), command=_yes, width=10, default="active")
+        btn_yes.bind("<Return>", _yes)
+        btn_yes.bind("<KP_Enter>", _yes)
+        btn_yes.pack(side=tk.LEFT, padx=(50, 5))
+        
+        btn_no = ttk.Button(btn_frame, text=_("Hủy"), command=_no, width=10)
+        btn_no.bind("<Return>", _no)
+        btn_no.bind("<KP_Enter>", _no)
+        btn_no.pack(side=tk.RIGHT, padx=(5, 50))
+        btn_yes.focus_force()
+    else:
+        btn_ok = ttk.Button(btn_frame, text=_("Đóng"), command=_yes, width=12, default="active")
+        btn_ok.bind("<Return>", _yes)
+        btn_ok.bind("<KP_Enter>", _yes)
+        btn_ok.pack(side=tk.TOP)
+        btn_ok.focus_force()
+        
+    dlg.grab_set()
+    parent.update_idletasks()
+    parent.wait_variable(var)
+    dlg.destroy()
+    return result[0]
+
+class CustomMessageBox:
+    @staticmethod
+    def showinfo(title, message, **kwargs):
+        parent = kwargs.get("parent")
+        if not parent:
+            from tkinter import messagebox as tk_msg
+            return tk_msg.showinfo(title, message, **kwargs)
+        return inline_messagebox(parent, title, message, "info")
+        
+    @staticmethod
+    def showerror(title, message, **kwargs):
+        parent = kwargs.get("parent")
+        if not parent:
+            from tkinter import messagebox as tk_msg
+            return tk_msg.showerror(title, message, **kwargs)
+        return inline_messagebox(parent, title, message, "error")
+        
+    @staticmethod
+    def showwarning(title, message, **kwargs):
+        parent = kwargs.get("parent")
+        if not parent:
+            from tkinter import messagebox as tk_msg
+            return tk_msg.showwarning(title, message, **kwargs)
+        return inline_messagebox(parent, title, message, "warning")
+        
+    @staticmethod
+    def askyesno(title, message, **kwargs):
+        parent = kwargs.get("parent")
+        if not parent:
+            from tkinter import messagebox as tk_msg
+            return tk_msg.askyesno(title, message, **kwargs)
+        return inline_messagebox(parent, title, message, "askyesno")
+
+
 def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080):
     try:
         import tkinter as tk
         from tkinter import ttk, filedialog, messagebox
+        messagebox = CustomMessageBox
         import threading, os, time, base64
 
         import sys
