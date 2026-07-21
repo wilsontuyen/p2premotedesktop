@@ -28,7 +28,7 @@ def E(text):
     if sys.platform != "win32" or platform.release() in ["7", "8", "8.1"]:
         mapping = {
             "📋": "❐", "📁": "≡", "📡": "⌂", "🔧": "¤",
-            "🔄": "↻", "🔍": "?", "➕": "+", "❌": "X"
+            "🔄": "↻", "🔍": "⌕", "➕": "+", "❌": "X"
         }
         for k, v in mapping.items():
             text = text.replace(k, v)
