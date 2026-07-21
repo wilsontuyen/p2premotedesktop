@@ -1257,6 +1257,8 @@ class HostMixin:
                                         total_sz += sz
 
                     if not all_files:
+                        batch_end_msg = {"type": "batch_end"}
+                        send_msg(c, json.dumps(batch_end_msg).encode('utf-8'), pwd)
                         return
                         
                     display_name = all_files[0][1]

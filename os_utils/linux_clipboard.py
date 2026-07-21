@@ -35,7 +35,45 @@ class ClipboardSyncManager:
         pass
 
     def handle_received_packet(self, packet):
-        pass
+        try:
+            ptype = packet.get("type")
+            if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
+                return
+
+            if ptype == "batch_start":
+                self.batch_total_size = packet.get("total_size", 0)
+                self.batch_received = 0
+            elif ptype == "file_start":
+                import os
+                self.current_filename = packet.get("name")
+                self.current_target_dir = packet.get("target_dir", getattr(self, "target_save_dir", ""))
+                if not os.path.exists(self.current_target_dir):
+                    os.makedirs(self.current_target_dir, exist_ok=True)
+                path = os.path.join(self.current_target_dir, self.current_filename)
+                self.current_file = open(path, "wb")
+            elif ptype == "file_chunk":
+                if hasattr(self, 'current_file') and self.current_file:
+                    import base64
+                    data = base64.b64decode(packet.get("data", ""))
+                    self.current_file.write(data)
+                    self.batch_received += len(data)
+                    if hasattr(self, 'active_dialog') and self.active_dialog:
+                        try:
+                            self.active_dialog.after(0, lambda v=self.batch_received: getattr(self, 'active_dialog') and self.active_dialog.update_progress(v))
+                        except: pass
+            elif ptype == "file_end":
+                if hasattr(self, 'current_file') and self.current_file:
+                    self.current_file.close()
+                    self.current_file = None
+            elif ptype == "batch_end":
+                if hasattr(self, 'active_dialog') and self.active_dialog:
+                    try:
+                        self.active_dialog.after(0, lambda d=self.active_dialog: d.destroy())
+                    except: pass
+                self.active_dialog = None
+                self._receive_cancelled = False
+        except Exception as e:
+            print(f"[LinuxClipboard] Lỗi xử lý packet {packet.get('type')}: {e}")
         
     def _poll_clipboard(self):
         while self.running:
