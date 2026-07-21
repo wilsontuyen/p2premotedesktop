@@ -13,15 +13,11 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     from tkinter import ttk
     var = tk.StringVar(parent, value="")
     result = [None]
-    # We use a Frame overlay to block clicks outside the dialog and keep it inside the File Manager
-    dim = tk.Frame(parent, bg="gray")
-    dim.place(relx=0, rely=0, relwidth=1, relheight=1)
-    
+    # We removed the dim overlay to allow seeing the File Manager content
     dlg = tk.Frame(parent, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
     dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=400, height=150)
     
     # Lift to ensure they are on top of other widgets
-    dim.lift()
     dlg.lift()
     
     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
@@ -50,19 +46,21 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
         
     entry.bind("<Return>", _ok)
     entry.bind("<Escape>", _cancel)
+    dlg.bind("<Return>", _ok)
+    dlg.bind("<Escape>", _cancel)
     
     btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10)
+    btn_ok.bind("<Return>", _ok)
     btn_ok.pack(side=tk.LEFT, padx=(0, 5))
     
     btn_cancel = ttk.Button(btn_frame, text=_("Hủy"), command=_cancel, width=10)
+    btn_cancel.bind("<Return>", _cancel)
     btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
     
     dlg.grab_set()
     parent.update_idletasks()
     
     parent.wait_variable(var)
-    if dim:
-        dim.destroy()
     dlg.destroy()
     return result[0]
 
@@ -153,13 +151,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
             """Show a properties dialog for a file or folder."""
             w, h = 400, 380
-            dim = tk.Frame(top, bg="gray")
-            dim.place(relx=0, rely=0, relwidth=1, relheight=1)
-            
+            # Removed dim overlay to see background
             dlg = tk.Frame(top, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
             dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=w, height=h)
             
-            dim.lift()
             dlg.lift()
 
             # Title bar
@@ -212,7 +207,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 try: dlg.grab_release()
                 except: pass
                 dlg.destroy()
-                dim.destroy()
             
             btn_frame = tk.Frame(dlg, bg="#F0F0F0")
             btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
