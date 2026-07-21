@@ -160,7 +160,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             dlg.configure(bg="#F0F0F0")
             dlg.resizable(False, False)
 
-            w, h = 400, 340
+            w, h = 400, 380
             try:
                 import pygame
                 pygame_hwnd = pygame.display.get_wm_info().get("window")
