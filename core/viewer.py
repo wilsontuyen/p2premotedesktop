@@ -111,7 +111,7 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
                         continue
-                    elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result"):
+                    elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result", "batch_start", "file_start", "file_chunk", "file_end", "batch_end"):
                         global file_manager_callback
                         if file_manager_callback:
                             file_manager_callback(event)

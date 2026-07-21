@@ -747,6 +747,21 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 success = event.get("success")
                 if not success:
                     messagebox.showerror(_("Lỗi"), event.get("error", _("Lỗi lưu tệp từ xa")), parent=top)
+            elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end"):
+                try:
+                    from core.clipboard_agent import clipboard_sync_manager as cm
+                    if cm:
+                        cm.process_clipboard_event(event)
+                except Exception:
+                    pass
+            elif evt_type == "batch_end":
+                try:
+                    from core.clipboard_agent import clipboard_sync_manager as cm
+                    if cm:
+                        cm.process_clipboard_event(event)
+                except Exception:
+                    pass
+                refresh_local()
 
         import queue
         fm_event_queue = queue.Queue()

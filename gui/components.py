@@ -278,6 +278,7 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
+        self.withdraw()
         self.attributes("-alpha", 0.0)
         self.overrideredirect(True)
         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
