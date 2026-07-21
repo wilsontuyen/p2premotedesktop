@@ -157,14 +157,44 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             dlg = tk.Toplevel(top)
             dlg.title(_("Thuộc tính"))
             dlg.transient(top)
-            dlg.attributes('-topmost', True)
             dlg.configure(bg="#F0F0F0")
             dlg.resizable(False, False)
 
             w, h = 400, 340
-            px, py_ = top.winfo_rootx(), top.winfo_rooty()
-            pw, ph = top.winfo_width(), top.winfo_height()
-            dlg.geometry(f"{w}x{h}+{px + (pw-w)//2}+{py_ + (ph-h)//2}")
+            try:
+                import pygame
+                pygame_hwnd = pygame.display.get_wm_info().get("window")
+            except:
+                pygame_hwnd = None
+
+            if pygame_hwnd and host_w >= 1920 and host_h >= 1080:
+                dlg.update_idletasks()
+                dlg_hwnd = int(dlg.frame(), 16)
+                import ctypes
+                from ctypes import wintypes
+                try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                except: pass
+                style = ctypes.windll.user32.GetWindowLongW(dlg_hwnd, -16)
+                style = (style | 0x40000000) & ~0x80000000
+                ctypes.windll.user32.SetWindowLongW(dlg_hwnd, -16, style)
+                ctypes.windll.user32.SetParent(dlg_hwnd, pygame_hwnd)
+                
+                px, py_ = top.winfo_pointerx(), top.winfo_pointery()
+                pt = wintypes.POINT(px, py_)
+                ctypes.windll.user32.ScreenToClient(pygame_hwnd, ctypes.byref(pt))
+                
+                rect = wintypes.RECT()
+                ctypes.windll.user32.GetClientRect(pygame_hwnd, ctypes.byref(rect))
+                py_w = rect.right - rect.left
+                py_h = rect.bottom - rect.top
+                
+                x = max(0, min(pt.x - w//2, py_w - w))
+                y = max(0, min(pt.y - h//2, py_h - h))
+                ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, w, h, 0x0004)
+            else:
+                dlg.attributes('-topmost', True)
+                px, py_ = top.winfo_pointerx(), top.winfo_pointery()
+                dlg.geometry(f"{w}x{h}+{px - w//2}+{py_ - h//2}")
 
             # Title bar
             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
@@ -216,7 +246,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
             ttk.Button(btn_frame, text=_("Đóng"), command=dlg.destroy, width=12).pack(side=tk.RIGHT)
 
-            dlg.grab_set()
+            try: dlg.grab_set()
+            except: pass
+            
             return dlg, size_label
 
         def refresh_local():
