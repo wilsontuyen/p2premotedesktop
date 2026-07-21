@@ -13,68 +13,16 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     from tkinter import ttk
     var = tk.StringVar(parent, value="")
     result = [None]
-    import sys
-    use_dim = (sys.platform == "win32")
+    # We use a Frame overlay to block clicks outside the dialog and keep it inside the File Manager
+    dim = tk.Frame(parent, bg="gray")
+    dim.place(relx=0, rely=0, relwidth=1, relheight=1)
     
-    if use_dim:
-        dim = tk.Toplevel(parent)
-        dim.attributes("-alpha", 0.4)
-        dim.attributes("-topmost", True)
-        dim.configure(bg="black")
-        dim.overrideredirect(True)
-        dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+0+0")
-        dim.update_idletasks()
-        try:
-            import ctypes
-            parent_hwnd = int(parent.frame(), 16)
-            dim_hwnd = int(dim.frame(), 16)
-            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-            except: pass
-            style = ctypes.windll.user32.GetWindowLongW(dim_hwnd, -16)
-            style = (style | 0x40000000) & ~0x80000000
-            ctypes.windll.user32.SetWindowLongW(dim_hwnd, -16, style)
-            ctypes.windll.user32.SetParent(dim_hwnd, parent_hwnd)
-            ctypes.windll.user32.SetWindowPos(dim_hwnd, 0, 0, 0, parent.winfo_width(), parent.winfo_height(), 0x0004)
-        except: pass
-    else:
-        dim = None
+    dlg = tk.Frame(parent, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+    dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=400, height=150)
     
-    if sys.platform != "win32":
-        try:
-            dlg = tk.Toplevel(parent, use=str(parent.winfo_id()))
-        except:
-            dlg = tk.Toplevel(parent)
-    else:
-        dlg = tk.Toplevel(parent)
-        
-    dlg.title(title)
-    dlg.transient(parent)
-    dlg.attributes("-topmost", True)
-    dlg.configure(bg="#F0F0F0")
-    dlg.resizable(False, False)
-    
-    if sys.platform == "win32":
-        dlg.geometry(f"400x150")
-        dlg.update_idletasks()
-        try:
-            import ctypes
-            parent_hwnd = int(parent.frame(), 16)
-            dlg_hwnd = int(dlg.frame(), 16)
-            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-            except: pass
-            style = ctypes.windll.user32.GetWindowLongW(dlg_hwnd, -16)
-            style = (style | 0x40000000) & ~0x80000000
-            ctypes.windll.user32.SetWindowLongW(dlg_hwnd, -16, style)
-            ctypes.windll.user32.SetParent(dlg_hwnd, parent_hwnd)
-            
-            x = (parent.winfo_width() - 400) // 2
-            y = (parent.winfo_height() - 150) // 2
-            ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, 400, 150, 0x0004)
-        except: pass
-    else:
-        x = (parent.winfo_width() - 400) // 2
-        y = (parent.winfo_height() - 150) // 2
-        dlg.geometry(f"400x150+{x}+{y}")
+    # Lift to ensure they are on top of other widgets
+    dim.lift()
+    dlg.lift()
     
     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
     lbl_title.pack(pady=(10, 5), padx=20, anchor=tk.W)
@@ -102,9 +50,6 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
         
     entry.bind("<Return>", _ok)
     entry.bind("<Escape>", _cancel)
-    dlg.bind("<Return>", _ok)
-    dlg.bind("<Escape>", _cancel)
-    dlg.protocol("WM_DELETE_WINDOW", _cancel)
     
     btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10)
     btn_ok.pack(side=tk.LEFT, padx=(0, 5))
@@ -207,44 +152,15 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
             """Show a properties dialog for a file or folder."""
-            if sys.platform != "win32":
-                try:
-                    dlg = tk.Toplevel(top, use=str(top.winfo_id()))
-                except:
-                    dlg = tk.Toplevel(top)
-            else:
-                dlg = tk.Toplevel(top)
-                
-            dlg.title(_("Thuộc tính"))
-            dlg.transient(top)
-            dlg.configure(bg="#F0F0F0")
-            dlg.resizable(False, False)
-
             w, h = 400, 380
-            import sys
-            if sys.platform == "win32":
-                dlg.geometry(f"{w}x{h}")
-                dlg.update_idletasks()
-                dlg_hwnd = int(dlg.frame(), 16)
-                import ctypes
-                try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-                except: pass
-                style = ctypes.windll.user32.GetWindowLongW(dlg_hwnd, -16)
-                style = (style | 0x40000000) & ~0x80000000
-                ctypes.windll.user32.SetWindowLongW(dlg_hwnd, -16, style)
-                
-                top.update_idletasks()
-                top_hwnd = int(top.frame(), 16)
-                ctypes.windll.user32.SetParent(dlg_hwnd, top_hwnd)
-                
-                x = max(0, (top.winfo_width() - w) // 2)
-                y = max(0, (top.winfo_height() - h) // 2)
-                ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, w, h, 0x0004)
-            else:
-                dlg.attributes('-topmost', True)
-                top.update_idletasks()
-                pw, ph = top.winfo_width(), top.winfo_height()
-                dlg.geometry(f"{w}x{h}+{(pw - w)//2}+{(ph - h)//2}")
+            dim = tk.Frame(top, bg="gray")
+            dim.place(relx=0, rely=0, relwidth=1, relheight=1)
+            
+            dlg = tk.Frame(top, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+            dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=w, height=h)
+            
+            dim.lift()
+            dlg.lift()
 
             # Title bar
             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
@@ -292,9 +208,15 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 add_row(_("Sửa đổi:"), modified_time)
 
             # Close button
+            def _close_props():
+                try: dlg.grab_release()
+                except: pass
+                dlg.destroy()
+                dim.destroy()
+            
             btn_frame = tk.Frame(dlg, bg="#F0F0F0")
             btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
-            ttk.Button(btn_frame, text=_("Đóng"), command=dlg.destroy, width=12).pack(side=tk.RIGHT)
+            ttk.Button(btn_frame, text=_("Đóng"), command=_close_props, width=12).pack(side=tk.RIGHT)
 
             try: dlg.grab_set()
             except: pass
