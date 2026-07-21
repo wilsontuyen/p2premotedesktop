@@ -529,8 +529,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     if action == "view":
                         from datetime import datetime
                         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                        with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                            f.write(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}\n")
+                        print(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}")
                         if is_dir:
                             messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                         else:
@@ -538,12 +537,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             _base, ext = os.path.splitext(name.lower())
                             if ext in text_exts:
                                 try:
-                                    with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                        f.write(f"{ts} [Local] Opening {full_path}...\n")
+                                    print(f"{ts} [Local] Opening {full_path}...")
                                     with open(full_path, "r", encoding="utf-8") as f:
                                         file_content = f.read(5 * 1024 * 1024)
-                                    with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                        f.write(f"{ts} [Local] Read successful, creating window...\n")
+                                    print(f"{ts} [Local] Read successful, creating window...")
                                     np_win = tk.Toplevel(top)
                                     np_win.title(_("Soạn thảo (Local) - {name}").format(name=name))
                                     np_win.geometry("800x600")
@@ -567,12 +564,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                                 messagebox.showerror(_("Lỗi"), _("Không thể lưu: {e}").format(e=e), parent=win)
                                         return save_file
                                     tk.Button(np_win, text=_("Lưu"), command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
-                                    with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                        f.write(f"{ts} [Local] Window created successfully.\n")
+                                    print(f"{ts} [Local] Window created successfully.")
                                 except Exception as ex:
                                     import traceback
-                                    with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                                        f.write(f"{ts} [Local] CRASH during view: {traceback.format_exc()}\n")
+                                    print(f"{ts} [Local] CRASH during view: {traceback.format_exc()}")
                                     messagebox.showerror(_("Lỗi"), str(ex), parent=top)
                             else:
                                 try:
@@ -596,8 +591,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 import traceback
                 from datetime import datetime
                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                    f.write(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}\n")
+                print(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}")
                 messagebox.showerror(_("Lỗi"), str(outer_e), parent=top)
         def show_local_menu(event):
             local_menu.delete(0, 'end')
@@ -761,7 +755,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         cm.process_clipboard_event(event)
                 except Exception:
                     pass
-                top.after(500, refresh_local)
+                top.after(500, lambda: fm_event_queue.put({"type": "trigger_local_refresh"}))
 
         import queue
         fm_event_queue = queue.Queue()
@@ -776,8 +770,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             on_remote_dir_result(evt)
                     except Exception as e:
                         import traceback
-                        with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f:
-                            f.write(f"Error in process_fm_queue: {e}\n{traceback.format_exc()}\n")
+                        print(f"Error in process_fm_queue: {e}\n{traceback.format_exc()}\n")
             except queue.Empty:
                 pass
             if top.winfo_exists():
@@ -922,6 +915,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
                 remote_menu.add_separator()
                 remote_menu.add_command(label=_("Làm mới"), command=lambda: request_remote_dir(remote_entry.get()))
+                remote_tree.focus_set()
                 try:
                     remote_menu.tk_popup(event.x_root, event.y_root)
                 finally:
@@ -943,7 +937,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             remote_menu.add_command(label=_("Xóa"), command=lambda: remote_action("delete"))
             remote_menu.add_separator()
             remote_menu.add_command(label=_("Thuộc tính"), command=lambda: remote_action("properties"))
-
+            
+            remote_tree.focus_set()
             try:
                 remote_menu.tk_popup(event.x_root, event.y_root)
             finally:

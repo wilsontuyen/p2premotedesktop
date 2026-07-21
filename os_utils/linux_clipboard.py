@@ -34,6 +34,9 @@ class ClipboardSyncManager:
     def cancel_active_transfer(self, remote_triggered=False):
         pass
 
+    def process_clipboard_event(self, packet):
+        self.handle_received_packet(packet)
+
     def handle_received_packet(self, packet):
         try:
             ptype = packet.get("type")
@@ -65,6 +68,19 @@ class ClipboardSyncManager:
                 if hasattr(self, 'current_file') and self.current_file:
                     self.current_file.close()
                     self.current_file = None
+                
+                if not getattr(self, 'incoming_transfers', False) and getattr(self, 'active_batch', False) and getattr(self, 'batch_total_size', 0) > 0 and getattr(self, 'batch_received', 0) >= self.batch_total_size:
+                    if hasattr(self, 'active_dialog') and self.active_dialog:
+                        try:
+                            self.active_dialog.after(0, lambda d=self.active_dialog: d.destroy())
+                        except: pass
+                        self.active_dialog = None
+                    try:
+                        import core.viewer
+                        if core.viewer.file_manager_callback:
+                            core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
+                    except: pass
+                    self.active_batch = False
             elif ptype == "batch_end":
                 if hasattr(self, 'active_dialog') and self.active_dialog:
                     try:
@@ -72,6 +88,11 @@ class ClipboardSyncManager:
                     except: pass
                 self.active_dialog = None
                 self._receive_cancelled = False
+                try:
+                    import core.viewer
+                    if core.viewer.file_manager_callback:
+                        core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
+                except: pass
         except Exception as e:
             print(f"[LinuxClipboard] Lỗi xử lý packet {packet.get('type')}: {e}")
         
