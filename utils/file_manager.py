@@ -41,6 +41,9 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     
     dlg = tk.Toplevel(parent)
     dlg.title(title)
+    dlg.transient(parent)
+    dlg.attributes("-topmost", True)
+    dlg.configure(bg="#F0F0F0")
     dlg.resizable(False, False)
     
     if sys.platform == "win32":
@@ -63,8 +66,16 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
         except: pass
     else:
         parent.update_idletasks()
-        x = parent.winfo_rootx() + (parent.winfo_width() - 400) // 2
-        y = parent.winfo_rooty() + (parent.winfo_height() - 150) // 2
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        if px == 0 and py == 0:
+            sw = parent.winfo_screenwidth()
+            sh = parent.winfo_screenheight()
+            x = (sw - 400) // 2
+            y = (sh - 150) // 2
+        else:
+            x = px + (parent.winfo_width() - 400) // 2
+            y = py + (parent.winfo_height() - 150) // 2
         dlg.geometry(f"400x150+{x}+{y}")
     
     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
