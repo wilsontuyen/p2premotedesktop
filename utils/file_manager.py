@@ -533,7 +533,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         if is_dir:
                             messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                         else:
-                            text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
+                            text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', '.desktop', '.yaml', '.yml', '.conf', ''}
                             _base, ext = os.path.splitext(name.lower())
                             if ext in text_exts:
                                 try:
@@ -889,7 +889,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     if is_dir:
                         messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                     else:
-                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', ''}
+                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', '.desktop', '.yaml', '.yml', '.conf', ''}
                         _base, ext = os.path.splitext(name.lower())
                         if ext in text_exts:
                             req = {"type": "request_read_text_file", "path": full_path}
