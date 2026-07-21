@@ -39,7 +39,14 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     else:
         dim = None
     
-    dlg = tk.Toplevel(parent)
+    if sys.platform != "win32":
+        try:
+            dlg = tk.Toplevel(parent, use=str(parent.winfo_id()))
+        except:
+            dlg = tk.Toplevel(parent)
+    else:
+        dlg = tk.Toplevel(parent)
+        
     dlg.title(title)
     dlg.transient(parent)
     dlg.attributes("-topmost", True)
@@ -65,17 +72,8 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
             ctypes.windll.user32.SetWindowPos(dlg_hwnd, 0, x, y, 400, 150, 0x0004)
         except: pass
     else:
-        parent.update_idletasks()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        if px == 0 and py == 0:
-            sw = parent.winfo_screenwidth()
-            sh = parent.winfo_screenheight()
-            x = (sw - 400) // 2
-            y = (sh - 150) // 2
-        else:
-            x = px + (parent.winfo_width() - 400) // 2
-            y = py + (parent.winfo_height() - 150) // 2
+        x = (parent.winfo_width() - 400) // 2
+        y = (parent.winfo_height() - 150) // 2
         dlg.geometry(f"400x150+{x}+{y}")
     
     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
@@ -130,19 +128,23 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         from tkinter import ttk, filedialog, messagebox
         import threading, os, time, base64
 
-        top = tk.Tk()
+        import sys
+        hwnd = host_hwnd
+        if not hwnd:
+            try: hwnd = pygame.display.get_wm_info().get("window")
+            except: pass
+            
+        if hwnd and sys.platform != "win32":
+            try: top = tk.Tk(use=str(hwnd))
+            except: top = tk.Tk()
+        else:
+            top = tk.Tk()
+            
         globals()['fm_top'] = top
         top.attributes('-alpha', 0.0) # Ẩn đi để tránh nháy khi tạo
 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
-
-        hwnd = host_hwnd
-        if not hwnd:
-            try: hwnd = pygame.display.get_wm_info().get("window")
-            except: pass
-        
-        import sys
         if hwnd and sys.platform == "win32":
             import ctypes
             from ctypes import wintypes
@@ -170,9 +172,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
         else:
             top.update_idletasks()
-            sw = top.winfo_screenwidth()
-            sh = top.winfo_screenheight()
-            top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
+            x = max(0, (host_w - 900) // 2)
+            y = max(0, (host_h - 600) // 2)
+            top.geometry(f"900x600+{x}+{y}")
 
         top.attributes('-topmost', True)
         top.attributes('-alpha', 1.0) # Hiện lại sau khi set geometry
@@ -209,7 +211,14 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
             """Show a properties dialog for a file or folder."""
-            dlg = tk.Toplevel(top)
+            if sys.platform != "win32":
+                try:
+                    dlg = tk.Toplevel(top, use=str(top.winfo_id()))
+                except:
+                    dlg = tk.Toplevel(top)
+            else:
+                dlg = tk.Toplevel(top)
+                
             dlg.title(_("Thuộc tính"))
             dlg.transient(top)
             dlg.configure(bg="#F0F0F0")
@@ -238,9 +247,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             else:
                 dlg.attributes('-topmost', True)
                 top.update_idletasks()
-                px, py_ = top.winfo_rootx(), top.winfo_rooty()
                 pw, ph = top.winfo_width(), top.winfo_height()
-                dlg.geometry(f"{w}x{h}+{px + (pw - w)//2}+{py_ + (ph - h)//2}")
+                dlg.geometry(f"{w}x{h}+{(pw - w)//2}+{(ph - h)//2}")
 
             # Title bar
             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
