@@ -104,6 +104,8 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
         
     entry.bind("<Return>", _ok)
     entry.bind("<Escape>", _cancel)
+    dlg.bind("<Return>", _ok)
+    dlg.bind("<Escape>", _cancel)
     dlg.protocol("WM_DELETE_WINDOW", _cancel)
     
     btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10)
@@ -135,7 +137,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
 
-        hwnd = pygame.display.get_wm_info().get("window")
+        hwnd = host_hwnd
+        if not hwnd:
+            try: hwnd = pygame.display.get_wm_info().get("window")
+            except: pass
+        
         import sys
         if hwnd and sys.platform == "win32":
             import ctypes
