@@ -1174,15 +1174,28 @@ class HostMixin:
                 import os
                 items = []
                 if os.path.isdir(path):
-                    for item in os.listdir(path):
+                    try:
+                        dir_items = os.listdir(path)
+                    except Exception:
+                        dir_items = []
+                    for item in dir_items:
                         full = os.path.join(path, item)
-                        is_dir = os.path.isdir(full)
-                        size = 0 if is_dir else os.path.getsize(full)
+                        try:
+                            is_dir = os.path.isdir(full)
+                            size = 0 if is_dir else os.path.getsize(full)
+                        except Exception:
+                            is_dir = False
+                            size = 0
                         items.append({"name": item, "is_dir": is_dir, "size": size})
                 res = {"type": "list_dir_result", "path": path, "items": items}
                 send_msg(conn, json.dumps(res).encode('utf-8'), password)
             except Exception as e:
                 print(f"[Host] list dir error: {e}")
+                res = {"type": "list_dir_result", "path": path, "items": []}
+                try:
+                    send_msg(conn, json.dumps(res).encode('utf-8'), password)
+                except Exception:
+                    pass
                 
         elif ev_type == 'request_file_download':
             path = event.get('path')

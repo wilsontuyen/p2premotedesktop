@@ -176,24 +176,29 @@ def get_app_data_dir():
 
 def get_computers_xml_path():
     import os, sys, shutil
+    
+    user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
+    if os.path.exists(user_path):
+        return user_path
+        
     if sys.platform == "win32":
         installed_path = r"C:\Apps\P2P\saved_computers.xml"
     else:
         installed_path = "/opt/p2p_remote/config/saved_computers.xml"
         
     if os.path.exists(installed_path):
-        if os.access(installed_path, os.W_OK):
+        try:
+            with open(installed_path, 'a'):
+                pass
             return installed_path
-        else:
-            user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
-            if not os.path.exists(user_path):
-                try:
-                    shutil.copy2(installed_path, user_path)
-                except Exception:
-                    pass
+        except Exception:
+            try:
+                shutil.copy2(installed_path, user_path)
+            except Exception:
+                pass
             return user_path
             
-    return os.path.join(get_app_data_dir(), "saved_computers.xml")
+    return user_path
 
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 
