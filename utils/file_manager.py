@@ -568,12 +568,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         if is_dir:
                             messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                         else:
-                            text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', '.desktop', '.yaml', '.yml', '.conf', ''}
-                            _base, ext = os.path.splitext(name.lower())
-                            if ext in text_exts:
+                            if True:
                                 try:
                                     print(f"{ts} [Local] Opening {full_path}...")
-                                    with open(full_path, "r", encoding="utf-8") as f:
+                                    with open(full_path, "r", encoding="utf-8", errors="replace") as f:
                                         file_content = f.read(5 * 1024 * 1024)
                                     print(f"{ts} [Local] Read successful, creating window...")
                                     np_win = tk.Toplevel(top)
@@ -606,13 +604,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                     import traceback
                                     print(f"{ts} [Local] CRASH during view: {traceback.format_exc()}")
                                     messagebox.showerror(_("Lỗi"), str(ex), parent=top)
-                            else:
-                                try:
-                                    import sys, subprocess
-                                    if sys.platform == "win32": os.startfile(full_path)
-                                    else: subprocess.call(["xdg-open", full_path])
-                                except Exception as e:
-                                    messagebox.showerror(_("Lỗi"), str(e), parent=top)
                     elif action == "rename":
                         
                         new_name = inline_ask_string(top, _("Đổi tên"), _("Nhập tên mới cho '{name}':").format(name=name), initialvalue=name)
@@ -924,13 +915,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     if is_dir:
                         messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
                     else:
-                        text_exts = {'.txt', '.log', '.md', '.py', '.json', '.xml', '.ini', '.cfg', '.csv', '.html', '.css', '.js', '.kt', '.java', '.c', '.cpp', '.h', '.bat', '.sh', '.desktop', '.yaml', '.yml', '.conf', ''}
-                        _base, ext = os.path.splitext(name.lower())
-                        if ext in text_exts:
-                            req = {"type": "request_read_text_file", "path": full_path}
-                        else:
-                            req = {"type": "request_open_file", "path": full_path}
-                            messagebox.showinfo(_("Thông báo"), _("Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.").format(ext=ext), parent=top)
+                        req = {"type": "request_read_text_file", "path": full_path}
                         try:
                             print(f"{ts} [Remote] Sending file read request: {req}")
                             send_event(req)
