@@ -175,13 +175,24 @@ def get_app_data_dir():
             return os.path.dirname(os.path.abspath(__file__))
 
 def get_computers_xml_path():
-    import os, sys
+    import os, sys, shutil
     if sys.platform == "win32":
         installed_path = r"C:\Apps\P2P\saved_computers.xml"
     else:
         installed_path = "/opt/p2p_remote/config/saved_computers.xml"
+        
     if os.path.exists(installed_path):
-        return installed_path
+        if os.access(installed_path, os.W_OK):
+            return installed_path
+        else:
+            user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
+            if not os.path.exists(user_path):
+                try:
+                    shutil.copy2(installed_path, user_path)
+                except Exception:
+                    pass
+            return user_path
+            
     return os.path.join(get_app_data_dir(), "saved_computers.xml")
 
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
@@ -2243,6 +2254,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
+            if hasattr(self, 'show_custom_error'):
+                self.after(0, lambda err=str(e): self.show_custom_error(_("Lỗi lưu file"), _("Không thể lưu danh sách máy tính. Vui lòng kiểm tra quyền ghi tệp (Administrator/Root)!\nChi tiết: {err}").format(err=err)))
 
 
     def save_group_states_only(self):

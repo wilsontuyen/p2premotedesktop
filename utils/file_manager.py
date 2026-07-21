@@ -591,7 +591,22 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         remote_nav.pack(fill=tk.X, pady=2)
 
         remote_entry = tk.Entry(remote_nav)
-        remote_entry.insert(0, "/sdcard/" if is_android else "C:\\")
+        
+        try:
+            import core.viewer
+            host_os = getattr(core.viewer, 'client_host_os_release', '10')
+            is_host_win = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in host_os
+        except Exception:
+            is_host_win = True
+            
+        if is_android:
+            default_path = "/sdcard/"
+        elif not is_host_win:
+            default_path = "/"
+        else:
+            default_path = "C:\\"
+            
+        remote_entry.insert(0, default_path)
 
         def request_remote_dir(path):
             # send list_dir request
