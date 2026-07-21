@@ -1242,7 +1242,8 @@ class NetworkMixin:
                             # The saved ID might contain spaces (e.g. "123 456 789 012")
                             if c.get("id", "").replace(" ", "") == partner_id:
                                 if c.get("name"):
-                                    computer_name = c.get("name")
+                                    original_name = computer_name
+                                    computer_name = f"{c.get('name')} | {original_name}" if original_name else c.get("name")
                                 break
                     except Exception:
                         pass
