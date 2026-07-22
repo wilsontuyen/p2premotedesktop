@@ -105,54 +105,21 @@ def _scaled_toplevel_geometry(self, newGeometry=None):
 
 tk.Toplevel.geometry = _scaled_toplevel_geometry
 
+_orig_tk_label = tk.Label
+def _mac_tk_label(master=None, cnf={}, **kw):
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    return _orig_tk_label(master, cnf, **kw)
+
 _orig_tk_entry = tk.Entry
 def _mac_tk_entry(master=None, cnf={}, **kw):
-    if "highlightthickness" not in kw:
-        kw["highlightthickness"] = 1
-    if "highlightbackground" not in kw:
-        kw["highlightbackground"] = "#3A3A4A"
+    kw.pop('bg', None)
+    kw.pop('background', None)
     return _orig_tk_entry(master, cnf, **kw)
 
-_orig_tk_label = tk.Label
-class MacLabel(ttk.Label):
-    def __init__(self, master=None, **kw):
-        self._style_name = f"MacLabel_{id(self)}.TLabel"
-        self._style = ttk.Style()
-        
-        ttk_kw = {}
-        style_kw = {}
-        for k, v in kw.items():
-            if k == 'bg': style_kw['background'] = v
-            elif k == 'fg': style_kw['foreground'] = v
-            elif k == 'font': style_kw['font'] = v
-            elif k in ('bd', 'relief', 'height', 'width'): pass
-            else: ttk_kw[k] = v
-            
-        self._style.configure(self._style_name, **style_kw)
-        ttk_kw['style'] = self._style_name
-        super().__init__(master, **ttk_kw)
-        
-    def config(self, **kw):
-        ttk_kw = {}
-        style_kw = {}
-        for k, v in kw.items():
-            if k == 'bg': style_kw['background'] = v
-            elif k == 'fg': style_kw['foreground'] = v
-            elif k == 'font': style_kw['font'] = v
-            elif k in ('bd', 'relief', 'height', 'width'): pass
-            else: ttk_kw[k] = v
-        if style_kw:
-            self._style.configure(self._style_name, **style_kw)
-        if ttk_kw:
-            super().config(**ttk_kw)
-            
-    def configure(self, **kw):
-        self.config(**kw)
-
-
 if sys.platform == "darwin":
+    tk.Label = _mac_tk_label
     tk.Entry = _mac_tk_entry
-    tk.Label = MacLabel
 
 
 import pygame
