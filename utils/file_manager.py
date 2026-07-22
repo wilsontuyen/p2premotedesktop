@@ -189,7 +189,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         top = tk.Tk()
             
         globals()['fm_top'] = top
-        top.withdraw() # Ẩn đi để tránh nháy khi tạo
+        if sys.platform == "win32":
+            top.attributes('-alpha', 0.0)
+        else:
+            top.withdraw()
 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
@@ -225,7 +228,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
 
         top.attributes('-topmost', True)
-        top.deiconify() # Hiện lại sau khi set geometry
+        if sys.platform == "win32":
+            top.attributes('-alpha', 1.0)
+        else:
+            top.deiconify()
         top.configure(bg="#E5E5E5")
 
         left_frame = tk.Frame(top, bg="#E5E5E5")
@@ -575,15 +581,53 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                         file_content = f.read(5 * 1024 * 1024)
                                     print(f"{ts} [Local] Read successful, creating window...")
                                     np_win = tk.Toplevel(top)
+                                    import sys
+                                    if sys.platform == "win32":
+                                        np_win.attributes('-alpha', 0.0)
+                                    else:
+                                        np_win.withdraw()
                                     np_win.title(_("Soạn thảo (Local) - {name}").format(name=name))
                                     np_win.geometry("800x600")
-                                    np_win.transient(top)
-                                    np_win.attributes('-topmost', True)
-                                    np_win.update_idletasks()
-                                    w, h = 800, 600
-                                    px, py = top.winfo_rootx(), top.winfo_rooty()
-                                    pw, ph = top.winfo_width(), top.winfo_height()
-                                    np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                                    
+                                    import sys
+                                    _np_hwnd = None
+                                    try: 
+                                        import pygame
+                                        _np_hwnd = pygame.display.get_wm_info().get("window")
+                                    except: pass
+                                    
+                                    if _np_hwnd and sys.platform == "win32":
+                                        import ctypes
+                                        from ctypes import wintypes
+                                        np_win.update_idletasks()
+                                        tk_hwnd = int(np_win.frame(), 16)
+                                        try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                                        except: pass
+                                        style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+                                        style = (style | 0x40000000) & ~0x80000000
+                                        ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+                                        ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
+                                        rect = wintypes.RECT()
+                                        ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
+                                        py_w = rect.right - rect.left
+                                        py_h = rect.bottom - rect.top
+                                        x = max(0, (py_w - 800) // 2)
+                                        y = max(0, (py_h - 600) // 2)
+                                        np_win.geometry("800x600")
+                                        np_win.update_idletasks()
+                                        ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
+                                    else:
+                                        np_win.transient(top)
+                                        np_win.attributes('-topmost', True)
+                                        np_win.update_idletasks()
+                                        w, h = 800, 600
+                                        px, py = top.winfo_rootx(), top.winfo_rooty()
+                                        pw, ph = top.winfo_width(), top.winfo_height()
+                                        np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                                    if sys.platform == "win32":
+                                        np_win.attributes('-alpha', 1.0)
+                                    else:
+                                        np_win.deiconify()
                                     np_win.lift()
                                     np_win.focus_force()
                                     text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
@@ -743,15 +787,53 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         path = event.get("path", "")
                         name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
                         np_win = tk.Toplevel(top)
+                        import sys
+                        if sys.platform == "win32":
+                            np_win.attributes('-alpha', 0.0)
+                        else:
+                            np_win.withdraw()
                         np_win.title(_("Soạn thảo (Remote) - {name}").format(name=name))
                         np_win.geometry("800x600")
-                        np_win.transient(top)
-                        np_win.attributes('-topmost', True)
-                        np_win.update_idletasks()
-                        w, h = 800, 600
-                        px, py = top.winfo_rootx(), top.winfo_rooty()
-                        pw, ph = top.winfo_width(), top.winfo_height()
-                        np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                        
+                        import sys
+                        _np_hwnd = None
+                        try: 
+                            import pygame
+                            _np_hwnd = pygame.display.get_wm_info().get("window")
+                        except: pass
+                        
+                        if _np_hwnd and sys.platform == "win32":
+                            import ctypes
+                            from ctypes import wintypes
+                            np_win.update_idletasks()
+                            tk_hwnd = int(np_win.frame(), 16)
+                            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                            except: pass
+                            style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+                            style = (style | 0x40000000) & ~0x80000000
+                            ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+                            ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
+                            py_w = rect.right - rect.left
+                            py_h = rect.bottom - rect.top
+                            x = max(0, (py_w - 800) // 2)
+                            y = max(0, (py_h - 600) // 2)
+                            np_win.geometry("800x600")
+                            np_win.update_idletasks()
+                            ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
+                        else:
+                            np_win.transient(top)
+                            np_win.attributes('-topmost', True)
+                            np_win.update_idletasks()
+                            w, h = 800, 600
+                            px, py = top.winfo_rootx(), top.winfo_rooty()
+                            pw, ph = top.winfo_width(), top.winfo_height()
+                            np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+                        if sys.platform == "win32":
+                            np_win.attributes('-alpha', 1.0)
+                        else:
+                            np_win.deiconify()
                         np_win.lift()
                         np_win.focus_force()
                         text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
