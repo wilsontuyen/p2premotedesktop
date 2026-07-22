@@ -260,7 +260,7 @@ def uninstall_keyboard_hook():
 
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release=""):
-    global client_switching_desktop_countdown
+    global client_switching_desktop_countdown, client_host_computer_name_override
     
     try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
     except: pass
@@ -485,7 +485,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             last_seen_override = None
             
             while client_running:
-                global client_host_computer_name_override
                 if client_host_computer_name_override != last_seen_override:
                     last_seen_override = client_host_computer_name_override
                     if last_seen_override:
@@ -543,7 +542,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.display.init()
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                         
-                        global client_host_computer_name_override
                         comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
                         if comp_to_use:
                             pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_to_use))
@@ -696,7 +694,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
                                 print("[Client] Transfer File Button Clicked.")
                                 hwnd = pygame.display.get_wm_info().get("window")
-                                global client_host_computer_name_override
                                 comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
                                 threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
                             continue
@@ -732,7 +729,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 state['is_recording'] = not state['is_recording']
                                 if state['is_recording']:
                                     print("[Client] Started recording viewer...")
-                                    global client_host_computer_name_override
                                     c_name = client_host_computer_name_override if client_host_computer_name_override else computer_name
                                     c_name = c_name if c_name else "host"
                                     # Replace invalid chars from computer name
