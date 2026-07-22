@@ -128,7 +128,7 @@ class MacLabel(ttk.Label):
 
         for k, v in all_kw.items():
             if k in ('bg', 'background'):
-                style_kw['background'] = v
+                pass  # Ignore bg on macOS to keep label transparent
             elif k in ('fg', 'foreground'):
                 style_kw['foreground'] = v
             elif k == 'font':
@@ -153,7 +153,7 @@ class MacLabel(ttk.Label):
 
         for k, v in all_kw.items():
             if k in ('bg', 'background'):
-                style_kw['background'] = v
+                pass  # Ignore bg on macOS to keep label transparent
             elif k in ('fg', 'foreground'):
                 style_kw['foreground'] = v
             elif k == 'font':
@@ -181,8 +181,20 @@ class MacLabel(ttk.Label):
             return ttk.Style().lookup(self._style_name, key if key not in ('bg', 'fg') else {'bg': 'background', 'fg': 'foreground'}[key])
         return super().__getitem__(key)
 
+_orig_tk_entry = tk.Entry
+def _mac_tk_entry(master=None, cnf={}, **kw):
+    # macOS native Entries ignore bg but respect fg. 
+    # Strip colors to let macOS handle native contrast (black on light, white on dark).
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    kw.pop('fg', None)
+    kw.pop('foreground', None)
+    kw.pop('insertbackground', None)
+    return _orig_tk_entry(master, cnf, **kw)
+
 if sys.platform == "darwin":
     tk.Label = MacLabel
+    tk.Entry = _mac_tk_entry
 
 
 import pygame
