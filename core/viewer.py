@@ -43,6 +43,7 @@ client_is_locked = False
 client_switching_desktop_countdown = 0
 client_host_resolution = None
 client_host_did_shutdown = False
+client_host_computer_name_override = None
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
@@ -112,6 +113,17 @@ def client_receiver_thread(sock, password):
                         client_pending_bbox = event.get("bbox")
                         continue
                     elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result", "batch_start", "file_start", "file_chunk", "file_end", "batch_end"):
+                        if evt_type == "read_text_file_result" and event.get("path") == "/sys/block/mmcblk0/device/serial":
+                            if event.get("success"):
+                                serial = event.get("content", "").strip()
+                                if serial.startswith("0x"):
+                                    serial = serial[2:]
+                                if serial:
+                                    comp = f"MC-Android {serial}"
+                                    global client_host_computer_name_override
+                                    client_host_computer_name_override = comp
+                            continue
+                            
                         global file_manager_callback
                         if file_manager_callback:
                             file_manager_callback(event)
@@ -454,6 +466,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             if hwnd:
                 install_keyboard_hook(hwnd, send_event)
                 
+            if is_android:
+                send_event({"type": "request_read_text_file", "path": "/sys/block/mmcblk0/device/serial"})
+                
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
             
@@ -467,7 +482,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             drag_start_time = 0
             drag_path = []
             
+            last_seen_override = None
+            
             while client_running:
+                global client_host_computer_name_override
+                if client_host_computer_name_override != last_seen_override:
+                    last_seen_override = client_host_computer_name_override
+                    if last_seen_override:
+                        pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=last_seen_override))
+
                 frame_counter += 1
                 # Check for blink signal file periodically
                 if blink_file and frame_counter % 15 == 0:
@@ -520,8 +543,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.display.init()
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                         
-                        if computer_name:
-                            pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=computer_name))
+                        global client_host_computer_name_override
+                        comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
+                        if comp_to_use:
+                            pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_to_use))
                         else:
                             pygame.display.set_caption(_("P2P Remote Desktop Viewer"))
                         try:
@@ -671,7 +696,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
                                 print("[Client] Transfer File Button Clicked.")
                                 hwnd = pygame.display.get_wm_info().get("window")
-                                threading.Thread(target=fm.open_transfer_window, args=(computer_name, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
+                                global client_host_computer_name_override
+                                comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
+                                threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
                             continue
                         if show_buttons and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -705,7 +732,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 state['is_recording'] = not state['is_recording']
                                 if state['is_recording']:
                                     print("[Client] Started recording viewer...")
-                                    c_name = computer_name if computer_name else "host"
+                                    global client_host_computer_name_override
+                                    c_name = client_host_computer_name_override if client_host_computer_name_override else computer_name
+                                    c_name = c_name if c_name else "host"
                                     # Replace invalid chars from computer name
                                     c_name = "".join([c if c.isalnum() else "_" for c in c_name])
                                     filename = f"{c_name}_{_datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.mp4"

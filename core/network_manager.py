@@ -111,6 +111,27 @@ class NetworkMixin:
     def _lan_beacon_sender(self):
         """Phát UDP broadcast beacon mỗi LAN_BEACON_INTERVAL giây."""
         import platform
+        
+        comp_name = platform.node()
+        try:
+            import os, sys
+            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+            if hasattr(sys, 'getandroidapilevel'):
+                is_android = True
+            if is_android:
+                serial = ""
+                try:
+                    with open("/sys/block/mmcblk0/device/serial", "r") as f:
+                        serial = f.read().strip()
+                        if serial.startswith("0x"):
+                            serial = serial[2:]
+                except Exception:
+                    pass
+                if serial:
+                    comp_name = f"MC-Android {serial}"
+        except Exception:
+            pass
+
         while getattr(self, 'running_server', True):
             if not self.is_headless and getattr(self, "is_service_active", False):
                 # Service is active, GUI app should not broadcast beacon to avoid hijacking LAN connection
@@ -120,7 +141,7 @@ class NetworkMixin:
                 beacon = json.dumps({
                     "sig": LAN_APP_SIGNATURE,
                     "hwid": self.my_id_clean,
-                    "computer_name": platform.node(),
+                    "computer_name": comp_name,
                     "port": BOUND_PORT,
                     "local_ip": getattr(self, 'local_ip', get_local_ip()),
                     "macs": getattr(self, 'my_macs', "")

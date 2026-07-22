@@ -396,25 +396,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except: pass
             
             if is_android:
-                from jnius import autoclass
-                context = None
+                serial = ""
                 try:
-                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                    context = PythonActivity.mActivity
-                except: pass
-                if not context:
-                    try:
-                        PythonService = autoclass('org.kivy.android.PythonService')
-                        context = PythonService.mService
-                    except: pass
-                if not context:
-                    ActivityThread = autoclass('android.app.ActivityThread')
-                    context = ActivityThread.currentApplication().getApplicationContext()
-                
-                SettingsSecure = autoclass('android.provider.Settings$Secure')
-                android_id = SettingsSecure.getString(context.getContentResolver(), SettingsSecure.ANDROID_ID)
-                if android_id:
-                    title_text += f" - Android ID: {android_id}"
+                    with open("/sys/block/mmcblk0/device/serial", "r") as f:
+                        serial = f.read().strip()
+                        if serial.startswith("0x"):
+                            serial = serial[2:]
+                except Exception:
+                    pass
+                if serial:
+                    title_text += f" - MC-Android {serial}"
         except Exception:
             pass
         self.title(title_text)
