@@ -1,5 +1,5 @@
 import sys
-APP_FONT_NAME = APP_FONT_NAME if sys.platform == "win32" else "Helvetica"
+APP_FONT_NAME = "Segoe UI" if sys.platform == "win32" else "Helvetica"
 
 import traceback
 import os
@@ -64,7 +64,8 @@ import random
 import subprocess
 import base64
 import ctypes
-from ctypes import wintypes
+if sys.platform == "win32":
+    from ctypes import wintypes
 import hashlib
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 import urllib.request
@@ -105,21 +106,8 @@ def _scaled_toplevel_geometry(self, newGeometry=None):
 
 tk.Toplevel.geometry = _scaled_toplevel_geometry
 
-_orig_tk_label = tk.Label
-def _mac_tk_label(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    return _orig_tk_label(master, cnf, **kw)
-
-_orig_tk_entry = tk.Entry
-def _mac_tk_entry(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    return _orig_tk_entry(master, cnf, **kw)
-
-if sys.platform == "darwin":
-    tk.Label = _mac_tk_label
-    tk.Entry = _mac_tk_entry
+# macOS Tkinter compatibility: no monkey-patching needed
+# Previously stripped bg from Labels/Entries which made text invisible
 
 
 import pygame
@@ -227,14 +215,15 @@ def get_computers_xml_path():
 is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 
 # Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
-try:
-    import ctypes
-    ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
-except:
+if sys.platform == "win32":
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
     except:
-        pass
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except:
+            pass
 
 from utils.logger import get_log_filepath, log_file_transfer, log_debug, log_activity
 

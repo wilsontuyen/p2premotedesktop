@@ -195,11 +195,11 @@ def change_app_theme(app):
             i += 1
             
     # Launch new instance with 2 seconds delay via internal argument
-    flags = 0
+    popen_kwargs = {}
     if sys.platform == "win32":
-        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        popen_kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         
-    subprocess.Popen([sys.executable] + clean_args + ["--delay-startup", "2.0"], creationflags=flags)
+    subprocess.Popen([sys.executable] + clean_args + ["--delay-startup", "2.0"], **popen_kwargs)
         
     # Close current instance gracefully
     try:

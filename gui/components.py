@@ -3,6 +3,7 @@ from tkinter import ttk
 import os
 import time
 import sys
+_DIALOG_FONT = "Segoe UI" if sys.platform == "win32" else "Helvetica"
 from utils.logger import log_debug
 from core.i18n import _
 
@@ -95,13 +96,13 @@ class ClassicCopyDialog(tk.Toplevel):
         
         lbl_title = tk.Label(
             self, text="There is already a file with the same name in this location.",
-            font=("Segoe UI", 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
+            font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
         )
         lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
         
         lbl_sub = tk.Label(
             self, text="Click the file you want to keep",
-            font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w"
+            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
         )
         lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
         
@@ -178,16 +179,16 @@ class ClassicCopyDialog(tk.Toplevel):
         link1 = tk.Frame(self, bg="#FFFFFF")
         link1.pack(fill=tk.X, padx=24, pady=5)
         
-        lbl_arrow1 = tk.Label(link1, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow1 = tk.Label(link1, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
         lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
         
         right_content1 = tk.Frame(link1, bg="#FFFFFF")
         right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=("Segoe UI", 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title1.pack(fill=tk.X)
         
-        lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         lbl_desc1.pack(fill=tk.X, pady=(0, 5))
         
         info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
@@ -200,10 +201,10 @@ class ClassicCopyDialog(tk.Toplevel):
         info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
         info_text1.pack(side=tk.LEFT, fill=tk.X)
         
-        tk.Label(info_text1, text=filename, font=("Segoe UI", 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         
         setup_command_link(link1, "replace")
         
@@ -211,16 +212,16 @@ class ClassicCopyDialog(tk.Toplevel):
         link2 = tk.Frame(self, bg="#FFFFFF")
         link2.pack(fill=tk.X, padx=24, pady=5)
         
-        lbl_arrow2 = tk.Label(link2, text="→", font=("Segoe UI", 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+        lbl_arrow2 = tk.Label(link2, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
         lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
         
         right_content2 = tk.Frame(link2, bg="#FFFFFF")
         right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        lbl_title2 = tk.Label(right_content2, text="Don't copy", font=("Segoe UI", 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title2 = tk.Label(right_content2, text="Don't copy", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title2.pack(fill=tk.X)
         
-        lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         lbl_desc2.pack(fill=tk.X, pady=(0, 5))
         
         info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
@@ -233,10 +234,10 @@ class ClassicCopyDialog(tk.Toplevel):
         info_text2 = tk.Frame(info_frame2, bg="#FFFFFF")
         info_text2.pack(side=tk.LEFT, fill=tk.X)
         
-        tk.Label(info_text2, text=filename, font=("Segoe UI", 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         
         setup_command_link(link2, "skip")
         
@@ -250,13 +251,13 @@ class ClassicCopyDialog(tk.Toplevel):
         self.var_all = tk.BooleanVar()
         if has_multiple:
             chk = tk.Checkbutton(
-                bottom_bar, text="Do this for all conflicts", font=("Segoe UI", 9),
+                bottom_bar, text="Do this for all conflicts", font=(_DIALOG_FONT, 9),
                 variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
             )
             chk.pack(side=tk.LEFT, padx=24, pady=10)
             
         btn_cancel = tk.Button(
-            bottom_bar, text="Cancel", font=("Segoe UI", 9), width=10,
+            bottom_bar, text="Cancel", font=(_DIALOG_FONT, 9), width=10,
             bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
             command=self.on_cancel
         )
@@ -287,7 +288,7 @@ class ProgressDialog(tk.Toplevel):
         self.title_bar = tk.Frame(self, bg=title_bg, height=28)
         self.title_bar.pack(fill=tk.X, side=tk.TOP)
         self.title_bar.pack_propagate(False)
-        self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=("Segoe UI", 9, "bold"))
+        self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
         self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
 
         self.attributes("-topmost", True)
@@ -304,19 +305,19 @@ class ProgressDialog(tk.Toplevel):
         if len(display_name) > 40:
             display_name = display_name[:20] + "..." + display_name[-15:]
             
-        self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_action.pack(fill=tk.X)
         
-        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
         self.prog1.pack(fill=tk.X, pady=(0, 10))
         
-        self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_files.pack(fill=tk.X)
         
-        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=("Segoe UI", 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
@@ -331,7 +332,7 @@ class ProgressDialog(tk.Toplevel):
         
         if self.on_cancel:
             btn_cancel = tk.Button(
-                bottom_frame, text=_("Hủy"), font=("Segoe UI", 9),
+                bottom_frame, text=_("Hủy"), font=(_DIALOG_FONT, 9),
                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
             )
@@ -448,10 +449,10 @@ class ConfirmDialog(tk.Toplevel):
             self.focus_force()
         # Bỏ grab_set() để tránh xung đột Focus & Event routing trên một số hệ thống Windows
         
-        lbl_title = tk.Label(self, text=title.upper(), font=("Segoe UI", 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+        lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
         
-        lbl_msg = tk.Label(self, text=message, font=("Segoe UI", 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
+        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
         
         btn_frame = tk.Frame(self, bg="#1E1E24")
@@ -474,14 +475,14 @@ class ConfirmDialog(tk.Toplevel):
                 self.on_no_cb()
                 
         btn_yes = tk.Button(
-            btn_frame, text=_("Đồng ý (Yes)"), font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Đồng ý (Yes)"), font=(_DIALOG_FONT, 9, "bold"),
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
         )
         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
         btn_no = tk.Button(
-            btn_frame, text=_("Bỏ qua (No)"), font=("Segoe UI", 9, "bold"),
+            btn_frame, text=_("Bỏ qua (No)"), font=(_DIALOG_FONT, 9, "bold"),
             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
         )
@@ -521,7 +522,7 @@ class ToolTip(object):
         self.tw.wm_geometry("+%d+%d" % (x, y))
         label = tk.Label(self.tw, text=self.text, justify='left',
                          background='#ffffe0', relief='solid', borderwidth=1,
-                         font=("Segoe UI", "8", "normal"), padx=2, pady=1)
+                         font=(_DIALOG_FONT, "8", "normal"), padx=2, pady=1)
         label.pack(ipadx=1)
 
     def close(self, event=None):
