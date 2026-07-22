@@ -45,6 +45,8 @@ import mss
 # pyrefly: ignore [missing-import]
 from PIL import Image, ImageDraw, ImageTk
 try:
+    if sys.platform == "darwin":
+        raise Exception("Disabled on macOS to prevent Tkinter runloop crash")
     # pyrefly: ignore [missing-import]
     import pystray
     # pyrefly: ignore [missing-import]
