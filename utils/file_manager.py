@@ -189,7 +189,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         top = tk.Tk()
             
         globals()['fm_top'] = top
-        top.attributes('-alpha', 0.0) # Ẩn đi để tránh nháy khi tạo
+        top.withdraw() # Ẩn đi để tránh nháy khi tạo
 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
@@ -225,7 +225,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
 
         top.attributes('-topmost', True)
-        top.attributes('-alpha', 1.0) # Hiện lại sau khi set geometry
+        top.deiconify() # Hiện lại sau khi set geometry
         top.configure(bg="#E5E5E5")
 
         left_frame = tk.Frame(top, bg="#E5E5E5")
@@ -1457,7 +1457,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         btn_download.config(command=do_download)
 
         def on_close():
-            globals()['fm_is_open'] = False
             try: top.withdraw()
             except: pass
 
@@ -1471,7 +1470,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         local_entry.focus()
         top.mainloop()
     except Exception as ex:
-        globals()['fm_is_open'] = False
         import traceback
         err = traceback.format_exc()
         try:

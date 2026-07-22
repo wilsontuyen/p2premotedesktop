@@ -658,23 +658,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             continue
                         if show_buttons and file_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                                if globals().get('fm_is_open'):
-                                    continue
-                                globals()['fm_is_open'] = True
-                                print("[Client] Transfer File Button Clicked.")
-                                
-                                if globals().get('fm_top') and globals().get('fm_top').winfo_exists():
+                                import utils.file_manager as fm
+                                if hasattr(fm, 'fm_top') and fm.fm_top:
                                     try:
-                                        def restore_fm():
-                                            globals().get('fm_top').deiconify()
-                                            globals().get('fm_top').focus_force()
-                                        globals().get('fm_top').after(0, restore_fm)
+                                        if fm.fm_top.winfo_exists():
+                                            def restore_fm():
+                                                fm.fm_top.deiconify()
+                                                fm.fm_top.focus_force()
+                                            fm.fm_top.after(0, restore_fm)
+                                            continue
                                     except: pass
-                                    continue
 
-                                from utils.file_manager import open_transfer_window
+                                print("[Client] Transfer File Button Clicked.")
                                 hwnd = pygame.display.get_wm_info().get("window")
-                                threading.Thread(target=open_transfer_window, args=(computer_name, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
+                                threading.Thread(target=fm.open_transfer_window, args=(computer_name, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
                             continue
                         if show_buttons and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:

@@ -1361,7 +1361,7 @@ class HostMixin:
             path = event.get('path')
             try:
                 import os
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     content = f.read(5 * 1024 * 1024)
                 res = {"type": "read_text_file_result", "success": True, "content": content, "path": path}
             except Exception as e:
