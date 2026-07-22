@@ -4,7 +4,7 @@ import re
 import datetime
 from pathlib import Path
 
-brain_dir = r"C:\Users\Tuyen\.gemini\antigravity\brain"
+brain_dir = r"C:\Users\Tuyen\.gemini\antigravity-ide\brain"
 output_dir = r"D:\Data\AG\remote_desktop\conversations"
 
 os.makedirs(output_dir, exist_ok=True)

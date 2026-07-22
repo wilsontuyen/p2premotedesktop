@@ -1,0 +1,85 @@
+========== USER ==========
+phần install.iss có thể chọn ngôn ngữ trước khi vào cài đặt không? nếu có thêm phần chọn giữa 2 ngôn ngữ tiếng Việt và tiếng Anh giùm tôi
+
+[Action: grep_search]
+  Query: "Language"
+  SearchPath: "d:\\Data\\AG\\remote_desktop\\install.iss"
+
+[Action: grep_search]
+  Query: ".iss"
+  SearchPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: list_dir]
+  DirectoryPath: "d:\\Data\\AG\\remote_desktop"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\installer.iss"
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Add language selection for English and Vietnamese in Inno Setup installer."
+  EndLine: 24
+  Instruction: "Add Languages section and ShowLanguageDialog option"
+  ReplacementContent: "DisableProgramGroupPage=yes\nShowLanguageDialog=yes\n\n[Languages]\nName: \"english\"; MessagesFile: \"compiler:Default.isl\"\nName: \"vietnamese\"; MessagesFile: \"compiler:Languages\\Vietnamese.isl...
+  StartLine: 23
+  TargetContent: "DisableProgramGroupPage=yes\n\n"
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\installer.iss"
+
+========== MODEL ==========
+Tôi đã thêm tùy chọn chọn ngôn ngữ (tiếng Anh và tiếng Việt) vào file `installer.iss` cho bạn. 
+
+Khi chạy file cài đặt, nó sẽ hiện ra hộp thoại hỏi người dùng muốn sử dụng ngôn ngữ nào (tiếng Anh hay tiếng Việt) trước khi bắt đầu các bước cài đặt tiếp theo.
+
+**Lưu ý nhỏ:** Nếu khi bạn biên dịch (compile) bằng Inno Setup mà gặp lỗi không tìm thấy file `Vietnamese.isl`, điều đó có nghĩa là bản cài đặt Inno Setup của bạn chưa có sẵn ngôn ngữ này. Bạn chỉ cần làm theo các bước sau để thêm vào:
+1. Tải file `Vietnamese.isl` từ kho lưu trữ bản dịch chính thức của Inno Setup trên GitHub (bạn có thể tìm kiếm với từ khóa "Inno Setup Translations").
+<truncated 444 bytes>
+
+========== USER ==========
+build lại giùm tôi
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\install.bat"
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\build_and_deploy.py"
+
+[Action: run_command]
+  CommandLine: "& \"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe\" \"d:\\Data\\AG\\remote_desktop\\installer.iss\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 2000
+
+[Action: run_command]
+  CommandLine: "curl -o \"d:\\Data\\AG\\remote_desktop\\Vietnamese.isl\" https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Vietnamese.isl"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 5000
+
+[Action: view_file]
+  AbsolutePath: "d:\\Data\\AG\\remote_desktop\\Vietnamese.isl"
+
+[Action: replace_file_content]
+  AllowMultiple: false
+  Description: "Update Vietnamese language file path in installer.iss"
+  EndLine: 27
+  Instruction: "Change the Vietnamese messages file path to the local Vietnamese.isl file"
+  ReplacementContent: "[Languages]\nName: \"english\"; MessagesFile: \"compiler:Default.isl\"\nName: \"vietnamese\"; MessagesFile: \"Vietnamese.isl\""
+  StartLine: 25
+  TargetContent: "[Languages]\nName: \"english\"; MessagesFile: \"compiler:Default.isl\"\nName: \"vietnamese\"; MessagesFile: \"compiler:Languages\\Vietnamese.isl\""
+  TargetFile: "d:\\Data\\AG\\remote_desktop\\installer.iss"
+
+[Action: run_command]
+  CommandLine: "& \"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe\" \"d:\\Data\\AG\\remote_desktop\\installer.iss\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: false
+  WaitMsBeforeAsync: 5000
+
+[Action: command_status]
+  CommandId: "d1314d16-a402-46a7-9609-9386b77179ae"
+  WaitDurationSeconds: 30
+
+========== MODEL ==========
+Tôi đã tải file `Vietnamese.isl` trực tiếp từ kho mã nguồn chính thức của Inno Setup và đặt chung thư mục dự án của bạn (`d:\Data\AG\remote_desktop\Vietnamese.isl`), sau đó sửa lại cấu hình trong file `installer.iss` và tiến hành compile thành công. 
+
+Bây giờ bạn đã có file `EasyRemoteDesktop_Installer.exe` mới với tính năng chọn ngôn ngữ Tiếng Anh / Tiếng Việt ngay từ lúc bắt đầu cài đặt. Bạn có thể mở file này lên để kiểm tra thử nhé! Nếu cần thêm gì cứ báo tôi.
+

@@ -37,3 +37,75 @@ Tôi lưu laik các conversation từ trước đến giờ vào D:\Data\AG\remo
   SafeToAutoRun: true
   WaitMsBeforeAsync: 5000
 
+[Action: run_command]
+  CommandLine: "$env:PYTHONIOENCODING=\"utf-8\"; python export_conversations.py"
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 5000
+
+========== MODEL ==========
+Tôi đã viết một đoạn mã nhỏ chạy dưới nền để trích xuất và xuất toàn bộ lịch sử trò chuyện (conversation) từ trước đến nay của bạn. 
+
+Tất cả **101 cuộc hội thoại** đã được lưu vào thư mục `D:\Data\AG\remote_desktop\conversations`. 
+
+**Chi tiết file xuất ra:**
+- Mỗi cuộc hội thoại được lưu thành một file `.txt` riêng biệt.
+- Tên file được đặt theo định dạng: `Năm-Tháng-Ngày_GiờPhútGiây_TiêuĐềNộiDung.txt` để bạn dễ dàng tìm kiếm và tra cứu.
+- Nội dung bên trong được định dạng lại một cách dễ đọc, phân tách rõ ràng giữa yêu cầu của bạn (`========== USER ==========`) và câu trả lời/hành động của tôi (`========== MODEL ==========`).
+
+Bạn có thể mở thư mục đó ra kiểm tra lại nhé! Nếu cần thay đổi định dạng hoặc tên file thì báo lại cho mình.
+
+========== USER ==========
+mặc định thư mục lưu conversation vào D:\Data\AG\remote_desktop\conversations và xóa bên C:\Users\Tuyen\.gemini\antigravity\conversations giùm tôi
+
+========== USER ==========
+The USER performed the following action:
+Show the contents of file d:\Data\AG\remote_desktop\conversations\2026-05-23_034531_Toi_muon_xuat_cac_conversation_tu.txt from lines 1 to 28
+File Path: `file:///d:/Data/AG/remote_desktop/conversations/2026-05-23_034531_Toi_muon_xuat_cac_conversation_tu.txt`
+Total Lines: 34
+Total Bytes: 3907
+Showing lines 1 to 28
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: ================================================================================
+2: CONVERSATION ID: b99e1370-95d2-46ca-9b7a-0d58d44eca4a
+3: 
+4: ================================================================================
+5: [USER] (2026-05-23T03:45:31Z):
+<truncated 3039 bytes>
+
+[Action: run_command]
+  CommandLine: "ls \"C:\\Users\\Tuyen\\.gemini\\antigravity\\conversations\""
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 2000
+
+========== MODEL ==========
+Chào bạn, thư mục `C:\Users\Tuyen\.gemini\antigravity\conversations` chứa các file dữ liệu gốc định dạng nhị phân (`.pb`). Đây là nơi phần mềm Antigravity mà bạn đang dùng lưu trữ để hiển thị lại lịch sử trò chuyện lên giao diện (cột bên trái của phần mềm).
+
+Đường dẫn này được lập trình cố định (hardcoded) bên trong hệ thống lõi của ứng dụng, nên tôi **không thể** tự ý đổi cấu hình đường dẫn mặc định này sang ổ `D:\` được. 
+
+Bên cạnh đó, nếu tôi xóa thư mục bên ổ C đi, toàn bộ lịch sử trò chuyện trên giao diện phần mềm của bạn sẽ **bị mất sạch**, và hệ thống có thể sẽ tự động tạo lại thư mục này hoặc bị lỗi khi lưu cuộc trò chuyện mới.
+
+<truncated 881 bytes>
+
+========== USER ==========
+có
+
+[Action: run_command]
+  CommandLine: "$source = \"C:\\Users\\Tuyen\\.gemini\\antigravity\\conversations\"\n$target = \"D:\\Data\\AG\\remote_desktop\\_internal_data\\conversations\"\n\nif (!(Test-Path $target)) {\n    New-Item -ItemType D...
+  Cwd: "d:\\Data\\AG\\remote_desktop"
+  SafeToAutoRun: true
+  WaitMsBeforeAsync: 5000
+
+========== MODEL ==========
+Tôi đã thực hiện thành công các bước chuyển đổi cho bạn!
+
+Hệ thống đã tự động sao chép toàn bộ dữ liệu ở ổ C và thiết lập xong **Junction** (thư mục liên kết ảo). Tuy nhiên, để thư mục `conversations` trên ổ D của bạn không bị lộn xộn, tôi đã tổ chức lại một chút như sau:
+
+1. Các file văn bản (`.txt`) mà chúng ta xuất ra ban nãy vẫn nằm gọn gàng ở: `D:\Data\AG\remote_desktop\conversations`.
+2. Các file dữ liệu hệ thống (`.pb`) để phần mềm đọc được đưa vào thư mục ẩn: `D:\Data\AG\remote_desktop\_internal_data\conversations`.
+
+Phần mềm Antigravity ở ổ C đã được liên kết trực tiếp vào thư mục `_internal_data` này. Từ giờ trở đi:
+- Bạn **không bị mất** lịch sử trò chuyện trên giao diện phần mềm.
+<truncated 248 bytes>
+

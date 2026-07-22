@@ -198,69 +198,22 @@ def main():
         except Exception:
             log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
 
-    # 6. Deploy to D:\Apps\P2P
-    log("Ensuring all running instances are terminated right before deployment to release file locks...")
-    subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-
-    log(f"Deploying files to {target_dir}...")
-    if not os.path.exists(target_dir):
-        try:
-            os.makedirs(target_dir)
-            log(f"Created target directory {target_dir}")
-        except Exception as e:
-            log(f"Failed to create target directory: {e}")
-            return
-
-    # Copy Nuitka app.dist contents (overwrite existing)
-    log(f"Copying all agent, service and installation files to {target_dir}...")
-    errors = 0
-    for item in os.listdir(app_dist_dir):
-        s = os.path.join(app_dist_dir, item)
-        d = os.path.join(target_dir, item)
-        try:
-            if os.path.isdir(s):
-                if os.path.exists(d):
-                    shutil.rmtree(d)
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-        except Exception as e:
-            log(f"Error copying {item}: {e}")
-            errors += 1
-
-    if errors > 0:
-        log(f"Deployment completed with {errors} errors.")
-    else:
-        log("Deployment completed successfully!")
-
-    # 7. Kill hết mọi instance cũ còn sót lại
-    log("Killing any remaining instances before clean launch...")
-    subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-
-    # 8. Re-enable & Start Scheduled Task (Service sẽ tự spawn --headless agent)
-    log("Re-enabling and starting scheduled task 'EasyRemoteDesktopAgent'...")
-    subprocess.run("schtasks /change /tn \"EasyRemoteDesktopAgent\" /enable", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("schtasks /run /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    # 9. Chờ Service khởi động và hoàn tất bước cleanup
-    log("Waiting for service to initialize and complete cleanup (5s)...")
-    time.sleep(5)
-    
-    # Service will now automatically spawn the GUI Agent (--gui-agent) and Clipboard Agent (--clipboard-agent) 
-    # under the active user's session using CreateProcessAsUser.
-
-    # 10. Start the main application
-    app_exe_path = os.path.join(target_dir, "RemoteDesktopP2P.exe")
-    if os.path.exists(app_exe_path):
-        log(f"Starting application: {app_exe_path}")
-        try:
-            subprocess.Popen([app_exe_path], cwd=target_dir)
-        except Exception as e:
-            log(f"Failed to start application: {e}")
+    # 6. Show Popup Notification
+    try:
+        import ctypes
+        MB_OK = 0x00000000
+        MB_ICONINFORMATION = 0x00000040
+        MB_SERVICE_NOTIFICATION = 0x00200000
+        MB_TOPMOST = 0x00040000
+        ctypes.windll.user32.MessageBoxW(
+            0, 
+            "Đã build xong Easy Remote Desktop! Hãy kiểm tra thư mục dự án.", 
+            "Build Thành Công", 
+            MB_OK | MB_ICONINFORMATION | MB_SERVICE_NOTIFICATION | MB_TOPMOST
+        )
+        log("Shown success popup to user.")
+    except Exception as e:
+        log(f"Failed to show popup: {e}")
 
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
 
