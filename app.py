@@ -389,10 +389,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Window attributes
         title_text = "Easy Remote Desktop"
         try:
-            import os
             is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
             try:
-                import sys
                 if hasattr(sys, 'getandroidapilevel'):
                     is_android = True
             except: pass
