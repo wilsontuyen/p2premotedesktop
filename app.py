@@ -387,7 +387,39 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             clipboard_sync_manager.register_app(self)
         
         # Window attributes
-        self.title("Easy Remote Desktop")
+        title_text = "Easy Remote Desktop"
+        try:
+            import os
+            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+            try:
+                import sys
+                if hasattr(sys, 'getandroidapilevel'):
+                    is_android = True
+            except: pass
+            
+            if is_android:
+                from jnius import autoclass
+                context = None
+                try:
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    context = PythonActivity.mActivity
+                except: pass
+                if not context:
+                    try:
+                        PythonService = autoclass('org.kivy.android.PythonService')
+                        context = PythonService.mService
+                    except: pass
+                if not context:
+                    ActivityThread = autoclass('android.app.ActivityThread')
+                    context = ActivityThread.currentApplication().getApplicationContext()
+                
+                SettingsSecure = autoclass('android.provider.Settings$Secure')
+                android_id = SettingsSecure.getString(context.getContentResolver(), SettingsSecure.ANDROID_ID)
+                if android_id:
+                    title_text += f" - Android ID: {android_id}"
+        except Exception:
+            pass
+        self.title(title_text)
         self.resizable(False, False)
         
         # Shutdown listener for closing client cleanly
