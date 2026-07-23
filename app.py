@@ -984,13 +984,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=(2, 0))
         self.update_fixed_password_indicator()
 
-        # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
-        saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
-
         # Button to Copy both ID & Password at once
         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
-        copy_all_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 8))
+        copy_all_btn.pack(padx=20, fill=tk.X, pady=(15, 8))
+
+        # Nút gọi Danh sách máy tính đã lưu
+        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+        saved_list_btn.pack(padx=20, fill=tk.X, pady=(0, 20))
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
@@ -1031,8 +1031,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, pady=3, cursor="hand2", command=self.show_lan_computers_dialog)
-        lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        lan_btn.pack(padx=20, fill=tk.X, pady=(15, 20))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
@@ -1140,7 +1140,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(490 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
+        min_h = int(430 * scale) # Thu gọn lại chiều cao để khít với nút bấm
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
