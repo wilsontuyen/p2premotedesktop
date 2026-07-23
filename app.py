@@ -109,11 +109,31 @@ tk.Toplevel.geometry = _scaled_toplevel_geometry
 # macOS Tkinter compatibility: tk.Label doesn't render text with custom bg/fg
 # on Aqua theme. Use ttk.Label wrapper that translates classic kwargs to ttk.Style.
 # macOS Tkinter compatibility for Sequoia (macOS 15).
-# ttk widgets are often broken on newer macOS Python builds, so we MUST use standard tk widgets.
-# However, tk widgets with custom 'bg' can obscure text, and custom 'fg' (white) on native light windows makes text invisible.
-# Solution: Monkey-patch tk.Label and tk.Entry to strip custom colors and rely entirely on native macOS contrast.
 _orig_tk_label = tk.Label
+
+import datetime
+def _log_mac(msg):
+    try:
+        with open("mac_ui_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.datetime.now()}] {msg}\n")
+    except:
+        pass
+
 def _mac_tk_label(master=None, cnf={}, **kw):
+    orig_kw = dict(kw)
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    kw['fg'] = 'black'
+    kw['foreground'] = 'black'
+    lbl = _orig_tk_label(master, cnf, **kw)
+    _log_mac(f"Label created: text='{kw.get('text', '')}', orig_kw={orig_kw}, final_kw={kw}")
+    
+    # Store reference to check geometry later
+    if not hasattr(sys, '_mac_labels'):
+        sys._mac_labels = []
+    sys._mac_labels.append(lbl)
+    
+    return lbl
     kw.pop('bg', None)
     kw.pop('background', None)
     kw['fg'] = 'black'
@@ -916,8 +936,21 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         help_menu.add_command(label=_("About"), command=self.show_about_dialog)
         menubar.add_cascade(label=_("Help"), menu=help_menu)
         
-        # Apply menubar to window
         self.config(menu=menubar)
+        
+        if sys.platform == "darwin":
+            self.after(2000, self._dump_mac_ui_geometry)
+
+    def _dump_mac_ui_geometry(self):
+        _log_mac("=== DUMPING GEOMETRY AFTER 2 SECONDS ===")
+        labels = getattr(sys, '_mac_labels', [])
+        _log_mac(f"Total labels tracked: {len(labels)}")
+        for i, lbl in enumerate(labels[:20]):  # just check first 20
+            try:
+                _log_mac(f"Label {i} ['{lbl.cget('text')}']: viewable={lbl.winfo_viewable()}, x={lbl.winfo_x()}, y={lbl.winfo_y()}, w={lbl.winfo_width()}, h={lbl.winfo_height()}, ismapped={lbl.winfo_ismapped()}, fg={lbl.cget('fg')}, bg={lbl.cget('bg')}")
+            except Exception as e:
+                _log_mac(f"Label {i} error: {e}")
+        _log_mac("=== DUMP COMPLETE ===")
 
         # Header Label
         header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color)
