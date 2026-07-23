@@ -111,61 +111,23 @@ tk.Toplevel.geometry = _scaled_toplevel_geometry
 # The app's white text becomes invisible on the light gray frames.
 # Solution: Use ttk widgets and force black text via a shared style.
 
-_style_initialized = False
-def _init_mac_styles():
-    global _style_initialized
-    if not _style_initialized:
-        try:
-            s = ttk.Style()
-            s.configure('Mac.TLabel', foreground='black')
-            s.configure('Mac.TEntry', foreground='black')
-            _style_initialized = True
-        except:
-            pass
+_orig_tk_label = tk.Label
+def _mac_tk_label(master=None, cnf={}, **kw):
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    return _orig_tk_label(master, cnf, **kw)
 
-class MacSafeLabel(ttk.Label):
-    def __init__(self, master=None, cnf={}, **kw):
-        _init_mac_styles()
-        safe_kw = {}
-        for k in ['text', 'textvariable', 'image', 'compound', 'anchor', 'justify', 'width', 'state', 'font']:
-            if k in kw: safe_kw[k] = kw[k]
-            elif cnf and k in cnf: safe_kw[k] = cnf[k]
-        safe_kw['style'] = 'Mac.TLabel'
-        super().__init__(master, **safe_kw)
-        
-    def configure(self, cnf=None, **kw):
-        safe_kw = {}
-        for k in ['text', 'textvariable', 'image', 'compound', 'anchor', 'justify', 'width', 'state', 'font']:
-            if k in kw: safe_kw[k] = kw[k]
-            elif cnf and k in cnf: safe_kw[k] = cnf[k]
-        if safe_kw:
-            super().configure(**safe_kw)
-    config = configure
-    def __setitem__(self, key, value): self.configure({key: value})
-
-class MacSafeEntry(ttk.Entry):
-    def __init__(self, master=None, cnf={}, **kw):
-        _init_mac_styles()
-        safe_kw = {}
-        for k in ['textvariable', 'width', 'state', 'font', 'show', 'justify']:
-            if k in kw: safe_kw[k] = kw[k]
-            elif cnf and k in cnf: safe_kw[k] = cnf[k]
-        safe_kw['style'] = 'Mac.TEntry'
-        super().__init__(master, **safe_kw)
-        
-    def configure(self, cnf=None, **kw):
-        safe_kw = {}
-        for k in ['textvariable', 'width', 'state', 'font', 'show', 'justify']:
-            if k in kw: safe_kw[k] = kw[k]
-            elif cnf and k in cnf: safe_kw[k] = cnf[k]
-        if safe_kw:
-            super().configure(**safe_kw)
-    config = configure
-    def __setitem__(self, key, value): self.configure({key: value})
+_orig_tk_entry = tk.Entry
+def _mac_tk_entry(master=None, cnf={}, **kw):
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    kw['relief'] = tk.SUNKEN
+    kw['bd'] = 2
+    return _orig_tk_entry(master, cnf, **kw)
 
 if sys.platform == "darwin":
-    tk.Label = MacSafeLabel
-    tk.Entry = MacSafeEntry
+    tk.Label = _mac_tk_label
+    tk.Entry = _mac_tk_entry
 
 
 import pygame
