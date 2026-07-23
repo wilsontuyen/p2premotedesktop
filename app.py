@@ -981,12 +981,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # Nhãn hiển thị trạng thái mật khẩu cố định
         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
-        self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=(2, 0))
+        self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
-        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 5))
+        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
 
         # Nút gọi Danh sách máy tính đã lưu
         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
@@ -1032,7 +1032,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
         lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
-        lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(10, 10))
+        lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
