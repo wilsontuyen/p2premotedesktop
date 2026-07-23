@@ -123,8 +123,7 @@ def _mac_tk_label(master=None, cnf={}, **kw):
     orig_kw = dict(kw)
     kw.pop('bg', None)
     kw.pop('background', None)
-    kw['fg'] = 'black'
-    kw['foreground'] = 'black'
+    # Do NOT force fg=black! The app uses a dark theme, so we need the original white/cyan text for contrast.
     lbl = _orig_tk_label(master, cnf, **kw)
     _log_mac(f"Label created: text='{kw.get('text', '')}', orig_kw={orig_kw}, final_kw={kw}")
     
