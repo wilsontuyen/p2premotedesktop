@@ -691,7 +691,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         
         # Setup UI
-        self.setup_ui()
+        try:
+            self.setup_ui()
+        except Exception as e:
+            import traceback
+            try:
+                with open("mac_crash.log", "w", encoding="utf-8") as f:
+                    traceback.print_exc(file=f)
+            except:
+                pass
+            print(f"CRASH IN SETUP_UI: {e}")
         
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
