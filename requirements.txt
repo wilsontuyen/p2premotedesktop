@@ -3,9 +3,9 @@ pygame-ce
 pynput
 pystray
 Pillow
-cryptography==38.0.4
+cryptography
 opencv-python
-numpy==1.21.6
+numpy
 psutil
 pywin32; sys_platform == 'win32'
 nuitka
