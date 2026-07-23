@@ -112,17 +112,12 @@ tk.Toplevel.geometry = _scaled_toplevel_geometry
 # Solution: Use ttk widgets and force black text via a shared style.
 
 _orig_tk_label = tk.Label
-_orig_tk_button = tk.Button
 def _mac_tk_label(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    kw.pop('fg', None)
-    kw.pop('foreground', None)
-    kw['relief'] = tk.FLAT
-    kw['bd'] = 0
-    btn = _orig_tk_button(master, cnf, **kw)
-    btn.bind("<Button-1>", lambda e: "break")
-    return btn
+    kw['bg'] = 'systemTransparent'
+    kw['background'] = 'systemTransparent'
+    kw['fg'] = 'black'
+    kw['foreground'] = 'black'
+    return _orig_tk_label(master, cnf, **kw)
 
 _orig_tk_entry = tk.Entry
 def _mac_tk_entry(master=None, cnf={}, **kw):
