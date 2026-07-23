@@ -1354,14 +1354,34 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def copy_id_and_password(self):
         text = f'ID: {self.my_id_formatted}, mật khẩu: {self.my_password}'
-        self.clipboard_clear()
-        self.clipboard_append(text)
+        import sys
+        if sys.platform == 'darwin':
+            import subprocess
+            try:
+                process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+                process.communicate(text.encode('utf-8'))
+            except Exception:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+        else:
+            self.clipboard_clear()
+            self.clipboard_append(text)
         self.update_status(_("Đã sao chép cả ID & Mật khẩu!"), is_success=True)
 
 
     def copy_to_clipboard(self, text):
-        self.clipboard_clear()
-        self.clipboard_append(text.strip())
+        import sys
+        if sys.platform == 'darwin':
+            import subprocess
+            try:
+                process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+                process.communicate(text.strip().encode('utf-8'))
+            except Exception:
+                self.clipboard_clear()
+                self.clipboard_append(text.strip())
+        else:
+            self.clipboard_clear()
+            self.clipboard_append(text.strip())
         self.update_status(_("Đã sao chép vào bộ nhớ tạm: ") + text.strip(), is_success=True)
 
 

@@ -96,3 +96,13 @@ def send_input_mouse_move(x, y):
         _pynput_mouse.position = (x, y)
     except Exception as e:
         print(f"[MacInput] Mouse move injection failed: {e}")
+
+# IMPORTANT: MacOS HIToolbox requires UI/Input resources to be accessed from the main thread first.
+# By calling _init_pynput() here at the module level (which is evaluated on the main thread 
+# when app.py starts), we prevent crashes (EXC_BAD_INSTRUCTION in TSMGetInputSourceProperty) 
+# that occur when pynput.keyboard.Controller is instantiated for the first time inside the 
+# client_handler_thread (a background thread) when the first remote input event is received.
+try:
+    _init_pynput()
+except Exception as e:
+    print(f"[MacInput] Early initialization failed: {e}")
