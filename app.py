@@ -957,7 +957,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
         self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+        copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_id_btn, _("Sao chép"))
         
@@ -971,11 +971,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+        copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_pass_btn, _("Sao chép"))
         
-        refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, width=3, command=self.refresh_password)
+        refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=self.refresh_password)
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(refresh_btn, _("Đổi mật khẩu"))
 
@@ -1022,11 +1022,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, command=self.click_connect)
+        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
-        self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, width=4, cursor="hand2", command=self.add_current_partner_to_saved)
+        self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
@@ -1140,7 +1140,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(430 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
+        min_h = int(490 * scale) # Tăng chiều cao để hiển thị đủ nút bấm
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
