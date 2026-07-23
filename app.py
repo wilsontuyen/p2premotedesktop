@@ -116,17 +116,19 @@ _orig_tk_label = tk.Label
 def _mac_tk_label(master=None, cnf={}, **kw):
     kw.pop('bg', None)
     kw.pop('background', None)
-    kw.pop('fg', None)
-    kw.pop('foreground', None)
+    kw['fg'] = 'black'
+    kw['foreground'] = 'black'
     return _orig_tk_label(master, cnf, **kw)
 
 _orig_tk_entry = tk.Entry
 def _mac_tk_entry(master=None, cnf={}, **kw):
     kw.pop('bg', None)
     kw.pop('background', None)
-    kw.pop('fg', None)
-    kw.pop('foreground', None)
+    kw['fg'] = 'black'
+    kw['foreground'] = 'black'
     kw.pop('insertbackground', None)
+    kw['relief'] = tk.SUNKEN
+    kw['bd'] = 2
     return _orig_tk_entry(master, cnf, **kw)
 
 if sys.platform == "darwin":
