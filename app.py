@@ -41,6 +41,10 @@ def E(text):
 from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
 
 import socket
+import logging
+
+print("==== RUNNING APP VERSION: MAC_DEBUG_101 ====")
+
 import threading
 import json
 import struct
