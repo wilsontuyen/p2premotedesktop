@@ -1010,7 +1010,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_pass.pack(pady=(5, 5), padx=20, fill=tk.X)
+        self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
         
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
