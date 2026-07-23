@@ -113,33 +113,6 @@ def _scaled_toplevel_geometry(self, newGeometry=None):
 
 tk.Toplevel.geometry = _scaled_toplevel_geometry
 
-# macOS Tkinter compatibility for Sequoia (macOS 15).
-# Frame backgrounds are ignored on some Sequoia builds, rendering as light gray.
-# The app's white text becomes invisible on the light gray frames.
-# Solution: Use ttk widgets and force black text via a shared style.
-
-_orig_tk_label = tk.Label
-def _mac_tk_label(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    kw['fg'] = 'black'
-    kw['foreground'] = 'black'
-    return _orig_tk_label(master, cnf, **kw)
-
-_orig_tk_entry = tk.Entry
-def _mac_tk_entry(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    kw['fg'] = 'black'
-    kw['foreground'] = 'black'
-    kw['relief'] = tk.SUNKEN
-    kw['bd'] = 2
-    return _orig_tk_entry(master, cnf, **kw)
-
-if sys.platform == "darwin":
-    tk.Label = _mac_tk_label
-    tk.Entry = _mac_tk_entry
-
 
 import pygame
 import sys
@@ -705,18 +678,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except:
                 pass
             print(f"CRASH IN SETUP_UI: {e}")
-            
-        if sys.platform == "darwin":
-            try:
-                self.update_idletasks()
-                w = self.winfo_width()
-                h = self.winfo_height()
-                if w > 1 and h > 1:
-                    self.geometry(f"{w+1}x{h+1}")
-                    self.update()
-                    self.geometry(f"{w}x{h}")
-            except:
-                pass
         
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
