@@ -108,61 +108,30 @@ tk.Toplevel.geometry = _scaled_toplevel_geometry
 
 # macOS Tkinter compatibility: tk.Label doesn't render text with custom bg/fg
 # on Aqua theme. Use ttk.Label wrapper that translates classic kwargs to ttk.Style.
-# macOS Tkinter compatibility: avoid dynamic ttk.Style which breaks on Sequoia.
-# Use native ttk widgets and drop incompatible kwargs (bg, fg).
-class SimpleMacLabel(ttk.Label):
-    def __init__(self, master=None, cnf={}, **kw):
-        self._filter_and_apply(master, True, cnf, kw)
-        
-    def configure(self, cnf=None, **kw):
-        self._filter_and_apply(None, False, cnf, kw)
-        
-    config = configure
-    
-    def __setitem__(self, key, value):
-        self.configure({key: value})
-        
-    def _filter_and_apply(self, master, is_init, cnf, kw):
-        all_kw = dict(cnf) if cnf else {}
-        all_kw.update(kw)
-        safe_kw = {}
-        allowed = ('text', 'textvariable', 'image', 'compound', 'anchor', 'justify', 'width', 'state', 'font', 'padding')
-        for k, v in all_kw.items():
-            if k in allowed:
-                safe_kw[k] = v
-        if is_init:
-            super().__init__(master, **safe_kw)
-        elif safe_kw:
-            super().configure(**safe_kw)
+# macOS Tkinter compatibility for Sequoia (macOS 15).
+# ttk widgets are often broken on newer macOS Python builds, so we MUST use standard tk widgets.
+# However, tk widgets with custom 'bg' can obscure text, and custom 'fg' (white) on native light windows makes text invisible.
+# Solution: Monkey-patch tk.Label and tk.Entry to strip custom colors and rely entirely on native macOS contrast.
+_orig_tk_label = tk.Label
+def _mac_tk_label(master=None, cnf={}, **kw):
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    kw.pop('fg', None)
+    kw.pop('foreground', None)
+    return _orig_tk_label(master, cnf, **kw)
 
-class SimpleMacEntry(ttk.Entry):
-    def __init__(self, master=None, cnf={}, **kw):
-        self._filter_and_apply(master, True, cnf, kw)
-        
-    def configure(self, cnf=None, **kw):
-        self._filter_and_apply(None, False, cnf, kw)
-        
-    config = configure
-    
-    def __setitem__(self, key, value):
-        self.configure({key: value})
-        
-    def _filter_and_apply(self, master, is_init, cnf, kw):
-        all_kw = dict(cnf) if cnf else {}
-        all_kw.update(kw)
-        safe_kw = {}
-        allowed = ('textvariable', 'width', 'state', 'font', 'show', 'justify')
-        for k, v in all_kw.items():
-            if k in allowed:
-                safe_kw[k] = v
-        if is_init:
-            super().__init__(master, **safe_kw)
-        elif safe_kw:
-            super().configure(**safe_kw)
+_orig_tk_entry = tk.Entry
+def _mac_tk_entry(master=None, cnf={}, **kw):
+    kw.pop('bg', None)
+    kw.pop('background', None)
+    kw.pop('fg', None)
+    kw.pop('foreground', None)
+    kw.pop('insertbackground', None)
+    return _orig_tk_entry(master, cnf, **kw)
 
 if sys.platform == "darwin":
-    tk.Label = SimpleMacLabel
-    tk.Entry = SimpleMacEntry
+    tk.Label = _mac_tk_label
+    tk.Entry = _mac_tk_entry
 
 
 import pygame
