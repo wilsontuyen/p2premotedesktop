@@ -822,6 +822,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             kwargs.pop('highlightbackground', None)
             if 'cursor' not in kwargs:
                 kwargs['cursor'] = 'hand2'
+            if 'pady' not in kwargs:
+                kwargs['pady'] = 5
+            if 'padx' not in kwargs:
+                kwargs['padx'] = 5
             lbl = tk.Label(parent, **kwargs)
             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
             lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
@@ -980,13 +984,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=(2, 0))
         self.update_fixed_password_indicator()
 
-        # Button to Copy both ID & Password at once
-        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, command=self.copy_id_and_password)
-        copy_all_btn.pack(pady=(8, 0), padx=20, fill=tk.X)
-        
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color, pady=3, cursor="hand2", command=self.show_saved_computers_dialog)
+        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
+
+        # Button to Copy both ID & Password at once
+        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
+        copy_all_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 8))
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
