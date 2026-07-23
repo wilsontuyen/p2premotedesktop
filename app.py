@@ -106,53 +106,66 @@ def _scaled_toplevel_geometry(self, newGeometry=None):
 
 tk.Toplevel.geometry = _scaled_toplevel_geometry
 
-# macOS Tkinter compatibility: tk.Label doesn't render text with custom bg/fg
-# on Aqua theme. Use ttk.Label wrapper that translates classic kwargs to ttk.Style.
 # macOS Tkinter compatibility for Sequoia (macOS 15).
-_orig_tk_label = tk.Label
+# Frame backgrounds are ignored on some Sequoia builds, rendering as light gray.
+# The app's white text becomes invisible on the light gray frames.
+# Solution: Use ttk widgets and force black text via a shared style.
 
-import datetime
-def _log_mac(msg):
-    try:
-        with open("mac_ui_debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.datetime.now()}] {msg}\n")
-    except:
-        pass
+_style_initialized = False
+def _init_mac_styles():
+    global _style_initialized
+    if not _style_initialized:
+        try:
+            s = ttk.Style()
+            s.configure('Mac.TLabel', foreground='black')
+            s.configure('Mac.TEntry', foreground='black')
+            _style_initialized = True
+        except:
+            pass
 
-def _mac_tk_label(master=None, cnf={}, **kw):
-    orig_kw = dict(kw)
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    # Do NOT force fg=black! The app uses a dark theme, so we need the original white/cyan text for contrast.
-    lbl = _orig_tk_label(master, cnf, **kw)
-    _log_mac(f"Label created: text='{kw.get('text', '')}', orig_kw={orig_kw}, final_kw={kw}")
-    
-    # Store reference to check geometry later
-    if not hasattr(sys, '_mac_labels'):
-        sys._mac_labels = []
-    sys._mac_labels.append(lbl)
-    
-    return lbl
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    kw['fg'] = 'black'
-    kw['foreground'] = 'black'
-    return _orig_tk_label(master, cnf, **kw)
+class MacSafeLabel(ttk.Label):
+    def __init__(self, master=None, cnf={}, **kw):
+        _init_mac_styles()
+        safe_kw = {}
+        for k in ['text', 'textvariable', 'image', 'compound', 'anchor', 'justify', 'width', 'state', 'font']:
+            if k in kw: safe_kw[k] = kw[k]
+            elif cnf and k in cnf: safe_kw[k] = cnf[k]
+        safe_kw['style'] = 'Mac.TLabel'
+        super().__init__(master, **safe_kw)
+        
+    def configure(self, cnf=None, **kw):
+        safe_kw = {}
+        for k in ['text', 'textvariable', 'image', 'compound', 'anchor', 'justify', 'width', 'state', 'font']:
+            if k in kw: safe_kw[k] = kw[k]
+            elif cnf and k in cnf: safe_kw[k] = cnf[k]
+        if safe_kw:
+            super().configure(**safe_kw)
+    config = configure
+    def __setitem__(self, key, value): self.configure({key: value})
 
-_orig_tk_entry = tk.Entry
-def _mac_tk_entry(master=None, cnf={}, **kw):
-    kw.pop('bg', None)
-    kw.pop('background', None)
-    kw['fg'] = 'black'
-    kw['foreground'] = 'black'
-    kw.pop('insertbackground', None)
-    kw['relief'] = tk.SUNKEN
-    kw['bd'] = 2
-    return _orig_tk_entry(master, cnf, **kw)
+class MacSafeEntry(ttk.Entry):
+    def __init__(self, master=None, cnf={}, **kw):
+        _init_mac_styles()
+        safe_kw = {}
+        for k in ['textvariable', 'width', 'state', 'font', 'show', 'justify']:
+            if k in kw: safe_kw[k] = kw[k]
+            elif cnf and k in cnf: safe_kw[k] = cnf[k]
+        safe_kw['style'] = 'Mac.TEntry'
+        super().__init__(master, **safe_kw)
+        
+    def configure(self, cnf=None, **kw):
+        safe_kw = {}
+        for k in ['textvariable', 'width', 'state', 'font', 'show', 'justify']:
+            if k in kw: safe_kw[k] = kw[k]
+            elif cnf and k in cnf: safe_kw[k] = cnf[k]
+        if safe_kw:
+            super().configure(**safe_kw)
+    config = configure
+    def __setitem__(self, key, value): self.configure({key: value})
 
 if sys.platform == "darwin":
-    tk.Label = _mac_tk_label
-    tk.Entry = _mac_tk_entry
+    tk.Label = MacSafeLabel
+    tk.Entry = MacSafeEntry
 
 
 import pygame

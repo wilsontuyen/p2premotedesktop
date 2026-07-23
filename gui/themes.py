@@ -133,7 +133,7 @@ def get_theme_palette(theme_name):
 
 
 def setup_app_theme(app, config_file):
-    import os, json
+    import os, json, sys
     import tkinter as tk
     
     app.current_theme = tk.StringVar(value="dark")
@@ -146,6 +146,9 @@ def setup_app_theme(app, config_file):
                     app.current_theme.set(saved_theme)
         except Exception:
             pass
+            
+    if sys.platform == "darwin":
+        app.current_theme.set("light")
 
     app._last_applied_theme = app.current_theme.get()
     pal = get_theme_palette(app._last_applied_theme)
