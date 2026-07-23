@@ -990,7 +990,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # Nút gọi Danh sách máy tính đã lưu
         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
-        saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
+        saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 20))
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
@@ -1032,7 +1032,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
         lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
-        lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 20))
+        lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(15, 20))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
