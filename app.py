@@ -701,6 +701,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except:
                 pass
             print(f"CRASH IN SETUP_UI: {e}")
+            
+        if sys.platform == "darwin":
+            try:
+                self.update_idletasks()
+                w = self.winfo_width()
+                h = self.winfo_height()
+                if w > 1 and h > 1:
+                    self.geometry(f"{w+1}x{h+1}")
+                    self.update()
+                    self.geometry(f"{w}x{h}")
+            except:
+                pass
         
         # Start background services
         threading.Thread(target=self.init_network_services, daemon=True).start()
