@@ -905,19 +905,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         self.config(menu=menubar)
         
-        if sys.platform == "darwin":
-            self.after(2000, self._dump_mac_ui_geometry)
-
-    def _dump_mac_ui_geometry(self):
-        _log_mac("=== DUMPING GEOMETRY AFTER 2 SECONDS ===")
-        labels = getattr(sys, '_mac_labels', [])
-        _log_mac(f"Total labels tracked: {len(labels)}")
-        for i, lbl in enumerate(labels[:20]):  # just check first 20
-            try:
-                _log_mac(f"Label {i} ['{lbl.cget('text')}']: viewable={lbl.winfo_viewable()}, x={lbl.winfo_x()}, y={lbl.winfo_y()}, w={lbl.winfo_width()}, h={lbl.winfo_height()}, ismapped={lbl.winfo_ismapped()}, fg={lbl.cget('fg')}, bg={lbl.cget('bg')}")
-            except Exception as e:
-                _log_mac(f"Label {i} error: {e}")
-        _log_mac("=== DUMP COMPLETE ===")
 
         # Header Label
         header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color)
