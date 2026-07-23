@@ -1140,7 +1140,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         scale = self.winfo_fpixels('1i') / 96.0
         min_w = int(680 * scale)
-        min_h = int(430 * scale) # Thu gọn lại chiều cao để khít với nút bấm
+        min_h = int(490 * scale) # Đảm bảo đủ chiều cao trên macOS để không bị cắt nút
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
