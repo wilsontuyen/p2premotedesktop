@@ -694,8 +694,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Setup UI
         try:
-            from tkinter import messagebox
-            messagebox.showinfo("Version Check", "RUNNING MAC_DEBUG_102")
             self.setup_ui()
         except Exception as e:
             import traceback
