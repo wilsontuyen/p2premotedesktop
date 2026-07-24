@@ -901,6 +901,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             label=_("Cài đặt máy chủ..."),
             command=self.show_server_settings_dialog
         )
+        if sys.platform == "darwin":
+            options_menu.add_separator()
+            options_menu.add_command(
+                label=_("Sửa lỗi quyền macOS..."),
+                command=self.fix_mac_permissions
+            )
         options_menu.add_separator()
         
         
@@ -1146,6 +1152,57 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             pass
 
     def load_window_position(self):
+        try:
+            if hasattr(self, 'config_file'):
+                import os, json
+                if os.path.exists(self.config_file):
+                    with open(self.config_file, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                        if "geometry" in config:
+                            self.geometry(config["geometry"])
+                            self.last_normal_geometry = config["geometry"]
+        except Exception:
+            pass
+
+    def fix_mac_permissions(self):
+        if sys.platform != "darwin":
+            return
+            
+        import subprocess
+        import os
+        import plistlib
+        
+        # Default bundle ID if running from terminal
+        bundle_id = "com.apple.Terminal"
+        
+        # Try to detect if we are running inside a macOS .app bundle
+        try:
+            exe_path = sys.executable
+            if "/Contents/MacOS/" in exe_path:
+                plist_path = exe_path.split("/Contents/MacOS/")[0] + "/Contents/Info.plist"
+                if os.path.exists(plist_path):
+                    with open(plist_path, 'rb') as f:
+                        plist = plistlib.load(f)
+                        if "CFBundleIdentifier" in plist:
+                            bundle_id = plist["CFBundleIdentifier"]
+        except Exception as e:
+            print("Could not read Info.plist:", e)
+            
+        try:
+            subprocess.run(["tccutil", "reset", "Accessibility", bundle_id], capture_output=True)
+            subprocess.run(["tccutil", "reset", "ScreenCapture", bundle_id], capture_output=True)
+            
+            # Open macOS System Settings directly to Privacy > Accessibility
+            subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+            
+            from tkinter import messagebox
+            messagebox.showinfo(_("Thành công"), _("Đã tự động reset lại quyền bảo mật cho ứng dụng!\n\nVui lòng tích xanh (kích hoạt) lại quyền trên cửa sổ cài đặt vừa mở, sau đó KHỞI ĐỘNG LẠI phần mềm này để có tác dụng."))
+            
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror(_("Lỗi"), _("Không thể reset quyền tự động: ") + str(e))
+
+    def save_window_position(self):
         # Force Tkinter to calculate proper font/widget scales based on physical DPI
         try:
             dpi = self.winfo_fpixels('1i')
