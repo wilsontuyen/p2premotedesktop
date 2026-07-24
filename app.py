@@ -3902,6 +3902,17 @@ if __name__ == '__main__':
         pass
     
     import sys
+    import os
+    if sys.platform == "darwin":
+        try:
+            exe_path = sys.executable
+            if "/Contents/MacOS/" in exe_path:
+                app_path = exe_path.split("/Contents/MacOS/")[0]
+                import subprocess
+                subprocess.Popen(["xattr", "-cr", app_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+            
     import ctypes
     import time
     
