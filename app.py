@@ -78,6 +78,22 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 import urllib.request
 import urllib.parse
 import tkinter as tk
+import sys
+if sys.platform == 'darwin':
+    try:
+        from tkmacosx import Button as MacButton
+        class CustomMacButton(MacButton):
+            def __init__(self, master=None, cnf={}, **kw):
+                if 'borderless' not in kw:
+                    kw['borderless'] = 1
+                if 'pady' in kw:
+                    kw.pop('pady')  # tkmacosx Button handles padding differently and may crash or look wrong
+                if 'padx' in kw:
+                    kw.pop('padx')
+                super().__init__(master, cnf, **kw)
+        tk.Button = CustomMacButton
+    except ImportError:
+        pass
 from tkinter import messagebox, ttk
 import sys
 
