@@ -575,9 +575,9 @@ class NetworkMixin:
                     except: pass
                     
                 if runs:
-                        best_run = max(runs, key=lambda x: x[1])
-                        avg_ping = best_run[0]
-                        bandwidth = best_run[1]
+                    best_run = max(runs, key=lambda x: x[1])
+                    avg_ping = best_run[0]
+                    bandwidth = best_run[1]
                     if bandwidth > 20.0 and avg_ping < 10.0:
                         net_class = "high"
                     elif bandwidth < 5.0 or avg_ping > 50.0:
@@ -1359,10 +1359,10 @@ class NetworkMixin:
                     except: pass
                             
                 if runs:
-                        # Compare and select the run with the highest bandwidth speed
-                        best_run = max(runs, key=lambda x: x[1])
-                        avg_ping = best_run[0]
-                        bandwidth = best_run[1]
+                    # Compare and select the run with the highest bandwidth speed
+                    best_run = max(runs, key=lambda x: x[1])
+                    avg_ping = best_run[0]
+                    bandwidth = best_run[1]
                                                                         
                     # 3. Network quality classification
                     # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 10ms.

@@ -42,8 +42,9 @@ def _init_pynput():
         'left meta': Key.cmd, 'right meta': Key.cmd_r,
         'left windows': Key.cmd, 'right windows': Key.cmd_r,
         'left super': Key.cmd, 'right super': Key.cmd_r,
-        'menu': Key.menu, 'insert': Key.insert,
     }
+    if hasattr(Key, 'menu'): _pynput_vk_map['menu'] = Key.menu
+    if hasattr(Key, 'insert'): _pynput_vk_map['insert'] = Key.insert
     print("[MacInput] pynput initialized")
 
 def send_input_keyboard_event(key_name, pressed):
