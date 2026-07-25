@@ -570,6 +570,9 @@ class NetworkMixin:
                         if run_idx == 0: time.sleep(0.2)
                 except Exception as e:
                     print(f"[LAN] Speed test error: {e}")
+                    try:
+                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": "medium", "ping": 50.0, "bandwidth": 10.0}).encode('utf-8'), password)
+                    except: pass
                 finally:
                     try: sock.settimeout(None)
                     except: pass
@@ -582,13 +585,12 @@ class NetworkMixin:
                         net_class = "high"
                     elif bandwidth < 5.0 or avg_ping > 50.0:
                         net_class = "low"
-                    send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": net_class, "ping": avg_ping, "bandwidth": bandwidth}).encode('utf-8'), password)
-                    print(f"[LAN Direct] Speed: Ping {avg_ping:.1f}ms, BW {bandwidth:.2f} Mbps, Class: {net_class}")
-                except Exception as ste:
-                    print(f"[LAN Direct] Speed test error: {ste}")
+                    else:
+                        net_class = "medium"
                     try:
-                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": "medium", "ping": 50.0, "bandwidth": 10.0}).encode('utf-8'), password)
+                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": net_class, "ping": avg_ping, "bandwidth": bandwidth}).encode('utf-8'), password)
                     except: pass
+                    print(f"[LAN Direct] Speed: Ping {avg_ping:.1f}ms, BW {bandwidth:.2f} Mbps, Class: {net_class}")
 
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
                 sock.settimeout(None)
@@ -1354,6 +1356,15 @@ class NetworkMixin:
                             time.sleep(0.2) # Small gap between runs
                 except Exception as e:
                     print(f"[Client] Speed test error: {e}")
+                    # Send default result to host to avoid locking
+                    try:
+                        send_msg(sock, json.dumps({
+                            "action": "speed_test_result",
+                            "net_class": "medium",
+                            "ping": 50.0,
+                            "bandwidth": 10.0
+                        }).encode('utf-8'), partner_pass)
+                    except: pass
                 finally:
                     try: sock.settimeout(15.0)
                     except: pass
@@ -1379,28 +1390,19 @@ class NetworkMixin:
                         net_class_viet = _("Trung bình (Medium)")
                         
                     # 4. Report speed test results to Host
-                    send_msg(sock, json.dumps({
-                        "action": "speed_test_result",
-                        "net_class": net_class,
-                        "ping": avg_ping,
-                        "bandwidth": bandwidth
-                    }).encode('utf-8'), partner_pass)
+                    try:
+                        send_msg(sock, json.dumps({
+                            "action": "speed_test_result",
+                            "net_class": net_class,
+                            "ping": avg_ping,
+                            "bandwidth": bandwidth
+                        }).encode('utf-8'), partner_pass)
+                    except: pass
                     
                     status_text = _("Đo tốc độ (Lớn nhất 2 lần): Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
                     time.sleep(0.5)
-                except Exception as ste:
-                    print(f"[Client] Speed test error: {ste}")
-                    # Send default result to host to avoid locking
-                    try:
-                        send_msg(sock, json.dumps({
-                            "action": "speed_test_result",
-                            "net_class": "medium",
-                            "ping": 50.0,
-                            "bandwidth": 10.0
-                        }).encode('utf-8'), partner_pass)
-                    except: pass
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
                 # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
