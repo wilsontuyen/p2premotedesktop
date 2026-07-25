@@ -114,9 +114,23 @@ if sys.platform == 'darwin':
                 if 'borderless' not in kw:
                     kw['borderless'] = 1
                 if 'pady' in kw:
-                    kw.pop('pady')  # tkmacosx Button handles padding differently and may crash or look wrong
+                    kw.pop('pady')
                 if 'padx' in kw:
                     kw.pop('padx')
+                if 'width' in kw:
+                    try:
+                        w = int(kw['width'])
+                        if w < 100:
+                            kw['width'] = w * 9
+                    except:
+                        pass
+                if 'height' in kw:
+                    try:
+                        h = int(kw['height'])
+                        if h < 10:
+                            kw['height'] = h * 20
+                    except:
+                        pass
                 super().__init__(master, cnf, **kw)
         tk.Button = CustomMacButton
     except ImportError:
