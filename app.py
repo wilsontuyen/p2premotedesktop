@@ -3271,8 +3271,8 @@ Comment=Remote Desktop P2P AutoStart
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 400
-        h = 180
+        w = 420
+        h = 220
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -3337,8 +3337,8 @@ Comment=Remote Desktop P2P AutoStart
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 400
-        h = 180
+        w = 420
+        h = 220
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -3490,8 +3490,8 @@ Comment=Remote Desktop P2P AutoStart
         
         # Center calculations relative to parent
         dialog.update_idletasks()
-        w = 400
-        h = 180
+        w = 420
+        h = 220
         x = p.winfo_x() + (p.winfo_width() - w) // 2
         y = p.winfo_y() + (p.winfo_height() - h) // 2
         dialog.geometry(f"{w}x{h}+{x}+{y}")
