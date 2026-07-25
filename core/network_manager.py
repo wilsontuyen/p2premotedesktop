@@ -465,7 +465,7 @@ class NetworkMixin:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(3.0)
                 s.connect((try_ip, port))
-                s.settimeout(None)
+                s.settimeout(15.0)
                 sock = s
                 connected = True
                 print(f"[LAN Direct] Connected to {try_ip}:{port}")
@@ -581,6 +581,7 @@ class NetworkMixin:
                     except: pass
 
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
+                sock.settimeout(None)
                 self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, False, os_release)
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
@@ -1216,6 +1217,7 @@ class NetworkMixin:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception as e:
             print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+        sock.settimeout(15.0)
             
         # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
         try:
