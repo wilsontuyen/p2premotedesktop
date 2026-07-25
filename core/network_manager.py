@@ -521,6 +521,7 @@ class NetworkMixin:
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
+                    sock.settimeout(10.0)
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
@@ -538,13 +539,16 @@ class NetworkMixin:
                         run_ping = (sum(rtts) / len(rtts)) * 1000.0 if rtts else 50.0
                         
                         run_bw = 10.0
-                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'), password)
+                        suggested_size = 1572864
+                        if run_ping > 200.0: suggested_size = 131072
+                        elif run_ping > 50.0: suggested_size = 524288
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req", "suggested_size": suggested_size}).encode('utf-8'), password)
                         bw_start_msg = recv_msg(sock, password)
                         if bw_start_msg:
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
                                 dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = 1048576
+                                warm_size = dummy_size // 3
                                 measure_size = dummy_size - warm_size
                                 warm_data = b''
                                 while len(warm_data) < warm_size:
@@ -564,7 +568,13 @@ class NetworkMixin:
                                     run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
                         runs.append((run_ping, run_bw))
                         if run_idx == 0: time.sleep(0.2)
-                    if runs:
+                except Exception as e:
+                    print(f"[LAN] Speed test error: {e}")
+                finally:
+                    try: sock.settimeout(None)
+                    except: pass
+                    
+                if runs:
                         best_run = max(runs, key=lambda x: x[1])
                         avg_ping = best_run[0]
                         bandwidth = best_run[1]
@@ -1283,6 +1293,7 @@ class NetworkMixin:
                 avg_ping = 50.0
                 bandwidth = 10.0
                 try:
+                    sock.settimeout(10.0)
                     runs = []
                     for run_idx in range(2):
                         if run_idx > 0:
@@ -1305,13 +1316,16 @@ class NetworkMixin:
                             
                         # 2. Bandwidth test
                         run_bw = 10.0
-                        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode('utf-8'), partner_pass)
+                        suggested_size = 1572864
+                        if run_ping > 200.0: suggested_size = 131072
+                        elif run_ping > 50.0: suggested_size = 524288
+                        send_msg(sock, json.dumps({"action": "speed_test_bw_req", "suggested_size": suggested_size}).encode('utf-8'), partner_pass)
                         bw_start_msg = recv_msg(sock, partner_pass)
                         if bw_start_msg:
                             bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
                             if bw_start_data.get("action") == "speed_test_bw_start":
                                 dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = 1048576 # 1 MB warm-up để vượt qua TCP slow-start
+                                warm_size = dummy_size // 3 # 1/3 cho warm-up
                                 measure_size = dummy_size - warm_size
                                 
                                 warm_data = b''
@@ -1338,8 +1352,13 @@ class NetworkMixin:
                         runs.append((run_ping, run_bw))
                         if run_idx == 0:
                             time.sleep(0.2) # Small gap between runs
+                except Exception as e:
+                    print(f"[Client] Speed test error: {e}")
+                finally:
+                    try: sock.settimeout(15.0)
+                    except: pass
                             
-                    if runs:
+                if runs:
                         # Compare and select the run with the highest bandwidth speed
                         best_run = max(runs, key=lambda x: x[1])
                         avg_ping = best_run[0]

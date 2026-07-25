@@ -491,12 +491,9 @@ class HostMixin:
                     
                 try: log_activity(_("Chấp nhận kết nối từ ID {id} ({comp})").format(id=fmt_client_id, comp=client_comp))
                 except: pass
-                    
-                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
-                self.after(0, self.show_host_connection_border)
                 
-                self.wake_display()
-                
+                # Notification UI will be shown after speed test
+
                 # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa
                 try:
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -569,6 +566,7 @@ class HostMixin:
                 
                 # Perform pre-connection speed test handling on host (2 rounds to match client)
                 try:
+                    conn.settimeout(10.0)
                     for run_idx in range(2):
                         # 1. Ping / Latency test (3 pings per round)
                         for _i in range(3):
@@ -583,7 +581,7 @@ class HostMixin:
                         if bw_msg:
                             bw_data = json.loads(bw_msg.decode('utf-8'))
                             if bw_data.get("action") == "speed_test_bw_req":
-                                dummy_size = 1572864 # 1.5 MB để nới rộng TCP Window
+                                dummy_size = bw_data.get("suggested_size", 1572864)
                                 send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'), client_pass)
                                 conn.sendall(b'\x00' * dummy_size)
                             
@@ -604,6 +602,14 @@ class HostMixin:
                                 set_windows_graphics_effects(False)
                 except Exception as ste:
                     print(f"[Host] Speed test handler error: {ste}")
+                finally:
+                    try: conn.settimeout(None)
+                    except: pass
+                
+                # Hiển thị thông báo và viền đỏ sau khi test xong
+                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
+                self.after(0, self.show_host_connection_border)
+                self.wake_display()
                 
                 self.active_clients[addr] = client_state
                 
