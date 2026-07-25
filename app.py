@@ -77,6 +77,33 @@ import hashlib
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 import urllib.request
 import urllib.parse
+
+_is_child = False
+if "--headless" in sys.argv or "--clipboard-agent" in sys.argv:
+    _is_child = True
+else:
+    for arg in sys.argv:
+        if "multiprocessing" in arg or arg == "-c":
+            _is_child = True
+            break
+if _is_child and sys.platform == "darwin":
+    try:
+        import ctypes
+        objc = ctypes.cdll.LoadLibrary('/usr/lib/libobjc.A.dylib')
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.sel_registerName.restype = ctypes.c_void_p
+        msgSend = objc.objc_msgSend
+        msgSend.restype = ctypes.c_void_p
+        msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        NSApplication = objc.objc_getClass(b'NSApplication')
+        sharedApplication = objc.sel_registerName(b'sharedApplication')
+        app = msgSend(NSApplication, sharedApplication)
+        setActivationPolicy = objc.sel_registerName(b'setActivationPolicy:')
+        msgSend_policy = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int)(msgSend)
+        msgSend_policy(app, setActivationPolicy, 2)
+    except Exception:
+        pass
+
 import tkinter as tk
 import sys
 if sys.platform == 'darwin':
