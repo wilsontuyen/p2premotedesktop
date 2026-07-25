@@ -548,13 +548,13 @@ class NetworkMixin:
                                 measure_size = dummy_size - warm_size
                                 warm_data = b''
                                 while len(warm_data) < warm_size:
-                                    chunk = sock.recv(warm_size - len(warm_data))
+                                    chunk = sock.recv(min(65536, warm_size - len(warm_data)))
                                     if not chunk: break
                                     warm_data += chunk
                                 t_start = time.time()
                                 measured_data = b''
                                 while len(measured_data) < measure_size:
-                                    chunk = sock.recv(measure_size - len(measured_data))
+                                    chunk = sock.recv(min(65536, measure_size - len(measured_data)))
                                     if not chunk: break
                                     measured_data += chunk
                                 t_end = time.time()
@@ -1314,7 +1314,7 @@ class NetworkMixin:
                                 
                                 warm_data = b''
                                 while len(warm_data) < warm_size:
-                                    chunk = sock.recv(warm_size - len(warm_data))
+                                    chunk = sock.recv(min(65536, warm_size - len(warm_data)))
                                     if not chunk:
                                         break
                                     warm_data += chunk
@@ -1322,7 +1322,7 @@ class NetworkMixin:
                                 t_start = time.time()
                                 measured_data = b''
                                 while len(measured_data) < measure_size:
-                                    chunk = sock.recv(measure_size - len(measured_data))
+                                    chunk = sock.recv(min(65536, measure_size - len(measured_data)))
                                     if not chunk:
                                         break
                                     measured_data += chunk
