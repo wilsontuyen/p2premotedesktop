@@ -78,7 +78,7 @@ def client_receiver_thread(sock, password):
                     evt_type = event.get("type", "")
                     if evt_type == "pong":
                         continue
-                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text"):
+                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image"):
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
                         continue

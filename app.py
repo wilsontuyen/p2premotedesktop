@@ -1192,18 +1192,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         except Exception:
             pass
 
-    def load_window_position(self):
-        try:
-            if hasattr(self, 'config_file'):
-                import os, json
-                if os.path.exists(self.config_file):
-                    with open(self.config_file, 'r', encoding='utf-8') as f:
-                        config = json.load(f)
-                        if "geometry" in config:
-                            self.geometry(config["geometry"])
-                            self.last_normal_geometry = config["geometry"]
-        except Exception:
-            pass
 
     def fix_mac_permissions(self):
         if sys.platform != "darwin":
@@ -1243,7 +1231,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             from tkinter import messagebox
             messagebox.showerror(_("Lỗi"), _("Không thể reset quyền tự động: ") + str(e))
 
-    def save_window_position(self):
+    def load_window_position(self):
         # Force Tkinter to calculate proper font/widget scales based on physical DPI
         try:
             dpi = self.winfo_fpixels('1i')
@@ -1292,150 +1280,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self.geometry(geom)
         self.last_normal_geometry = geom
 
-    def change_theme(self):
-        from gui.themes import change_app_theme
-        change_app_theme(self)
 
-    
-    def export_lang_template(self):
-        try:
-            template = {
-    _("Đang kết nối tới mạng đăng ký..."): _("Đang kết nối tới mạng đăng ký..."),
-    _("Đã sao chép cả ID & Mật khẩu!"): _("Đã sao chép cả ID & Mật khẩu!"),
-    _("Đã sao chép vào bộ nhớ tạm: "): _("Đã sao chép vào bộ nhớ tạm: "),
-    _("Lỗi"): _("Lỗi"),
-    _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"): _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"),
-    _("Tìm kiếm theo tên hoặc ID..."): _("Tìm kiếm theo tên hoặc ID..."),
-    _("tìm kiếm theo tên hoặc id..."): _("tìm kiếm theo tên hoặc id..."),
-    _("Lỗi nhập liệu"): _("Lỗi nhập liệu"),
-    _("Vui lòng điền đầy đủ các thông tin!"): _("Vui lòng điền đầy đủ các thông tin!"),
-    _("Trùng lặp"): _("Trùng lặp"),
-    _("Máy tính này đã tồn tại trong danh sách!"): _("Máy tính này đã tồn tại trong danh sách!"),
-    _("Sửa thông tin"): _("Sửa thông tin"),
-    _("Không tìm thấy máy tính tương ứng để sửa!"): _("Không tìm thấy máy tính tương ứng để sửa!"),
-    _("Vui lòng nhập đầy đủ thông tin!"): _("Vui lòng nhập đầy đủ thông tin!"),
-    _("Cổng kết nối (Port) phải là số!"): _("Cổng kết nối (Port) phải là số!"),
-    _("Không thể lưu file server.ini: "): _("Không thể lưu file server.ini: "),
-    _("Thất bại"): _("Thất bại"),
-    _("Không thể thay đổi cài đặt Registry: "): _("Không thể thay đổi cài đặt Registry: "),
-    _("Sao chép"): _("Sao chép"),
-    _("Đổi mật khẩu"): _("Đổi mật khẩu"),
-    _("Thêm máy tính"): _("Thêm máy tính"),
-    _("Thành công"): _("Thành công"),
-    _("Đã lưu máy tính '{name}' vào danh sách thành công!"): _("Đã lưu máy tính '{name}' vào danh sách thành công!"),
-    _("Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!"): _("Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!"),
-    "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.": "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.",
-    _("Đã lưu mật khẩu cố định thành công!"): _("Đã lưu mật khẩu cố định thành công!"),
-    _("Đã tắt mật khẩu cố định thành công!"): _("Đã tắt mật khẩu cố định thành công!"),
-    _("Đã bật tính năng chạy khi mở máy thành công!"): _("Đã bật tính năng chạy khi mở máy thành công!"),
-    _("Đã tắt tính năng chạy khi mở máy thành công!"): _("Đã tắt tính năng chạy khi mở máy thành công!"),
-    _("+ Thêm Mới"): _("+ Thêm Mới"),
-    _("4 chữ số"): _("4 chữ số"),
-    _("5 chữ số"): _("5 chữ số"),
-    _("8 ký tự (chữ + số)"): _("8 ký tự (chữ + số)"),
-    "AI Pro Version": "AI Pro Version",
-    "About": "About",
-    _("CHO PHÉP ĐIỀU KHIỂN"): _("CHO PHÉP ĐIỀU KHIỂN"),
-    _("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"): _("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"),
-    _("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"): _("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"),
-    "Cam": "Cam",
-    _("Chưa có liên lạc"): _("Chưa có liên lạc"),
-    _("Chạy khi mở máy (Run on Startup)"): _("Chạy khi mở máy (Run on Startup)"),
-    _("Chọn tất cả (Select All)"): _("Chọn tất cả (Select All)"),
-    _("Chọn đối tác"): _("Chọn đối tác"),
-    _("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"): _("CÀI ĐẶT MẬT KHẨU CỐ ĐỊNH"),
-    _("CÀI ĐẶT ZALO / ĐIỆN THOẠI"): _("CÀI ĐẶT ZALO / ĐIỆN THOẠI"),
-    _("Cài Zalo / Điện thoại"): _("Cài Zalo / Điện thoại"),
-    _("Cài mật khẩu cố định..."): _("Cài mật khẩu cố định..."),
-    _("Cài đặt Máy chủ (Signaling Server)"): _("Cài đặt Máy chủ (Signaling Server)"),
-    _("Cài đặt máy chủ..."): _("Cài đặt máy chủ..."),
-    _("Có"): _("Có"),
-    _("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"): _("Cả hai máy cùng mạng nội bộ nhưng không kết nối được trực tiếp"),
-    _("CẤU HÌNH MÁY CHỦ SIGNALING"): _("CẤU HÌNH MÁY CHỦ SIGNALING"),
-    _("CẬP NHẬT THÔNG TIN"): _("CẬP NHẬT THÔNG TIN"),
-    _("Cắt (Cut)"): _("Cắt (Cut)"),
-    _("Cổng kết nối (Port):"): _("Cổng kết nối (Port):"),
-    _("DANH SÁCH MÁY TÍNH ĐÃ LƯU"): _("DANH SÁCH MÁY TÍNH ĐÃ LƯU"),
-    _("Danh sách (Saved Computers)"): _("Danh sách (Saved Computers)"),
-    _("Danh sách Máy chủ:"): _("Danh sách Máy chủ:"),
-    _("Danh sách Máy tính"): _("Danh sách Máy tính"),
-    _("Dán (Paste)"): _("Dán (Paste)"),
-    "Easy Remote Desktop": "Easy Remote Desktop",
-    "File": "File",
-    _("Giao diện"): _("Giao diện"),
-    "Help": "Help",
-    _("Hiển thị mật khẩu"): _("Hiển thị mật khẩu"),
-    _("Hồng"): _("Hồng"),
-    _("Hủy"): _("Hủy"),
-    _("Hủy bỏ"): _("Hủy bỏ"),
-    _("ID đối tác:"): _("ID đối tác:"),
-    _("Không"): _("Không"),
-    _("KẾT NỐI (CONNECT)"): _("KẾT NỐI (CONNECT)"),
-    _("Kết nối"): _("Kết nối"),
-    _("Kết nối mạng LAN thất bại"): _("Kết nối mạng LAN thất bại"),
-    _("Liên hệ Zalo"): _("Liên hệ Zalo"),
-    _("Liên hệ: Mr. Tuyến - 0941 261 771"): _("Liên hệ: Mr. Tuyến - 0941 261 771"),
-    _("Lưu"): _("Lưu"),
-    _("Lưu lại"): _("Lưu lại"),
-    _("Lỗi kết nối mạng LAN"): _("Lỗi kết nối mạng LAN"),
-    _("Mã ID của bạn:"): _("Mã ID của bạn:"),
-    _("Mật khẩu (Password)"): _("Mật khẩu (Password)"),
-    _("Mật khẩu cố định"): _("Mật khẩu cố định"),
-    _("Mật khẩu kết nối:"): _("Mật khẩu kết nối:"),
-    _("Mật khẩu mới:"): _("Mật khẩu mới:"),
-    _("Mật khẩu:"): _("Mật khẩu:"),
-    _("Nhóm (Tùy chọn):"): _("Nhóm (Tùy chọn):"),
-    _("Nhập ID đối tác:"): _("Nhập ID đối tác:"),
-    _("Nhập Mật khẩu đối tác:"): _("Nhập Mật khẩu đối tác:"),
-    "OK": "OK",
-    "Options": "Options",
-    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
-    _("Pha lê"): _("Pha lê"),
-    _("Sao chép (Copy)"): _("Sao chép (Copy)"),
-    _("Sáng"): _("Sáng"),
-    _("Sửa thông tin"): _("Sửa thông tin"),
-    _("THÊM MÁY TÍNH MỚI"): _("THÊM MÁY TÍNH MỚI"),
-    _("Thay đổi thông tin"): _("Thay đổi thông tin"),
-    _("Thoát (Exit)"): _("Thoát (Exit)"),
-    _("Thêm Máy tính"): _("Thêm Máy tính"),
-    _("Tên gọi gợi nhớ:"): _("Tên gọi gợi nhớ:"),
-    _("Tùy chỉnh"): _("Tùy chỉnh"),
-    _("Tối"): _("Tối"),
-    _("Xám"): _("Xám"),
-    _("Xóa máy tính"): _("Xóa máy tính"),
-    "Zalo": "Zalo",
-    _("ĐIỀU KHIỂN ĐỐI TÁC"): _("ĐIỀU KHIỂN ĐỐI TÁC"),
-    _("Điều khiển trực tuyến máy tính bằng HWID"): _("Điều khiển trực tuyến máy tính bằng HWID"),
-    _("Điện thoại"): _("Điện thoại"),
-    _("Điện thoại liên hệ"): _("Điện thoại liên hệ"),
-    _("Đã hiểu"): _("Đã hiểu"),
-    _("Đóng"): _("Đóng"),
-    _("Đỏ"): _("Đỏ"),
-    _("Đổi tên nhóm"): _("Đổi tên nhóm"),
-    _("● Mật khẩu cố định: Đang hoạt động"): _("● Mật khẩu cố định: Đang hoạt động"),
-    _("📁 Danh sách máy tính đã lưu"): _("📁 Danh sách máy tính đã lưu"),
-    _("📋  Thông tin kỹ thuật"): _("📋  Thông tin kỹ thuật"),
-    _("📋 Sao chép cả ID & Mật khẩu"): _("📋 Sao chép cả ID & Mật khẩu"),
-    _("📡 Quét mạng LAN (LAN Discovery)"): _("📡 Quét mạng LAN (LAN Discovery)"),
-    _("📡 Quét mạng LAN (LAN Only)"): _("📡 Quét mạng LAN (LAN Only)"),
-    _("🔄 Làm mới"): _("🔄 Làm mới"),
-    _("🔄 Làm mới (30s)"): _("🔄 Làm mới (30s)"),
-    _("🔧  Cách khắc phục"): _("🔧  Cách khắc phục")
-}
-            template_path = export_template(template)
-            if template_path:
-                messagebox.showinfo(_("Lưu lại"), _("Tệp ngôn ngữ mẫu đã được lưu tại:") + f"\n{template_path}\n" + _("Bạn có thể sao chép và đổi tên thành 'yourown.json' để dịch.\nGợi ý: dùng ChatGPT để dịch tự động là 1 lựa chọn\nThank you!"))
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def change_language(self, *args):
-        lang = self.current_lang.get()
-        load_language(lang)
-        self.save_window_position()
-        messagebox.showinfo(_("Thay đổi thông tin"), _("Ứng dụng sẽ khởi động lại để áp dụng ngôn ngữ mới."))
-        import subprocess
-        subprocess.Popen([sys.executable] + sys.argv[1:])
-        os._exit(0)
 
     def save_window_position(self):
         try:

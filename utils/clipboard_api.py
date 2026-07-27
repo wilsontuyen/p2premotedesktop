@@ -332,3 +332,135 @@ def set_clipboard_text(text, owner_hwnd=None):
     except Exception as e:
         print(f"[Clipboard] Lỗi ghi text clipboard Win32: {e}")
     return False
+
+
+# --- Hỗ trợ Clipboard Image cho Windows 11 ---
+# CF_BITMAP = 2, CF_DIB = 8, CF_DIBV5 = 17
+
+def get_clipboard_image_data(owner_hwnd=None):
+    """
+    Lấy dữ liệu ảnh từ clipboard dưới dạng bytes (DIB format).
+    Trả về (dib_bytes, width, height) hoặc (None, 0, 0) nếu không có ảnh.
+    """
+    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard:
+        return None, 0, 0
+    
+    CF_DIB = 8
+    dib_bytes = None
+    width = 0
+    height = 0
+    
+    try:
+        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+        opened = False
+        for _ in range(30):
+            if fn_OpenClipboard(hwnd_arg):
+                opened = True
+                break
+            time.sleep(0.05)
+        
+        if not opened:
+            return None, 0, 0
+        
+        try:
+            if fn_IsClipboardFormatAvailable(CF_DIB):
+                hGlobal = fn_GetClipboardData(CF_DIB)
+                if hGlobal:
+                    pMem = fn_GlobalLock(hGlobal)
+                    if pMem:
+                        try:
+                            # Đọc BITMAPINFOHEADER (40 bytes đầu)
+                            import struct
+                            header = (ctypes.c_char * 40)()
+                            ctypes.memmove(header, pMem, 40)
+                            bi_size = struct.unpack_from('<I', header, 0)[0]
+                            width = struct.unpack_from('<i', header, 4)[0]
+                            height = abs(struct.unpack_from('<i', header, 8)[0])
+                            bi_bit_count = struct.unpack_from('<H', header, 14)[0]
+                            bi_compression = struct.unpack_from('<I', header, 16)[0]
+                            bi_size_image = struct.unpack_from('<I', header, 20)[0]
+                            
+                            # Tính tổng kích thước DIB data
+                            if bi_size_image == 0:
+                                row_size = ((width * bi_bit_count + 31) // 32) * 4
+                                bi_size_image = row_size * height
+                            
+                            # Tính kích thước bảng màu (color table)
+                            color_table_size = 0
+                            if bi_bit_count <= 8:
+                                bi_clr_used = struct.unpack_from('<I', header, 32)[0]
+                                if bi_clr_used == 0:
+                                    bi_clr_used = 1 << bi_bit_count
+                                color_table_size = bi_clr_used * 4
+                            
+                            total_size = bi_size + color_table_size + bi_size_image
+                            
+                            # Giới hạn dung lượng ảnh tối đa 10MB để tránh lag mạng
+                            if total_size > 10 * 1024 * 1024:
+                                log_debug(f"[get_clipboard_image] Ảnh quá lớn ({total_size} bytes), bỏ qua.")
+                                return None, 0, 0
+                            
+                            dib_buf = (ctypes.c_char * total_size)()
+                            ctypes.memmove(dib_buf, pMem, total_size)
+                            dib_bytes = bytes(dib_buf)
+                        finally:
+                            fn_GlobalUnlock(hGlobal)
+        finally:
+            fn_CloseClipboard()
+    except Exception as e:
+        log_debug(f"[get_clipboard_image] Lỗi: {e}")
+    
+    return dib_bytes, width, height
+
+
+def set_clipboard_image_data(dib_bytes, owner_hwnd=None):
+    """
+    Nạp dữ liệu ảnh (DIB bytes) vào clipboard.
+    """
+    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard:
+        return False
+    if not dib_bytes:
+        return False
+    
+    CF_DIB = 8
+    try:
+        total_size = len(dib_bytes)
+        hGlobal = fn_GlobalAlloc(GHND, total_size)
+        if not hGlobal:
+            return False
+        
+        pMem = fn_GlobalLock(hGlobal)
+        if not pMem:
+            fn_GlobalFree(hGlobal)
+            return False
+        
+        ctypes.memmove(pMem, dib_bytes, total_size)
+        fn_GlobalUnlock(hGlobal)
+        
+        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+        opened = False
+        for _ in range(30):
+            if fn_OpenClipboard(hwnd_arg):
+                opened = True
+                break
+            time.sleep(0.05)
+        
+        if opened:
+            try:
+                fn_EmptyClipboard()
+                res = fn_SetClipboardData(CF_DIB, hGlobal)
+                if not res:
+                    fn_GlobalFree(hGlobal)
+                    return False
+                global last_clipboard_set_time
+                last_clipboard_set_time = time.time()
+                return True
+            finally:
+                fn_CloseClipboard()
+        else:
+            fn_GlobalFree(hGlobal)
+            log_debug("[set_clipboard_image] OpenClipboard thất bại.")
+    except Exception as e:
+        log_debug(f"[set_clipboard_image] Lỗi: {e}")
+    return False
+

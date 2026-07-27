@@ -1366,7 +1366,7 @@ class NetworkMixin:
                         }).encode('utf-8'), partner_pass)
                     except: pass
                 finally:
-                    try: sock.settimeout(15.0)
+                    try: sock.settimeout(None)
                     except: pass
                             
                 if runs:

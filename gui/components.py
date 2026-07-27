@@ -291,6 +291,13 @@ class ProgressDialog(tk.Toplevel):
         self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
         self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
 
+        # Cho phép kéo thả hộp thoại bằng chuột trên thanh tiêu đề
+        self._drag_offset_x = 0
+        self._drag_offset_y = 0
+        for widget in (self.title_bar, self.title_lbl):
+            widget.bind("<ButtonPress-1>", self._start_drag)
+            widget.bind("<B1-Motion>", self._do_drag)
+
         self.attributes("-topmost", True)
         self.lift()
         self.total_size = total_size
@@ -366,6 +373,15 @@ class ProgressDialog(tk.Toplevel):
         if self.on_cancel:
             try: self.on_cancel()
             except: pass
+
+    def _start_drag(self, event):
+        self._drag_offset_x = event.x_root - self.winfo_x()
+        self._drag_offset_y = event.y_root - self.winfo_y()
+
+    def _do_drag(self, event):
+        x = event.x_root - self._drag_offset_x
+        y = event.y_root - self._drag_offset_y
+        self.geometry(f"+{x}+{y}")
 
     def update_progress(self, sent_bytes):
         def _do_update():
