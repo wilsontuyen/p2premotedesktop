@@ -863,7 +863,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lang = self.current_lang.get()
         load_language(lang)
         self.save_window_position()
-        messagebox.showinfo(_("Thay đổi thông tin"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+        dialog = InfoDialog(self, _("Thay đổi ngôn ngữ"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
+        self.wait_window(dialog)
         import subprocess
         subprocess.Popen([sys.executable] + sys.argv[1:])
         os._exit(0)

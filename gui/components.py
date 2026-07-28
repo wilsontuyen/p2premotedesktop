@@ -520,7 +520,7 @@ class ConfirmDialog(tk.Toplevel):
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
 
 class InfoDialog(tk.Toplevel):
-    def __init__(self, parent, title, message):
+    def __init__(self, parent, title, message, button_text=None):
         super().__init__(parent)
         self.withdraw()  # Ẩn tạm thời để tránh nháy
         self.title(title)
@@ -555,8 +555,11 @@ class InfoDialog(tk.Toplevel):
         def _ok():
             self.destroy()
                 
+        if button_text is None:
+            button_text = _("Đồng ý (OK)")
+            
         btn_ok = tk.Button(
-            btn_frame, text=_("Đóng (Close)"), font=(_DIALOG_FONT, 9, "bold"),
+            btn_frame, text=button_text, font=(_DIALOG_FONT, 9, "bold"),
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_ok
         )
