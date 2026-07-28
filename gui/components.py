@@ -546,7 +546,7 @@ class InfoDialog(tk.Toplevel):
         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
         
-        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
+        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=380)
         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
         
         btn_frame = tk.Frame(self, bg="#1E1E24")
@@ -570,7 +570,7 @@ class InfoDialog(tk.Toplevel):
         self.update_idletasks()
         # Tính toán chiều cao tự động dựa trên nội dung
         req_height = self.winfo_reqheight()
-        dialog_w = 360
+        dialog_w = 420
         dialog_h = max(160, req_height + 20)
         
         if parent:
