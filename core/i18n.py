@@ -22,19 +22,26 @@ def get_language_name(lang_code):
 
 def get_lang_dir():
     if getattr(sys, 'frozen', False):
-        if hasattr(sys, '_MEIPASS'):
-            base_dir = sys._MEIPASS
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             executable_dir = os.path.dirname(sys.executable)
             if executable_dir.endswith("MacOS"):
                 base_dir = os.path.join(os.path.dirname(executable_dir), "Resources")
             else:
-                base_dir = executable_dir
+                base_dir = getattr(sys, '_MEIPASS', executable_dir)
         else:
-            base_dir = os.path.dirname(sys.executable)
+            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     lang_dir = os.path.join(base_dir, "lang")
+    
+    # Fallback to _MEIPASS if not in Resources on macOS
+    if getattr(sys, 'frozen', False) and sys.platform == "darwin" and not os.path.exists(lang_dir):
+        if hasattr(sys, '_MEIPASS'):
+            fallback_dir = os.path.join(sys._MEIPASS, "lang")
+            if os.path.exists(fallback_dir):
+                return fallback_dir
+                
     if not os.path.exists(lang_dir):
         try:
             os.makedirs(lang_dir, exist_ok=True)
