@@ -319,7 +319,7 @@ from network.upnp import attempt_upnp_forward
 from utils.clipboard_api import (ENABLE_CLIPBOARD_SYNC, set_clipboard_dword_format, setup_clipboard_exclusions, 
                                 get_clipboard_files, set_clipboard_files, get_clipboard_text, set_clipboard_text)
 
-from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip
+from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip, InfoDialog
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, run_clipboard_agent_mode
 
 from core.host import HostMixin, check_desktop_change
@@ -871,6 +871,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
     def import_saved_computers(self):
         from tkinter import filedialog
         filepath = filedialog.askopenfilename(
+            parent=self,
             title=_("Nhập khẩu danh sách máy tính"),
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
         )
@@ -879,13 +880,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 import shutil
                 dest = get_computers_xml_path()
                 shutil.copy2(filepath, dest)
-                messagebox.showinfo(_("Thành công"), _("Đã nhập khẩu danh sách máy tính thành công!"))
+                msg = f"{_('Đã nhập khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                InfoDialog(self, _("Thành công"), msg)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể nhập khẩu: {e}")
 
     def export_saved_computers(self):
         from tkinter import filedialog
         filepath = filedialog.asksaveasfilename(
+            parent=self,
             title=_("Xuất khẩu danh sách máy tính"),
             defaultextension=".xml",
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
@@ -897,7 +900,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 src = get_computers_xml_path()
                 if os.path.exists(src):
                     shutil.copy2(src, filepath)
-                    messagebox.showinfo(_("Thành công"), _("Đã xuất khẩu danh sách máy tính thành công!"))
+                    msg = f"{_('Đã xuất khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                    InfoDialog(self, _("Thành công"), msg)
                 else:
                     messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."))
             except Exception as e:

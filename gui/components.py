@@ -519,6 +519,72 @@ class ConfirmDialog(tk.Toplevel):
         y = parent_y + (parent_h - dialog_h) // 2
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
 
+class InfoDialog(tk.Toplevel):
+    def __init__(self, parent, title, message):
+        super().__init__(parent)
+        self.withdraw()  # Ẩn tạm thời để tránh nháy
+        self.title(title)
+        self.resizable(False, False)
+        self.configure(bg="#1E1E24")
+        
+        try:
+            icon_path = os.path.join(app_dir, "app_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                self.iconphoto(False, icon_img)
+                self._dialog_icon_img = icon_img
+        except Exception:
+            pass
+            
+        self.attributes("-topmost", True)
+        if parent and parent.state() != "withdrawn":
+            self.transient(parent)
+        else:
+            self.lift()
+            self.focus_force()
+        
+        lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+        lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
+        
+        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
+        lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
+        
+        btn_frame = tk.Frame(self, bg="#1E1E24")
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+        
+        def _ok():
+            self.destroy()
+                
+        btn_ok = tk.Button(
+            btn_frame, text=_("Đóng (Close)"), font=(_DIALOG_FONT, 9, "bold"),
+            fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
+            relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_ok
+        )
+        btn_ok.pack(side=tk.RIGHT, fill=tk.X, expand=False, padx=0)
+        
+        self.protocol("WM_DELETE_WINDOW", _ok)
+        
+        self.update_idletasks()
+        # Tính toán chiều cao tự động dựa trên nội dung
+        req_height = self.winfo_reqheight()
+        dialog_w = 360
+        dialog_h = max(160, req_height + 20)
+        
+        if parent:
+            parent_x = parent.winfo_x()
+            parent_y = parent.winfo_y()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            
+            x = parent_x + (parent_w - dialog_w) // 2
+            y = parent_y + (parent_h - dialog_h) // 2
+            self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        else:
+            self.geometry(f"{dialog_w}x{dialog_h}")
+            
+        self.deiconify() # Hiển thị sau khi set geometry
+
+
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
         self.widget = widget
