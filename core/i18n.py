@@ -24,10 +24,21 @@ def get_lang_dir():
     if getattr(sys, 'frozen', False):
         if sys.platform == "darwin":
             executable_dir = os.path.dirname(sys.executable)
-            if executable_dir.endswith("MacOS"):
-                base_dir = os.path.join(os.path.dirname(executable_dir), "Resources")
-            else:
-                base_dir = getattr(sys, '_MEIPASS', executable_dir)
+            possible_paths = [
+                # 1. macOS App Bundle: Contents/Resources/lang
+                os.path.join(os.path.dirname(executable_dir), "Resources", "lang"),
+                # 2. PyInstaller fallback: sys._MEIPASS/lang
+                os.path.join(getattr(sys, '_MEIPASS', executable_dir), "lang"),
+                # 3. Next to executable: Contents/MacOS/lang
+                os.path.join(executable_dir, "lang")
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+                    
+            # If not found anywhere, default to Resources to allow creation (though it might fail if read-only)
+            base_dir = os.path.join(os.path.dirname(executable_dir), "Resources") if executable_dir.endswith("MacOS") else getattr(sys, '_MEIPASS', executable_dir)
         else:
             base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
     else:
@@ -35,8 +46,7 @@ def get_lang_dir():
     
     lang_dir = os.path.join(base_dir, "lang")
     
-    # Fallback to _MEIPASS if not in Resources on macOS
-    if getattr(sys, 'frozen', False) and sys.platform == "darwin" and not os.path.exists(lang_dir):
+    if getattr(sys, 'frozen', False) and sys.platform != "darwin" and not os.path.exists(lang_dir):
         if hasattr(sys, '_MEIPASS'):
             fallback_dir = os.path.join(sys._MEIPASS, "lang")
             if os.path.exists(fallback_dir):
