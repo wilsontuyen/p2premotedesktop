@@ -868,6 +868,42 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         subprocess.Popen([sys.executable] + sys.argv[1:])
         os._exit(0)
 
+    def import_saved_computers(self):
+        from tkinter import filedialog
+        filepath = filedialog.askopenfilename(
+            title=_("Nhập khẩu danh sách máy tính"),
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+        )
+        if filepath:
+            try:
+                import shutil
+                dest = get_computers_xml_path()
+                shutil.copy2(filepath, dest)
+                messagebox.showinfo(_("Thành công"), _("Đã nhập khẩu danh sách máy tính thành công!"))
+            except Exception as e:
+                messagebox.showerror(_("Lỗi"), f"Không thể nhập khẩu: {e}")
+
+    def export_saved_computers(self):
+        from tkinter import filedialog
+        filepath = filedialog.asksaveasfilename(
+            title=_("Xuất khẩu danh sách máy tính"),
+            defaultextension=".xml",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
+            initialfile="saved_computers.xml"
+        )
+        if filepath:
+            try:
+                import shutil
+                src = get_computers_xml_path()
+                if os.path.exists(src):
+                    shutil.copy2(src, filepath)
+                    messagebox.showinfo(_("Thành công"), _("Đã xuất khẩu danh sách máy tính thành công!"))
+                else:
+                    messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."))
+            except Exception as e:
+                messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
+
+
         
     def setup_ui(self):
         def create_flat_button(parent, **kwargs):
@@ -879,11 +915,58 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             kwargs.pop('highlightbackground', None)
             if 'cursor' not in kwargs:
                 kwargs['cursor'] = 'hand2'
-            if 'pady' not in kwargs:
-                kwargs['pady'] = 5
-            if 'padx' not in kwargs:
-                kwargs['padx'] = 5
-            lbl = tk.Label(parent, **kwargs)
+            pady = kwargs.pop('pady', 5)
+            padx = kwargs.pop('padx', 5)
+            
+            text = kwargs.get('text', '')
+            if text and len(text) > 2 and text[0] in ['📋', '📁', '📡', '🔧', '🔄', '🔍', '➕', '❌', '❐', '≡', '⌂', '¤', '↻', '⌕']:
+                icon_char = text[0]
+                label_text = text[1:].strip()
+                kwargs.pop('text')
+                
+                frame = tk.Frame(parent, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+                inner = tk.Frame(frame, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+                inner.pack(expand=True, pady=pady)
+                
+                font = kwargs.get('font')
+                fg = kwargs.get('fg')
+                bg = kwargs.get('bg')
+                
+                lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
+                lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
+                
+                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+                lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
+                
+                def on_enter(e):
+                    frame.config(bg=active_bg)
+                    inner.config(bg=active_bg)
+                    lbl_icon.config(bg=active_bg)
+                    lbl_text.config(bg=active_bg)
+                def on_leave(e):
+                    frame.config(bg=bg)
+                    inner.config(bg=bg)
+                    lbl_icon.config(bg=bg)
+                    lbl_text.config(bg=bg)
+                    
+                frame.bind("<Enter>", on_enter)
+                inner.bind("<Enter>", on_enter)
+                lbl_icon.bind("<Enter>", on_enter)
+                lbl_text.bind("<Enter>", on_enter)
+                frame.bind("<Leave>", on_leave)
+                inner.bind("<Leave>", on_leave)
+                lbl_icon.bind("<Leave>", on_leave)
+                lbl_text.bind("<Leave>", on_leave)
+                
+                if cmd:
+                    frame.bind("<Button-1>", lambda e: cmd())
+                    inner.bind("<Button-1>", lambda e: cmd())
+                    lbl_icon.bind("<Button-1>", lambda e: cmd())
+                    lbl_text.bind("<Button-1>", lambda e: cmd())
+                    
+                return frame
+
+            lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
             lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
             if cmd:
@@ -896,7 +979,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
-        file_menu.add_command(label=E(_("📡 Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+        file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+        file_menu.add_separator()
+        file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
+        file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
         file_menu.add_separator()
         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label=_("File"), menu=file_menu)
