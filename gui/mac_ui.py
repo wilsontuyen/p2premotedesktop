@@ -252,11 +252,11 @@ def setup_mac_ui(self):
         self.update_fixed_password_indicator()
 
         # Button to Copy both ID & Password at once
-        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password, pady=4)
+        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password, pady=3)
         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
 
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog, pady=6)
+        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog, pady=7)
         saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
         
         # RIGHT PANEL: Control Remote Computer
@@ -277,7 +277,7 @@ def setup_mac_ui(self):
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+        self.entry_p_pass.pack(pady=(5, 29), padx=20, fill=tk.X)
         
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
@@ -289,7 +289,7 @@ def setup_mac_ui(self):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
+        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=3, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
