@@ -298,7 +298,7 @@ def setup_windows_ui(self):
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste

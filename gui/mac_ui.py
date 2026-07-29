@@ -53,7 +53,7 @@ def setup_mac_ui(self):
                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
                 
-                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=0, anchor=tk.CENTER)
                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
                 
                 def on_enter(e):
@@ -256,7 +256,7 @@ def setup_mac_ui(self):
         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
 
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
         
         # RIGHT PANEL: Control Remote Computer
@@ -298,7 +298,7 @@ def setup_mac_ui(self):
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
