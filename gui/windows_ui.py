@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 import sys
 from core.i18n import _, get_available_languages, get_language_name
 from gui.components import ToolTip
@@ -315,5 +315,7 @@ def setup_windows_ui(self):
         # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
         if not self.is_headless:
             self.setup_tray_icon()
+            
+    setup_ui(self)
         
     # Auto formatting spaces inside ID: "123 456 789 012"
