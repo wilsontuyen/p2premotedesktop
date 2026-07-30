@@ -230,10 +230,13 @@ os.chdir(app_dir)
 def get_app_data_dir():
     import os, sys
     if sys.platform != "win32":
-        if os.path.exists("/opt/p2p_remote"):
-            path = "/opt/p2p_remote/config"
+        if sys.platform == "darwin":
+            path = os.path.expanduser("~/Library/Application Support/RemoteDesktopP2P")
         else:
-            path = os.path.expanduser("~/.config/RemoteDesktopP2P")
+            if os.path.exists("/opt/p2p_remote"):
+                path = "/opt/p2p_remote/config"
+            else:
+                path = os.path.expanduser("~/.config/RemoteDesktopP2P")
         try:
             os.makedirs(path, exist_ok=True)
             # Đảm bảo quyền ghi cho mọi user (vì root tạo ra thì user không sửa được)
