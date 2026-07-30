@@ -375,5 +375,6 @@
     "Đã tự động reset lại quyền bảo mật cho ứng dụng!\n\nVui lòng tích xanh (kích hoạt) lại quyền trên cửa sổ cài đặt vừa mở, sau đó KHỞI ĐỘNG LẠI phần mềm này để có tác dụng.": "Automatically reset security permissions for the application!\n\nPlease check (enable) the permission again on the newly opened installation window, then REBOOT this software for it to take effect.",
     "Đã xuất khẩu danh sách máy tính thành công!": "Computer list exported successfully!",
     "Đường dẫn": "Path",
-    "Đồng ý (OK)": "Agree (OK)"
+    "Đồng ý (OK)": "Agree (OK)",
+    "Thay đổi ngôn ngữ": "Change language"
 }

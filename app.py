@@ -866,11 +866,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         lang = self.current_lang.get()
         load_language(lang)
         self.save_window_position()
-        dialog = InfoDialog(self, _("Thay đổi ngôn ngữ"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
-        self.wait_window(dialog)
-        import subprocess
-        subprocess.Popen([sys.executable] + sys.argv[1:])
-        os._exit(0)
+        
+        def _do_restart():
+            import subprocess
+            if getattr(sys, 'frozen', False):
+                subprocess.Popen([sys.executable] + sys.argv[1:])
+            else:
+                subprocess.Popen([sys.executable] + sys.argv)
+            os._exit(0)
+            
+        InfoDialog(self, _("Thay đổi ngôn ngữ"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."), show_cancel=True, on_ok=_do_restart)
 
     def import_saved_computers(self):
         from tkinter import filedialog

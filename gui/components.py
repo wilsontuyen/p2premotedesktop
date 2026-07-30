@@ -468,7 +468,7 @@ class ConfirmDialog(tk.Toplevel):
         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
         
-        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
+        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=380)
         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
         
         btn_frame = tk.Frame(self, bg="#1E1E24")
@@ -507,7 +507,7 @@ class ConfirmDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", _no)
         
         self.update_idletasks()
-        dialog_w = 360
+        dialog_w = 420
         dialog_h = 160
         
         parent_x = parent.winfo_x()
@@ -520,7 +520,7 @@ class ConfirmDialog(tk.Toplevel):
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
 
 class InfoDialog(tk.Toplevel):
-    def __init__(self, parent, title, message, button_text=None):
+    def __init__(self, parent, title, message, button_text=None, show_cancel=False, cancel_text=None, on_ok=None, on_cancel=None):
         super().__init__(parent)
         self.withdraw()  # Ẩn tạm thời để tránh nháy
         self.title(title)
@@ -546,7 +546,7 @@ class InfoDialog(tk.Toplevel):
         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
         
-        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=380)
+        lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=440)
         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
         
         btn_frame = tk.Frame(self, bg="#1E1E24")
@@ -554,6 +554,13 @@ class InfoDialog(tk.Toplevel):
         
         def _ok():
             self.destroy()
+            if on_ok:
+                on_ok()
+                
+        def _cancel():
+            self.destroy()
+            if on_cancel:
+                on_cancel()
                 
         if button_text is None:
             button_text = _("Đồng ý (OK)")
@@ -563,14 +570,25 @@ class InfoDialog(tk.Toplevel):
             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_ok
         )
-        btn_ok.pack(side=tk.RIGHT, fill=tk.X, expand=False, padx=0)
+        btn_ok.pack(side=tk.RIGHT if not show_cancel else tk.LEFT, fill=tk.X if show_cancel else tk.NONE, expand=show_cancel, padx=(0, 5) if show_cancel else 0)
         
-        self.protocol("WM_DELETE_WINDOW", _ok)
+        if show_cancel:
+            if cancel_text is None:
+                cancel_text = _("Hủy (Cancel)")
+            btn_cancel = tk.Button(
+                btn_frame, text=cancel_text, font=(_DIALOG_FONT, 9, "bold"),
+                fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
+                relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_cancel
+            )
+            btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+            self.protocol("WM_DELETE_WINDOW", _cancel)
+        else:
+            self.protocol("WM_DELETE_WINDOW", _ok)
         
         self.update_idletasks()
         # Tính toán chiều cao tự động dựa trên nội dung
         req_height = self.winfo_reqheight()
-        dialog_w = 420
+        dialog_w = 480
         dialog_h = max(160, req_height + 20)
         
         if parent:

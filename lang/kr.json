@@ -375,5 +375,6 @@
     "Đã tự động reset lại quyền bảo mật cho ứng dụng!\n\nVui lòng tích xanh (kích hoạt) lại quyền trên cửa sổ cài đặt vừa mở, sau đó KHỞI ĐỘNG LẠI phần mềm này để có tác dụng.": "애플리케이션에 대한 보안 권한을 자동으로 재설정합니다!\n\n새로 열린 설치 창에서 권한을 다시 확인(활성화)한 후 이 소프트웨어를 재부팅하면 적용됩니다.",
     "Đã xuất khẩu danh sách máy tính thành công!": "컴퓨터 목록을 성공적으로 내보냈습니다!",
     "Đường dẫn": "길",
-    "Đồng ý (OK)": "동의한다(OK)"
+    "Đồng ý (OK)": "동의한다(OK)",
+    "Thay đổi ngôn ngữ": "언어 변경"
 }
