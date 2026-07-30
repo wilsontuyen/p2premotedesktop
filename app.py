@@ -873,22 +873,28 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Nạp ngôn ngữ mới trước để hộp thoại xác nhận hiện bằng ngôn ngữ đích
         load_language(new_lang)
             
+        if sys.platform == "darwin":
+            self.save_window_position()
+            # Giữ nguyên process để không bị rớt mạng, chỉ load lại UI
+            self.config(menu="")
+            if hasattr(self, 'status_dots_widgets'):
+                self.status_dots_widgets.clear()
+            for widget in self.winfo_children():
+                widget.destroy()
+            if hasattr(self, 'setup_ui'):
+                self.setup_ui()
+            return
+
         def _do_restart():
             self.save_window_position()
             import subprocess
             import os
             if getattr(sys, 'frozen', False):
-                if sys.platform == "darwin":
-                    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
-                else:
-                    subprocess.Popen([sys.executable] + sys.argv[1:])
-                    os._exit(0)
+                subprocess.Popen([sys.executable] + sys.argv[1:])
+                os._exit(0)
             else:
-                if sys.platform == "darwin":
-                    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
-                else:
-                    subprocess.Popen([sys.executable] + sys.argv)
-                    os._exit(0)
+                subprocess.Popen([sys.executable] + sys.argv)
+                os._exit(0)
             
         def _do_cancel():
             # Nếu huỷ, nạp lại ngôn ngữ cũ và trả lại UI
