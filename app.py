@@ -876,22 +876,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         def _do_restart():
             self.save_window_position()
             import subprocess
+            import os
             if getattr(sys, 'frozen', False):
                 if sys.platform == "darwin":
-                    app_path = sys.executable
-                    while app_path and app_path != "/":
-                        if app_path.endswith(".app"):
-                            break
-                        app_path = os.path.dirname(app_path)
-                    if app_path and app_path.endswith(".app"):
-                        subprocess.Popen(["open", "-n", app_path])
-                    else:
-                        subprocess.Popen([sys.executable] + sys.argv[1:])
+                    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
                 else:
                     subprocess.Popen([sys.executable] + sys.argv[1:])
+                    os._exit(0)
             else:
-                subprocess.Popen([sys.executable] + sys.argv)
-            os._exit(0)
+                if sys.platform == "darwin":
+                    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+                else:
+                    subprocess.Popen([sys.executable] + sys.argv)
+                    os._exit(0)
             
         def _do_cancel():
             # Nếu huỷ, nạp lại ngôn ngữ cũ và trả lại UI
