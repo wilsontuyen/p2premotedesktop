@@ -376,5 +376,18 @@
     "Đã xuất khẩu danh sách máy tính thành công!": "Computer list exported successfully!",
     "Đường dẫn": "Path",
     "Đồng ý (OK)": "Agree (OK)",
-    "Thay đổi ngôn ngữ": "Change language"
+    "Thay đổi ngôn ngữ": "Change language",
+    "{item_type} với tên \"{item_name}\" đã tồn tại.": "{item_type} named \"{item_name}\" already exists.",
+    "{dst_title}\\n- Vị trí: {dst_path}\\n- Dung lượng: {dst_sz}{dst_extra}\\n- Ngày sửa đổi: {dst_mtime}": "{dst_title}\\n- Location: {dst_path}\\n- Size: {dst_sz}{dst_extra}\\n- Modified: {dst_mtime}",
+    "{src_title}\\n- Vị trí: {src_path}\\n- Dung lượng: {src_sz}{src_extra}\\n- Ngày sửa đổi: {src_mtime}": "{src_title}\\n- Location: {src_path}\\n- Size: {src_sz}{src_extra}\\n- Modified: {src_mtime}",
+    "P2P Remote Desktop Viewer": "P2P Remote Desktop Viewer",
+    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
+    "Options": "Options",
+    "Help": "Help",
+    "File": "File",
+    "Zalo": "Zalo",
+    "Cam": "Cam",
+    "About": "About",
+    "AI Pro Version": "AI Pro Version",
+    "OK": "OK"
 }

@@ -1,13 +1,28 @@
-import json, re
+import os
+import re
+import json
 
-with open('lang/en.json', 'r', encoding='utf-8') as f:
-    en_dict = json.load(f)
+missing = set()
+try:
+    with open('lang/en.json', 'r', encoding='utf-8') as f:
+        en_dict = json.load(f)
+except Exception as e:
+    print(e)
+    en_dict = {}
 
-with open('gui/mac_ui.py', 'r', encoding='utf-8') as f:
-    content = f.read()
+for root, _, files in os.walk('.'):
+    if 'dist' in root or 'build' in root or '.git' in root or 'lang' in root:
+        continue
+    for file in files:
+        if file.endswith('.py'):
+            with open(os.path.join(root, file), 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            matches = re.findall(r'_\(\"(.*?)\"\)', content)
+            matches.extend(re.findall(r'_\(\'(.*?)\'\)', content))
+            for m in matches:
+                if m not in en_dict:
+                    missing.add(m)
 
-keys = re.findall(r'_\(["\'](.*?)["\']\)', content)
-missing = [k for k in set(keys) if k not in en_dict]
-print('Missing translations in en.json:')
-for m in missing:
-    print('-', m)
+import json
+with open('missing_langs.json', 'w', encoding='utf-8') as f:
+    json.dump(list(missing), f, ensure_ascii=False, indent=4)

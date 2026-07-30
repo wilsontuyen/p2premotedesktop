@@ -863,11 +863,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 messagebox.showerror(_("Lỗi"), str(e))
 
     def change_language(self, *args):
-        lang = self.current_lang.get()
-        load_language(lang)
-        self.save_window_position()
+        new_lang = self.current_lang.get()
+        import core.i18n
+        old_lang = core.i18n._current_lang
         
+        if new_lang == old_lang:
+            return
+            
+        # Nạp ngôn ngữ mới trước để hộp thoại xác nhận hiện bằng ngôn ngữ đích
+        load_language(new_lang)
+            
         def _do_restart():
+            self.save_window_position()
             import subprocess
             if getattr(sys, 'frozen', False):
                 subprocess.Popen([sys.executable] + sys.argv[1:])
@@ -875,7 +882,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 subprocess.Popen([sys.executable] + sys.argv)
             os._exit(0)
             
-        InfoDialog(self, _("Thay đổi ngôn ngữ"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."), show_cancel=True, on_ok=_do_restart)
+        def _do_cancel():
+            # Nếu huỷ, nạp lại ngôn ngữ cũ và trả lại UI
+            load_language(old_lang)
+            self.current_lang.set(old_lang)
+            
+        InfoDialog(self, _("Thay đổi ngôn ngữ"), _("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."), show_cancel=True, on_ok=_do_restart, on_cancel=_do_cancel)
 
     def import_saved_computers(self):
         from tkinter import filedialog

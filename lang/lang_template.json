@@ -376,5 +376,18 @@
     "🔄 Làm mới": "🔄 Làm mới",
     "🔄 Làm mới (30s)": "🔄 Làm mới (30s)",
     "🔧  Cách khắc phục": "🔧  Cách khắc phục",
-    "Thay đổi ngôn ngữ": "Thay đổi ngôn ngữ"
+    "Thay đổi ngôn ngữ": "Thay đổi ngôn ngữ",
+    "{item_type} với tên \"{item_name}\" đã tồn tại.": "{item_type} với tên \"{item_name}\" đã tồn tại.",
+    "{dst_title}\\n- Vị trí: {dst_path}\\n- Dung lượng: {dst_sz}{dst_extra}\\n- Ngày sửa đổi: {dst_mtime}": "{dst_title}\\n- Vị trí: {dst_path}\\n- Dung lượng: {dst_sz}{dst_extra}\\n- Ngày sửa đổi: {dst_mtime}",
+    "{src_title}\\n- Vị trí: {src_path}\\n- Dung lượng: {src_sz}{src_extra}\\n- Ngày sửa đổi: {src_mtime}": "{src_title}\\n- Vị trí: {src_path}\\n- Dung lượng: {src_sz}{src_extra}\\n- Ngày sửa đổi: {src_mtime}",
+    "P2P Remote Desktop Viewer": "P2P Remote Desktop Viewer",
+    "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
+    "Options": "Options",
+    "Help": "Help",
+    "File": "File",
+    "Zalo": "Zalo",
+    "Cam": "Cam",
+    "About": "About",
+    "AI Pro Version": "AI Pro Version",
+    "OK": "OK"
 }
