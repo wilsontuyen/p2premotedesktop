@@ -53,7 +53,7 @@ def setup_linux_ui(self):
                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
                 
-                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(2, 0), anchor=tk.CENTER)
                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
                 
                 def on_enter(e):
@@ -209,7 +209,7 @@ def setup_linux_ui(self):
         # LEFT PANEL: Allow Remote Control
         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._left_panel = left_panel
-        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
+        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.86)
         
         lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
@@ -262,7 +262,7 @@ def setup_linux_ui(self):
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._right_panel = right_panel
-        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
+        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.86)
         
         lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
@@ -271,13 +271,13 @@ def setup_linux_ui(self):
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
+        self.entry_p_id.pack(pady=(5, 12), padx=20, fill=tk.X)
         
         lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+        self.entry_p_pass.pack(pady=(5, 23), padx=20, fill=tk.X)
         
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
@@ -289,16 +289,16 @@ def setup_linux_ui(self):
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
         
-        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
+        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, command=self.click_connect)
         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Add button with a blue "+"
-        self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
+        self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", width=4, command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
         # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
