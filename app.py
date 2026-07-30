@@ -877,7 +877,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.save_window_position()
             import subprocess
             if getattr(sys, 'frozen', False):
-                subprocess.Popen([sys.executable] + sys.argv[1:])
+                if sys.platform == "darwin":
+                    app_path = sys.executable
+                    while app_path and app_path != "/":
+                        if app_path.endswith(".app"):
+                            break
+                        app_path = os.path.dirname(app_path)
+                    if app_path and app_path.endswith(".app"):
+                        subprocess.Popen(["open", "-n", app_path])
+                    else:
+                        subprocess.Popen([sys.executable] + sys.argv[1:])
+                else:
+                    subprocess.Popen([sys.executable] + sys.argv[1:])
             else:
                 subprocess.Popen([sys.executable] + sys.argv)
             os._exit(0)
