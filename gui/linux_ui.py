@@ -301,10 +301,10 @@ def setup_linux_ui(self):
         
         # Container to hold CONNECT & ADD (+) buttons
         btn_container = tk.Frame(right_panel, bg=self.card_color)
-        btn_container.pack(padx=20, fill=tk.X)
+        btn_container.pack(padx=20, fill=tk.X,pady=(4, 0))
         
-        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, command=self.click_connect)
-        self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=6, command=self.click_connect)
+        self.connect_btn.pack(side=tk.LEFT, fill=tk.X, anchor=tk.CENTER, expand=True)
         
         # Add button with a blue "+"
         self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", width=4, command=self.add_current_partner_to_saved)

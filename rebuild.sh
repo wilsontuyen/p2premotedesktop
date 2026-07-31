@@ -66,8 +66,10 @@ fi
 echo "2946635" | sudo -S rm -rf /tmp/p2p_remote_backup
 
 echo "Khởi động ứng dụng (GUI)..."
-export DISPLAY=:0
-/opt/p2p_remote/EasyRemoteDesktop > /dev/null 2>&1 &
+if [ -z "$DISPLAY" ]; then
+    export DISPLAY=:0
+fi
+nohup /opt/p2p_remote/EasyRemoteDesktop > /dev/null 2>&1 &
 
 echo "Hoàn tất quá trình rebuild và khởi động EasyRemoteDesktop!"
 echo "Cửa sổ sẽ tự đóng sau 10 giây..."
