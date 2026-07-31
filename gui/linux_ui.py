@@ -289,7 +289,7 @@ def setup_linux_ui(self):
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
         p_pass_bg = tk.Frame(right_panel, bg=self.entry_bg)
-        p_pass_bg.pack(pady=(5, 25), padx=20, fill=tk.X)
+        p_pass_bg.pack(pady=(5, 27), padx=20, fill=tk.X)
         self.entry_p_pass = tk.Entry(p_pass_bg, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.entry_p_pass.pack(pady=(8, 0), padx=5, fill=tk.X)
         
