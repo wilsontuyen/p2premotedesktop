@@ -53,7 +53,13 @@ def setup_linux_ui(self):
                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
                 
-                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(2, 0), anchor=tk.CENTER)
+                if icon_char in ['📁', '≡']:
+                    icon_pady = (0, 2)
+                elif icon_char in ['📡', '⌂']:
+                    icon_pady = (0, 0)
+                else:
+                    icon_pady = (2, 0)
+                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=icon_pady, anchor=tk.CENTER)
                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
                 
                 def on_enter(e):
@@ -209,7 +215,7 @@ def setup_linux_ui(self):
         # LEFT PANEL: Allow Remote Control
         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._left_panel = left_panel
-        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.86)
+        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=1.0)
         
         lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_allow.pack(pady=(15, 10))
@@ -221,10 +227,12 @@ def setup_linux_ui(self):
         self._id_frame = id_frame
         id_frame.pack(fill=tk.X, padx=20, pady=(5, 12))
         
-        self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
-        self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        id_lbl_bg = tk.Frame(id_frame, bg=self.entry_bg)
+        id_lbl_bg.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.my_id_label = tk.Label(id_lbl_bg, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
+        self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=(8, 0))
         
-        copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+        copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=5, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_id_btn, _("Sao chép"))
         
@@ -235,14 +243,16 @@ def setup_linux_ui(self):
         self._pass_frame = pass_frame
         pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
         
-        self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
-        self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        pass_lbl_bg = tk.Frame(pass_frame, bg=self.entry_bg)
+        pass_lbl_bg.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.my_pass_label = tk.Label(pass_lbl_bg, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
+        self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=(8, 0))
         
-        copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+        copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=5, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(copy_pass_btn, _("Sao chép"))
         
-        refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=self.refresh_password)
+        refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=5, width=3, command=self.refresh_password)
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(refresh_btn, _("Đổi mật khẩu"))
 
@@ -262,7 +272,7 @@ def setup_linux_ui(self):
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
         self._right_panel = right_panel
-        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.86)
+        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=1.0)
         
         lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
         lbl_control.pack(pady=(15, 10))
@@ -270,14 +280,18 @@ def setup_linux_ui(self):
         lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
-        self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_id.pack(pady=(5, 12), padx=20, fill=tk.X)
+        p_id_bg = tk.Frame(right_panel, bg=self.entry_bg)
+        p_id_bg.pack(pady=(5, 12), padx=20, fill=tk.X)
+        self.entry_p_id = tk.Entry(p_id_bg, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.entry_p_id.pack(pady=(8, 0), padx=5, fill=tk.X)
         
         lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
-        self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_pass.pack(pady=(5, 23), padx=20, fill=tk.X)
+        p_pass_bg = tk.Frame(right_panel, bg=self.entry_bg)
+        p_pass_bg.pack(pady=(5, 25), padx=20, fill=tk.X)
+        self.entry_p_pass = tk.Entry(p_pass_bg, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.entry_p_pass.pack(pady=(8, 0), padx=5, fill=tk.X)
         
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
@@ -316,6 +330,17 @@ def setup_linux_ui(self):
         if not self.is_headless:
             self.setup_tray_icon()
             
+        # Tự động gọt bỏ phần khoảng trống thừa bên dưới (chỉ áp dụng cho Linux)
+        scale = self.winfo_fpixels('1i') / 96.0
+        min_w = int(680 * scale)
+        min_h = int(410 * scale)
+        self.minsize(min_w, min_h)
+        current_geom = self.geometry()
+        if "+" in current_geom:
+            pos = "+" + "+".join(current_geom.split("+")[1:])
+            self.geometry(f"{min_w}x{min_h}{pos}")
+        else:
+            self.geometry(f"{min_w}x{min_h}")
     setup_ui(self)
         
     # Auto formatting spaces inside ID: "123 456 789 012"

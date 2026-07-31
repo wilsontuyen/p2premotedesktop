@@ -6,10 +6,10 @@ cd ~/p2premotedesktop
 # Thiết lập xác thực tự động qua Personal Access Token (PAT)
 git remote set-url origin https://wilsontuyen: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@github.com/wilsontuyen/p2premotedesktop.git
 
-echo "Đang tải bản cập nhật mới nhất từ branch feature/linux-support..."
+echo "Đang tải bản cập nhật mới nhất từ branch main..."
 git fetch origin
-git reset --hard origin/feature/linux-support
-git pull origin feature/linux-support
+git reset --hard main
+git pull origin main
 
 # Lấy nội dung commit mới nhất
 LATEST_COMMIT=$(git log -1 --pretty=format:"%s")

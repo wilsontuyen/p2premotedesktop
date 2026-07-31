@@ -40,7 +40,11 @@ def get_lang_dir():
             # If not found anywhere, default to Resources to allow creation (though it might fail if read-only)
             base_dir = os.path.join(os.path.dirname(executable_dir), "Resources") if executable_dir.endswith("MacOS") else getattr(sys, '_MEIPASS', executable_dir)
         else:
-            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+            exe_dir = os.path.dirname(sys.executable)
+            base_dir = exe_dir
+            if not os.path.exists(os.path.join(exe_dir, "lang")) and hasattr(sys, '_MEIPASS'):
+                if os.path.exists(os.path.join(sys._MEIPASS, "lang")):
+                    base_dir = sys._MEIPASS
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
