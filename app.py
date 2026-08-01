@@ -1430,6 +1430,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 check_auto_scroll()
             
             if drag_id:
+                self._is_dragging = True
                 try:
                     x, y = event.x_root, event.y_root
                     target_widget = dialog.winfo_containing(x, y)
@@ -1475,9 +1476,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             except Exception:
                 pass
                 
+            was_dragging = getattr(self, '_is_dragging', False)
+            self._is_dragging = False
             drag_id = getattr(self, 'drag_card_id', None)
             if not drag_id: return
             self.drag_card_id = None
+            
+            # Only process drop if user actually dragged (B1-Motion fired)
+            if not was_dragging: return
             
             x, y = event.x_root, event.y_root
             target_widget = dialog.winfo_containing(x, y)
@@ -1728,16 +1734,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 def show_context_menu(event, menu=context_menu):
                     menu.tk_popup(event.x_root, event.y_root)
                         
-                def start_drag(event, c_id=clean_id, c=comp):
+                def start_drag(event, c_id=clean_id):
                     self.drag_card_id = c_id
-                    import time
-                    now = time.time()
-                    last = getattr(self, "_last_click_time", 0)
-                    last_id = getattr(self, "_last_click_id", "")
-                    if now - last < 0.5 and last_id == c_id:
-                        connect_computer(c)
-                    self._last_click_time = now
-                    self._last_click_id = c_id
+                    self._is_dragging = False
 
                 for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
                     w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
