@@ -1004,10 +1004,11 @@ class NetworkMixin:
                 self.update_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
                 current_time = time.time()
                 with self.lan_peers_lock:
-                    # Clean up old peers
-                    self.lan_peers = {k: v for k, v in self.lan_peers.items() if current_time - v.get("last_seen", 0) < 15}
+                    # Do not clean up old peers here to preserve them for Wake-on-LAN
                     if partner_id in self.lan_peers:
-                        lan_target = self.lan_peers[partner_id]
+                        p = self.lan_peers[partner_id]
+                        if current_time - p.get("last_seen", 0) < 15:
+                            lan_target = p
                 
                 if lan_target:
                     print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN!")
