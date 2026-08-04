@@ -513,6 +513,10 @@ class ClipboardSyncManager:
 
     def register_app(self, app):
         self.app = app
+        self.cached_app_hwnd = None
+        if not getattr(self.app, 'is_headless', False):
+            try: self.cached_app_hwnd = self.app.winfo_id()
+            except: pass
         self.poll_gui_queue()
         if getattr(self.app, 'is_headless', False):
             threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
@@ -921,10 +925,7 @@ class ClipboardSyncManager:
     def _process_clipboard_change(self):
         try:
             time.sleep(0.05) # Chờ xíu để Windows thả file lock (giảm delay)
-            owner_hwnd = None
-            if self.app:
-                try: owner_hwnd = self.app.winfo_id()
-                except: pass
+            owner_hwnd = getattr(self, 'cached_app_hwnd', None)
                 
             current_files = get_clipboard_files(owner_hwnd)
             if current_files:
@@ -1634,10 +1635,7 @@ class ClipboardSyncManager:
             self.last_received_text = text
             self.ignore_destroy_clipboard = True
             try:
-                owner_hwnd = None
-                if self.app:
-                    try: owner_hwnd = self.app.winfo_id()
-                    except: pass
+                owner_hwnd = getattr(self, 'cached_app_hwnd', None)
                 
                 if self.app and getattr(self.app, 'is_headless', False):
                     # Gửi text qua Named Pipe cho Clipboard Agent
