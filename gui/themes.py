@@ -147,8 +147,6 @@ def setup_app_theme(app, config_file):
         except Exception:
             pass
             
-    # Force dark theme temporarily to clear corrupted state
-    app.current_theme.set("dark")
 
     app._last_applied_theme = app.current_theme.get()
     pal = get_theme_palette(app._last_applied_theme)

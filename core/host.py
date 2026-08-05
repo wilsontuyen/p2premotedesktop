@@ -19,6 +19,8 @@ import zlib
 import mss
 import tkinter as tk
 from PIL import Image, ImageChops
+import cv2
+import numpy as np
 from core.i18n import _
 
 from core.config import *
@@ -683,6 +685,32 @@ class HostMixin:
         print("[Host] Started Screen Sender Thread.")
         import io
         
+        class MultiCapCtx:
+            def __init__(self):
+                self.use_dxcam = False
+                self.dxcam_camera = None
+                self.sct = None
+            def __enter__(self):
+                if sys.platform == "win32":
+                    try:
+                        import dxcam
+                        self.dxcam_camera = dxcam.create(output_color="BGR")
+                        if self.dxcam_camera is not None:
+                            self.dxcam_camera.start(video_mode=True)
+                            self.use_dxcam = True
+                    except Exception as e:
+                        print(f"[Host] dxcam init failed: {e}")
+                if not self.use_dxcam:
+                    self.sct = mss.mss()
+                    self.sct.__enter__()
+                return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if self.use_dxcam and self.dxcam_camera:
+                    self.dxcam_camera.stop()
+                elif self.sct:
+                    self.sct.__exit__(exc_type, exc_val, exc_tb)
+
+        
         try:
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 2000)
         except: pass
@@ -751,15 +779,20 @@ class HostMixin:
                         time.sleep(0.3)
                         continue
                     
-                with mss.mss() as sct:
+                with MultiCapCtx() as cap_ctx:
+                    use_dxcam = cap_ctx.use_dxcam
+                    dxcam_camera = cap_ctx.dxcam_camera
+                    sct = cap_ctx.sct
+                    
                     # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
-                    if sys.platform != "win32":
-                        dynamic_monitor = sct.monitors[0]
-                    else:
-                        if len(sct.monitors) > 1:
-                            dynamic_monitor = sct.monitors[1]
-                        else:
+                    if not use_dxcam:
+                        if sys.platform != "win32":
                             dynamic_monitor = sct.monitors[0]
+                        else:
+                            if len(sct.monitors) > 1:
+                                dynamic_monitor = sct.monitors[1]
+                            else:
+                                dynamic_monitor = sct.monitors[0]
                         
                     while client_state.get("running", False):
                         try:
@@ -793,9 +826,16 @@ class HostMixin:
                                 print("[Host] Resolution change detected via GetSystemMetrics. Breaking capture loop...")
                                 break
                                 
-                            img = sct.grab(dynamic_monitor)
-                            # Convert raw BGRA from mss directly to Pillow Image
-                            pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+                            if use_dxcam:
+                                frame_bgr = dxcam_camera.get_latest_frame()
+                                if frame_bgr is None:
+                                    time.sleep(0.01)
+                                    continue
+                                cap_h, cap_w = frame_bgr.shape[:2]
+                            else:
+                                img = sct.grab(dynamic_monitor)
+                                cap_w, cap_h = img.size
+                                frame_bgr = cv2.cvtColor(np.array(img, dtype=np.uint8), cv2.COLOR_BGRA2BGR)
                             
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
@@ -834,7 +874,6 @@ class HostMixin:
                                 client_state["dyn_quality"] = quality
                                 client_state["dyn_scale"] = dyn_scale
 
-                            cap_w, cap_h = img.size
                             if client_state.get("last_cap_w") != cap_w or client_state.get("last_cap_h") != cap_h:
                                 client_state["last_cap_w"] = cap_w
                                 client_state["last_cap_h"] = cap_h
@@ -863,26 +902,26 @@ class HostMixin:
                             final_h = max(10, min(final_h, cap_h))
                             
                             if cap_w != final_w or cap_h != final_h:
-                                try:
-                                    resample_filter = Image.Resampling.LANCZOS
-                                except AttributeError:
-                                    resample_filter = Image.LANCZOS
-                                pil_img = pil_img.resize((final_w, final_h), resample_filter)
+                                frame_bgr = cv2.resize(frame_bgr, (final_w, final_h), interpolation=cv2.INTER_AREA)
 
                             static_frame = False
                             diff_bbox = None
                             try:
                                 if "prev_sent_img" in client_state and not force_update:
-                                    from PIL import ImageChops
                                     prev_img = client_state["prev_sent_img"]
-                                    if prev_img.size == pil_img.size:
-                                        diff_bbox = ImageChops.difference(pil_img, prev_img).getbbox()
-                                        if diff_bbox is None:
+                                    if prev_img.shape == frame_bgr.shape:
+                                        diff = cv2.absdiff(frame_bgr, prev_img)
+                                        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                                        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)
+                                        x, y, w_box, h_box = cv2.boundingRect(thresh)
+                                        if w_box == 0 or h_box == 0:
                                             static_frame = True
+                                        else:
+                                            diff_bbox = (x, y, x + w_box, y + h_box)
                             except: pass
                             
                             if not static_frame:
-                                client_state["prev_sent_img"] = pil_img.copy()
+                                client_state["prev_sent_img"] = frame_bgr.copy()
                             
                             if static_frame:
                                 current_q = client_state.get("dyn_quality", 40)
@@ -903,13 +942,13 @@ class HostMixin:
                                 box_w = diff_bbox[2] - diff_bbox[0]
                                 box_h = diff_bbox[3] - diff_bbox[1]
                                 if box_w * box_h < (w * h) * 0.7:
-                                    pil_img = pil_img.crop(diff_bbox)
+                                    frame_bgr = frame_bgr[diff_bbox[1]:diff_bbox[3], diff_bbox[0]:diff_bbox[2]]
                                     partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
                                     send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
-                            buf = io.BytesIO()
-                            pil_img.save(buf, format="JPEG", quality=quality, subsampling=0)
-                            jpeg_data = buf.getvalue()
+                            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+                            result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
+                            jpeg_data = encimg.tobytes()
                             
                             t_start_send = time.time()
                             send_msg(conn, jpeg_data, password)

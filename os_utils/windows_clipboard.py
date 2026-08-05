@@ -43,6 +43,22 @@ if getattr(sys, 'frozen', False):
 else:
     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Dọn dẹp thư mục tạm từ các phiên chạy trước
+def _cleanup_stale_transfers():
+    import shutil
+    try:
+        temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    except: pass
+    try:
+        headless_dir = r"C:\Users\Public\Downloads\RemoteDesktopTransfers"
+        if os.path.exists(headless_dir):
+            shutil.rmtree(headless_dir, ignore_errors=True)
+    except: pass
+
+_cleanup_stale_transfers()
+
 
 # --- NATIVE CLIPBOARD EVENT LISTENER ---
 WM_CLIPBOARDUPDATE = 0x031D
@@ -1700,12 +1716,16 @@ class ClipboardSyncManager:
             # Dọn dẹp thư mục tạm trong luồng nền để không block việc sáng nút Paste
             def cleanup_temp():
                 try:
+                    import shutil
                     os.makedirs(temp_dir, exist_ok=True)
                     for item in os.listdir(temp_dir):
                         item_path = os.path.join(temp_dir, item)
-                        if os.path.isfile(item_path):
-                            try: os.remove(item_path)
-                            except: pass
+                        try:
+                            if os.path.isfile(item_path) or os.path.islink(item_path):
+                                os.remove(item_path)
+                            elif os.path.isdir(item_path):
+                                shutil.rmtree(item_path, ignore_errors=True)
+                        except: pass
                 except Exception as e:
                     log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục tạm: {e}")
             threading.Thread(target=cleanup_temp, daemon=True).start()
