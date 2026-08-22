@@ -343,8 +343,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Check headless flag (run in Session 0 / background service mode)
         self.is_headless = "--headless" in sys.argv
-        if self.is_headless:
-            self.withdraw()
+        
+        # Tạm ẩn cửa sổ trắng trong lúc khởi tạo giao diện
+        self.withdraw()
             
         # Configure logging and stdout redirection for diagnostics
         try:
@@ -448,12 +449,24 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
         # Thiết lập icon cho cửa sổ chính
         try:
-            icon_path = os.path.join(app_dir, "app_icon.png")
-            if os.path.exists(icon_path):
+            if sys.platform == "win32":
+                import ctypes
+                myappid = 'easy.remotedesktop.p2p.1.0'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+                
+            icon_ico_path = os.path.join(app_dir, "app_icon.ico")
+            icon_ico_path_alt = os.path.join(app_dir, "app.ico")
+            icon_png_path = os.path.join(app_dir, "app_icon.png")
+            
+            if sys.platform == "win32" and os.path.exists(icon_ico_path):
+                self.iconbitmap(icon_ico_path)
+            elif sys.platform == "win32" and os.path.exists(icon_ico_path_alt):
+                self.iconbitmap(icon_ico_path_alt)
+            elif os.path.exists(icon_png_path):
                 try:
-                    icon_img = tk.PhotoImage(file=icon_path)
+                    icon_img = tk.PhotoImage(file=icon_png_path)
                 except Exception:
-                    icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_png_path))
                 self.iconphoto(True, icon_img)
                 self._app_icon_img = icon_img  # Giữ reference tránh GC
         except Exception as e:
@@ -739,6 +752,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # Setup UI
         try:
             self.setup_ui()
+            
+            # Hiển thị lại cửa sổ chính sau khi UI đã được khởi tạo xong
+            if not self.is_headless:
+                self.deiconify()
+                
         except Exception as e:
             import traceback
             try:
