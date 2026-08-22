@@ -847,11 +847,17 @@ class HostMixin:
                                 client_state["last_target_h"] = target_h
 
                             net_class = client_state.get("net_class", "medium")
+                            q_mode = getattr(self, 'client_quality_mode', 'quality')
                             
-                            if net_class == "high":
+                            if q_mode == "quality":
+                                # Chế độ Chất lượng 4K: luôn gửi ảnh gốc, quality cao nhất
+                                base_quality = 98
+                                fps_limit = 30
+                                res_scale = -1.0  # -1.0 = gửi ảnh ở độ phân giải gốc, không resize
+                            elif net_class == "high":
                                 base_quality = 98
                                 fps_limit = 60
-                                res_scale = 1.0
+                                res_scale = -1.0
                             elif net_class == "low":
                                 base_quality = 40
                                 fps_limit = 12
@@ -859,7 +865,7 @@ class HostMixin:
                             else:
                                 base_quality = 75
                                 fps_limit = 30
-                                res_scale = 0.8
+                                res_scale = 1.0
 
                             quality = client_state.get("dyn_quality", base_quality)
                             sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
@@ -870,7 +876,8 @@ class HostMixin:
                                 
                             if time.time() - client_state["start_time"] < 5.0:
                                 quality = min(98, quality + 10)
-                                dyn_scale = min(1.0, dyn_scale + 0.1)
+                                if dyn_scale >= 0:
+                                    dyn_scale = min(1.0, dyn_scale + 0.1)
                                 client_state["dyn_quality"] = quality
                                 client_state["dyn_scale"] = dyn_scale
 
@@ -884,25 +891,27 @@ class HostMixin:
                                 except Exception:
                                     pass
 
-                            w = int(target_w * dyn_scale)
-                            h = int(target_h * dyn_scale)
-                            
-                            # Calculate final dimensions while preserving aspect ratio
-                            cap_ratio = cap_w / cap_h if cap_h > 0 else 1.0
-                            target_ratio = w / h if h > 0 else 1.0
-                            
-                            if cap_ratio > target_ratio:
-                                final_w = w
-                                final_h = int(w / cap_ratio)
-                            else:
-                                final_h = h
-                                final_w = int(h * cap_ratio)
+                            # dyn_scale < 0 = chế độ full resolution (gửi ảnh gốc, không resize)
+                            if dyn_scale >= 0:
+                                w = int(target_w * dyn_scale)
+                                h = int(target_h * dyn_scale)
                                 
-                            final_w = max(10, min(final_w, cap_w))
-                            final_h = max(10, min(final_h, cap_h))
-                            
-                            if cap_w != final_w or cap_h != final_h:
-                                frame_bgr = cv2.resize(frame_bgr, (final_w, final_h), interpolation=cv2.INTER_AREA)
+                                # Calculate final dimensions while preserving aspect ratio
+                                cap_ratio = cap_w / cap_h if cap_h > 0 else 1.0
+                                target_ratio = w / h if h > 0 else 1.0
+                                
+                                if cap_ratio > target_ratio:
+                                    final_w = w
+                                    final_h = int(w / cap_ratio)
+                                else:
+                                    final_h = h
+                                    final_w = int(h * cap_ratio)
+                                    
+                                final_w = max(10, min(final_w, cap_w))
+                                final_h = max(10, min(final_h, cap_h))
+                                
+                                if cap_w != final_w or cap_h != final_h:
+                                    frame_bgr = cv2.resize(frame_bgr, (final_w, final_h), interpolation=cv2.INTER_AREA)
 
                             static_frame = False
                             diff_bbox = None
@@ -926,9 +935,13 @@ class HostMixin:
                             if static_frame:
                                 current_q = client_state.get("dyn_quality", 40)
                                 current_s = client_state.get("dyn_scale", 0.6)
-                                if current_q < 98 or current_s < 1.0:
+                                target_scale = -1.0 if net_class == "high" else 1.0
+                                if current_q < 98 or (current_s >= 0 and current_s < target_scale) or (current_s >= 0 and target_scale < 0):
                                     client_state["dyn_quality"] = min(98, current_q + 15)
-                                    client_state["dyn_scale"] = min(1.0, current_s + 0.1)
+                                    if target_scale < 0:
+                                        client_state["dyn_scale"] = -1.0  # Phục hồi về full resolution
+                                    else:
+                                        client_state["dyn_scale"] = min(target_scale, current_s + 0.1)
                                     static_frame = False 
                                 else:
                                     if "wake_event" in client_state:
@@ -941,12 +954,16 @@ class HostMixin:
                             if diff_bbox is not None and not static_frame and not force_update:
                                 box_w = diff_bbox[2] - diff_bbox[0]
                                 box_h = diff_bbox[3] - diff_bbox[1]
-                                if box_w * box_h < (w * h) * 0.7:
+                                frame_h_cur, frame_w_cur = frame_bgr.shape[:2]
+                                if box_w * box_h < (frame_w_cur * frame_h_cur) * 0.7:
                                     frame_bgr = frame_bgr[diff_bbox[1]:diff_bbox[3], diff_bbox[0]:diff_bbox[2]]
                                     partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
                                     send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+                            # Khi quality >= 90, dùng chroma subsampling 4:4:4 để giữ sắc nét chữ/viền
+                            if quality >= 90 and hasattr(cv2, 'IMWRITE_JPEG_SAMPLING_FACTOR'):
+                                encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
                             jpeg_data = encimg.tobytes()
                             
@@ -965,13 +982,16 @@ class HostMixin:
                                 # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
                                 quality = max(max(35, base_quality - 20), quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
-                                if ema > 0.6:
-                                    dyn_scale = max(res_scale, dyn_scale - 0.05)
+                                if ema > 0.6 and dyn_scale >= 0:
+                                    dyn_scale = max(max(0.5, res_scale if res_scale > 0 else 0.5), dyn_scale - 0.05)
                             elif ema < 0.20:
-                                # Phương án 2: Dynamic Scaling mượt hơn (vượt qua giới hạn ban đầu nếu mạng tốt)
+                                # Mạng tốt: Tăng dần chất lượng và scale
                                 quality = min(98, quality + 1)
                                 sleep_time = max(1.0 / 60, sleep_time - 0.005)
-                                dyn_scale = min(1.0, dyn_scale + 0.02)
+                                if res_scale < 0:
+                                    dyn_scale = -1.0  # Phục hồi về full resolution mode
+                                elif dyn_scale >= 0:
+                                    dyn_scale = min(1.0, dyn_scale + 0.02)
                                 
                             client_state["dyn_quality"] = quality
                             client_state["dyn_sleep_time"] = sleep_time
@@ -1178,6 +1198,18 @@ class HostMixin:
         elif ev_type == 'resize_viewer':
             self.client_viewer_w = event.get('w', 1280)
             self.client_viewer_h = event.get('h', 720)
+            
+        elif ev_type == 'quality_mode':
+            mode = event.get('mode', 'quality')
+            self.client_quality_mode = mode
+            # Reset dynamic state để áp dụng ngay chế độ mới
+            for addr, cs in self.active_clients.items():
+                cs.pop('dyn_quality', None)
+                cs.pop('dyn_scale', None)
+                cs.pop('dyn_sleep_time', None)
+                cs.pop('start_time', None)
+                cs['force_update'] = True
+            print(f"[Host] Client quality mode set to: {mode}")
             
         elif ev_type == 'ping':
             try:

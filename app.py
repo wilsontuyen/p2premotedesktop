@@ -557,6 +557,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         except:
             pass
 
+        # Load quality mode setting (quality = Chất lượng 4K, speed = Tốc độ)
+        self.quality_mode = tk.StringVar(value="quality")
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, "r") as f:
+                    cfg = json.load(f)
+                    self.quality_mode.set(cfg.get("quality_mode", "quality"))
+        except:
+            pass
         
         # Migrate old JSON list to new encrypted XML format
         old_json_file = "saved_computers.json"
@@ -1148,6 +1157,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 config_data["theme"] = self.current_theme.get()
             if hasattr(self, 'current_lang'):
                 config_data["language"] = self.current_lang.get()
+            if hasattr(self, 'quality_mode'):
+                config_data["quality_mode"] = self.quality_mode.get()
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f)
             print(f"[Config] Saved window position & theme & language: {geom}")

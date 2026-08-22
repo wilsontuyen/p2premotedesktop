@@ -339,9 +339,9 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan")
         return False
 
-    # Chuột trái nhấp vào "Paste" trong Context Menu
-    if time_since_lbutton < 1.5 and (last_lbutton > last_rbutton) and (last_lbutton >= meta_arrival_time):
-        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai (chon Paste)")
+    # Chuột trái nhấp vào "Paste" trong Context Menu (phải xảy ra trong vòng 5 giây sau khi nhấp chuột phải)
+    if time_since_lbutton < 1.5 and (last_lbutton > last_rbutton) and (last_lbutton - last_rbutton < 5.0) and (last_lbutton >= meta_arrival_time):
+        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai chon Paste sau khi click chuot phai ({last_lbutton - last_rbutton:.2f}s)")
         return False
 
     # --- 2. LOẠI TRỪ CỬA SỔ GUI CỦA APP ---

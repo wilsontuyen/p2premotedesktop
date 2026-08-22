@@ -286,6 +286,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 load_language(cfg.get("language", "vi"))
         except:
             pass
+        
+        # Đọc quality_mode từ config (quality = 4K, speed = tốc độ)
+        client_quality_mode = "quality"
+        try:
+            cfg_path = os.path.join(os.environ.get("APPDATA", ""), "EasyRemoteDesktop", "window_config.json")
+            if not os.path.exists(cfg_path):
+                cfg_path = "window_config.json"
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg2 = json.load(f)
+                    client_quality_mode = cfg2.get("quality_mode", "quality")
+        except:
+            pass
 
         outer_running = True
         
@@ -471,6 +484,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+            send_event({"type": "quality_mode", "mode": client_quality_mode})
             
             frame_counter = 0
             blink_frames_remaining = 0

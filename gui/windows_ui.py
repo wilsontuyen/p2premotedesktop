@@ -168,6 +168,13 @@ def setup_windows_ui(self):
         options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
         options_menu.add_separator()
 
+        # Submenu: Image Quality Mode
+        quality_menu = tk.Menu(options_menu, tearoff=0)
+        quality_menu.add_radiobutton(label=_("Chất lượng 4K"), variable=self.quality_mode, value="quality", command=self.save_window_position)
+        quality_menu.add_radiobutton(label=_("Tốc độ"), variable=self.quality_mode, value="speed", command=self.save_window_position)
+        options_menu.add_cascade(label=_("Chất lượng hình ảnh"), menu=quality_menu)
+        options_menu.add_separator()
+
         # Submenu: Theme
         theme_menu = tk.Menu(options_menu, tearoff=0)
         theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
