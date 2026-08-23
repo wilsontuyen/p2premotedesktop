@@ -256,8 +256,45 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         local_nav = tk.Frame(left_frame, bg="#E5E5E5")
         local_nav.pack(fill=tk.X, pady=2)
 
+        def get_fm_config_path():
+            import sys
+            import os
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            return os.path.join(base_dir, "fm_config.json")
+
+        def load_last_local_dir():
+            import json
+            try:
+                with open(get_fm_config_path(), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("last_local_dir", "")
+            except Exception:
+                return ""
+
+        def save_last_local_dir(path):
+            import json
+            try:
+                data = {}
+                cfg_path = get_fm_config_path()
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                data["last_local_dir"] = path
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+            except Exception:
+                pass
+
         local_entry = tk.Entry(local_nav)
-        local_entry.insert(0, os.path.abspath(os.path.expanduser("~")))
+        
+        last_dir = load_last_local_dir()
+        if not last_dir or not os.path.exists(last_dir):
+            last_dir = os.path.abspath(os.path.expanduser("~"))
+            
+        local_entry.insert(0, last_dir)
 
         def format_size(s):
             if s < 1024: return f"{s} B"
@@ -384,6 +421,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     full = os.path.join(path, f)
                     size = os.path.getsize(full)
                     local_tree.insert("", "end", text=f, values=(format_size(size), _("Tệp"), size))
+                    
+                save_last_local_dir(path)
             except Exception as e:
                 pass
 
