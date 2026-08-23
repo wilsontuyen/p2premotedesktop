@@ -277,9 +277,10 @@ class ClassicCopyDialog(tk.Toplevel):
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
+    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None):
         super().__init__(parent)
         self.parent_window = parent
+        self.host_hwnd = host_hwnd
         self.withdraw()
         self.attributes("-alpha", 0.0)
         self.overrideredirect(True)
@@ -358,11 +359,40 @@ class ProgressDialog(tk.Toplevel):
         self.update_idletasks()
         dialog_w = 400
         
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
-        x = (screen_w - dialog_w) // 2
-        y = (screen_h - dialog_h) // 2
-        self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        if self.host_hwnd and sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                tk_hwnd = int(self.frame(), 16)
+                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+                style = (style | 0x40000000) & ~0x80000000
+                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+                ctypes.windll.user32.SetParent(tk_hwnd, self.host_hwnd)
+                
+                rect = wintypes.RECT()
+                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
+                py_w = rect.right - rect.left
+                py_h = rect.bottom - rect.top
+                
+                x = max(0, (py_w - dialog_w) // 2)
+                y = max(0, (py_h - dialog_h) // 2)
+                # Use HWND_TOP (0) and do NOT use SWP_NOZORDER (0x0004) so it stays on top of siblings
+                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
+                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+                self.parent_window = None # Not locked to File Manager
+            except Exception:
+                screen_w = self.winfo_screenwidth()
+                screen_h = self.winfo_screenheight()
+                x = (screen_w - dialog_w) // 2
+                y = (screen_h - dialog_h) // 2
+                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        else:
+            screen_w = self.winfo_screenwidth()
+            screen_h = self.winfo_screenheight()
+            x = (screen_w - dialog_w) // 2
+            y = (screen_h - dialog_h) // 2
+            self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+
         self.deiconify()
         self.lift()
         self.focus_force()
@@ -396,6 +426,21 @@ class ProgressDialog(tk.Toplevel):
                 
                 x = max(p_x, min(x, p_x + p_w - my_w))
                 y = max(p_y, min(y, p_y + p_h - my_h))
+            except Exception:
+                pass
+        elif hasattr(self, 'host_hwnd') and self.host_hwnd and sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
+                p_w = rect.right - rect.left
+                p_h = rect.bottom - rect.top
+                my_w = self.winfo_width()
+                my_h = self.winfo_height()
+                
+                x = max(0, min(x, p_w - my_w))
+                y = max(0, min(y, p_h - my_h))
             except Exception:
                 pass
                 
