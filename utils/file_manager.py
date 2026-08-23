@@ -173,7 +173,7 @@ class CustomMessageBox:
         return inline_messagebox(parent, title, message, "askyesno")
 
 
-def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080):
+def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080, send_event_sync=None):
     try:
         import tkinter as tk
         from tkinter import ttk, filedialog, messagebox
@@ -189,6 +189,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         top = tk.Tk()
             
         globals()['fm_top'] = top
+        active_upload_ack_events = []
+        active_upload_dialog = []
+        
         if sys.platform == "win32":
             top.attributes('-alpha', 0.0)
         else:
@@ -860,6 +863,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         cm.process_clipboard_event(event)
                 except Exception:
                     pass
+            elif evt_type == "upload_progress_ack":
+                fm_event_queue.put({"type": "upload_progress_update", "received": event.get("received", 0)})
+            elif evt_type == "upload_batch_ack":
+                for ev in active_upload_ack_events:
+                    ev.set()
+                active_upload_ack_events.clear()
             elif evt_type == "batch_end":
                 try:
                     from core.clipboard_agent import clipboard_sync_manager as cm
@@ -878,6 +887,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     try:
                         if evt.get("type") == "trigger_local_refresh":
                             refresh_local()
+                        elif evt.get("type") == "upload_progress_update":
+                            if active_upload_dialog:
+                                active_upload_dialog[0].update_progress(evt.get("received", 0))
                         else:
                             on_remote_dir_result(evt)
                     except Exception as e:
@@ -1366,10 +1378,18 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
             dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True))
             dialog.update_progress(0)
+            
+            active_upload_dialog.clear()
+            active_upload_dialog.append(dialog)
 
-            def upload_batch_thread(items, t_dir, dlg, st):
+            upload_ack_event = threading.Event()
+            active_upload_ack_events.append(upload_ack_event)
+
+            def upload_batch_thread(items, t_dir, dlg, st, ack_event):
+                send_fn = send_event_sync if send_event_sync else send_event
                 try:
                     sent_total = 0
+                    batch_start_time = time.time()
                     for path, n, sz, is_empty_dir in items:
                         if st.is_cancelled: break
 
@@ -1386,7 +1406,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                 if parent_path.endswith("/"): parent_path = parent_path[:-1]
                                 folder_name = parts[0]
 
-                            send_event({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name})
+                            send_fn({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name})
                             time.sleep(0.1)
                             continue
 
@@ -1401,38 +1421,61 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         if sub_dir:
                             final_target_dir += sub_dir
 
-                        send_event({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
+                        send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
                         time.sleep(0.5)
+
+                        # Adaptive throttling: đo thời gian send thực tế để tự điều chỉnh tốc độ
+                        # Dùng chunk 16KB nhỏ để sendall() trả nhanh, không chặn socket lock lâu
+                        # Sau mỗi chunk luôn yield 50ms cho control events (chuột/phím) qua socket
+                        chunk_size = 16 * 1024
 
                         with open(path, "rb") as f:
                             while True:
                                 if st.is_cancelled: break
-                                chunk = f.read(65536)
+
+                                chunk = f.read(chunk_size)
                                 if not chunk: break
-                                send_event({
+
+                                t_send_start = time.time()
+                                send_fn({
                                     "type": "file_chunk",
                                     "name": file_name,
                                     "data": base64.b64encode(chunk).decode('utf-8')
                                 })
+                                send_duration = time.time() - t_send_start
+
                                 sent_total += len(chunk)
                                 dlg.update_progress(sent_total)
-                                time.sleep(0.01)
 
-                        send_event({"type": "file_end"})
+                                # Adaptive wait: nếu send mất lâu → mạng chậm → chờ thêm
+                                # Luôn chờ ít nhất 50ms để nhường socket cho control events
+                                wait_time = max(0.05, send_duration * 0.5)
+                                if wait_time > 2.0:
+                                    wait_time = 2.0
+                                sleep_end = time.time() + wait_time
+                                while time.time() < sleep_end:
+                                    if st.is_cancelled:
+                                        break
+                                    time.sleep(0.05)
+
+                        send_fn({"type": "file_end"})
                         time.sleep(0.1) 
 
                     if not st.is_cancelled:
+                        # Gửi batch_end để báo host đã gửi xong
+                        send_fn({"type": "batch_end"})
+                        # Đóng cửa sổ tiến trình ngay lập tức
                         dlg.safe_destroy()
 
                     def delayed_refresh():
-                        time.sleep(2)
+                        time.sleep(1)
                         top.after(0, lambda: request_remote_dir(t_dir))
                     threading.Thread(target=delayed_refresh, daemon=True).start()
                 except Exception as e:
                     print(f"Upload error: {e}")
                     dlg.safe_destroy()
 
-            threading.Thread(target=upload_batch_thread, args=(items_to_upload, target_dir, dialog, state), daemon=True).start()
+            threading.Thread(target=upload_batch_thread, args=(items_to_upload, target_dir, dialog, state, upload_ack_event), daemon=True).start()
 
         def do_download():
             sel = remote_tree.selection()

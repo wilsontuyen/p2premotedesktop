@@ -279,6 +279,7 @@ class ClassicCopyDialog(tk.Toplevel):
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
         super().__init__(parent)
+        self.parent_window = parent
         self.withdraw()
         self.attributes("-alpha", 0.0)
         self.overrideredirect(True)
@@ -303,6 +304,7 @@ class ProgressDialog(tk.Toplevel):
         self.total_size = total_size
         self.filename = str(filename) if filename is not None else "Unknown"
         self.start_time = time.time()
+        self.history = [(self.start_time, 0)]
         self.on_cancel = on_cancel
         
         top_frame = tk.Frame(self, bg="#FFFFFF")
@@ -381,6 +383,22 @@ class ProgressDialog(tk.Toplevel):
     def _do_drag(self, event):
         x = event.x_root - self._drag_offset_x
         y = event.y_root - self._drag_offset_y
+        
+        if hasattr(self, 'parent_window') and self.parent_window:
+            try:
+                p_x = self.parent_window.winfo_rootx()
+                p_y = self.parent_window.winfo_rooty()
+                p_w = self.parent_window.winfo_width()
+                p_h = self.parent_window.winfo_height()
+                
+                my_w = self.winfo_width()
+                my_h = self.winfo_height()
+                
+                x = max(p_x, min(x, p_x + p_w - my_w))
+                y = max(p_y, min(y, p_y + p_h - my_h))
+            except Exception:
+                pass
+                
         self.geometry(f"+{x}+{y}")
 
     def update_progress(self, sent_bytes):
@@ -392,20 +410,29 @@ class ProgressDialog(tk.Toplevel):
                 self.prog1["value"] = percent
                 self.prog2["value"] = percent
 
-                elapsed_time = time.time() - self.start_time
-                if elapsed_time > 0 and sent_bytes > 0:
-                    speed = sent_bytes / elapsed_time
-                    if speed > 0:
-                        remaining_bytes = self.total_size - sent_bytes
-                        remaining_time = remaining_bytes / speed
-                        mins = int(remaining_time // 60)
-                        secs = int(remaining_time % 60)
-                        if mins > 0:
-                            time_str = f"{mins} min {secs} sec(s)"
-                        else:
-                            time_str = f"{secs} sec(s)"
+                current_time = time.time()
+                self.history.append((current_time, sent_bytes))
+                while len(self.history) > 1 and current_time - self.history[0][0] > 2.0:
+                    self.history.pop(0)
+
+                elapsed_time = current_time - self.history[0][0]
+                bytes_in_window = sent_bytes - self.history[0][1]
+                
+                if elapsed_time > 0 and bytes_in_window > 0:
+                    speed = bytes_in_window / elapsed_time
+                else:
+                    speed = 0
+
+                if speed > 0:
+                    remaining_bytes = self.total_size - sent_bytes
+                    remaining_time = remaining_bytes / speed
+                    mins = int(remaining_time // 60)
+                    secs = int(remaining_time % 60)
+                    if mins > 0:
+                        time_str = f"{mins} min {secs} sec(s)"
                     else:
-                        time_str = "-- sec(s)"
+                        time_str = f"{secs} sec(s)"
+                if speed > 0:
                     speed_str = f"{self.format_speed(speed)}"
                 else:
                     speed_str = "-- MB/s"

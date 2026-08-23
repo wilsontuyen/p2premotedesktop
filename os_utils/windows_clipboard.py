@@ -1833,6 +1833,17 @@ class ClipboardSyncManager:
                             self._send_progress_signal("PROGRESS", str(self.batch_received))
                             self._last_progress_time = current_time
                             self._last_progress_bytes = self.batch_received
+                    
+                    # Luôn gửi ACK tiến độ về cho Client để cập nhật UI mượt mà theo đúng lượng đã nhận
+                    current_time_ack = time.time()
+                    if not hasattr(self, '_last_upload_ack_time'):
+                        self._last_upload_ack_time = 0
+                    if (current_time_ack - self._last_upload_ack_time >= 0.2) or (hasattr(self, 'batch_total_size') and self.batch_received >= self.batch_total_size):
+                        self._last_upload_ack_time = current_time_ack
+                        if getattr(self, 'sock', None):
+                            try:
+                                send_msg(self.sock, json.dumps({"type": "upload_progress_ack", "received": self.batch_received}).encode('utf-8'))
+                            except: pass
                 
         elif ptype == "file_end":
             filename = packet.get("name", "")
@@ -1878,6 +1889,13 @@ class ClipboardSyncManager:
             log_debug(f"[batch_end] Đã nhận xong toàn bộ file trong thư mục tạm.")
             try: log_activity(_("Nhận file: ") + str(self.batch_display_name) + " - " + str(self.batch_total_size) + _(" byte - Thành công"))
             except: pass
+            # Gửi ACK về client xác nhận đã nhận đủ file
+            try:
+                if self.sock:
+                    send_msg(self.sock, json.dumps({"type": "upload_batch_ack"}).encode('utf-8'))
+                    log_debug("[batch_end] Đã gửi upload_batch_ack về client.")
+            except Exception as ack_err:
+                log_debug(f"[batch_end] Lỗi gửi upload_batch_ack: {ack_err}")
             
             # --- HEADLESS MODE: Gửi đường dẫn file qua Named Pipe cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):

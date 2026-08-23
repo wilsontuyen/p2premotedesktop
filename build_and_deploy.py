@@ -61,6 +61,10 @@ def main():
     company_name = "P2P Remote Desktop"
     version_string = "1.0.0.0"
     
+    # Calculate jobs to limit CPU usage to ~80%
+    cpu_count = os.cpu_count() or 4
+    jobs_limit = max(1, int(cpu_count * 0.8))
+    
     # 3. Build Service using Nuitka (standalone)
     log("Building RemoteDesktopService via Nuitka (standalone)...")
     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
@@ -73,6 +77,7 @@ def main():
         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="{service_desc}" '
+        f'--jobs={jobs_limit} '
         f'--output-dir=dist_nuitka_service windows_service_loop.py'
     )
     if not run_cmd(nuitka_service_cmd):
@@ -91,6 +96,7 @@ def main():
         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="{app_desc}" '
+        f'--jobs={jobs_limit} '
         f'--output-dir=dist_nuitka app.py'
     )
     if not run_cmd(nuitka_cmd):

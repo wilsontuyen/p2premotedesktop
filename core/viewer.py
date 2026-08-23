@@ -112,7 +112,7 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
                         continue
-                    elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result", "batch_start", "file_start", "file_chunk", "file_end", "batch_end"):
+                    elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result", "batch_start", "file_start", "file_chunk", "file_end", "batch_end", "upload_batch_ack", "upload_progress_ack"):
                         if evt_type == "read_text_file_result" and event.get("path") == "/sys/block/mmcblk0/device/serial":
                             if event.get("success"):
                                 serial = event.get("content", "").strip()
@@ -475,6 +475,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     pass
                     
+            def send_event_sync(event_dict):
+                try:
+                    send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
+                except Exception:
+                    pass
+                    
             # Install keyboard hook to intercept Windows keys and Ctrl+Esc
             if hwnd:
                 install_keyboard_hook(hwnd, send_event)
@@ -502,7 +508,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 if client_host_computer_name_override != last_seen_override:
                     last_seen_override = client_host_computer_name_override
                     if last_seen_override:
-                        pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=last_seen_override))
+                        comp_title = f"{computer_name} - {last_seen_override}" if (computer_name and "MC-Android" in last_seen_override) else last_seen_override
+                        pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_title))
 
                 frame_counter += 1
                 # Check for blink signal file periodically
@@ -556,7 +563,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.display.init()
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                         
-                        comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
+                        comp_to_use = f"{computer_name} - {client_host_computer_name_override}" if (client_host_computer_name_override and computer_name and "MC-Android" in client_host_computer_name_override) else (client_host_computer_name_override or computer_name)
                         if comp_to_use:
                             pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_to_use))
                         else:
@@ -709,7 +716,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 print("[Client] Transfer File Button Clicked.")
                                 hwnd = pygame.display.get_wm_info().get("window")
                                 comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
-                                threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()
+                                threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), kwargs={"send_event_sync": send_event_sync}, daemon=True).start()
                             continue
                         if show_buttons and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
