@@ -170,6 +170,9 @@ def _scaled_toplevel_geometry(self, newGeometry=None):
 
 tk.Toplevel.geometry = _scaled_toplevel_geometry
 
+from gui.window_icon import install_toplevel_app_icon, set_dialog_app_icon
+install_toplevel_app_icon()
+
 
 import pygame
 import sys
@@ -226,40 +229,6 @@ if getattr(sys, 'frozen', False):
 else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
-
-def _set_dialog_app_icon(win):
-    """Gắn icon app lên Toplevel (tránh icon lông chim Tk). Không gọi từ __init__."""
-    try:
-        ico = os.path.join(app_dir, "app_icon.ico")
-        ico_alt = os.path.join(app_dir, "app.ico")
-        png = os.path.join(app_dir, "app_icon.png")
-        icon_path = ico if os.path.exists(ico) else (ico_alt if os.path.exists(ico_alt) else "")
-        if sys.platform == "win32" and icon_path:
-            win.iconbitmap(icon_path)
-        elif os.path.exists(png):
-            try:
-                img = tk.PhotoImage(file=png)
-            except Exception:
-                img = ImageTk.PhotoImage(Image.open(png))
-            win.iconphoto(False, img)
-            win._app_icon_img = img
-        else:
-            icon_path = ""
-        if sys.platform == "win32" and icon_path:
-            try:
-                win.update_idletasks()
-                hwnd = int(win.winfo_id())
-                parent = ctypes.windll.user32.GetParent(hwnd)
-                if parent:
-                    hwnd = parent
-                hicon = ctypes.windll.user32.LoadImageW(0, icon_path, 1, 0, 0, 0x0010)
-                if hicon:
-                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon)
-                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon)
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"[App] Không gắn được icon dialog: {e}")
 
 def get_app_data_dir():
     import os, sys
@@ -3010,7 +2979,7 @@ Comment=Remote Desktop P2P AutoStart
         dlg.configure(bg=self.bg_color)
         dlg.transient(self)
         dlg.resizable(True, True)
-        _set_dialog_app_icon(dlg)
+        set_dialog_app_icon(dlg)
         try:
             dlg.grab_set()
         except Exception:
@@ -3150,7 +3119,7 @@ Comment=Remote Desktop P2P AutoStart
         except Exception:
             x, y = 80, 80
         dlg.geometry(f"{dw}x{dh}+{x}+{y}")
-        _set_dialog_app_icon(dlg)
+        set_dialog_app_icon(dlg)
         dlg.deiconify()
         dlg.lift()
         try:

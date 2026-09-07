@@ -12,6 +12,9 @@ try:
 except ImportError:
     pass
 
+from gui.window_icon import install_toplevel_app_icon
+install_toplevel_app_icon()
+
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:
