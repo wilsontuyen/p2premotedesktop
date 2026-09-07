@@ -727,6 +727,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._reconnecting_signaling = False
         self.pending_connection_info = None
         self.status_dots_widgets = {}
+        self._saved_computers_cache = None
+        self._saved_computers_mtime = None
+        self._saved_list_reorder_job = None
+        self._status_query_worker_started = False
         self.tray_icon = None
         self.last_signaling_response = time.time()
         self.received_first_pong = False
@@ -1339,7 +1343,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             val = search_var.get()
             if val == _("Tìm kiếm theo tên hoặc ID..."):
                 return
-            refresh_list()
+            job = getattr(dialog, "_search_job", None)
+            if job:
+                try:
+                    dialog.after_cancel(job)
+                except Exception:
+                    pass
+            dialog._search_job = dialog.after(180, refresh_list)
             
         search_var.trace_add("write", on_search_change)
 
@@ -1359,7 +1369,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         scrollable_frame.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: None if getattr(dialog, "_building_list", False) else canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
         canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
@@ -1609,52 +1619,58 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                         return widgets[0].cget("fg") == "#00F5D4"
                 return False
 
-            for c in children:
-                c.pack_forget()
+            dialog._building_list = True
+            try:
+                for c in children:
+                    c.pack_forget()
 
-            # Group cards
-            grouped_cards = {}
-            for c in cards:
-                grp = getattr(c, 'comp_group', '')
-                if grp not in grouped_cards:
-                    grouped_cards[grp] = []
-                grouped_cards[grp].append(c)
+                grouped_cards = {}
+                for c in cards:
+                    grp = getattr(c, 'comp_group', '')
+                    if grp not in grouped_cards:
+                        grouped_cards[grp] = []
+                    grouped_cards[grp].append(c)
 
-            def group_sort_key(g):
-                return (1, g) if not g else (0, g.lower())
-            
-            sorted_groups = sorted(grouped_cards.keys(), key=group_sort_key)
-            header_map = {h.group_name: h for h in headers}
-
-            for grp in sorted_groups:
-                if grp in header_map:
-                    header_map[grp].pack(fill=tk.X, pady=(15, 5), padx=15)
+                def group_sort_key(g):
+                    return (1, g) if not g else (0, g.lower())
                 
-                if grp not in self.collapsed_groups:
-                    grp_cards = grouped_cards.get(grp, [])
-                    grp_cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
-                    for c in grp_cards:
-                        c.pack(fill=tk.X, pady=0, padx=(0, 10))
+                sorted_groups = sorted(grouped_cards.keys(), key=group_sort_key)
+                header_map = {h.group_name: h for h in headers}
 
-        self._reorder_saved_computers_func = reorder_list
+                for grp in sorted_groups:
+                    if grp in header_map:
+                        header_map[grp].pack(fill=tk.X, pady=(15, 5), padx=15)
+                    
+                    if grp not in self.collapsed_groups:
+                        grp_cards = grouped_cards.get(grp, [])
+                        grp_cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
+                        for c in grp_cards:
+                            c.pack(fill=tk.X, pady=0, padx=(0, 10))
+            finally:
+                dialog._building_list = False
+                try:
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                except Exception:
+                    pass
+
+        def schedule_reorder():
+            job = getattr(self, "_saved_list_reorder_job", None)
+            if job:
+                try:
+                    dialog.after_cancel(job)
+                except Exception:
+                    pass
+            self._saved_list_reorder_job = dialog.after(200, reorder_list)
+
+        self._reorder_saved_computers_func = schedule_reorder
 
         def refresh_list(force=False):
-            try:
-                dialog.config(cursor="watch")
-            except:
-                pass
-            dialog.update_idletasks()
-            
             def _refresh_task():
                 try:
                     _refresh_list_inner(force)
-                finally:
-                    try:
-                        dialog.config(cursor="")
-                    except:
-                        pass
-            
-            dialog.after(10, _refresh_task)
+                except Exception:
+                    pass
+            dialog.after(1, _refresh_task)
             
         def _refresh_list_inner(force=False):
             query = search_var.get().strip().lower()
@@ -1679,112 +1695,115 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 if widgets and widgets[0].winfo_exists():
                     current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
 
-            # Clear previous items
-            for widget in scrollable_frame.winfo_children():
-                widget.destroy()
-            self.status_dots_widgets.clear()
+            dialog._building_list = True
+            ids_to_query = []
+            try:
+                for widget in scrollable_frame.winfo_children():
+                    widget.destroy()
+                self.status_dots_widgets.clear()
 
-            if not computers:
-                txt = _("Không tìm thấy máy tính phù hợp.") if query else _("Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới.")
-                lbl_empty = tk.Label(scrollable_frame, text=txt, font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
-                lbl_empty.pack(pady=40, fill=tk.X, expand=True)
-                return
+                if not computers:
+                    txt = _("Không tìm thấy máy tính phù hợp.") if query else _("Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới.")
+                    lbl_empty = tk.Label(scrollable_frame, text=txt, font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.card_color, justify=tk.CENTER)
+                    lbl_empty.pack(pady=40, fill=tk.X, expand=True)
+                    return
 
-            unique_groups = set()
-            for c in computers:
-                unique_groups.add(c.get("group", "").strip())
-            
-            for grp in unique_groups:
-                grp_display = grp if grp else _("Chưa phân nhóm")
-                icon = "▶" if grp in self.collapsed_groups else "▼"
-                header_text = f"{icon} {grp_display.upper()}"
+                unique_groups = set()
+                for c in computers:
+                    unique_groups.add(c.get("group", "").strip())
                 
-                header = tk.Label(scrollable_frame, text=header_text, font=(APP_FONT_NAME, 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, cursor="hand2")
-                header.is_group_header = True
-                header.group_name = grp
-                
-                def toggle_group(event, g=grp):
-                    if g in self.collapsed_groups:
-                        self.collapsed_groups.remove(g)
-                    else:
-                        self.collapsed_groups.add(g)
-                    new_icon = "▶" if g in self.collapsed_groups else "▼"
-                    g_display = g if g else _("Chưa phân nhóm")
-                    event.widget.config(text=f"{new_icon} {g_display.upper()}")
-                    reorder_list()
-                    self.save_group_states_only()
+                for grp in unique_groups:
+                    grp_display = grp if grp else _("Chưa phân nhóm")
+                    icon = "▶" if grp in self.collapsed_groups else "▼"
+                    header_text = f"{icon} {grp_display.upper()}"
                     
-                header.bind("<Button-1>", toggle_group)
-                header.bind("<ButtonRelease-1>", on_drop)
-
-                grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
-                grp_context_menu.add_command(label=_("Đổi tên nhóm"), command=lambda g=grp: rename_group_dialog(g))
-
-                def show_grp_context(event, menu=grp_context_menu):
-                    menu.tk_popup(event.x_root, event.y_root)
-
-                header.bind("<ButtonRelease-3>", show_grp_context)
-
-            for comp in computers:
-                card = tk.Frame(scrollable_frame, bg=self.card_color)
-                card.comp_id = comp["id"].replace(" ", "")
-                card.comp_name = comp["name"]
-                card.comp_group = comp.get("group", "").strip()
-
-                content_frame = tk.Frame(card, bg=self.card_color, pady=5, padx=12)
-                content_frame.pack(fill=tk.X)
-                
-                separator = tk.Frame(card, bg=self.divider_color, height=2)
-                separator.pack(fill=tk.X, padx=10)
-
-                info_frame = tk.Frame(content_frame, bg=self.card_color)
-                info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-                clean_id = card.comp_id
-                is_online = current_online.get(clean_id, False)
-                dot_color = "#00F5D4" if is_online else "#8A8A9A"
-                dot_lbl = tk.Label(info_frame, text="●", font=(APP_FONT_NAME, 13, "bold"), fg=dot_color, bg=self.card_color)
-                dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
-
-                # ID label aligned to the right
-                id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color, anchor=tk.E)
-                id_lbl.pack(side=tk.RIGHT, padx=(0, 10))
-
-                # Name label aligned to the left
-                name_lbl = tk.Label(info_frame, text=comp["name"], font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
-                name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-                context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
-                context_menu.add_command(label=_("Kết nối"), command=lambda c=comp: connect_computer(c))
-                context_menu.add_separator()
-                context_menu.add_command(label=_("Thay đổi thông tin"), command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
-                context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
-
-                def show_context_menu(event, menu=context_menu):
-                    menu.tk_popup(event.x_root, event.y_root)
+                    header = tk.Label(scrollable_frame, text=header_text, font=(APP_FONT_NAME, 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, cursor="hand2")
+                    header.is_group_header = True
+                    header.group_name = grp
+                    
+                    def toggle_group(event, g=grp):
+                        if g in self.collapsed_groups:
+                            self.collapsed_groups.remove(g)
+                        else:
+                            self.collapsed_groups.add(g)
+                        new_icon = "▶" if g in self.collapsed_groups else "▼"
+                        g_display = g if g else _("Chưa phân nhóm")
+                        event.widget.config(text=f"{new_icon} {g_display.upper()}")
+                        reorder_list()
+                        self.save_group_states_only()
                         
-                def start_drag(event, c_id=clean_id):
-                    self.drag_card_id = c_id
-                    self._is_dragging = False
+                    header.bind("<Button-1>", toggle_group)
+                    header.bind("<ButtonRelease-1>", on_drop)
 
-                for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
-                    w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
-                    w.bind("<ButtonRelease-3>", show_context_menu)
-                    w.bind("<ButtonPress-1>", start_drag)
-                    w.bind("<B1-Motion>", on_drag_motion)
-                    w.bind("<ButtonRelease-1>", on_drop)
+                    grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                    grp_context_menu.add_command(label=_("Đổi tên nhóm"), command=lambda g=grp: rename_group_dialog(g))
+
+                    def show_grp_context(event, menu=grp_context_menu):
+                        menu.tk_popup(event.x_root, event.y_root)
+
+                    header.bind("<ButtonRelease-3>", show_grp_context)
+
+                for comp in computers:
+                    card = tk.Frame(scrollable_frame, bg=self.card_color)
+                    card.comp_id = comp["id"].replace(" ", "")
+                    card.comp_name = comp["name"]
+                    card.comp_group = comp.get("group", "").strip()
+
+                    content_frame = tk.Frame(card, bg=self.card_color, pady=5, padx=12)
+                    content_frame.pack(fill=tk.X)
                     
-                    try:
-                        w.config(cursor="hand2")
-                    except Exception:
-                        pass
+                    separator = tk.Frame(card, bg=self.divider_color, height=2)
+                    separator.pack(fill=tk.X, padx=10)
 
-                if clean_id not in self.status_dots_widgets:
-                    self.status_dots_widgets[clean_id] = []
-                self.status_dots_widgets[clean_id].append(dot_lbl)
-                self.query_computer_status(clean_id)
+                    info_frame = tk.Frame(content_frame, bg=self.card_color)
+                    info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+                    clean_id = card.comp_id
+                    is_online = current_online.get(clean_id, False)
+                    dot_color = "#00F5D4" if is_online else "#8A8A9A"
+                    dot_lbl = tk.Label(info_frame, text="●", font=(APP_FONT_NAME, 13, "bold"), fg=dot_color, bg=self.card_color)
+                    dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
+
+                    id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color, anchor=tk.E)
+                    id_lbl.pack(side=tk.RIGHT, padx=(0, 10))
+
+                    name_lbl = tk.Label(info_frame, text=comp["name"], font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
+                    name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                    context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                    context_menu.add_command(label=_("Kết nối"), command=lambda c=comp: connect_computer(c))
+                    context_menu.add_separator()
+                    context_menu.add_command(label=_("Thay đổi thông tin"), command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
+                    context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
+
+                    def show_context_menu(event, menu=context_menu):
+                        menu.tk_popup(event.x_root, event.y_root)
+                            
+                    def start_drag(event, c_id=clean_id):
+                        self.drag_card_id = c_id
+                        self._is_dragging = False
+
+                    for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
+                        w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
+                        w.bind("<ButtonRelease-3>", show_context_menu)
+                        w.bind("<ButtonPress-1>", start_drag)
+                        w.bind("<B1-Motion>", on_drag_motion)
+                        w.bind("<ButtonRelease-1>", on_drop)
+                        try:
+                            w.config(cursor="hand2")
+                        except Exception:
+                            pass
+
+                    if clean_id not in self.status_dots_widgets:
+                        self.status_dots_widgets[clean_id] = []
+                    self.status_dots_widgets[clean_id].append(dot_lbl)
+                    ids_to_query.append(clean_id)
+            finally:
+                dialog._building_list = False
                 
             reorder_list()
+            for cid in ids_to_query:
+                self.query_computer_status(cid)
 
         # Bottom buttons panel
         bottom_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -1844,8 +1863,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         def auto_refresh_status():
             if not dialog.winfo_exists(): return
-            for clean_id in list(self.status_dots_widgets.keys()):
-                self.query_computer_status(clean_id)
+            ids = list(self.status_dots_widgets.keys())
+            def _pump(i=0):
+                if not dialog.winfo_exists():
+                    return
+                batch = ids[i:i + 8]
+                for clean_id in batch:
+                    self.query_computer_status(clean_id)
+                if i + 8 < len(ids):
+                    dialog.after(120, lambda: _pump(i + 8))
+            _pump(0)
             dialog.after(10000, auto_refresh_status)
 
         dialog.after(10000, auto_refresh_status)
@@ -2093,6 +2120,17 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
     def load_saved_computers(self):
         computers_file = get_computers_xml_path()
+        try:
+            mtime = os.path.getmtime(computers_file) if os.path.exists(computers_file) else None
+        except Exception:
+            mtime = None
+        if (
+            getattr(self, "_saved_computers_cache", None) is not None
+            and mtime is not None
+            and mtime == getattr(self, "_saved_computers_mtime", None)
+        ):
+            return [dict(c) for c in self._saved_computers_cache]
+
         import xml.etree.ElementTree as ET
         lst = []
         if os.path.exists(computers_file):
@@ -2127,7 +2165,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                             self.collapsed_groups.add(decrypt_text(g_node.text) if g_node.text else "")
             except Exception as e:
                 print(f"[Config] Lỗi tải XML: {e}")
-        return lst
+        self._saved_computers_cache = lst
+        self._saved_computers_mtime = mtime
+        return [dict(c) for c in lst]
 
 
     def save_saved_computers(self, lst):
@@ -2178,6 +2218,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 
             tree = ET.ElementTree(root)
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+            self._saved_computers_cache = [dict(c) for c in lst]
+            try:
+                self._saved_computers_mtime = os.path.getmtime(computers_file)
+            except Exception:
+                self._saved_computers_mtime = None
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
             if hasattr(self, 'show_custom_error'):
@@ -2203,9 +2248,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if hasattr(ET, "indent"):
                 ET.indent(root, space="  ")
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
-        except:
+            try:
+                self._saved_computers_mtime = os.path.getmtime(computers_file)
+            except Exception:
+                pass
+        except Exception:
             pass
-
 
     def load_fixed_password_from_xml(self):
         computers_file = get_computers_xml_path()
@@ -2962,22 +3010,39 @@ Comment=Remote Desktop P2P AutoStart
             self.update_saved_computer_status(clean_id, True)
             return
 
-        sock = getattr(self, 'primary_signaling_socket', None)
-        if sock:
-            try:
-                print(f"[StatusQuery] Đang gửi yêu cầu kiểm tra trạng thái ID: {clean_id}")
-                req = json.dumps({"action": "check_online", "target": clean_id})
-                with self.signaling_lock:
-                    send_msg(sock, req.encode('utf-8'), APP_KEY)
-                
-                # Sau 1.5s nếu đèn LED vẫn là màu xám (chưa có phản hồi) thì tự động chuyển sang màu đỏ (Offline)
-                self.after(1500, lambda cid=clean_id: self.check_and_default_offline(cid))
-            except Exception as e:
-                print(f"[StatusQuery] Lỗi gửi yêu cầu status {clean_id}: {e}")
-                self.update_saved_computer_status(clean_id, False)
-        else:
-            print(f"[StatusQuery] Chưa kết nối Signaling, mặc định {clean_id} là Offline")
-            self.update_saved_computer_status(clean_id, False)
+        self._ensure_status_query_worker()
+        try:
+            self._status_query_q.put_nowait(clean_id)
+        except Exception:
+            pass
+        self.after(1800, lambda cid=clean_id: self.check_and_default_offline(cid))
+
+    def _ensure_status_query_worker(self):
+        if getattr(self, "_status_query_worker_started", False):
+            return
+        self._status_query_worker_started = True
+        import queue
+        self._status_query_q = queue.Queue()
+
+        def worker():
+            while True:
+                try:
+                    cid = self._status_query_q.get()
+                except Exception:
+                    continue
+                sock = getattr(self, "primary_signaling_socket", None)
+                if not sock:
+                    self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
+                    continue
+                try:
+                    req = json.dumps({"action": "check_online", "target": cid})
+                    with self.signaling_lock:
+                        send_msg(sock, req.encode("utf-8"), APP_KEY)
+                except Exception:
+                    self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
+                time.sleep(0.025)
+
+        threading.Thread(target=worker, daemon=True, name="StatusQueryWorker").start()
 
 
     def check_and_default_offline(self, clean_id):
