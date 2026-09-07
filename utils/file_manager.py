@@ -1415,7 +1415,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 is_cancelled = False
             state = UploadState()
 
-            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd)
+            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd, embed=True)
             dialog.update_progress(0)
             
             active_upload_dialog.clear()
@@ -1426,6 +1426,13 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
             def upload_batch_thread(items, t_dir, dlg, st, ack_event):
                 send_fn = send_event_sync if send_event_sync else send_event
+                lan = False
+                try:
+                    from network.socket_utils import is_lan_socket
+                    from core.clipboard_agent import clipboard_sync_manager
+                    lan = bool(clipboard_sync_manager and is_lan_socket(getattr(clipboard_sync_manager, "sock", None)))
+                except Exception:
+                    pass
                 try:
                     sent_total = 0
                     batch_start_time = time.time()
@@ -1461,12 +1468,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             final_target_dir += sub_dir
 
                         send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
-                        time.sleep(0.5)
-
-                        # Adaptive throttling: đo thời gian send thực tế để tự điều chỉnh tốc độ
-                        # Dùng chunk 16KB nhỏ để sendall() trả nhanh, không chặn socket lock lâu
-                        # Sau mỗi chunk luôn yield 50ms cho control events (chuột/phím) qua socket
-                        chunk_size = 16 * 1024
+                        if not lan:
+                            time.sleep(0.5)
+                        chunk_size = (1024 * 1024) if lan else (16 * 1024)
 
                         with open(path, "rb") as f:
                             while True:
@@ -1486,8 +1490,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                 sent_total += len(chunk)
                                 dlg.update_progress(sent_total)
 
-                                # Adaptive wait: nếu send mất lâu → mạng chậm → chờ thêm
-                                # Luôn chờ ít nhất 50ms để nhường socket cho control events
+                                if lan:
+                                    continue
                                 wait_time = max(0.05, send_duration * 0.5)
                                 if wait_time > 2.0:
                                     wait_time = 2.0
@@ -1609,7 +1613,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 def _cancel():
                     cm.cancel_active_transfer(remote_triggered=False)
 
-                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd)
+                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd, embed=True)
                 dialog.update_progress(0)
                 cm.active_dialog = dialog
 

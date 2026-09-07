@@ -24,7 +24,7 @@ import base64
 
 from utils.logger import log_debug
 from core.i18n import _
-from network.socket_utils import send_msg, recv_msg
+from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.clipboard_api import (
     ENABLE_CLIPBOARD_SYNC, 
     set_clipboard_dword_format, 
@@ -453,6 +453,9 @@ class ClipboardSyncManager:
         
         self.cached_explorer_path = None
         self.dummy_h_active = False
+        self._recv_dialog_open = False
+        self._reoffer_files = None
+        self._gui_poll_gen = 0
         self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
         self.cacher_thread.start()
         
@@ -570,7 +573,8 @@ class ClipboardSyncManager:
         if not getattr(self.app, 'is_headless', False):
             try: self.cached_app_hwnd = self.app.winfo_id()
             except: pass
-        self.poll_gui_queue()
+        self._gui_poll_gen = getattr(self, "_gui_poll_gen", 0) + 1
+        self.poll_gui_queue(self._gui_poll_gen)
         if getattr(self.app, 'is_headless', False):
             threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
             threading.Thread(target=self._start_uppipe_server, daemon=True).start()
@@ -714,12 +718,17 @@ class ClipboardSyncManager:
         """
         self._send_to_pipe("FILE", file_path)
 
-    def poll_gui_queue(self):
-        if not self.app: return
+    def poll_gui_queue(self, gen=None):
+        if not self.app:
+            return
+        if gen is None:
+            gen = getattr(self, "_gui_poll_gen", 0)
+        if gen != getattr(self, "_gui_poll_gen", 0):
+            return
         self.process_gui_queue()
         try:
-            self.app.after(50, self.poll_gui_queue)
-        except:
+            self.app.after(50, lambda g=gen: self.poll_gui_queue(g))
+        except Exception:
             pass
 
     def process_gui_queue(self):
@@ -735,19 +744,28 @@ class ClipboardSyncManager:
                 action, args = self.gui_queue.get_nowait()
                 if action == "create":
                     title_text, filename, total_size = args
-                    if self.active_dialog:
-                        try: self.active_dialog.destroy()
-                        except: pass
-                    host_hwnd = getattr(self, "pygame_hwnd", None)
-                    if not host_hwnd and self.app:
+                    existing = self.active_dialog
+                    if existing:
                         try:
-                            host_hwnd = int(self.app.winfo_id())
+                            if existing.winfo_exists():
+                                continue
                         except Exception:
-                            host_hwnd = None
+                            pass
+                        try:
+                            existing.destroy()
+                        except Exception:
+                            pass
+                        self.active_dialog = None
+                    owner_hwnd = getattr(self, "pygame_hwnd", None)
+                    if not owner_hwnd and self.app:
+                        try:
+                            owner_hwnd = int(self.app.winfo_id())
+                        except Exception:
+                            owner_hwnd = None
                     self.active_dialog = ProgressDialog(
                         self.app, title_text, filename, total_size,
                         on_cancel=lambda: self.cancel_active_transfer(remote_triggered=False),
-                        host_hwnd=host_hwnd
+                        owner_hwnd=owner_hwnd
                     )
                 elif action == "update":
                     sent_bytes = args
@@ -763,7 +781,7 @@ class ClipboardSyncManager:
                                     self.active_dialog.destroy()
                                 except: pass
                                 self.active_dialog = None
-                        self.app.after(500, _do_destroy)
+                        self.app.after(0, _do_destroy)
                 elif action == "classic_overwrite_dialog":
                     filename, source_info, dest_info, has_multiple = args
                     dialog = ClassicCopyDialog(self.app, filename, source_info, dest_info, has_multiple)
@@ -810,6 +828,7 @@ class ClipboardSyncManager:
             self._last_update_bytes = sent_bytes
 
     def close_dialog(self):
+        self._recv_dialog_open = False
         self.gui_queue.put(("destroy", None))
 
     def cancel_active_transfer(self, remote_triggered=False):
@@ -831,6 +850,8 @@ class ClipboardSyncManager:
         # Dọn dẹp cache file và trạng thái paste
         self.pending_remote_files = []
         self.is_paste_triggered = False
+        self._reoffer_files = None
+        self._recv_dialog_open = False
         
         # Giải phóng delayed rendering trên clipboard bằng cách xóa sạch clipboard nếu app đang sở hữu
         try:
@@ -1304,17 +1325,12 @@ class ClipboardSyncManager:
         
         self.gui_queue.put(("classic_overwrite_dialog", (filename, source_info, dest_info, has_multiple)))
         
-        # Chờ luồng GUI xử lý và người dùng phản hồi (bơm tin nhắn)
+        # Chờ luồng GUI; không PeekMessage toàn cục — sẽ nuốt chuột của dialog Tk.
         start_wait = time.time()
-        msg = wintypes.MSG()
         while time.time() - start_wait < 300.0:
             if self.overwrite_event.is_set():
                 break
-            if ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):
-                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-            else:
-                time.sleep(0.01)
+            time.sleep(0.02)
                 
         choice = self.overwrite_choice if self.overwrite_choice else "cancel"
         if choice in ("replace", "skip") and self.overwrite_all:
@@ -1364,6 +1380,7 @@ class ClipboardSyncManager:
             # render_format chỉ chạy trong GUI mode (WM_RENDERFORMAT từ ClipboardEventListener)
             # HEADLESS mode xử lý dialog riêng trong Clipboard Agent (WM_RENDERFORMAT của agent)
             if not (self.app and getattr(self.app, 'is_headless', False)):
+                self._recv_dialog_open = True
                 self.show_dialog("Đang tải file về...", display_name, total_size)
             
             self._receive_cancelled = False
@@ -1393,11 +1410,18 @@ class ClipboardSyncManager:
                     skip_all = False
             
                     if dest_dir and os.path.isdir(dest_dir):
+                        recent = getattr(self, "_recent_direct_paste", None)
+                        recent_paths = set()
+                        if recent and (time.time() - recent[0] < 15.0):
+                            recent_paths = recent[1]
                         for f in self.pending_remote_files:
                             filename = f.get("name")
                             dest_file_path = os.path.join(dest_dir, filename)
                     
                             if os.path.exists(dest_file_path):
+                                if os.path.normcase(os.path.abspath(dest_file_path)) in recent_paths:
+                                    log_debug(f"[render_format] Bỏ qua conflict {filename}: vừa tải xong vào đích.")
+                                    continue
                                 # File đã tồn tại ở thư mục đích
                                 if replace_all:
                                     files_to_download.append(f)
@@ -1496,14 +1520,18 @@ class ClipboardSyncManager:
                 
                         if is_direct_dest:
                             log_debug("[render_format] Tải trực tiếp vào đích. Hủy paste của Explorer để tránh lỗi same-file bằng empty HDROP.")
-                            # Cung cấp empty HDROP để Explorer không báo lỗi "Unspecified error"
                             empty_hdrop = create_hdrop_data([])
                             if empty_hdrop:
                                 self.ignore_destroy_clipboard = True
                                 res = fn_SetClipboardData(15, empty_hdrop)
                                 if not res: fn_GlobalFree(empty_hdrop)
-                    
-                            self.pending_remote_files = [] # Tránh bị loop
+                            self._reoffer_files = None
+                            self.pending_remote_files = []
+                            self.dummy_h_active = False
+                            self._recent_direct_paste = (
+                                time.time(),
+                                {os.path.normcase(os.path.abspath(p)) for p in self.batch_paths if p}
+                            )
                     
                             # Bỏ qua update_clip để tránh việc Explorer đang treo bỗng nhiên nhận được data thật và tự động chép đè lên chính nó.
                         else:
@@ -1549,6 +1577,7 @@ class ClipboardSyncManager:
             # Phải SetClipboardData trước khi thoát WM_RENDERFORMAT. Không được
             # spawn thread rồi return — Windows đóng clipboard ngay sau handler.
             background_download()
+            self._reoffer_files = None
             return
         except Exception as e:
             log_debug(f"[render_format] Lỗi khi xử lý render format: {e}")
@@ -1610,9 +1639,13 @@ class ClipboardSyncManager:
                 log_debug(f"[_process_send_requests] Đã gửi file_start cho {filename}, size={file_size}")
                 
                 try:
-                    # Giới hạn băng thông từ từ (Slow Start) để tránh quá tải mạng làm mất điều khiển với host
-                    # Bắt đầu từ 500 KB/s, mỗi giây tăng thêm 500 KB/s, tối đa 4 MB/s
-                    chunk_size = 256 * 1024
+                    lan = is_lan_socket(sock)
+                    if lan:
+                        tune_socket_for_lan_bulk(sock)
+                        # LAN: không slow-start, chunk lớn, không sleep điều tiết
+                        chunk_size = 1024 * 1024
+                    else:
+                        chunk_size = 256 * 1024
                     file_sent_bytes = 0
                     file_start_time = time.time()
                     
@@ -1621,11 +1654,14 @@ class ClipboardSyncManager:
                             if self._send_cancelled:
                                 break
                             
-                            elapsed_total = time.time() - batch_start_time
-                            current_limit = 500 * 1024 + int(500 * 1024 * elapsed_total)
-                            max_limit = 1000 * 1024 * 1024
-                            if current_limit > max_limit:
-                                current_limit = max_limit
+                            if not lan:
+                                elapsed_total = time.time() - batch_start_time
+                                current_limit = 500 * 1024 + int(500 * 1024 * elapsed_total)
+                                max_limit = 1000 * 1024 * 1024
+                                if current_limit > max_limit:
+                                    current_limit = max_limit
+                            else:
+                                current_limit = None
                                 
                             chunk_data = fh.read(chunk_size)
                             if not chunk_data:
@@ -1637,19 +1673,19 @@ class ClipboardSyncManager:
                             file_sent_bytes += len(chunk_data)
                             total_sent += len(chunk_data)
                             
-                            # Tính toán và điều tiết tốc độ gửi
-                            target_time = file_sent_bytes / current_limit
-                            actual_time = time.time() - file_start_time
-                            if actual_time < target_time:
-                                sleep_dur = target_time - actual_time
-                                if sleep_dur > 2.0:
-                                    sleep_dur = 2.0
-                                    
-                                sleep_end = time.time() + sleep_dur
-                                while time.time() < sleep_end:
-                                    if self._send_cancelled:
-                                        break
-                                    time.sleep(0.05)
+                            if current_limit:
+                                target_time = file_sent_bytes / current_limit
+                                actual_time = time.time() - file_start_time
+                                if actual_time < target_time:
+                                    sleep_dur = target_time - actual_time
+                                    if sleep_dur > 2.0:
+                                        sleep_dur = 2.0
+                                        
+                                    sleep_end = time.time() + sleep_dur
+                                    while time.time() < sleep_end:
+                                        if self._send_cancelled:
+                                            break
+                                        time.sleep(0.05)
                                     
                     log_debug(f"[_process_send_requests] Đã gửi xong dữ liệu cho {filename}")
                 except Exception as e:
@@ -1684,14 +1720,15 @@ class ClipboardSyncManager:
     def handle_received_packet(self, packet):
         ptype = packet.get("type")
         
-        # Chặn nhận clipboard từ Host nếu cửa sổ Client Viewer không được kích hoạt
-        if ptype in ("clipboard_text", "files_copied_meta"):
+        # Text: không ghi đè clipboard máy thật khi user đang làm việc ngoài viewer.
+        # File meta: vẫn nhận khi Explorer đang focus — đó là lúc user paste host→client.
+        if ptype == "clipboard_text":
             if getattr(self, 'pygame_hwnd', None):
                 user32 = ctypes.windll.user32
                 user32.GetForegroundWindow.restype = ctypes.c_void_p
                 fg_hwnd = user32.GetForegroundWindow()
                 if fg_hwnd != self.pygame_hwnd:
-                    log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do cửa sổ Viewer không được kích hoạt (Giữ clipboard cho máy thật).")
+                    log_debug(f"[handle_received_packet] Bỏ qua clipboard_text do cửa sổ Viewer không được kích hoạt (Giữ clipboard cho máy thật).")
                     return
                     
         # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại
@@ -1809,11 +1846,11 @@ class ClipboardSyncManager:
             os.makedirs(self.target_save_dir, exist_ok=True)
             log_file_transfer(display_name, self.batch_total_size)
             log_debug(f"[batch_start] Bắt đầu nhận batch, total_size={self.batch_total_size}, target_save_dir={self.target_save_dir}")
-            # GUI mode: hiện dialog khi bắt đầu nhận
-            # HEADLESS mode: KHÔNG gửi START ở đây — Clipboard Agent đã hiện dialog ngay
-            # khi WM_RENDERFORMAT (tức là đúng lúc user Paste), tránh hiện dialog trùng.
+            # GUI mode: hiện dialog khi bắt đầu nhận (File Manager / nhận không qua paste).
+            # Paste host→client đã gọi show_dialog trong render_format — không tạo dialog thứ 2.
             if not (self.app and getattr(self.app, 'is_headless', False)):
-                self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
+                if not getattr(self, "_recv_dialog_open", False):
+                    self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
             
         elif ptype == "file_start":
             filename = packet.get("name", "")

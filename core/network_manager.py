@@ -26,7 +26,7 @@ from utils.hwid import get_local_ip, get_public_ip, get_public_ipv6
 from network.socket_utils import socket_passwords, force_close_socket, APP_KEY
 
 
-from network.socket_utils import send_msg, recv_msg
+from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.logger import log_debug
 from network.upnp import attempt_upnp_forward
 from core.viewer import run_client_viewer_loop
@@ -486,6 +486,8 @@ class NetworkMixin:
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except: pass
+        if is_lan_socket(sock):
+            tune_socket_for_lan_bulk(sock)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
@@ -1230,6 +1232,8 @@ class NetworkMixin:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception as e:
             print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+        if is_lan_socket(sock):
+            tune_socket_for_lan_bulk(sock)
         sock.settimeout(15.0)
             
         # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router

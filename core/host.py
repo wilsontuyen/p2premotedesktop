@@ -35,7 +35,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from utils.logger import log_debug, log_activity, log_file_transfer
-from network.socket_utils import send_msg, recv_msg
+from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
 
@@ -501,6 +501,8 @@ class HostMixin:
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except Exception as e:
                     print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Host: {e}")
+                if is_lan_socket(conn):
+                    tune_socket_for_lan_bulk(conn)
                 
                 # Cấu hình TCP Keep-Alive bảo vệ kết nối đục lỗ khỏi bị đóng bởi Firewall/Router
                 try:

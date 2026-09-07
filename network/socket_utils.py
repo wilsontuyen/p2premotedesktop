@@ -1,6 +1,7 @@
 import socket
 import struct
 import threading
+import ipaddress
 from .crypto import encrypt_payload, decrypt_payload
 
 _socket_send_locks = {}
@@ -45,6 +46,41 @@ def send_msg(sock, data_bytes, password=None):
             sock.sendall(msg)
     except Exception as e:
         print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+
+def is_private_ip(ip):
+    if not ip:
+        return False
+    if isinstance(ip, bytes):
+        try:
+            ip = ip.decode("ascii")
+        except Exception:
+            return False
+    if ip.startswith("::ffff:"):
+        ip = ip[7:]
+    try:
+        addr = ipaddress.ip_address(ip)
+        return bool(addr.is_private or addr.is_loopback or addr.is_link_local)
+    except Exception:
+        return False
+
+def is_lan_socket(sock):
+    """True nếu peer là IP LAN/private (kết nối trực tiếp trong mạng nội bộ)."""
+    if not sock:
+        return False
+    try:
+        return is_private_ip(sock.getpeername()[0])
+    except Exception:
+        return False
+
+def tune_socket_for_lan_bulk(sock):
+    """Tăng cửa sổ TCP để copy file trên LAN sát băng thông local."""
+    if not sock:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+    except Exception:
+        pass
 
 def recv_exact(sock, length):
     data = b''

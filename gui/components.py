@@ -63,9 +63,9 @@ class ClassicCopyDialog(tk.Toplevel):
         super().__init__(parent)
         self.withdraw()
         self.title("Copy File")
-        self.geometry("520x420")
         self.resizable(False, False)
         self.configure(bg="#FFFFFF")
+        # Không dùng Toplevel.geometry (bị DPI scale) — layout 520x420 bị vỡ, không bấm được.
         
         try:
             icon_path = os.path.join(app_dir, "app_icon.png")
@@ -80,19 +80,6 @@ class ClassicCopyDialog(tk.Toplevel):
         self.has_multiple = has_multiple
         
         self.attributes("-topmost", True)
-        self.focus_force()
-        
-        self.update_idletasks()
-        w = 520
-        h = 420
-        ws = self.winfo_screenwidth()
-        hs = self.winfo_screenheight()
-        x = (ws - w) // 2
-        y = (hs - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
-        self.deiconify()
-        
-        self.grab_set()
         
         lbl_title = tk.Label(
             self, text="There is already a file with the same name in this location.",
@@ -271,16 +258,34 @@ class ClassicCopyDialog(tk.Toplevel):
         btn_cancel.bind("<Leave>", btn_leave)
         
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+
+        w, h = 520, 420
+        self.update_idletasks()
+        ws = self.winfo_screenwidth()
+        hs = self.winfo_screenheight()
+        x = max(0, (ws - w) // 2)
+        y = max(0, (hs - h) // 2)
+        try:
+            self.tk.call("wm", "geometry", self._w, "520x420+%d+%d" % (x, y))
+        except Exception:
+            self.geometry("520x420+%d+%d" % (x, y))
+        self.deiconify()
+        self.lift()
+        self.focus_force()
         
     def on_cancel(self):
         self.choice = "cancel"
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None):
+    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None):
         super().__init__(parent)
         self.parent_window = parent
         self.host_hwnd = host_hwnd
+        # owner_hwnd: cửa sổ client sở hữu dialog (GWLP_HWNDPARENT), không phải vùng remote.
+        # embed/SetParent chỉ dùng File Manager (cùng toolkit). Clipboard không kẹp pygame.
+        self.owner_hwnd = self._toplevel_hwnd(owner_hwnd)
+        self._embed = bool(embed and host_hwnd and sys.platform == "win32")
         self.withdraw()
         self.attributes("-alpha", 0.0)
         self.overrideredirect(True)
@@ -359,7 +364,7 @@ class ProgressDialog(tk.Toplevel):
         self.update_idletasks()
         dialog_w = 400
         
-        if self.host_hwnd and sys.platform == "win32":
+        if self._embed:
             try:
                 import ctypes
                 from ctypes import wintypes
@@ -376,27 +381,87 @@ class ProgressDialog(tk.Toplevel):
                 
                 x = max(0, (py_w - dialog_w) // 2)
                 y = max(0, (py_h - dialog_h) // 2)
-                # Use HWND_TOP (0) and do NOT use SWP_NOZORDER (0x0004) so it stays on top of siblings
                 ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
                 self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
             except Exception:
-                screen_w = self.winfo_screenwidth()
-                screen_h = self.winfo_screenheight()
-                x = (screen_w - dialog_w) // 2
-                y = (screen_h - dialog_h) // 2
-                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+                self._place_on_screen(dialog_w, dialog_h)
         else:
-            screen_w = self.winfo_screenwidth()
-            screen_h = self.winfo_screenheight()
-            x = (screen_w - dialog_w) // 2
-            y = (screen_h - dialog_h) // 2
-            self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+            self._place_on_screen(dialog_w, dialog_h)
 
         self.deiconify()
         self.lift()
         self.focus_force()
         self.attributes("-alpha", 1.0)
         self.update()
+        self._apply_owner()
+
+    def _toplevel_hwnd(self, hwnd):
+        if not hwnd or sys.platform != "win32":
+            return hwnd
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            root = user32.GetAncestor(ctypes.c_void_p(int(hwnd)), 2)  # GA_ROOT
+            return int(root) if root else int(hwnd)
+        except Exception:
+            return hwnd
+
+    def _apply_owner(self):
+        """Gắn dialog thuộc cửa sổ client (owner), không biến thành child của vùng remote."""
+        if self._embed or not self.owner_hwnd or sys.platform != "win32":
+            return
+        hwnd = self._hwnd()
+        if not hwnd:
+            return
+        try:
+            import ctypes
+            owner = int(self.owner_hwnd)
+            GWLP_HWNDPARENT = -8
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                ctypes.windll.user32.SetWindowLongPtrW(ctypes.c_void_p(hwnd), GWLP_HWNDPARENT, ctypes.c_void_p(owner))
+            else:
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWLP_HWNDPARENT, owner)
+        except Exception:
+            pass
+
+    def _owner_window_screen_rect(self):
+        if not (getattr(self, "owner_hwnd", None) and sys.platform == "win32"):
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            if not ctypes.windll.user32.GetWindowRect(int(self.owner_hwnd), ctypes.byref(rect)):
+                return None
+            return (rect.left, rect.top, rect.right, rect.bottom)
+        except Exception:
+            return None
+
+    def _place_on_screen(self, dialog_w, dialog_h):
+        self.geometry(f"{dialog_w}x{dialog_h}")
+        self.update_idletasks()
+        my_w = max(self.winfo_width(), dialog_w)
+        my_h = max(self.winfo_height(), dialog_h)
+        # Clipboard: căn giữa cửa sổ client (owner), không dùng client-area pygame/host view.
+        bounds = None
+        if not self._embed:
+            bounds = self._owner_window_screen_rect()
+        if not bounds:
+            bounds = self._host_client_screen_rect()
+        if not bounds:
+            p = self._usable_tk_parent()
+            if p:
+                bounds = (p.winfo_rootx(), p.winfo_rooty(),
+                          p.winfo_rootx() + p.winfo_width(),
+                          p.winfo_rooty() + p.winfo_height())
+        if bounds:
+            left, top, right, bottom = bounds
+            x = left + max(0, (right - left - my_w) // 2)
+            y = top + max(0, (bottom - top - my_h) // 2)
+        else:
+            x = (self.winfo_screenwidth() - my_w) // 2
+            y = (self.winfo_screenheight() - my_h) // 2
+        self._move_to_screen(x, y)
 
     def trigger_cancel(self):
         try: self.destroy()
@@ -443,16 +508,36 @@ class ProgressDialog(tk.Toplevel):
         except Exception:
             return None
 
+    def _virtual_screen_rect(self):
+        if sys.platform != "win32":
+            return (0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+            SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+            left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+            top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+            return (left, top, left + user32.GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                    top + user32.GetSystemMetrics(SM_CYVIRTUALSCREEN))
+        except Exception:
+            return (0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
+
     def _clamp_screen_pos(self, screen_x, screen_y):
         my_w = max(self.winfo_width(), 1)
         my_h = max(self.winfo_height(), 1)
-        bounds = self._host_client_screen_rect()
-        if not bounds:
-            p = self._usable_tk_parent()
-            if p:
-                bounds = (p.winfo_rootx(), p.winfo_rooty(),
-                          p.winfo_rootx() + p.winfo_width(),
-                          p.winfo_rooty() + p.winfo_height())
+        bounds = None
+        if self._embed:
+            bounds = self._host_client_screen_rect()
+            if not bounds:
+                p = self._usable_tk_parent()
+                if p:
+                    bounds = (p.winfo_rootx(), p.winfo_rooty(),
+                              p.winfo_rootx() + p.winfo_width(),
+                              p.winfo_rooty() + p.winfo_height())
+        else:
+            # Clipboard: thuộc cửa sổ client nhưng kéo tự do trên desktop, không kẹt trong vùng remote.
+            bounds = self._virtual_screen_rect()
         if bounds:
             left, top, right, bottom = bounds
             max_x = left if (right - left) <= my_w else right - my_w
@@ -463,7 +548,7 @@ class ProgressDialog(tk.Toplevel):
 
     def _move_to_screen(self, screen_x, screen_y):
         screen_x, screen_y = self._clamp_screen_pos(screen_x, screen_y)
-        if getattr(self, "host_hwnd", None) and sys.platform == "win32":
+        if self._embed:
             try:
                 import ctypes
                 from ctypes import wintypes
@@ -471,7 +556,6 @@ class ProgressDialog(tk.Toplevel):
                 ctypes.windll.user32.ScreenToClient(self.host_hwnd, ctypes.byref(pt))
                 hwnd = self._hwnd()
                 if hwnd:
-                    # SWP_NOSIZE | SWP_NOZORDER
                     ctypes.windll.user32.SetWindowPos(hwnd, 0, pt.x, pt.y, 0, 0, 0x0001 | 0x0004)
                     return
             except Exception:
