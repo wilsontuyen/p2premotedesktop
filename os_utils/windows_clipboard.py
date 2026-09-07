@@ -401,19 +401,16 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     except Exception as e:
         pass
         
-    # 5. Nếu chuột phải vừa được click gần đây (< 1.5s)
-    if time_since_rbutton < 1.5:
+    # 5. Nếu chuột phải vừa được click gần đây (< 1.5s) và chưa có click trái sau đó
+    if time_since_rbutton < 1.5 and last_rbutton >= last_lbutton:
         log_debug(f"[check_is_menu_query] Tra ve MENU: Vua click chuot phai gan day (age={time_since_rbutton:.3f}s)")
         return "MENU"
-        
-    # 6. Nếu metadata vừa mới nhận được (< 1.5s)
-    if meta_age < 1.5:
-        log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Metadata vua moi nhan (age={meta_age:.3f}s)")
-        return "BACKGROUND"
-        
-    # 7. Fallback: Mặc định coi là nền
-    log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Mac dinh coi la nen")
-    return "BACKGROUND"
+
+    # 6. Fallback: coi là Paste thật. Không được mặc định BACKGROUND —
+    # user thường dán ngay sau khi nhận metadata; bỏ qua WM_RENDERFORMAT
+    # lúc đó làm copy/paste lúc được lúc không.
+    log_debug(f"[check_is_menu_query] Tra ve False: Khong phai menu/scanner, xu ly nhu Paste (meta_age={meta_age:.3f}s)")
+    return False
 
 
 class ClipboardSyncManager:
@@ -455,6 +452,7 @@ class ClipboardSyncManager:
         self.overwrite_all = False
         
         self.cached_explorer_path = None
+        self.dummy_h_active = False
         self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
         self.cacher_thread.start()
         
@@ -527,7 +525,32 @@ class ClipboardSyncManager:
                             self._close_transfer_pipe()
                 else:
                     # Metadata file do Clipboard Agent gửi lên (copy file từ phía user)
-                    metadata = json.loads(raw)
+                    if raw.startswith("COPIED_FILES|"):
+                        parts = raw.split("|", 1)
+                        paths = json.loads(parts[1]) if len(parts) > 1 else []
+                        metadata = []
+                        for f in paths:
+                            if os.path.isfile(f):
+                                metadata.append({
+                                    "name": os.path.basename(f),
+                                    "path": f,
+                                    "size": os.path.getsize(f),
+                                    "mtime": os.path.getmtime(f)
+                                })
+                            elif os.path.isdir(f):
+                                parent_dir = os.path.dirname(f)
+                                for root, _, files in os.walk(f):
+                                    for file in files:
+                                        full_path = os.path.join(root, file)
+                                        rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
+                                        metadata.append({
+                                            "name": rel_path,
+                                            "path": full_path,
+                                            "size": os.path.getsize(full_path),
+                                            "mtime": os.path.getmtime(full_path)
+                                        })
+                    else:
+                        metadata = json.loads(raw)
                     if metadata and self.active_sockets:
                         pkt = json.dumps({"type": "files_copied_meta", "files": metadata}).encode('utf-8')
                         with self.lock:
@@ -715,9 +738,16 @@ class ClipboardSyncManager:
                     if self.active_dialog:
                         try: self.active_dialog.destroy()
                         except: pass
+                    host_hwnd = getattr(self, "pygame_hwnd", None)
+                    if not host_hwnd and self.app:
+                        try:
+                            host_hwnd = int(self.app.winfo_id())
+                        except Exception:
+                            host_hwnd = None
                     self.active_dialog = ProgressDialog(
                         self.app, title_text, filename, total_size,
-                        on_cancel=lambda: self.cancel_active_transfer(remote_triggered=False)
+                        on_cancel=lambda: self.cancel_active_transfer(remote_triggered=False),
+                        host_hwnd=host_hwnd
                     )
                 elif action == "update":
                     sent_bytes = args
@@ -956,11 +986,18 @@ class ClipboardSyncManager:
         try:
             time.sleep(0.05) # Chờ xíu để Windows thả file lock (giảm delay)
             
+            owner_hwnd = getattr(self, 'cached_app_hwnd', None)
             if provided_files is not None:
                 current_files = provided_files
             else:
-                owner_hwnd = getattr(self, 'cached_app_hwnd', None)
                 current_files = get_clipboard_files(owner_hwnd)
+                # Explorer đôi khi vẫn giữ clipboard lúc WM_CLIPBOARDUPDATE; thử lại trước khi bỏ qua
+                if not current_files:
+                    for _ in range(4):
+                        time.sleep(0.1)
+                        current_files = get_clipboard_files(owner_hwnd)
+                        if current_files:
+                            break
             if current_files:
                 # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
@@ -1298,19 +1335,14 @@ class ClipboardSyncManager:
         last_ctrl_v = getattr(self, 'last_ctrl_v_time', 0.0)
         is_menu = check_is_menu_query(last_l, last_r, meta_time, last_ctrl_v)
         if is_menu == "MENU":
-            log_debug("[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+            log_debug("[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và chờ user dán...")
             dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
             if dummy_h:
                 fn_SetClipboardData(15, dummy_h)
-            
-            # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
-            def re_setup():
-                time.sleep(0.2)
-                self.setup_delayed_rendering()
-            threading.Thread(target=re_setup, daemon=True).start()
+            self.dummy_h_active = True
             return
         elif is_menu == "BACKGROUND":
-            log_debug("[render_format] Phát hiện truy vấn nền (VM Tools, clipboard monitor). Bỏ qua hoàn toàn.")
+            log_debug("[render_format] Phát hiện truy vấn nền (VM Tools, clipboard monitor). Bỏ qua để giữ delayed rendering.")
             return
             
 
@@ -1514,14 +1546,10 @@ class ClipboardSyncManager:
                     self.transfer_in_progress = False
                     self.ignore_destroy_clipboard = False
                     
-            if dest_dir and os.path.isdir(dest_dir):
-                self.ignore_destroy_clipboard = True
-                import threading
-                threading.Thread(target=background_download, daemon=True).start()
-                return
-            else:
-                background_download()
-                return
+            # Phải SetClipboardData trước khi thoát WM_RENDERFORMAT. Không được
+            # spawn thread rồi return — Windows đóng clipboard ngay sau handler.
+            background_download()
+            return
         except Exception as e:
             log_debug(f"[render_format] Lỗi khi xử lý render format: {e}")
             empty_hdrop = create_hdrop_data([])
@@ -2107,9 +2135,10 @@ def run_clipboard_agent_mode():
     _agent_last_rbutton_time = 0.0
     _agent_last_ctrl_v_time = 0.0
     _agent_meta_arrival_time = 0.0
+    _agent_dummy_h_active = False
 
     def _agent_mouse_poll_loop():
-        nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time
+        nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -2201,7 +2230,7 @@ def run_clipboard_agent_mode():
 
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
-        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time
+        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active
 
         if msg == WM_USER_SETUP_DELAYED:
             if _pending_info:
@@ -2218,7 +2247,7 @@ def run_clipboard_agent_mode():
                 if files:
                     try:
                         import win32pipe, win32file, json
-                        pipe_name = r"\\.\pipe\AntigravityP2P_Clipboard_UpPipe"
+                        pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
                         win32pipe.WaitNamedPipe(pipe_name, 5000)
                         pipe_handle = win32file.CreateFile(pipe_name, win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, 0, None)
                         msg = "COPIED_FILES|" + json.dumps(files)
@@ -2238,23 +2267,14 @@ def run_clipboard_agent_mode():
             # Kiểm tra nếu là truy vấn từ menu chuột phải (context menu) thì tránh tải file thực tế lúc này
             is_menu = check_is_menu_query(_agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_last_ctrl_v_time)
             if is_menu == "MENU":
-                agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Cung cấp dummy HDROP và lập lịch reset delayed rendering...")
+                agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Cung cấp dummy HDROP và chờ user dán...")
                 dummy_h = create_hdrop_data(["C:\\RemoteDesktop_Paste_Trigger.tmp"])
                 if dummy_h:
                     ctypes.windll.user32.SetClipboardData(CF_HDROP, dummy_h)
-                
-                # Lập lịch setup lại delayed rendering sau 200ms để chờ menu truy vấn xong
-                def re_setup_agent():
-                    time.sleep(0.2)
-                    if _agent_hwnd and _pending_info:
-                        ctypes.windll.user32.PostMessageW(
-                            ctypes.c_void_p(_agent_hwnd),
-                            WM_USER_SETUP_DELAYED, 0, 0
-                        )
-                threading.Thread(target=re_setup_agent, daemon=True).start()
+                _agent_dummy_h_active = True
                 return 0
             elif is_menu == "BACKGROUND":
-                agent_print("[ClipboardAgent] Phát hiện truy vấn nền (VM Tools). Bỏ qua hoàn toàn.")
+                agent_print("[ClipboardAgent] Phát hiện truy vấn nền (VM Tools). Bỏ qua để giữ delayed rendering.")
                 return 0
 
             _is_rendering = True

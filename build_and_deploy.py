@@ -11,7 +11,10 @@ log_path = os.path.join(workspace_dir, "build_deploy.log")
 def log(msg):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     log_line = f"[{timestamp}] {msg}\n"
-    print(log_line, end="")
+    try:
+        print(log_line, end="")
+    except UnicodeEncodeError:
+        print(log_line.encode("ascii", "replace").decode("ascii"), end="")
     try:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(log_line)
@@ -143,6 +146,7 @@ def main():
         log("ERROR: Compiled RemoteDesktopService standalone directory not found!")
         return
 
+    shorten_openblas_dll(app_dist_dir)
 
     # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
     files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt"]
@@ -191,6 +195,7 @@ def main():
                 log("WARNING: Inno Setup build failed.")
             else:
                 log("Successfully built setup.exe using Inno Setup.")
+                try_authenticode_sign(os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe"))
         else:
             log("WARNING: installer.iss not found. Skipping installer build.")
     else:
@@ -201,6 +206,7 @@ def main():
                 log("WARNING: Inno Setup build failed.")
             else:
                 log("Successfully built setup.exe using Inno Setup.")
+                try_authenticode_sign(os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe"))
         except Exception:
             log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
 
@@ -222,6 +228,80 @@ def main():
         log(f"Failed to show popup: {e}")
 
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
+
+def shorten_openblas_dll(app_dist_dir):
+    """Đổi tên DLL OpenBLAS do NumPy đóng gói (tên hash dài) thành libopenblas.dll và vá import trong .pyd."""
+    import re
+    short_name = "libopenblas.dll"
+    long_path = None
+    long_name = None
+    try:
+        names = os.listdir(app_dist_dir)
+    except Exception as e:
+        log(f"Không đọc được {app_dist_dir}: {e}")
+        return
+    for name in names:
+        if re.match(r"libopenblas\..+\.dll$", name, re.I) and name.lower() != short_name:
+            long_path = os.path.join(app_dist_dir, name)
+            long_name = name
+            break
+    if not long_path:
+        log("No hashed libopenblas DLL found to rename.")
+        return
+    old_bytes = long_name.encode("ascii")
+    short_bytes = short_name.encode("ascii")
+    if len(short_bytes) >= len(old_bytes):
+        log(f"Short name {short_name} is not shorter; skip.")
+        return
+    padded = short_bytes + b"\x00" * (len(old_bytes) - len(short_bytes))
+    patched = 0
+    for root, _dirs, files in os.walk(app_dist_dir):
+        for f in files:
+            if not f.lower().endswith((".dll", ".pyd", ".exe")):
+                continue
+            path = os.path.join(root, f)
+            try:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except Exception:
+                continue
+            if old_bytes not in data:
+                continue
+            data = data.replace(old_bytes, padded)
+            with open(path, "wb") as fh:
+                fh.write(data)
+            patched += 1
+            log(f"Patched OpenBLAS import in {os.path.relpath(path, app_dist_dir)}")
+    dest = os.path.join(app_dist_dir, short_name)
+    if os.path.abspath(dest) != os.path.abspath(long_path):
+        if os.path.exists(dest):
+            try:
+                os.remove(dest)
+            except Exception as e:
+                log(f"Could not remove old {short_name}: {e}")
+                return
+        os.rename(long_path, dest)
+    log(f"Renamed {long_name} -> {short_name} (patched {patched} files).")
+
+def try_authenticode_sign(exe_path):
+    """Ký Authenticode nếu máy có signtool + chứng chỉ code signing (cách đúng để giảm Defender ML)."""
+    if not os.path.exists(exe_path):
+        return
+    signtool = None
+    kit = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Windows Kits", "10", "bin")
+    if os.path.isdir(kit):
+        for root, _dirs, files in os.walk(kit):
+            if "signtool.exe" in files and os.path.basename(root).lower() == "x64":
+                signtool = os.path.join(root, "signtool.exe")
+    if not signtool:
+        log("Không tìm thấy signtool.exe — bỏ qua ký Authenticode. Defender ML có thể vẫn cảnh báo installer chưa ký.")
+        log("Cách xử lý: chứng chỉ code signing, hoặc gửi file lên https://www.microsoft.com/en-us/wdsi/filesubmission")
+        return
+    cmd = f'"{signtool}" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "{exe_path}"'
+    if run_cmd(cmd):
+        log(f"Đã ký Authenticode: {exe_path}")
+    else:
+        log("Không ký được (chưa có chứng chỉ code signing). Gửi Microsoft WDSI nếu Defender cảnh báo.")
 
 if __name__ == "__main__":
     main()

@@ -379,7 +379,6 @@ class ProgressDialog(tk.Toplevel):
                 # Use HWND_TOP (0) and do NOT use SWP_NOZORDER (0x0004) so it stays on top of siblings
                 ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
                 self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
-                self.parent_window = None # Not locked to File Manager
             except Exception:
                 screen_w = self.winfo_screenwidth()
                 screen_h = self.winfo_screenheight()
@@ -406,45 +405,90 @@ class ProgressDialog(tk.Toplevel):
             try: self.on_cancel()
             except: pass
 
+    def _hwnd(self):
+        try:
+            return int(self.frame(), 16)
+        except Exception:
+            return 0
+
+    def _usable_tk_parent(self):
+        p = getattr(self, "parent_window", None)
+        if not p:
+            return None
+        try:
+            if str(p) == str(self):
+                return None
+            if not p.winfo_exists() or not p.winfo_ismapped() or not p.winfo_viewable():
+                return None
+            if p.winfo_width() < 80 or p.winfo_height() < 80:
+                return None
+            return p
+        except Exception:
+            return None
+
+    def _host_client_screen_rect(self):
+        """(left, top, right, bottom) màn hình của client area cửa sổ host/viewer."""
+        if not (getattr(self, "host_hwnd", None) and sys.platform == "win32"):
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            rect = wintypes.RECT()
+            if not user32.GetClientRect(self.host_hwnd, ctypes.byref(rect)):
+                return None
+            pt = wintypes.POINT(rect.left, rect.top)
+            user32.ClientToScreen(self.host_hwnd, ctypes.byref(pt))
+            return (pt.x, pt.y, pt.x + (rect.right - rect.left), pt.y + (rect.bottom - rect.top))
+        except Exception:
+            return None
+
+    def _clamp_screen_pos(self, screen_x, screen_y):
+        my_w = max(self.winfo_width(), 1)
+        my_h = max(self.winfo_height(), 1)
+        bounds = self._host_client_screen_rect()
+        if not bounds:
+            p = self._usable_tk_parent()
+            if p:
+                bounds = (p.winfo_rootx(), p.winfo_rooty(),
+                          p.winfo_rootx() + p.winfo_width(),
+                          p.winfo_rooty() + p.winfo_height())
+        if bounds:
+            left, top, right, bottom = bounds
+            max_x = left if (right - left) <= my_w else right - my_w
+            max_y = top if (bottom - top) <= my_h else bottom - my_h
+            screen_x = max(left, min(screen_x, max_x))
+            screen_y = max(top, min(screen_y, max_y))
+        return screen_x, screen_y
+
+    def _move_to_screen(self, screen_x, screen_y):
+        screen_x, screen_y = self._clamp_screen_pos(screen_x, screen_y)
+        if getattr(self, "host_hwnd", None) and sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                pt = wintypes.POINT(int(screen_x), int(screen_y))
+                ctypes.windll.user32.ScreenToClient(self.host_hwnd, ctypes.byref(pt))
+                hwnd = self._hwnd()
+                if hwnd:
+                    # SWP_NOSIZE | SWP_NOZORDER
+                    ctypes.windll.user32.SetWindowPos(hwnd, 0, pt.x, pt.y, 0, 0, 0x0001 | 0x0004)
+                    return
+            except Exception:
+                pass
+        try:
+            self.tk.call("wm", "geometry", self._w, "+%d+%d" % (int(screen_x), int(screen_y)))
+        except Exception:
+            self.geometry("+%d+%d" % (int(screen_x), int(screen_y)))
+
     def _start_drag(self, event):
-        self._drag_offset_x = event.x_root - self.winfo_x()
-        self._drag_offset_y = event.y_root - self.winfo_y()
+        self._drag_offset_x = event.x_root - self.winfo_rootx()
+        self._drag_offset_y = event.y_root - self.winfo_rooty()
 
     def _do_drag(self, event):
         x = event.x_root - self._drag_offset_x
         y = event.y_root - self._drag_offset_y
-        
-        if hasattr(self, 'parent_window') and self.parent_window:
-            try:
-                p_x = self.parent_window.winfo_rootx()
-                p_y = self.parent_window.winfo_rooty()
-                p_w = self.parent_window.winfo_width()
-                p_h = self.parent_window.winfo_height()
-                
-                my_w = self.winfo_width()
-                my_h = self.winfo_height()
-                
-                x = max(p_x, min(x, p_x + p_w - my_w))
-                y = max(p_y, min(y, p_y + p_h - my_h))
-            except Exception:
-                pass
-        elif hasattr(self, 'host_hwnd') and self.host_hwnd and sys.platform == "win32":
-            try:
-                import ctypes
-                from ctypes import wintypes
-                rect = wintypes.RECT()
-                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
-                p_w = rect.right - rect.left
-                p_h = rect.bottom - rect.top
-                my_w = self.winfo_width()
-                my_h = self.winfo_height()
-                
-                x = max(0, min(x, p_w - my_w))
-                y = max(0, min(y, p_h - my_h))
-            except Exception:
-                pass
-                
-        self.geometry(f"+{x}+{y}")
+        self._move_to_screen(x, y)
 
     def update_progress(self, sent_bytes):
         def _do_update():
