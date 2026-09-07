@@ -227,6 +227,40 @@ else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
 
+def _set_dialog_app_icon(win):
+    """Gắn icon app lên Toplevel (tránh icon lông chim Tk). Không gọi từ __init__."""
+    try:
+        ico = os.path.join(app_dir, "app_icon.ico")
+        ico_alt = os.path.join(app_dir, "app.ico")
+        png = os.path.join(app_dir, "app_icon.png")
+        icon_path = ico if os.path.exists(ico) else (ico_alt if os.path.exists(ico_alt) else "")
+        if sys.platform == "win32" and icon_path:
+            win.iconbitmap(icon_path)
+        elif os.path.exists(png):
+            try:
+                img = tk.PhotoImage(file=png)
+            except Exception:
+                img = ImageTk.PhotoImage(Image.open(png))
+            win.iconphoto(False, img)
+            win._app_icon_img = img
+        else:
+            icon_path = ""
+        if sys.platform == "win32" and icon_path:
+            try:
+                win.update_idletasks()
+                hwnd = int(win.winfo_id())
+                parent = ctypes.windll.user32.GetParent(hwnd)
+                if parent:
+                    hwnd = parent
+                hicon = ctypes.windll.user32.LoadImageW(0, icon_path, 1, 0, 0, 0x0010)
+                if hicon:
+                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon)
+                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[App] Không gắn được icon dialog: {e}")
+
 def get_app_data_dir():
     import os, sys
     if sys.platform != "win32":
@@ -572,11 +606,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         # Load quality mode setting (quality = Chất lượng 4K, speed = Tốc độ)
         self.quality_mode = tk.StringVar(value="quality")
+        self.disclaimer_accepted = False
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, "r") as f:
                     cfg = json.load(f)
                     self.quality_mode.set(cfg.get("quality_mode", "quality"))
+                    self.disclaimer_accepted = bool(cfg.get("disclaimer_accepted", False))
         except:
             pass
         
@@ -760,6 +796,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             # Hiển thị lại cửa sổ chính sau khi UI đã được khởi tạo xong
             if not self.is_headless:
                 self.deiconify()
+                self.after(250, self.maybe_show_disclaimer)
                 
         except Exception as e:
             import traceback
@@ -1181,6 +1218,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 config_data["language"] = self.current_lang.get()
             if hasattr(self, 'quality_mode'):
                 config_data["quality_mode"] = self.quality_mode.get()
+            config_data["disclaimer_accepted"] = bool(getattr(self, "disclaimer_accepted", False))
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f)
             print(f"[Config] Saved window position & theme & language: {geom}")
@@ -2955,6 +2993,173 @@ Comment=Remote Desktop P2P AutoStart
         btn_ok.pack()
 
 
+    def maybe_show_disclaimer(self):
+        if self.is_headless or getattr(self, "disclaimer_accepted", False):
+            return
+        self.show_disclaimer_dialog(require_accept=True)
+
+    def show_disclaimer_dialog(self, require_accept=False):
+        from core.disclaimer import load_disclaimer_text
+        body = load_disclaimer_text(self.current_lang.get() if hasattr(self, "current_lang") else "vi")
+        if not body:
+            body = load_disclaimer_text("vi")
+
+        dlg = tk.Toplevel(self)
+        dlg.withdraw()
+        dlg.title(_("Tuyên bố miễn trừ trách nhiệm"))
+        dlg.configure(bg=self.bg_color)
+        dlg.transient(self)
+        dlg.resizable(True, True)
+        _set_dialog_app_icon(dlg)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+
+        heading_fg = getattr(self, "text_white", "#1A2332")
+        body_fg = getattr(self, "entry_fg", heading_fg)
+        body_bg = getattr(self, "card_color", "#FFFFFF")
+
+        tk.Label(
+            dlg,
+            text=_("Tuyên bố miễn trừ trách nhiệm"),
+            font=(APP_FONT_NAME, 12, "bold"),
+            fg=heading_fg,
+            bg=self.bg_color,
+        ).pack(pady=(12, 6), padx=12)
+
+        wrap = tk.Frame(dlg, bg=self.bg_color)
+        wrap.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+        scroll = tk.Scrollbar(wrap)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        txt = tk.Text(
+            wrap,
+            wrap=tk.WORD,
+            font=(APP_FONT_NAME, 9),
+            fg=body_fg,
+            bg=body_bg,
+            insertbackground=body_fg,
+            relief=tk.FLAT,
+            bd=8,
+            yscrollcommand=scroll.set,
+            highlightthickness=0,
+        )
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.config(command=txt.yview)
+        txt.insert("1.0", body)
+        txt.tag_add("body", "1.0", "end")
+        txt.tag_configure("body", foreground=body_fg, background=body_bg)
+        txt.configure(fg=body_fg, bg=body_bg, insertbackground=body_bg, takefocus=0)
+        txt.bind("<Key>", lambda e: "break")
+        txt.bind("<<Paste>>", lambda e: "break")
+        txt.bind("<<Cut>>", lambda e: "break")
+
+        btns = tk.Frame(dlg, bg=self.bg_color)
+        btns.pack(pady=(0, 14))
+
+        def accept():
+            self.disclaimer_accepted = True
+            try:
+                self.save_window_position()
+            except Exception:
+                pass
+            dlg.destroy()
+
+        def decline():
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+            try:
+                self.destroy()
+            except Exception:
+                pass
+            os._exit(0)
+
+        if require_accept:
+            tk.Label(
+                dlg,
+                text=_("Bạn phải đồng ý để tiếp tục sử dụng phần mềm."),
+                font=(APP_FONT_NAME, 8),
+                fg=self.text_gray if hasattr(self, "text_gray") else "#A0A0A0",
+                bg=self.bg_color,
+            ).pack(pady=(0, 8))
+            tk.Button(
+                btns,
+                text=_("Tôi đã đọc và đồng ý"),
+                font=(APP_FONT_NAME, 9, "bold"),
+                fg=self.text_white,
+                bg=self.btn_color,
+                activebackground=self.btn_hover,
+                relief=tk.FLAT,
+                bd=0,
+                padx=16,
+                pady=6,
+                cursor="hand2",
+                command=accept,
+            ).pack(side=tk.LEFT, padx=6)
+            tk.Button(
+                btns,
+                text=_("Không đồng ý — Thoát"),
+                font=(APP_FONT_NAME, 9, "bold"),
+                fg=self.text_white,
+                bg="#E05252",
+                activebackground="#C04242",
+                relief=tk.FLAT,
+                bd=0,
+                padx=16,
+                pady=6,
+                cursor="hand2",
+                command=decline,
+            ).pack(side=tk.LEFT, padx=6)
+            dlg.protocol("WM_DELETE_WINDOW", decline)
+        else:
+            tk.Button(
+                btns,
+                text=_("Đóng"),
+                font=(APP_FONT_NAME, 9, "bold"),
+                fg=self.text_white,
+                bg="#E05252",
+                activebackground="#C04242",
+                relief=tk.FLAT,
+                bd=0,
+                padx=25,
+                pady=6,
+                cursor="hand2",
+                command=dlg.destroy,
+            ).pack()
+            dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+
+        dlg.update_idletasks()
+        dw, dh = 560, 480
+        try:
+            self.update_idletasks()
+            ax = int(self.winfo_rootx())
+            ay = int(self.winfo_rooty())
+            aw = int(self.winfo_width())
+            ah = int(self.winfo_height())
+            if aw < 80 or ah < 80:
+                import re
+                geo = getattr(self, "last_normal_geometry", None) or self.geometry()
+                m = re.match(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", str(geo))
+                if m:
+                    aw, ah = int(m.group(1)), int(m.group(2))
+                    ax, ay = int(m.group(3)), int(m.group(4))
+            x = ax + (aw - dw) // 2
+            y = ay + (ah - dh) // 2
+        except Exception:
+            x, y = 80, 80
+        dlg.geometry(f"{dw}x{dh}+{x}+{y}")
+        _set_dialog_app_icon(dlg)
+        dlg.deiconify()
+        dlg.lift()
+        try:
+            dlg.focus_force()
+        except Exception:
+            pass
+        if require_accept:
+            self.wait_window(dlg)
+
     def show_about_dialog(self):
         # Tạo cửa sổ Toplevel mới đóng vai trò Modal
         about = tk.Toplevel(self)
@@ -2974,7 +3179,21 @@ Comment=Remote Desktop P2P AutoStart
         ai_label.pack(pady=(0, 5))
         
         contact_label = tk.Label(about, text=_("Liên hệ: Mr. Tuyến - 0941 261 771"), font=("Inter", 10), fg=self.text_gray, bg=self.bg_color)
-        contact_label.pack(pady=(0, 15))
+        contact_label.pack(pady=(0, 8))
+
+        disc_btn = tk.Button(
+            about,
+            text=_("Tuyên bố miễn trừ trách nhiệm"),
+            font=("Inter", 8, "bold"),
+            fg=self.btn_color,
+            bg=self.bg_color,
+            activeforeground=self.text_white,
+            activebackground=self.bg_color,
+            bd=0,
+            cursor="hand2",
+            command=lambda: (about.grab_release(), about.destroy(), self.show_disclaimer_dialog(require_accept=False)),
+        )
+        disc_btn.pack(pady=(0, 10))
         
         close_btn = tk.Button(about, text=_("Đóng"), font=("Inter", 9, "bold"), fg=self.text_white, bg="#E05252", 
                               activeforeground=self.text_white, activebackground="#C04242",
@@ -2985,8 +3204,8 @@ Comment=Remote Desktop P2P AutoStart
         about.update_idletasks()
         
         # Kích thước cố định của dialog About
-        dialog_w = 320
-        dialog_h = 175
+        dialog_w = 340
+        dialog_h = 210
         
         # Lấy thông số tọa độ và kích thước của cửa sổ chính UnifiedApp
         parent_x = self.winfo_x()
@@ -3615,33 +3834,32 @@ Comment=Remote Desktop P2P AutoStart
         
 
     def _restore_window(self):
-        if self.state() == "normal":
-            try:
-                if self.attributes("-alpha") == 1.0:
-                    self.lift()
-                    self.focus_force()
-                    return
-            except:
-                pass
-                
-        import re
-        geom = self.geometry()
-        m = re.match(r"(\d+)x(\d+)([-+]\d+)([-+]\d+)", geom)
-        if m:
-            end_w, end_h = int(m.group(1)), int(m.group(2))
-            end_x, end_y = int(m.group(3)), int(m.group(4))
-        else:
-            end_w, end_h, end_x, end_y = 1000, 700, 100, 100 # Fallback
-            
-        self.geometry(f"{end_w}x{end_h}+{end_x}+{end_y}")
+        try:
+            self.deiconify()
+            self.state("normal")
+        except Exception:
+            pass
         try:
             self.attributes("-alpha", 1.0)
-        except:
+        except Exception:
             pass
-            
-        self.deiconify()
-        self.lift()
-        self.focus_force()
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+            self.focus_force()
+        except Exception:
+            pass
+        try:
+            for w in self.winfo_children():
+                if isinstance(w, tk.Toplevel) and w.winfo_exists():
+                    try:
+                        w.deiconify()
+                        w.lift()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         print("[Tray] Main window restored.")
         
 
@@ -3873,13 +4091,6 @@ if __name__ == '__main__':
                         wait_time += 1
                         continue
                     else:
-                        # Topmost native message dialog
-                        msg_text = _("Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống")
-                        msg_title = _("Thông báo")
-                        # MB_OK | MB_ICONINFORMATION | MB_TOPMOST
-                        ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
-                        
-                        # Signal restore event to primary GUI instance
                         restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
                         try:
                             h_event = win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, restore_event_name)
@@ -3888,6 +4099,22 @@ if __name__ == '__main__':
                                 win32api.CloseHandle(h_event)
                         except Exception as e:
                             print(f"Failed to signal restore event: {e}")
+                        visible = False
+                        try:
+                            user32 = ctypes.windll.user32
+                            hwnd = user32.FindWindowW(None, "Easy Remote Desktop")
+                            if hwnd:
+                                user32.ShowWindow(hwnd, 9)
+                                user32.ShowWindow(hwnd, 5)
+                                user32.SetForegroundWindow(hwnd)
+                                time.sleep(0.35)
+                                visible = bool(user32.IsWindowVisible(hwnd))
+                        except Exception as e:
+                            print(f"Failed to FindWindow restore: {e}")
+                        if not visible:
+                            msg_text = _("Ứng dụng đang chạy nhưng cửa sổ bị ẩn. Mở Task Manager, tắt RemoteDesktopP2P.exe, rồi mở lại shortcut.")
+                            msg_title = _("Thông báo")
+                            ctypes.windll.user32.MessageBoxW(0, msg_text, msg_title, 0x00040040)
                         sys.exit(0)
                 else:
                     break

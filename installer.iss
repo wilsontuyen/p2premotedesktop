@@ -27,8 +27,8 @@ DisableProgramGroupPage=yes
 ShowLanguageDialog=yes
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "vietnamese"; MessagesFile: "Vietnamese.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "disclaimer_en.txt"
+Name: "vietnamese"; MessagesFile: "Vietnamese.isl"; LicenseFile: "disclaimer_vi.txt"
 [CustomMessages]
 english.RunProgram=Start Easy Remote Desktop
 vietnamese.RunProgram=Chạy Easy Remote Desktop
@@ -38,6 +38,8 @@ Name: "{app}"; Permissions: users-modify
 
 [Files]
 Source: "dist_nuitka\app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "disclaimer_vi.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "disclaimer_en.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"
@@ -63,7 +65,7 @@ Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAg
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
 ; Thêm option khởi chạy ứng dụng sau khi cài đặt
-Filename: "{app}\RemoteDesktopP2P.exe"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\RemoteDesktopP2P.exe"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 
 [UninstallRun]
