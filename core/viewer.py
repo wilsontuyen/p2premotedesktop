@@ -910,9 +910,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 if frame_to_draw is not None:
                     w, h = frame_to_draw.size
                     surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
-                    # smoothscale sử dụng bilinear interpolation thay vì nearest-neighbor
-                    # cho chất lượng upscale mượt hơn nhiều (đặc biệt khi xem Android 1080p)
-                    scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
+                    if w == window_w and h == window_h:
+                        scaled_surf = surf
+                    elif w >= window_w and h >= window_h:
+                        scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
+                    else:
+                        scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
                     screen.blit(scaled_surf, (0, 0))
                     
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
@@ -1159,7 +1162,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     was_switching = False
                     send_event({"type": "check_domain"})
                 
-                if client_last_recv_time > 0 and time.time() - client_last_recv_time > 10.0:
+                if client_last_recv_time > 0 and time.time() - client_last_recv_time > 25.0:
                     print("[Client] Connection ping timeout. Disconnecting.")
                     # Nếu host là Linux/Ubuntu, ping timeout thường do shutdown/restart
                     host_os = globals().get('client_host_os_release', '10')

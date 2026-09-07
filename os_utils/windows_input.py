@@ -15,6 +15,7 @@ MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
 
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
@@ -284,29 +285,43 @@ def send_input_mouse_scroll(dx, dy):
     except Exception as e:
         print(f"[SendInput] Mouse scroll injection failed: {e}")
 
-# Cached screen metrics for mouse move normalization (avoid calling GetSystemMetrics on every event)
+# Cached virtual-desktop metrics for mouse (multi-monitor)
 _cached_screen_w = 0
 _cached_screen_h = 0
+_cached_screen_x = 0
+_cached_screen_y = 0
 _cached_screen_time = 0
 
 def send_input_mouse_move(x, y):
-    global _cached_screen_w, _cached_screen_h, _cached_screen_time
+    global _cached_screen_w, _cached_screen_h, _cached_screen_x, _cached_screen_y, _cached_screen_time
     try:
-        # Refresh cached screen dimensions every 2 seconds
         now = time.monotonic() if hasattr(time, 'monotonic') else time.time()
         if now - _cached_screen_time > 2.0 or _cached_screen_w == 0:
-            _cached_screen_w = ctypes.windll.user32.GetSystemMetrics(0) # SM_CXSCREEN
-            _cached_screen_h = ctypes.windll.user32.GetSystemMetrics(1) # SM_CYSCREEN
+            user32 = ctypes.windll.user32
+            _cached_screen_x = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+            _cached_screen_y = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+            _cached_screen_w = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+            _cached_screen_h = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+            if _cached_screen_w <= 0 or _cached_screen_h <= 0:
+                _cached_screen_x = 0
+                _cached_screen_y = 0
+                _cached_screen_w = user32.GetSystemMetrics(0)
+                _cached_screen_h = user32.GetSystemMetrics(1)
             _cached_screen_time = now
         w, h = _cached_screen_w, _cached_screen_h
-        if w > 0 and h > 0:
-            # Standard absolute coordinate formula: (coord * 65535) / (screen_size - 1)
-            normalized_x = int((x * 65535) / (w - 1)) if w > 1 else 0
-            normalized_y = int((y * 65535) / (h - 1)) if h > 1 else 0
+        ox, oy = _cached_screen_x, _cached_screen_y
+        if w > 1 and h > 1:
+            normalized_x = int(((x - ox) * 65535) / (w - 1))
+            normalized_y = int(((y - oy) * 65535) / (h - 1))
+            normalized_x = max(0, min(65535, normalized_x))
+            normalized_y = max(0, min(65535, normalized_y))
             inp = INPUT()
             inp.type = INPUT_MOUSE
-            # MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_ABSOLUTE = 0x8000
-            inp.union.mi = MOUSEINPUT(normalized_x, normalized_y, 0, 0x0001 | 0x8000, 0, None)
+            inp.union.mi = MOUSEINPUT(
+                normalized_x, normalized_y, 0,
+                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                0, None
+            )
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Mouse move injection failed: {e}")

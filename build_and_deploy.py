@@ -94,7 +94,7 @@ def main():
     nuitka_cmd = (
         f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
         f'--assume-yes-for-downloads '
-        f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam '
+        f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam --include-module=comtypes '
         f'--no-deployment-flag=excluded-module-usage '
         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '

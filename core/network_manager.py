@@ -28,6 +28,89 @@ from network.socket_utils import socket_passwords, force_close_socket, APP_KEY
 
 from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.logger import log_debug
+
+
+def client_quick_link_probe(sock, password, status_cb=None):
+    """Phân loại mạng nhanh rồi cho host gửi khung hình. LAN bỏ đo băng thông (tiết kiệm vài giây)."""
+    def _status(msg):
+        if status_cb:
+            try:
+                status_cb(msg)
+            except Exception:
+                pass
+
+    if is_lan_socket(sock):
+        net_class, ping, bandwidth = "high", 1.0, 100.0
+        try:
+            send_msg(sock, json.dumps({
+                "action": "speed_test_result",
+                "net_class": net_class,
+                "ping": ping,
+                "bandwidth": bandwidth,
+            }).encode("utf-8"), password)
+        except Exception:
+            pass
+        return net_class, ping, bandwidth
+
+    _status(_("Đang kiểm tra chất lượng mạng..."))
+    net_class, ping, bandwidth = "medium", 50.0, 10.0
+    try:
+        sock.settimeout(5.0)
+        t0 = time.time()
+        send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode("utf-8"), password)
+        pong_msg = recv_msg(sock, password)
+        if pong_msg:
+            pong_data = json.loads(pong_msg.decode("utf-8"))
+            if pong_data.get("action") == "speed_test_pong":
+                ping = (time.time() - t0) * 1000.0
+        dummy_size = 262144
+        if ping > 200.0:
+            dummy_size = 65536
+        elif ping > 50.0:
+            dummy_size = 131072
+        send_msg(sock, json.dumps({
+            "action": "speed_test_bw_req",
+            "suggested_size": dummy_size,
+        }).encode("utf-8"), password)
+        bw_start_msg = recv_msg(sock, password)
+        if bw_start_msg:
+            bw_start_data = json.loads(bw_start_msg.decode("utf-8"))
+            if bw_start_data.get("action") == "speed_test_bw_start":
+                dummy_size = int(bw_start_data.get("size", dummy_size))
+                t_start = time.time()
+                got = b""
+                while len(got) < dummy_size:
+                    chunk = sock.recv(min(65536, dummy_size - len(got)))
+                    if not chunk:
+                        break
+                    got += chunk
+                dur = time.time() - t_start
+                if dur > 0 and len(got) == dummy_size:
+                    bandwidth = (dummy_size * 8.0) / (dur * 1024.0 * 1024.0)
+        if bandwidth > 20.0 and ping < 30.0:
+            net_class = "high"
+        elif bandwidth < 5.0 or ping > 80.0:
+            net_class = "low"
+        else:
+            net_class = "medium"
+    except Exception as e:
+        print(f"[Client] Speed test error: {e}")
+        net_class, ping, bandwidth = "medium", 50.0, 10.0
+    finally:
+        try:
+            sock.settimeout(None)
+        except Exception:
+            pass
+    try:
+        send_msg(sock, json.dumps({
+            "action": "speed_test_result",
+            "net_class": net_class,
+            "ping": ping,
+            "bandwidth": bandwidth,
+        }).encode("utf-8"), password)
+    except Exception:
+        pass
+    return net_class, ping, bandwidth
 from network.upnp import attempt_upnp_forward
 from core.viewer import run_client_viewer_loop
 
@@ -517,84 +600,9 @@ class NetworkMixin:
                 is_domain = res.get("is_domain", False)
                 partner_id = hwid
 
-                # Speed test (same flow as regular connect)
-                self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
-                net_class = "medium"
-                avg_ping = 50.0
-                bandwidth = 10.0
-                try:
-                    sock.settimeout(10.0)
-                    runs = []
-                    for run_idx in range(2):
-                        if run_idx > 0:
-                            self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2..."))
-                        rtts = []
-                        for _i in range(3):
-                            t0 = time.time()
-                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), password)
-                            pong_msg = recv_msg(sock, password)
-                            if pong_msg:
-                                pong_data = json.loads(pong_msg.decode('utf-8'))
-                                if pong_data.get("action") == "speed_test_pong":
-                                    rtts.append(time.time() - t0)
-                            time.sleep(0.05)
-                        run_ping = (sum(rtts) / len(rtts)) * 1000.0 if rtts else 50.0
-                        
-                        run_bw = 10.0
-                        suggested_size = 1572864
-                        if run_ping > 200.0: suggested_size = 131072
-                        elif run_ping > 50.0: suggested_size = 524288
-                        send_msg(sock, json.dumps({"action": "speed_test_bw_req", "suggested_size": suggested_size}).encode('utf-8'), password)
-                        bw_start_msg = recv_msg(sock, password)
-                        if bw_start_msg:
-                            bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
-                            if bw_start_data.get("action") == "speed_test_bw_start":
-                                dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = dummy_size // 3
-                                measure_size = dummy_size - warm_size
-                                warm_data = b''
-                                while len(warm_data) < warm_size:
-                                    chunk = sock.recv(min(65536, warm_size - len(warm_data)))
-                                    if not chunk: break
-                                    warm_data += chunk
-                                t_start = time.time()
-                                measured_data = b''
-                                while len(measured_data) < measure_size:
-                                    chunk = sock.recv(min(65536, measure_size - len(measured_data)))
-                                    if not chunk: break
-                                    measured_data += chunk
-                                t_end = time.time()
-                                duration = t_end - t_start
-                                total_len = len(warm_data) + len(measured_data)
-                                if duration > 0 and total_len == dummy_size:
-                                    run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
-                        runs.append((run_ping, run_bw))
-                        if run_idx == 0: time.sleep(0.2)
-                except Exception as e:
-                    print(f"[LAN] Speed test error: {e}")
-                    try:
-                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": "medium", "ping": 50.0, "bandwidth": 10.0}).encode('utf-8'), password)
-                    except: pass
-                finally:
-                    try: sock.settimeout(None)
-                    except: pass
-                    
-                if runs:
-                    best_run = max(runs, key=lambda x: x[1])
-                    avg_ping = best_run[0]
-                    bandwidth = best_run[1]
-                    if bandwidth > 20.0 and avg_ping < 10.0:
-                        net_class = "high"
-                    elif bandwidth < 5.0 or avg_ping > 50.0:
-                        net_class = "low"
-                    else:
-                        net_class = "medium"
-                    try:
-                        send_msg(sock, json.dumps({"action": "speed_test_result", "net_class": net_class, "ping": avg_ping, "bandwidth": bandwidth}).encode('utf-8'), password)
-                    except: pass
-                    print(f"[LAN Direct] Speed: Ping {avg_ping:.1f}ms, BW {bandwidth:.2f} Mbps, Class: {net_class}")
-
+                # LAN: bỏ đo băng thông 2 vòng để hiện khung hình ngay
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
+                client_quick_link_probe(sock, password, self.update_status)
                 sock.settimeout(None)
                 self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, False, os_release)
             else:
@@ -1293,121 +1301,18 @@ class NetworkMixin:
                 is_domain = res.get("is_domain", False)
                 is_android = res.get("is_android", False)
                 
-                # Perform pre-connection speed test (Ping/Latency and Bandwidth) - 2 runs, select highest speed
-                self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2..."))
-                net_class = "medium"
-                net_class_viet = _("Trung bình (Medium)")
-                avg_ping = 50.0
-                bandwidth = 10.0
-                try:
-                    sock.settimeout(10.0)
-                    runs = []
-                    for run_idx in range(2):
-                        if run_idx > 0:
-                            self.update_status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2..."))
-                        # 1. Ping / Latency test
-                        rtts = []
-                        for _i in range(3):
-                            t0 = time.time()
-                            send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode('utf-8'), partner_pass)
-                            pong_msg = recv_msg(sock, partner_pass)
-                            if pong_msg:
-                                pong_data = json.loads(pong_msg.decode('utf-8'))
-                                if pong_data.get("action") == "speed_test_pong":
-                                    rtts.append(time.time() - t0)
-                            time.sleep(0.05)
-                        
-                        run_ping = 50.0
-                        if rtts:
-                            run_ping = (sum(rtts) / len(rtts)) * 1000.0
-                            
-                        # 2. Bandwidth test
-                        run_bw = 10.0
-                        suggested_size = 1572864
-                        if run_ping > 200.0: suggested_size = 131072
-                        elif run_ping > 50.0: suggested_size = 524288
-                        send_msg(sock, json.dumps({"action": "speed_test_bw_req", "suggested_size": suggested_size}).encode('utf-8'), partner_pass)
-                        bw_start_msg = recv_msg(sock, partner_pass)
-                        if bw_start_msg:
-                            bw_start_data = json.loads(bw_start_msg.decode('utf-8'))
-                            if bw_start_data.get("action") == "speed_test_bw_start":
-                                dummy_size = bw_start_data.get("size", 1572864)
-                                warm_size = dummy_size // 3 # 1/3 cho warm-up
-                                measure_size = dummy_size - warm_size
-                                
-                                warm_data = b''
-                                while len(warm_data) < warm_size:
-                                    chunk = sock.recv(min(65536, warm_size - len(warm_data)))
-                                    if not chunk:
-                                        break
-                                    warm_data += chunk
-                                    
-                                t_start = time.time()
-                                measured_data = b''
-                                while len(measured_data) < measure_size:
-                                    chunk = sock.recv(min(65536, measure_size - len(measured_data)))
-                                    if not chunk:
-                                        break
-                                    measured_data += chunk
-                                t_end = time.time()
-                                
-                                duration = t_end - t_start
-                                total_len = len(warm_data) + len(measured_data)
-                                if duration > 0 and total_len == dummy_size:
-                                    run_bw = (measure_size * 8.0) / (duration * 1024.0 * 1024.0)
-                        
-                        runs.append((run_ping, run_bw))
-                        if run_idx == 0:
-                            time.sleep(0.2) # Small gap between runs
-                except Exception as e:
-                    print(f"[Client] Speed test error: {e}")
-                    # Send default result to host to avoid locking
-                    try:
-                        send_msg(sock, json.dumps({
-                            "action": "speed_test_result",
-                            "net_class": "medium",
-                            "ping": 50.0,
-                            "bandwidth": 10.0
-                        }).encode('utf-8'), partner_pass)
-                    except: pass
-                finally:
-                    try: sock.settimeout(None)
-                    except: pass
-                            
-                if runs:
-                    # Compare and select the run with the highest bandwidth speed
-                    best_run = max(runs, key=lambda x: x[1])
-                    avg_ping = best_run[0]
-                    bandwidth = best_run[1]
-                                                                        
-                    # 3. Network quality classification
-                    # - Tốt (High-speed): Băng thông > 20 Mbps, Ping < 10ms.
-                    # - Trung bình (Medium): Băng thông 5 - 20 Mbps, Ping 50 - 100ms.
-                    # - Yếu (Low-speed): Băng thông < 5 Mbps hoặc Ping > 100ms.
-                    if bandwidth > 20.0 and avg_ping < 10.0:
-                        net_class = "high"
-                        net_class_viet = _("Tốt (High-speed)")
-                    elif bandwidth < 5.0 or avg_ping > 50.0:
-                        net_class = "low"
-                        net_class_viet = _("Yếu (Low-speed)")
-                    else:
-                        net_class = "medium"
-                        net_class_viet = _("Trung bình (Medium)")
-                        
-                    # 4. Report speed test results to Host
-                    try:
-                        send_msg(sock, json.dumps({
-                            "action": "speed_test_result",
-                            "net_class": net_class,
-                            "ping": avg_ping,
-                            "bandwidth": bandwidth
-                        }).encode('utf-8'), partner_pass)
-                    except: pass
-                    
-                    status_text = _("Đo tốc độ (Lớn nhất 2 lần): Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
+                # 1 vòng đo nhanh (LAN bỏ hẳn) — không chờ 2 lần ping/băng thông rồi mới mở viewer
+                net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, self.update_status)
+                if net_class == "high":
+                    net_class_viet = _("Tốt (High-speed)")
+                elif net_class == "low":
+                    net_class_viet = _("Yếu (Low-speed)")
+                else:
+                    net_class_viet = _("Trung bình (Medium)")
+                if not is_lan_socket(sock):
+                    status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
-                    time.sleep(0.5)
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
                 # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)

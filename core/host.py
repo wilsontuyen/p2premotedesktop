@@ -159,6 +159,146 @@ def set_windows_graphics_effects(enabled=True):
 # Unified Application Class
 
 
+_MAX_SEND_EDGE_LAN = 4096
+_MAX_SEND_EDGE_WAN = 2560
+
+
+def _virtual_screen_rect():
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080
+    user32 = ctypes.windll.user32
+    left0 = int(user32.GetSystemMetrics(76))
+    top0 = int(user32.GetSystemMetrics(77))
+    w = int(user32.GetSystemMetrics(78))
+    h = int(user32.GetSystemMetrics(79))
+    if w < 1 or h < 1:
+        left0, top0 = 0, 0
+        w = int(user32.GetSystemMetrics(0))
+        h = int(user32.GetSystemMetrics(1))
+    return left0, top0, w, h
+
+
+def _clip_tile_onto_canvas(canvas, tile, x, y):
+    if tile is None or getattr(tile, "size", 0) == 0:
+        return False
+    if tile.ndim == 2:
+        tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
+    elif tile.shape[2] == 4:
+        tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
+    ch, cw = canvas.shape[:2]
+    th, tw = tile.shape[:2]
+    x0 = max(int(x), 0)
+    y0 = max(int(y), 0)
+    x1 = min(int(x) + tw, cw)
+    y1 = min(int(y) + th, ch)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    sx = x0 - int(x)
+    sy = y0 - int(y)
+    dst = canvas[y0:y1, x0:x1]
+    src = tile[sy:sy + (y1 - y0), sx:sx + (x1 - x0)]
+    if src.shape[0] != dst.shape[0] or src.shape[1] != dst.shape[1]:
+        interp = cv2.INTER_AREA if (src.shape[1] > dst.shape[1] or src.shape[0] > dst.shape[0]) else cv2.INTER_NEAREST
+        src = cv2.resize(src, (dst.shape[1], dst.shape[0]), interpolation=interp)
+    dst[:] = src
+    return True
+
+
+def _open_dxcam_outputs():
+    cams = []
+    if sys.platform != "win32":
+        return cams
+    try:
+        import dxcam
+        fac = dxcam.DXFactory()
+    except Exception as e:
+        print(f"[Host] dxcam factory failed: {e}")
+        return cams
+    for di, outputs in enumerate(getattr(fac, "outputs", []) or []):
+        for oi, output in enumerate(outputs):
+            try:
+                if hasattr(output, "attached_to_desktop") and not output.attached_to_desktop:
+                    continue
+                cam = dxcam.create(
+                    device_idx=di,
+                    output_idx=oi,
+                    output_color="BGR",
+                    max_buffer_len=2,
+                )
+                if cam is None:
+                    continue
+                cams.append(cam)
+                print(f"[Host] DXGI capture Device {di} Output {oi}: {output}")
+            except Exception as e:
+                print(f"[Host] dxcam Device {di} Output {oi} failed: {e}")
+    return cams
+
+
+def grab_dxcam_virtual_bgr(cams, canvas=None):
+    left0, top0, w, h = _virtual_screen_rect()
+    if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    any_ok = False
+    for cam in cams:
+        try:
+            tile = cam.grab()
+            if tile is None:
+                continue
+            try:
+                cam._output.update_desc()
+                rc = cam._output.desc.DesktopCoordinates
+                x, y = int(rc.left) - left0, int(rc.top) - top0
+            except Exception:
+                x, y = 0, 0
+            if _clip_tile_onto_canvas(canvas, tile, x, y):
+                any_ok = True
+        except Exception as e:
+            print(f"[Host] dxcam grab failed: {e}")
+    return canvas, w, h, (left0, top0), any_ok
+
+
+def grab_virtual_desktop_bgr(sct, canvas=None):
+    """Bắt từng màn rồi ghép. Không BitBlt cả monitors[0] (thường đen trên máy nhiều GPU)."""
+    left0, top0, w, h = _virtual_screen_rect()
+    mons = sct.monitors
+    if mons:
+        virt = mons[0]
+        left0 = int(virt.get("left", left0))
+        top0 = int(virt.get("top", top0))
+        w = int(virt.get("width", w))
+        h = int(virt.get("height", h))
+    if w < 1 or h < 1:
+        raise RuntimeError("invalid virtual screen size")
+    if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    parts = mons[1:] if mons and len(mons) > 1 else (mons[:1] if mons else [])
+    any_ok = False
+    for mon in parts:
+        try:
+            raw = sct.grab(mon)
+            tile = np.array(raw, dtype=np.uint8)
+            if _clip_tile_onto_canvas(
+                canvas, tile,
+                int(mon.get("left", 0)) - left0,
+                int(mon.get("top", 0)) - top0,
+            ):
+                any_ok = True
+        except Exception as e:
+            print(f"[Host] Monitor grab failed ({mon}): {e}")
+    if not any_ok:
+        raise mss.exception.ScreenShotError("all monitor grabs failed")
+    return canvas, w, h, (left0, top0)
+
+
+def scale_frame_for_send(frame_bgr, cap_w, cap_h, max_edge=2560):
+    if max_edge <= 0 or (cap_w <= max_edge and cap_h <= max_edge):
+        return frame_bgr
+    scale = min(max_edge / float(cap_w), max_edge / float(cap_h))
+    nw = max(10, int(cap_w * scale))
+    nh = max(10, int(cap_h * scale))
+    return cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+
+
 class HostMixin:
     def ensure_input_thread_desktop(self, force=False):
         if getattr(self, 'is_headless', False) is False and sys.platform != "win32":
@@ -511,14 +651,13 @@ class HostMixin:
                 except Exception as e:
                     print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Host: {e}")
                 
-                # Get resolution safely
+                # Toàn bộ desktop ảo (mọi màn hình). monitors[1] chỉ là màn chính —
+                # máy 2 màn + DPI khác nhau bị GetSystemMetrics hiểu nhầm là đổi độ phân giải rồi ngắt.
                 with mss.mss() as sct:
-                    if len(sct.monitors) > 1:
-                        monitor = sct.monitors[1]
-                    else:
-                        monitor = sct.monitors[0]
+                    monitor = sct.monitors[0]
                     host_w = monitor['width']
                     host_h = monitor['height']
+                    self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
                 import platform
                 computer_name = platform.node()
@@ -568,42 +707,37 @@ class HostMixin:
                 
                 client_state = {"running": True, "net_class": "medium", "wake_event": threading.Event()}
                 
-                # Perform pre-connection speed test handling on host (2 rounds to match client)
+                # Speed test: client LAN gửi result ngay; WAN 1 ping + gói nhỏ
                 try:
-                    conn.settimeout(10.0)
-                    for run_idx in range(2):
-                        # 1. Ping / Latency test (3 pings per round)
-                        for _i in range(3):
-                            ping_msg = recv_msg(conn, client_pass)
-                            if ping_msg:
-                                ping_data = json.loads(ping_msg.decode('utf-8'))
-                                if ping_data.get("action") == "speed_test_ping":
-                                    send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode('utf-8'), client_pass)
-                                    
-                        # 2. Bandwidth test
-                        bw_msg = recv_msg(conn, client_pass)
-                        if bw_msg:
-                            bw_data = json.loads(bw_msg.decode('utf-8'))
-                            if bw_data.get("action") == "speed_test_bw_req":
-                                dummy_size = bw_data.get("suggested_size", 1572864)
-                                send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode('utf-8'), client_pass)
-                                conn.sendall(b'\x00' * dummy_size)
-                            
-                    # 3. Receive final results (sent once after both rounds)
-                    res_msg = recv_msg(conn, client_pass)
-                    if res_msg:
-                        res_data = json.loads(res_msg.decode('utf-8'))
-                        if res_data.get("action") == "speed_test_result":
-                            net_class = res_data.get("net_class", "medium")
+                    conn.settimeout(8.0)
+                    while client_state.get("running", True):
+                        probe_msg = recv_msg(conn, client_pass)
+                        if not probe_msg:
+                            break
+                        try:
+                            probe = json.loads(probe_msg.decode("utf-8"))
+                        except Exception:
+                            break
+                        act = probe.get("action")
+                        if act == "speed_test_ping":
+                            send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode("utf-8"), client_pass)
+                        elif act == "speed_test_bw_req":
+                            dummy_size = int(probe.get("suggested_size", 262144))
+                            dummy_size = max(1024, min(dummy_size, 1572864))
+                            send_msg(conn, json.dumps({"action": "speed_test_bw_start", "size": dummy_size}).encode("utf-8"), client_pass)
+                            conn.sendall(b"\x00" * dummy_size)
+                        elif act == "speed_test_result":
+                            net_class = probe.get("net_class", "medium")
                             client_state["net_class"] = net_class
-                            bandwidth = res_data.get("bandwidth", 32.0)
+                            bandwidth = probe.get("bandwidth", 32.0)
                             print(f"[Host] Speed test finished. Class: {net_class}, Bandwidth: {bandwidth:.2f} Mbps")
-                            
-                            # Adjust windows graphics effects based on net_class
                             if net_class == "high":
                                 set_windows_graphics_effects(True)
                             else:
                                 set_windows_graphics_effects(False)
+                            break
+                        else:
+                            break
                 except Exception as ste:
                     print(f"[Host] Speed test handler error: {ste}")
                 finally:
@@ -689,33 +823,46 @@ class HostMixin:
         
         class MultiCapCtx:
             def __init__(self):
-                self.use_dxcam = False
-                self.dxcam_camera = None
+                self.dx_cams = []
                 self.sct = None
             def __enter__(self):
                 if sys.platform == "win32":
-                    try:
-                        import dxcam
-                        self.dxcam_camera = dxcam.create(output_color="BGR")
-                        if self.dxcam_camera is not None:
-                            self.dxcam_camera.start(video_mode=True)
-                            self.use_dxcam = True
-                    except Exception as e:
-                        print(f"[Host] dxcam init failed: {e}")
-                if not self.use_dxcam:
+                    self.dx_cams = _open_dxcam_outputs()
+                try:
                     self.sct = mss.mss()
                     self.sct.__enter__()
+                except Exception as e:
+                    print(f"[Host] mss init failed: {e}")
+                    self.sct = None
+                if not self.dx_cams and not self.sct:
+                    raise RuntimeError("no screen capture backend")
                 return self
             def __exit__(self, exc_type, exc_val, exc_tb):
-                if self.use_dxcam and self.dxcam_camera:
-                    self.dxcam_camera.stop()
-                elif self.sct:
-                    self.sct.__exit__(exc_type, exc_val, exc_tb)
+                for cam in self.dx_cams:
+                    try:
+                        cam.release()
+                    except Exception:
+                        pass
+                self.dx_cams = []
+                if self.sct:
+                    try:
+                        self.sct.__exit__(exc_type, exc_val, exc_tb)
+                    except Exception:
+                        pass
+                    self.sct = None
 
         
         try:
-            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 2000)
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 30000)
         except: pass
+        try:
+            client_state["is_lan"] = is_lan_socket(conn)
+        except Exception:
+            client_state["is_lan"] = False
+        try:
+            send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password)
+        except Exception:
+            pass
 
         _last_switching_signal_time = 0
         while client_state.get("running", False):
@@ -782,19 +929,15 @@ class HostMixin:
                         continue
                     
                 with MultiCapCtx() as cap_ctx:
-                    use_dxcam = cap_ctx.use_dxcam
-                    dxcam_camera = cap_ctx.dxcam_camera
+                    dx_cams = cap_ctx.dx_cams
                     sct = cap_ctx.sct
                     
-                    # Dynamically get monitor for current desktop (fixes black screen on Win10 Winlogon)
-                    if not use_dxcam:
-                        if sys.platform != "win32":
-                            dynamic_monitor = sct.monitors[0]
-                        else:
-                            if len(sct.monitors) > 1:
-                                dynamic_monitor = sct.monitors[1]
-                            else:
-                                dynamic_monitor = sct.monitors[0]
+                    last_vw, last_vh = 0, 0
+                    try:
+                        last_vw = ctypes.windll.user32.GetSystemMetrics(78)
+                        last_vh = ctypes.windll.user32.GetSystemMetrics(79)
+                    except Exception:
+                        pass
                         
                     while client_state.get("running", False):
                         try:
@@ -819,30 +962,45 @@ class HostMixin:
                             sys_w, sys_h = 0, 0
                             try:
                                 if sys.platform == "win32":
-                                    sys_w = ctypes.windll.user32.GetSystemMetrics(0)
-                                    sys_h = ctypes.windll.user32.GetSystemMetrics(1)
+                                    sys_w = ctypes.windll.user32.GetSystemMetrics(78)
+                                    sys_h = ctypes.windll.user32.GetSystemMetrics(79)
                             except Exception:
                                 pass
                                 
-                            if sys_w > 0 and sys_h > 0 and (dynamic_monitor['width'] != sys_w or dynamic_monitor['height'] != sys_h):
-                                print("[Host] Resolution change detected via GetSystemMetrics. Breaking capture loop...")
+                            if sys_w > 0 and sys_h > 0 and last_vw > 0 and last_vh > 0 and (sys_w != last_vw or sys_h != last_vh):
+                                print("[Host] Virtual screen size changed. Breaking capture loop...")
                                 break
+                            if sys_w > 0 and sys_h > 0:
+                                last_vw, last_vh = sys_w, sys_h
                                 
-                            if use_dxcam:
-                                frame_bgr = dxcam_camera.get_latest_frame()
-                                if frame_bgr is None:
+                            grabbed = False
+                            if dx_cams:
+                                retries = 8 if not client_state.get("_got_frame") else 1
+                                for _try in range(retries):
+                                    frame_bgr, cap_w, cap_h, origin, grabbed = grab_dxcam_virtual_bgr(
+                                        dx_cams, client_state.get("_stitch_canvas")
+                                    )
+                                    client_state["_stitch_canvas"] = frame_bgr
+                                    self._capture_origin = origin
+                                    if grabbed:
+                                        break
                                     time.sleep(0.01)
+                            if not grabbed:
+                                if sct is None:
+                                    time.sleep(0.05)
                                     continue
-                                cap_h, cap_w = frame_bgr.shape[:2]
-                            else:
-                                img = sct.grab(dynamic_monitor)
-                                cap_w, cap_h = img.size
-                                frame_bgr = cv2.cvtColor(np.array(img, dtype=np.uint8), cv2.COLOR_BGRA2BGR)
+                                frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
+                                    sct, client_state.get("_stitch_canvas")
+                                )
+                                client_state["_stitch_canvas"] = frame_bgr
+                                self._capture_origin = origin
                             
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
                             
                             force_update = client_state.pop("force_update", False)
+                            if not client_state.get("_first_sent"):
+                                force_update = True
                             if client_state.get("last_target_w") != target_w or client_state.get("last_target_h") != target_h:
                                 force_update = True
                                 client_state["last_target_w"] = target_w
@@ -852,10 +1010,9 @@ class HostMixin:
                             q_mode = getattr(self, 'client_quality_mode', 'quality')
                             
                             if q_mode == "quality":
-                                # Chế độ Chất lượng 4K: luôn gửi ảnh gốc, quality cao nhất
-                                base_quality = 98
-                                fps_limit = 30
-                                res_scale = -1.0  # -1.0 = gửi ảnh ở độ phân giải gốc, không resize
+                                base_quality = 96
+                                fps_limit = 25
+                                res_scale = -1.0
                             elif net_class == "high":
                                 base_quality = 98
                                 fps_limit = 60
@@ -876,7 +1033,7 @@ class HostMixin:
                             if "start_time" not in client_state:
                                 client_state["start_time"] = time.time()
                                 
-                            if time.time() - client_state["start_time"] < 5.0:
+                            if time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
                                 quality = min(98, quality + 10)
                                 if dyn_scale >= 0:
                                     dyn_scale = min(1.0, dyn_scale + 0.1)
@@ -893,7 +1050,8 @@ class HostMixin:
                                 except Exception:
                                     pass
 
-                            # dyn_scale < 0 = chế độ full resolution (gửi ảnh gốc, không resize)
+                            # dyn_scale < 0 = gửi gần độ phân giải gốc (không thu về kích thước cửa sổ viewer)
+                            send_max_edge = _MAX_SEND_EDGE_LAN if client_state.get("is_lan") or net_class == "high" else _MAX_SEND_EDGE_WAN
                             if dyn_scale >= 0:
                                 w = int(target_w * dyn_scale)
                                 h = int(target_h * dyn_scale)
@@ -914,6 +1072,7 @@ class HostMixin:
                                 
                                 if cap_w != final_w or cap_h != final_h:
                                     frame_bgr = cv2.resize(frame_bgr, (final_w, final_h), interpolation=cv2.INTER_AREA)
+                            frame_bgr = scale_frame_for_send(frame_bgr, frame_bgr.shape[1], frame_bgr.shape[0], send_max_edge)
 
                             static_frame = False
                             diff_bbox = None
@@ -963,10 +1122,14 @@ class HostMixin:
                                     send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
-                            # Khi quality >= 90, dùng chroma subsampling 4:4:4 để giữ sắc nét chữ/viền
-                            if quality >= 90 and hasattr(cv2, 'IMWRITE_JPEG_SAMPLING_FACTOR'):
+                            if hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
+                                encode_param.extend([int(cv2.IMWRITE_JPEG_OPTIMIZE), 1])
+                            if quality >= 88 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
+                            if not result:
+                                time.sleep(0.05)
+                                continue
                             jpeg_data = encimg.tobytes()
                             
                             t_start_send = time.time()
@@ -980,7 +1143,14 @@ class HostMixin:
                                 
                             ema = client_state["send_ema"]
                             
-                            if ema > 0.35:
+                            if q_mode == "quality":
+                                quality = max(94, min(98, int(quality)))
+                                if ema > 0.45:
+                                    sleep_time = min(0.12, sleep_time + 0.02)
+                                elif ema < 0.20:
+                                    sleep_time = max(1.0 / 30, sleep_time - 0.005)
+                                dyn_scale = -1.0
+                            elif ema > 0.35:
                                 # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
                                 quality = max(max(35, base_quality - 20), quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
@@ -999,39 +1169,24 @@ class HostMixin:
                             client_state["dyn_sleep_time"] = sleep_time
                             client_state["dyn_scale"] = dyn_scale
 
+                            if not client_state.get("_first_sent"):
+                                client_state["_first_sent"] = True
+                                client_state["_got_frame"] = True
+                                continue
                             time.sleep(sleep_time)
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
-                            
-                            # Thử fallback sang monitors[0] một lần duy nhất.
-                            # KHÔNG dùng continue vì nếu monitors[0] cũng fail → vòng lặp vô tận.
-                            if len(sct.monitors) > 1 and dynamic_monitor != sct.monitors[0]:
-                                print("[Host] Falling back to sct.monitors[0] (Virtual Screen) - one-shot attempt")
-                                dynamic_monitor = sct.monitors[0]
-                                try:
-                                    img2 = sct.grab(dynamic_monitor)
-                                    # Fallback thành công: cập nhật dynamic_monitor và tiếp tục
-                                    img = img2
-                                except Exception:
-                                    pass  # Fallback cũng fail → rơi xuống break bên dưới
-                                else:
-                                    continue  # Fallback thành công → tiếp tục inner loop
-                                
-                            try:
-                                signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                                send_msg(conn, signal, password)
-                            except: pass
-                            time.sleep(1.0)
-                            break  # Break inner loop to recreate mss.mss()
+                            time.sleep(0.3)
+                            break
                         except Exception as e:
                             import traceback
-                            with open("host_error.log", "a", encoding="utf-8") as f:
-                                f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
-                            client_state["running"] = False
                             try:
-                                force_close_socket(conn)
-                            except:
+                                with open("host_error.log", "a", encoding="utf-8") as f:
+                                    f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
+                            except Exception:
                                 pass
+                            print(f"[Host] Screen Sender Error (retry): {e}")
+                            time.sleep(0.25)
                             break
             except Exception as e:
                 print(f"[Host] mss.mss() context error: {e}")
@@ -1165,8 +1320,8 @@ class HostMixin:
         if ev_type == 'mouse_move':
             self.ensure_input_thread_desktop(force=False)
             x, y = event['x'], event['y']
-            # Single SendInput call with MOUSEEVENTF_ABSOLUTE is sufficient and fastest
-            send_input_mouse_move(x, y)
+            ox, oy = getattr(self, "_capture_origin", (0, 0))
+            send_input_mouse_move(x + ox, y + oy)
                 
         elif ev_type == 'mouse_click':
             self.ensure_input_thread_desktop(force=True)
