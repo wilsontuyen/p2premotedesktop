@@ -464,3 +464,40 @@ def set_clipboard_image_data(dib_bytes, owner_hwnd=None):
         log_debug(f"[set_clipboard_image] Lỗi: {e}")
     return False
 
+
+def clear_local_clipboard(owner_hwnd=None):
+    """Xóa toàn bộ clipboard máy này (text/file/image)."""
+    if sys.platform == "win32":
+        if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard:
+            try:
+                ctypes.windll.user32.OpenClipboard(owner_hwnd)
+                ctypes.windll.user32.EmptyClipboard()
+                ctypes.windll.user32.CloseClipboard()
+                return True
+            except Exception:
+                return False
+        try:
+            hwnd_arg = owner_hwnd if owner_hwnd is not None else None
+            opened = False
+            for _i in range(20):
+                if fn_OpenClipboard(hwnd_arg):
+                    opened = True
+                    break
+                time.sleep(0.03)
+            if not opened:
+                return False
+            try:
+                fn_EmptyClipboard()
+                return True
+            finally:
+                fn_CloseClipboard()
+        except Exception as e:
+            log_debug(f"[clear_local_clipboard] {e}")
+            return False
+    try:
+        import pyperclip
+        pyperclip.copy("")
+        return True
+    except Exception:
+        return False
+

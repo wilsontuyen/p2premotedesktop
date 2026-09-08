@@ -34,12 +34,43 @@ class ClipboardSyncManager:
     def cancel_active_transfer(self, remote_triggered=False):
         pass
 
+    def clear_local_and_notify_peers(self):
+        try:
+            pyperclip.copy("")
+            self.last_text = ""
+        except Exception:
+            pass
+        try:
+            from network.socket_utils import socket_passwords, send_msg
+            pkt = json.dumps({"type": "clear_clipboard"}).encode("utf-8")
+            socks = set(self.active_sockets)
+            try:
+                socks.update(socket_passwords.keys())
+            except Exception:
+                pass
+            for conn in list(socks):
+                try:
+                    pw = socket_passwords.get(conn)
+                    if pw is not None:
+                        send_msg(conn, pkt, pw)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def process_clipboard_event(self, packet):
         self.handle_received_packet(packet)
 
     def handle_received_packet(self, packet):
         try:
             ptype = packet.get("type")
+            if ptype == "clear_clipboard":
+                try:
+                    pyperclip.copy("")
+                    self.last_text = ""
+                except Exception:
+                    pass
+                return
             if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
                 return
 

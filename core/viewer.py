@@ -82,7 +82,7 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "screen_cover_state":
                         globals()['viewer_cover_state'] = bool(event.get("active"))
                         continue
-                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image"):
+                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image", "clear_clipboard"):
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
                         continue
@@ -102,6 +102,11 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type == "host_shutdown":
                         print("[Client] Received host_shutdown. Exiting viewer immediately.")
+                        try:
+                            if clipboard_sync_manager:
+                                clipboard_sync_manager.handle_received_packet({"type": "clear_clipboard"})
+                        except Exception:
+                            pass
                         client_host_did_shutdown = True
                         import pygame
                         pygame.event.post(pygame.event.Event(pygame.QUIT))

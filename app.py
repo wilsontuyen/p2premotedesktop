@@ -514,7 +514,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                             print("[Host] System Shutdown/Restart detected!")
                             try:
                                 from network.socket_utils import socket_passwords, send_msg
+                                from core.clipboard_agent import clipboard_sync_manager
                                 import json
+                                if clipboard_sync_manager:
+                                    clipboard_sync_manager.clear_local_and_notify_peers()
                                 for conn in list(socket_passwords.keys()):
                                     try:
                                         send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
@@ -539,7 +542,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     print(f"[Host] System Shutdown/Restart detected (signal {signum})!")
                     try:
                         from network.socket_utils import socket_passwords, send_msg
+                        from core.clipboard_agent import clipboard_sync_manager
                         import json
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.clear_local_and_notify_peers()
                         for conn in list(socket_passwords.keys()):
                             try:
                                 send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
@@ -3871,6 +3877,12 @@ Comment=Remote Desktop P2P AutoStart
                 pass
         self.save_window_position()
         self.running_server = False
+        try:
+            if clipboard_sync_manager:
+                clipboard_sync_manager.clear_local_and_notify_peers()
+                time.sleep(0.25)
+        except Exception:
+            pass
         if getattr(self, 'server_socket', None):
             try: self.server_socket.close()
             except: pass
@@ -4107,7 +4119,10 @@ if __name__ == '__main__':
                 except: pass
                 try:
                     from network.socket_utils import socket_passwords, send_msg
+                    from core.clipboard_agent import clipboard_sync_manager
                     import json
+                    if clipboard_sync_manager:
+                        clipboard_sync_manager.clear_local_and_notify_peers()
                     pkt = json.dumps({"type": "host_shutdown"}).encode('utf-8')
                     for conn in list(socket_passwords.keys()):
                         try:
