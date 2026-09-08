@@ -1408,11 +1408,10 @@ class HostMixin:
                 
                 if getattr(self, 'head_screen_cover_active', False):
                     try:
-                        import ctypes
                         # Luôn re-apply BlockInput mỗi 0.2s để chống lại SAS (Ctrl+Alt+Del)
-                        if ctypes.windll.user32.BlockInput(True) == 0:
-                            ctypes.windll.user32.BlockInput(False)
-                            ctypes.windll.user32.BlockInput(True)
+                        if not self._apply_block_input(True):
+                            self._apply_block_input(False)
+                            self._apply_block_input(True)
                     except: pass
                     
                 if not r:
@@ -1507,6 +1506,13 @@ class HostMixin:
             
         elif ev_type == 'toggle_screen_cover':
             self.toggle_screen_cover()
+            try:
+                send_msg(conn, json.dumps({
+                    "type": "screen_cover_state",
+                    "active": bool(getattr(self, "head_screen_cover_active", False)),
+                }).encode("utf-8"), password)
+            except Exception:
+                pass
             
         elif ev_type == 'trigger_sas':
             self.trigger_sas()
@@ -1805,12 +1811,28 @@ class HostMixin:
                 res = {"type": "get_properties_result", "success": False, "error": str(e)}
             send_msg(conn, json.dumps(res).encode('utf-8'), password)
 
+    def _apply_block_input(self, active):
+        """BlockInput khóa hardware; thường cần quyền. Hook LL là lớp khóa chính khi không admin."""
+        if sys.platform != "win32":
+            return False
+        try:
+            user32 = ctypes.windll.user32
+            user32.BlockInput.argtypes = [ctypes.c_bool]
+            user32.BlockInput.restype = ctypes.c_bool
+            ok = bool(user32.BlockInput(bool(active)))
+            if not ok:
+                err = ctypes.GetLastError()
+                print(f"[Host] BlockInput({active}) failed, GetLastError={err}")
+            return ok
+        except Exception as e:
+            print(f"[Host] BlockInput error: {e}")
+            return False
+
     def _run_input_hooks(self):
         import ctypes
         from ctypes import wintypes
         import win32con
         
-        user32 = ctypes.windll.user32
         user32 = ctypes.windll.user32
         
         # Ensure thread is bound to active desktop
@@ -1825,30 +1847,64 @@ class HostMixin:
         WH_KEYBOARD_LL = 13
         WH_MOUSE_LL = 14
         LLKHF_INJECTED = 0x00000010
+        LLKHF_LOWER_IL_INJECTED = 0x00000002
         LLMHF_INJECTED = 0x00000001
+        LLMHF_LOWER_IL_INJECTED = 0x00000002
+        KB_INJECTED = LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED
+        MS_INJECTED = LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED
+
+        class KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("vkCode", wintypes.DWORD),
+                ("scanCode", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        class MSLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("pt", POINT),
+                ("mouseData", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
         
-        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
         
         def keyboard_hook_proc(nCode, wParam, lParam):
-            if nCode == 0:
-                flags = ctypes.c_uint.from_address(lParam + 8).value
-                if not (flags & LLKHF_INJECTED):
+            if nCode >= 0 and lParam:
+                kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                if not (kb.flags & KB_INJECTED):
                     return 1
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
             
         def mouse_hook_proc(nCode, wParam, lParam):
-            if nCode == 0:
-                flags = ctypes.c_uint.from_address(lParam + 12).value
-                if not (flags & LLMHF_INJECTED):
+            if nCode >= 0 and lParam:
+                ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+                if not (ms.flags & MS_INJECTED):
                     return 1
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
             
         self._kb_hook_ref = HOOKPROC(keyboard_hook_proc)
         self._ms_hook_ref = HOOKPROC(mouse_hook_proc)
+
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, ctypes.c_void_p, ctypes.c_uint]
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
         
         h_mod = ctypes.windll.kernel32.GetModuleHandleW(None)
         kb_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._kb_hook_ref, h_mod, 0)
         ms_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._ms_hook_ref, h_mod, 0)
+        if not kb_hook or not ms_hook:
+            print(f"[Host] SetWindowsHookEx failed kb={kb_hook} ms={ms_hook} err={ctypes.GetLastError()}")
+        else:
+            print("[Host] Input hooks installed (physical KB/mouse blocked, remote SendInput allowed).")
         
         def timer_proc(hwnd, msg, timer_id, time):
             if not getattr(self, 'host_block_input_active', False):
@@ -1856,16 +1912,21 @@ class HostMixin:
                 
         TIMERPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
         timer_ref = TIMERPROC(timer_proc)
+        self._hook_timer_ref = timer_ref
         timer_id = user32.SetTimer(None, 0, 200, timer_ref)
         
         msg = wintypes.MSG()
+        user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+        user32.GetMessageW.restype = ctypes.c_int
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
             
         user32.KillTimer(None, timer_id)
-        user32.UnhookWindowsHookEx(kb_hook)
-        user32.UnhookWindowsHookEx(ms_hook)
+        if kb_hook:
+            user32.UnhookWindowsHookEx(kb_hook)
+        if ms_hook:
+            user32.UnhookWindowsHookEx(ms_hook)
         self._kb_hook_ref = None
         self._ms_hook_ref = None
         print("[Host] Input hooks stopped.")
@@ -1884,15 +1945,16 @@ class HostMixin:
     def toggle_screen_cover(self):
         if sys.platform != "win32":
             return
-        import win32event, win32api, ctypes
+        import win32event, win32api
         
         is_active = not getattr(self, 'head_screen_cover_active', False)
         self.head_screen_cover_active = is_active
-        
-        try:
-            ctypes.windll.user32.BlockInput(is_active)
-        except:
-            pass
+        self._apply_block_input(is_active)
+        if not getattr(self, "is_headless", False):
+            if is_active:
+                self.start_input_hooks()
+            else:
+                self.stop_input_hooks()
             
         try:
             active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
@@ -1918,13 +1980,12 @@ class HostMixin:
     def disable_screen_cover(self):
         if sys.platform != "win32":
             return
-        import win32event, win32api, ctypes
+        import win32event, win32api
         
         self.head_screen_cover_active = False
-        try:
-            ctypes.windll.user32.BlockInput(False)
-        except:
-            pass
+        self._apply_block_input(False)
+        if not getattr(self, "is_headless", False):
+            self.stop_input_hooks()
             
         try:
             active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
@@ -1958,6 +2019,7 @@ class HostMixin:
                     print(f"[Host] disable_screen_cover_gui error: {e}")
                 self._cover_hwnd = None
             self.stop_input_hooks()
+            self._apply_block_input(False)
             print("[Host] Screen cover disabled forcefully.")
 
     def toggle_screen_cover_gui(self):
@@ -1971,14 +2033,45 @@ class HostMixin:
                     print(f"[Host] toggle_screen_cover_gui error: {e}")
                 self._cover_hwnd = None
             self.stop_input_hooks()
+            self._apply_block_input(False)
             print("[Host] Screen cover disabled.")
             return
 
         self.screen_cover_running = True
         self.start_input_hooks()
+        self._apply_block_input(True)
         print("[Host] Screen cover enabled. Launching Win32 cover thread...")
         import threading
         threading.Thread(target=self._run_cover_win32, daemon=True).start()
+
+    def _create_privacy_cover_hwnd(self, cls_name, ex_style, style, vx, vy, vw, vh, hInst):
+        """Tạo cửa sổ che trên ZBID_UIACCESS để đè Start/Taskbar (cần uiAccess + exe ký trong Program Files)."""
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        ZBID_UIACCESS = 2
+        hwnd = 0
+        try:
+            create_in_band = getattr(user32, "CreateWindowInBand")
+            create_in_band.restype = ctypes.c_void_p
+            create_in_band.argtypes = [
+                wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                wintypes.HWND, wintypes.HMENU, ctypes.c_void_p, ctypes.c_void_p,
+                wintypes.DWORD,
+            ]
+            hwnd = create_in_band(
+                ex_style, cls_name, "AGCover", style,
+                int(vx), int(vy), int(vw), int(vh),
+                None, None, ctypes.c_void_p(int(hInst)), None, ZBID_UIACCESS,
+            ) or 0
+            if hwnd:
+                print(f"[Host] Cover CreateWindowInBand(ZBID_UIACCESS) HWND={hex(hwnd)}")
+                return int(hwnd)
+            print(f"[Host] CreateWindowInBand failed err={ctypes.GetLastError()}")
+        except Exception as e:
+            print(f"[Host] CreateWindowInBand unavailable: {e}")
+        return 0
 
     def _run_cover_win32(self):
         """Tạo cửa sổ che phủ bằng pywin32 API thuần (không Tkinter).
@@ -2056,14 +2149,15 @@ class HostMixin:
                     # Create Font using GDI
                     text_y = (vh_rect // 2) + 20
                     text_rect = (0, text_y, vw_rect, text_y + 150)
+                    privacy_title = _("CHẾ ĐỘ RIÊNG TƯ")
                     try:
                         font_lf = win32gui.LOGFONT()
-                        font_lf.lfHeight = 80
+                        font_lf.lfHeight = 72
                         font_lf.lfWeight = win32con.FW_BOLD
                         font_lf.lfFaceName = "Segoe UI"
                         font = win32gui.CreateFontIndirect(font_lf)
                         old_font = win32gui.SelectObject(hdc, font)
-                        win32gui.DrawText(hdc, "P2P REMOTE DESKTOP PRIVACY MODE", -1, text_rect,
+                        win32gui.DrawText(hdc, privacy_title, -1, text_rect,
                                           win32con.DT_CENTER | win32con.DT_VCENTER | win32con.DT_SINGLELINE)
                         win32gui.SelectObject(hdc, old_font)
                         win32gui.DeleteObject(font)
@@ -2089,6 +2183,11 @@ class HostMixin:
                     win32gui.InvalidateRect(hwnd, None, False)
                     win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
                                           win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW)
+                    try:
+                        if not ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11):
+                            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x01)
+                    except:
+                        pass
                     return 0
                 elif msg == win32con.WM_CLOSE:
                     try:
@@ -2130,17 +2229,31 @@ class HostMixin:
                 self.screen_cover_running = False
                 return
                 
-        ex_style = win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_TOPMOST
+        WS_EX_NOACTIVATE = 0x08000000
+        ex_style = (
+            win32con.WS_EX_LAYERED
+            | win32con.WS_EX_TRANSPARENT
+            | win32con.WS_EX_TOOLWINDOW
+            | win32con.WS_EX_TOPMOST
+            | WS_EX_NOACTIVATE
+        )
         style = win32con.WS_POPUP | win32con.WS_VISIBLE
         
-        try:
-            hwnd = win32gui.CreateWindowEx(
-                ex_style, class_atom, "AGCover", style,
-                vx, vy, vw, vh, 0, 0, hInst, None
-            )
-        except Exception as e:
-            print(f"[Host] Cover Win32 CreateWindowEx error: {e}")
-            win32gui.UnregisterClass(class_atom, hInst)
+        hwnd = self._create_privacy_cover_hwnd(cls_name, ex_style, style, vx, vy, vw, vh, hInst)
+        if not hwnd:
+            try:
+                hwnd = win32gui.CreateWindowEx(
+                    ex_style, class_atom, "AGCover", style,
+                    vx, vy, vw, vh, 0, 0, hInst, None
+                )
+            except Exception as e:
+                print(f"[Host] Cover Win32 CreateWindowEx error: {e}")
+                hwnd = 0
+        if not hwnd:
+            try:
+                win32gui.UnregisterClass(class_atom, hInst)
+            except Exception:
+                pass
             self.screen_cover_running = False
             return
             

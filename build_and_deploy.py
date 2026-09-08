@@ -120,6 +120,7 @@ def main():
                 os.remove(new_exe)
             os.rename(old_exe, new_exe)
             log("Successfully renamed app.exe to RemoteDesktopP2P.exe")
+            try_authenticode_sign(new_exe)
         except Exception as e:
             log(f"Failed to rename app.exe: {e}")
             return

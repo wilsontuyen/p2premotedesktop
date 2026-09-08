@@ -79,6 +79,9 @@ def client_receiver_thread(sock, password):
                     evt_type = event.get("type", "")
                     if evt_type == "pong":
                         continue
+                    elif evt_type == "screen_cover_state":
+                        globals()['viewer_cover_state'] = bool(event.get("active"))
+                        continue
                     elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image"):
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
@@ -394,6 +397,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             client_host_did_shutdown = False
             client_is_domain = is_domain
             ping_limit = 90.0 if str(os_release) in ("7", "Vista", "XP", "8", "8.1") else 25.0
+            globals()['viewer_cover_state'] = False
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
