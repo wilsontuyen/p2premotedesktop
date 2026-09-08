@@ -30,6 +30,108 @@ from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_
 from utils.logger import log_debug
 
 
+def _handshake_is_android(res):
+    if not isinstance(res, dict):
+        return False
+    if res.get("is_android"):
+        return True
+    osr = str(res.get("os_release") or "").lower()
+    if "android" in osr:
+        return True
+    name = str(res.get("computer_name") or "")
+    if name.startswith("MC-Android"):
+        return True
+    return False
+
+
+def client_android_speed_test(sock, password, status_cb=None):
+    """Protocol cũ (trước refactor): 2 vòng ping + dummy RAW rồi speed_test_result.
+
+    Host Android (DataTransferClient.runBandwidthTest) chỉ gọi startFrameSender
+    sau khi xong đúng sequence này. Bản refactor bỏ đo trên LAN / chỉ 1 vòng
+    → Android kẹt ở bandwidth test, không gửi JPEG → viewer trắng.
+    """
+    def _status(msg):
+        if status_cb:
+            try:
+                status_cb(msg)
+            except Exception:
+                pass
+
+    net_class, avg_ping, bandwidth = "medium", 50.0, 10.0
+    try:
+        sock.settimeout(8.0)
+        runs = []
+        for run_idx in range(2):
+            _status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần {n}/2...").format(n=run_idx + 1))
+            rtts = []
+            for _ in range(3):
+                t0 = time.time()
+                send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode("utf-8"), password)
+                pong_msg = recv_msg(sock, password)
+                if pong_msg:
+                    try:
+                        pong_data = json.loads(pong_msg.decode("utf-8"))
+                    except Exception:
+                        pong_data = {}
+                    if pong_data.get("action") == "speed_test_pong":
+                        rtts.append(time.time() - t0)
+                time.sleep(0.05)
+            run_ping = (sum(rtts) / len(rtts)) * 1000.0 if rtts else 50.0
+
+            run_bw = 10.0
+            send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode("utf-8"), password)
+            bw_start_msg = recv_msg(sock, password)
+            if bw_start_msg:
+                try:
+                    bw_start_data = json.loads(bw_start_msg.decode("utf-8"))
+                except Exception:
+                    bw_start_data = {}
+                if bw_start_data.get("action") == "speed_test_bw_start":
+                    dummy_size = int(bw_start_data.get("size", 1572864))
+                    dummy_size = max(1024, min(dummy_size, 1572864))
+                    got = b""
+                    while len(got) < dummy_size:
+                        chunk = sock.recv(min(65536, dummy_size - len(got)))
+                        if not chunk:
+                            break
+                        got += chunk
+                    if len(got) == dummy_size:
+                        run_bw = 100.0
+            runs.append((run_ping, run_bw))
+            if run_idx == 0:
+                time.sleep(0.2)
+
+        if runs:
+            best_run = max(runs, key=lambda x: x[1])
+            avg_ping = best_run[0]
+            bandwidth = best_run[1]
+        if bandwidth > 20.0 and avg_ping < 10.0:
+            net_class = "high"
+        elif bandwidth < 5.0 or avg_ping > 50.0:
+            net_class = "low"
+        else:
+            net_class = "medium"
+    except Exception as e:
+        print(f"[Client] Android speed test error: {e}")
+        net_class, avg_ping, bandwidth = "medium", 50.0, 10.0
+    finally:
+        try:
+            sock.settimeout(None)
+        except Exception:
+            pass
+    try:
+        send_msg(sock, json.dumps({
+            "action": "speed_test_result",
+            "net_class": net_class,
+            "ping": avg_ping,
+            "bandwidth": bandwidth,
+        }).encode("utf-8"), password)
+    except Exception:
+        pass
+    return net_class, avg_ping, bandwidth
+
+
 def client_quick_link_probe(sock, password, status_cb=None):
     """Phân loại mạng nhanh rồi cho host gửi khung hình. LAN bỏ đo băng thông (tiết kiệm vài giây)."""
     def _status(msg):
@@ -591,12 +693,16 @@ class NetworkMixin:
                 zalo_phone = res.get("zalo_phone", "")
                 os_release = res.get("os_release", "")
                 is_domain = res.get("is_domain", False)
+                is_android = _handshake_is_android(res)
+                if is_android and not os_release:
+                    os_release = "android"
                 partner_id = hwid
 
-                # LAN: không đo băng thông / không báo result trước — mở viewer trước, host còn đang chờ.
+                if is_android:
+                    client_android_speed_test(sock, password, self.update_status)
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
                 sock.settimeout(None)
-                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, False, os_release)
+                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, is_android, os_release)
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
                 self.update_status(_("Bị từ chối kết nối"))
@@ -962,7 +1068,7 @@ class NetworkMixin:
                 print(f"[Client] Background thread crashed: {e}")
         
         threading.Thread(target=run_connect, daemon=True).start()
-    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None):
+    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None, reconnect_reason=""):
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
@@ -1115,7 +1221,7 @@ class NetworkMixin:
                     try: reconnect_queue.put(f"STATUS|{status_msg}")
                     except: pass
                     time.sleep(2)
-                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason)
                     return
                 self.update_status(_("Sẵn sàng kết nối"))
                 if not reconnect_queue:
@@ -1294,17 +1400,23 @@ class NetworkMixin:
                 zalo_phone = res.get("zalo_phone", "")
                 os_release = res.get("os_release", "")
                 is_domain = res.get("is_domain", False)
-                is_android = res.get("is_android", False)
+                is_android = _handshake_is_android(res)
+                if is_android and not os_release:
+                    os_release = "android"
                 
-                # 1 vòng đo nhanh (LAN bỏ hẳn) — không chờ 2 lần ping/băng thông rồi mới mở viewer
-                net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, self.update_status)
+                # Android: giữ đúng 2 vòng speed-test như bản trước refactor.
+                # LAN PC: bỏ đo (tránh flood JPEG + nhân socket). WAN PC: 1 vòng nhanh.
+                if is_android:
+                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, self.update_status)
+                else:
+                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, self.update_status)
                 if net_class == "high":
                     net_class_viet = _("Tốt (High-speed)")
                 elif net_class == "low":
                     net_class_viet = _("Yếu (Low-speed)")
                 else:
                     net_class_viet = _("Trung bình (Medium)")
-                if not is_lan_socket(sock):
+                if is_android or not is_lan_socket(sock):
                     status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
@@ -1364,7 +1476,7 @@ class NetworkMixin:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
                 time.sleep(2)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason)
                 return
 
             self.update_status(_("Sẵn sàng kết nối"))
@@ -1416,10 +1528,12 @@ class NetworkMixin:
                     while process.is_alive():
                         try:
                             msg = req_queue.get(timeout=1.0)
-                            if msg == "RECONNECT_REQUEST":
-                                print(f"[Client Monitor] Pygame requested reconnect for {pid}...")
-                                self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
-                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid), daemon=True).start()
+                            if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
+                                reason = "login" if "|LOGIN" in msg else ""
+                                print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason or 'drop'}")
+                                if reason != "login":
+                                    self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
+                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason), daemon=True).start()
                             else:
                                 req_queue.put(msg)
                                 time.sleep(0.5)

@@ -33,6 +33,52 @@ else:
 
 file_manager_callback = None
 
+def _client_host_is_android():
+    return bool(globals().get("client_host_is_android"))
+
+def _client_host_is_windows():
+    # Android handshake không gửi os_release; viewer từng mặc định "10"
+    # rồi nhận nhầm host điện thoại là Windows.
+    if _client_host_is_android():
+        return False
+    host_os = str(globals().get("client_host_os_release", "10") or "10")
+    low = host_os.lower()
+    if low in ("android", "linux", "ubuntu", "darwin", "macos"):
+        return False
+    if low in ("7", "8", "8.1", "10", "11", "xp", "vista"):
+        return True
+    if "server" in low or "windows" in low:
+        return True
+    if host_os.isdigit() and int(host_os) >= 2008:
+        return True
+    return False
+
+def _non_windows_close_is_shutdown():
+    """Linux/Ubuntu đứt socket ≈ shutdown. Android/Windows: thử kết nối lại."""
+    return (not _client_host_is_windows()) and (not _client_host_is_android())
+
+def _pil_to_rgb(pil_img):
+    if pil_img is None:
+        return None
+    if pil_img.mode != "RGB":
+        return pil_img.convert("RGB")
+    return pil_img
+
+def _blit_pil_to_screen(screen, pil_img, window_w, window_h):
+    if pil_img is None:
+        screen.fill((0, 0, 0))
+        return
+    pil_img = _pil_to_rgb(pil_img)
+    w, h = pil_img.size
+    surf = pygame.image.fromstring(pil_img.tobytes(), (w, h), "RGB")
+    if w == window_w and h == window_h:
+        scaled_surf = surf
+    elif w >= window_w and h >= window_h:
+        scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
+    else:
+        scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+    screen.blit(scaled_surf, (0, 0))
+
 # Shared client variables
 client_latest_frame = None
 client_last_recv_time = 0
@@ -41,13 +87,14 @@ client_running = True
 client_is_domain = False
 client_is_locked = False
 client_switching_desktop_countdown = 0
+client_last_switching_desktop_time = 0
 client_host_resolution = None
 client_host_did_shutdown = False
 client_host_computer_name_override = None
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
-    global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown
+    global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown, client_last_switching_desktop_time
     client_pending_bbox = None
     ensure_session_socket_blocking(sock)
     while client_running:
@@ -55,11 +102,8 @@ def client_receiver_thread(sock, password):
             msg = recv_msg(sock, password)
             if not msg:
                 print("[Client] Server closed connection.")
-                # Nếu host là Linux/Ubuntu (không phải Windows), đóng luôn viewer
-                # vì mất kết nối đột ngột trên Linux thường do shutdown/restart
-                host_os = globals().get('client_host_os_release', '10')
-                is_host_windows = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in str(host_os)
-                if not is_host_windows:
+                # Linux/Ubuntu đứt đột ngột ≈ shutdown. Android không đóng viewer.
+                if _non_windows_close_is_shutdown():
                     print("[Client] Non-Windows host connection closed. Treating as host shutdown.")
                     client_host_did_shutdown = True
                 client_running = False
@@ -87,8 +131,10 @@ def client_receiver_thread(sock, password):
                             clipboard_sync_manager.handle_received_packet(event)
                         continue
                     elif evt_type == "domain_status":
-                        client_is_domain = event.get("is_domain", False)
-                        client_is_locked = event.get("is_locked", False)
+                        if "is_domain" in event:
+                            client_is_domain = event.get("is_domain", False)
+                        if "is_locked" in event:
+                            client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
                         try:
                             with open("domain_debug.log", "a", encoding="utf-8") as df:
@@ -97,6 +143,10 @@ def client_receiver_thread(sock, password):
                             pass
                         continue
                     elif evt_type == "switching_desktop":
+                        client_last_switching_desktop_time = time.time()
+                        desk = str(event.get("desktop") or "").lower()
+                        if desk and desk not in ("default", "", "agprivacydesk"):
+                            client_is_locked = True
                         if client_switching_desktop_countdown <= 0:
                             client_switching_desktop_countdown = 10
                         continue
@@ -147,6 +197,7 @@ def client_receiver_thread(sock, password):
             try:
                 pil_img = Image.open(io.BytesIO(msg))
                 pil_img.load()  # Force decode in receiver thread
+                pil_img = _pil_to_rgb(pil_img)
                 with client_frame_lock:
                     if client_pending_bbox is not None:
                         if client_latest_frame is not None:
@@ -167,10 +218,7 @@ def client_receiver_thread(sock, password):
                 ensure_session_socket_blocking(sock)
                 continue
             with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
-            # Nếu host là Linux/Ubuntu, socket error thường do shutdown/restart
-            host_os = globals().get('client_host_os_release', '10')
-            is_host_windows = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in str(host_os)
-            if not is_host_windows:
+            if _non_windows_close_is_shutdown():
                 print(f"[Client] Non-Windows host socket error: {e}. Treating as host shutdown.")
                 client_host_did_shutdown = True
             client_running = False
@@ -282,8 +330,26 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
     if partner_pass:
         socket_passwords[sock] = partner_pass
-        
-    globals()['client_host_os_release'] = os_release if os_release else "10"
+
+    if not is_android:
+        name_l = str(computer_name or "").lower()
+        osr_l = str(os_release or "").lower()
+        if name_l.startswith("mc-android") or "android" in osr_l:
+            is_android = True
+
+    globals()['client_host_is_android'] = bool(is_android)
+    if is_android:
+        globals()['client_host_os_release'] = "android"
+    else:
+        globals()['client_host_os_release'] = os_release if os_release else "10"
+
+    try:
+        host_w = int(host_w or 0)
+        host_h = int(host_h or 0)
+    except Exception:
+        host_w, host_h = 0, 0
+    if host_w <= 0 or host_h <= 0:
+        host_w, host_h = (720, 1280) if is_android else (1280, 720)
     
     try:
         pygame_theme = "dark"
@@ -401,7 +467,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             client_running = True
             client_host_did_shutdown = False
             client_is_domain = is_domain
-            ping_limit = 90.0 if str(os_release) in ("7", "Vista", "XP", "8", "8.1") else 25.0
+            ping_limit = 90.0 if (is_android or str(os_release) in ("7", "Vista", "XP", "8", "8.1", "android")) else 25.0
+            last_full_frame_req = 0.0
             globals()['viewer_cover_state'] = False
             
             try:
@@ -449,7 +516,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             _mouse_move_has_new = threading.Event()
             
             def event_sender_thread():
-                last_ping_time = 0.0
+                last_ping_time = time.time()
                 while client_running:
                     try:
                         now = time.time()
@@ -507,6 +574,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
             send_event({"type": "quality_mode", "mode": client_quality_mode})
+            if is_android:
+                send_event({"type": "request_full_frame"})
             
             frame_counter = 0
             blink_frames_remaining = 0
@@ -922,17 +991,32 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 # Draw frame
                 with client_frame_lock:
                     frame_to_draw = client_latest_frame
+
+                if is_android and frame_to_draw is None:
+                    now_req = time.time()
+                    if now_req - last_full_frame_req >= 1.5:
+                        send_event({"type": "request_full_frame"})
+                        last_full_frame_req = now_req
                     
                 if frame_to_draw is not None:
-                    w, h = frame_to_draw.size
-                    surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
-                    if w == window_w and h == window_h:
-                        scaled_surf = surf
-                    elif w >= window_w and h >= window_h:
-                        scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
-                    else:
-                        scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
-                    screen.blit(scaled_surf, (0, 0))
+                    try:
+                        frame_to_draw = _pil_to_rgb(frame_to_draw)
+                        w, h = frame_to_draw.size
+                        if w <= 0 or h <= 0:
+                            raise ValueError("empty frame size")
+                        surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
+                        if w == window_w and h == window_h:
+                            scaled_surf = surf
+                        elif w >= window_w and h >= window_h:
+                            scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
+                        else:
+                            scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+                        screen.blit(scaled_surf, (0, 0))
+                    except Exception as blit_err:
+                        print(f"[Client] Blit error: {blit_err}")
+                        frame_to_draw = None
+
+                if frame_to_draw is not None:
                     
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
                     if state['is_recording'] and state['writer']:
@@ -963,7 +1047,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         except Exception as e:
                             print(f"[Client] Recording error: {e}")
                 else:
-                    if pygame_theme == "light":
+                    if is_android:
+                        screen.fill((30, 30, 30))
+                        try:
+                            wait_font = pygame.font.SysFont(font_names, 22, bold=True)
+                        except Exception:
+                            wait_font = pygame.font.Font(None, 28)
+                        wait_surf = wait_font.render(_("Đang nhận màn hình máy Android..."), True, (220, 220, 220))
+                        wait_rect = wait_surf.get_rect(center=(window_w // 2, window_h // 2))
+                        screen.blit(wait_surf, wait_rect)
+                    elif pygame_theme == "light":
                         screen.fill((240, 240, 245))
                     elif pygame_theme == "gray":
                         screen.fill((82, 89, 98))
@@ -1148,24 +1241,34 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         switching_last_tick = pygame.time.get_ticks()
                         switching_start_tick = pygame.time.get_ticks()
                     
-                    if "msg_font" not in locals():
-                        try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
-                        except: msg_font = pygame.font.Font(None, 32)
-                    
-                    overlay = pygame.Surface((window_w, window_h))
-                    overlay.set_alpha(150)
-                    overlay.fill((0, 0, 0))
-                    screen.blit(overlay, (0, 0))
-                    
-                    elapsed_switching = pygame.time.get_ticks() - switching_start_tick
-                    if elapsed_switching > 3000:
-                        text_msg = _("Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...")
-                    else:
-                        text_msg = _("Đang chuyển giao diện... Vui lòng đợi ") + str(current_countdown) + _(" giây...")
-                    
-                    text_surf = msg_font.render(text_msg, True, (255, 255, 255))
-                    text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
-                    screen.blit(text_surf, text_rect)
+                    # Có khung hình thật (logon/sign-out) thì không che overlay chữ.
+                    has_live_frame = False
+                    try:
+                        with client_frame_lock:
+                            has_live_frame = client_latest_frame is not None
+                    except Exception:
+                        pass
+                    if not has_live_frame:
+                        if "msg_font" not in locals():
+                            try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
+                            except: msg_font = pygame.font.Font(None, 32)
+                        
+                        overlay = pygame.Surface((window_w, window_h))
+                        overlay.set_alpha(150)
+                        overlay.fill((0, 0, 0))
+                        screen.blit(overlay, (0, 0))
+                        
+                        elapsed_switching = pygame.time.get_ticks() - switching_start_tick
+                        if globals().get('client_is_locked', False):
+                            text_msg = _("Đang đăng nhập...")
+                        elif elapsed_switching > 3000:
+                            text_msg = _("Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...")
+                        else:
+                            text_msg = _("Đang chuyển giao diện... Vui lòng đợi ") + str(current_countdown) + _(" giây...")
+                        
+                        text_surf = msg_font.render(text_msg, True, (255, 255, 255))
+                        text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
+                        screen.blit(text_surf, text_rect)
                     
                     current_tick = pygame.time.get_ticks()
                     if current_tick - switching_last_tick >= 1000:
@@ -1178,12 +1281,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     was_switching = False
                     send_event({"type": "check_domain"})
                 
-                if client_last_recv_time > 0 and time.time() - client_last_recv_time > ping_limit:
+                effective_ping = ping_limit
+                if current_countdown > 0 or globals().get('client_is_locked', False):
+                    effective_ping = max(ping_limit, 45.0)
+                if client_last_recv_time > 0 and time.time() - client_last_recv_time > effective_ping:
                     print("[Client] Connection ping timeout. Disconnecting.")
-                    # Nếu host là Linux/Ubuntu, ping timeout thường do shutdown/restart
-                    host_os = globals().get('client_host_os_release', '10')
-                    is_host_windows = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in str(host_os)
-                    if not is_host_windows:
+                    if _non_windows_close_is_shutdown():
                         print("[Client] Non-Windows host ping timeout. Treating as host shutdown.")
                         client_host_did_shutdown = True
                     exit_due_to_disconnect = True
@@ -1207,9 +1310,29 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 last_tick = pygame.time.get_ticks()
                 try: msg_font = pygame.font.SysFont(font_names, 24, bold=True)
                 except: msg_font = pygame.font.Font(None, 32)
+                try: title_font = pygame.font.SysFont(font_names, 32, bold=True)
+                except: title_font = msg_font
                 
-                print("[Client] Disconnected. Requesting reconnect in background...")
-                try: reconnect_queue.put("RECONNECT_REQUEST")
+                last_switch_age = time.time() - float(globals().get('client_last_switching_desktop_time', 0) or 0)
+                # Chi coi la handoff khi dang lock/doi desktop — KHONG coi moi host Windows
+                # la handoff (neu khong se an "Mất kết nối..." khi dut mang that).
+                session_handoff = bool(
+                    globals().get('client_is_locked', False)
+                    or was_switching
+                    or globals().get('client_switching_desktop_countdown', 0) > 0
+                    or (0 < last_switch_age < 12)
+                )
+                frozen_img = None
+                try:
+                    with client_frame_lock:
+                        if client_latest_frame is not None:
+                            frozen_img = client_latest_frame.copy()
+                except Exception:
+                    frozen_img = None
+                
+                print("[Client] Disconnected. Requesting reconnect in background..." + (" (session handoff)" if session_handoff else ""))
+                try:
+                    reconnect_queue.put("RECONNECT_REQUEST|LOGIN" if session_handoff else "RECONNECT_REQUEST")
                 except: pass
                 
                 status_msg_text = None
@@ -1256,20 +1379,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     if not outer_running or sock_acquired:
                         break
                     
-                    screen.fill((30, 30, 30))
-                    
-                    if status_msg_text:
-                        text_surf = msg_font.render(_("Trạng thái: ") + str(status_msg_text), True, (255, 165, 0))
-                        text_rect = text_surf.get_rect(center=(window_w//2, window_h//2 - 20))
-                        screen.blit(text_surf, text_rect)
-                        
-                        cd_surf = msg_font.render(_("Thời gian chờ: ") + str(countdown) + _(" giây..."), True, (255, 255, 255))
-                        cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 20))
-                        screen.blit(cd_surf, cd_rect)
+                    if session_handoff and frozen_img is not None:
+                        _blit_pil_to_screen(screen, frozen_img, window_w, window_h)
+                        overlay = pygame.Surface((window_w, window_h))
+                        overlay.set_alpha(170)
+                        overlay.fill((20, 20, 20))
+                        screen.blit(overlay, (0, 0))
                     else:
-                        text_surf = msg_font.render(_("Mất kết nối. Đang thử kết nối lại... ") + str(countdown) + _(" giây..."), True, (255, 255, 255))
-                        text_rect = text_surf.get_rect(center=(window_w//2, window_h//2))
-                        screen.blit(text_surf, text_rect)
+                        screen.fill((30, 30, 30))
+
+                    title = _("Mất kết nối.")
+                    title_surf = title_font.render(title, True, (255, 80, 80))
+                    title_rect = title_surf.get_rect(center=(window_w//2, window_h//2 - 36))
+                    screen.blit(title_surf, title_rect)
+
+                    if status_msg_text:
+                        detail = str(status_msg_text)
+                    else:
+                        detail = _("Đang thử kết nối lại... ") + str(countdown) + _(" giây...")
+                    detail_surf = msg_font.render(detail, True, (255, 255, 255))
+                    detail_rect = detail_surf.get_rect(center=(window_w//2, window_h//2 + 8))
+                    screen.blit(detail_surf, detail_rect)
+
+                    cd_surf = msg_font.render(_("Thời gian chờ: ") + str(countdown) + _(" giây"), True, (180, 180, 180))
+                    cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 44))
+                    screen.blit(cd_surf, cd_rect)
                         
                     pygame.display.flip()
                     

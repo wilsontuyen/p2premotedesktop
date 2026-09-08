@@ -9,6 +9,7 @@ import sys
 import os
 import time
 import traceback
+import threading
 
 if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
     try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
@@ -25,6 +26,20 @@ if not app_dir:
     else:
         app_dir = os.path.dirname(os.path.abspath(__file__))
 log_file = os.path.join(app_dir, "service.log")
+
+# Broker architecture (Phase 1): broker Session 0 giu ket noi viewer, agent chay
+# --capture-worker va noi toi broker qua IPC. Bat/tat bang file "broker.on" trong
+# app_dir de doi che do ma khong can build lai (mac dinh: BAT).
+def _broker_mode_enabled():
+    try:
+        if os.path.exists(os.path.join(app_dir, "broker.off")):
+            return False
+    except Exception:
+        pass
+    return True
+
+BROKER_MODE = _broker_mode_enabled()
+broker_pid = None
 
 def log(msg):
     try:
@@ -240,10 +255,38 @@ def get_executable_to_run():
     log("Lỗi: Không tìm thấy file thực thi hoặc file nguồn app.py!")
     return None, None
 
-def spawn_agent(session_id, is_logged_in, is_screen_locked):
+def ensure_broker_running():
+    """Giu 1 tien trinh broker song trong Session 0 (bat tu qua doi session)."""
+    global broker_pid
+    if broker_pid and is_process_alive(broker_pid):
+        return
+    exe_path, cmd_line = get_executable_to_run()
+    if not exe_path:
+        return
+    b_cmd = cmd_line.replace("--headless", "--broker")
+    try:
+        si = win32process.STARTUPINFO()
+        handles = win32process.CreateProcess(
+            None, b_cmd, None, None, False,
+            win32con.NORMAL_PRIORITY_CLASS | win32process.CREATE_NO_WINDOW,
+            None, os.path.dirname(exe_path), si
+        )
+        broker_pid = handles[2]
+        try:
+            win32api.CloseHandle(handles[0]); win32api.CloseHandle(handles[1])
+        except Exception:
+            pass
+        log(f"Broker (Session 0) da khoi chay voi PID {broker_pid}")
+    except Exception as e:
+        log(f"Khoi chay Broker that bai: {e}")
+
+def spawn_agent(session_id, is_logged_in, is_screen_locked, force_winlogon=False):
     exe_path, cmd_line = get_executable_to_run()
     if not exe_path:
         return None
+    if BROKER_MODE:
+        # Che do broker: agent chi capture/input, noi toi broker qua IPC noi bo.
+        cmd_line = cmd_line.replace("--headless", "--capture-worker")
 
     h_token = None
     desktop = "winsta0\\default"
@@ -266,16 +309,13 @@ def spawn_agent(session_id, is_logged_in, is_screen_locked):
         )
         win32api.CloseHandle(h_winlogon)
         
-        # Target appropriate initial desktop based on active state
-        if not is_logged_in:
+        # Target desktop: Sign-out/lock/logon = Winlogon (process MỚI, không reuse DXGI Default).
+        if force_winlogon or (not is_logged_in) or is_screen_locked:
             desktop = "winsta0\\winlogon"
-            log(f"Không có người dùng đăng nhập. Nhắm tới desktop Winlogon cho session {session_id} bằng token SYSTEM")
-        elif is_screen_locked:
-            desktop = "winsta0\\winlogon"
-            log(f"Đang nhắm tới desktop màn hình khóa (Winlogon) cho session {session_id} bằng token SYSTEM")
+            log(f"Nhắm desktop Winlogon cho session {session_id} (LoggedIn={is_logged_in}, Locked={is_screen_locked}, Force={force_winlogon})")
         else:
             desktop = "winsta0\\default"
-            log(f"Đang nhắm tới desktop người dùng mặc định cho session {session_id} bằng token SYSTEM")
+            log(f"Nhắm desktop Default cho session {session_id} bằng token SYSTEM")
     except Exception as e:
         log(f"Thất bại khi lấy token Winlogon: {e}")
         return None
@@ -487,6 +527,114 @@ def service_events_listener_thread():
             log("Nhận được tín hiệu sự kiện TaskMgr từ Agent. Đang kích hoạt Task Manager.")
             spawn_taskmgr_system()
 
+_session_event_lock = threading.Lock()
+_session_events = []
+_wts_wndproc_ref = None
+
+def _push_session_event(kind, session_id):
+    with _session_event_lock:
+        _session_events.append({"kind": kind, "session_id": int(session_id), "ts": time.time()})
+
+def pop_session_events():
+    with _session_event_lock:
+        evs = list(_session_events)
+        del _session_events[:]
+        return evs
+
+def agent_mutex_present(session_id, desktop_name):
+    mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"
+    try:
+        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
+        win32api.CloseHandle(h_mutex)
+        return True
+    except Exception as e:
+        err_code = getattr(e, "winerror", 0) or (e.args[0] if getattr(e, "args", None) else 0)
+        return err_code != 2
+
+def wts_session_notification_thread():
+    """WTS 6 = Signing out, WTS 7 = khóa LogonUI — xử lý tách."""
+    global _wts_wndproc_ref
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
+    wtsapi32.WTSRegisterSessionNotification.argtypes = [wintypes.HWND, wintypes.DWORD]
+    wtsapi32.WTSRegisterSessionNotification.restype = wintypes.BOOL
+
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+    class WNDCLASSW(ctypes.Structure):
+        _fields_ = [
+            ("style", wintypes.UINT),
+            ("lpfnWndProc", WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wintypes.HINSTANCE),
+            ("hIcon", wintypes.HANDLE),
+            ("hCursor", wintypes.HANDLE),
+            ("hbrBackground", wintypes.HANDLE),
+            ("lpszMenuName", wintypes.LPCWSTR),
+            ("lpszClassName", wintypes.LPCWSTR),
+        ]
+
+    WM_WTSSESSION_CHANGE = 0x02B1
+    WM_DESTROY = 0x0002
+    HWND_MESSAGE = wintypes.HWND(-3)
+    names = {
+        1: "console_connect",
+        2: "console_disconnect",
+        5: "logon",
+        6: "logoff",
+        7: "lock",
+        8: "unlock",
+    }
+
+    def wndproc(hwnd, msg, wparam, lparam):
+        if msg == WM_WTSSESSION_CHANGE:
+            code = int(wparam)
+            sid = int(lparam)
+            kind = names.get(code, f"wts_{code}")
+            log(f"WTS session event: {kind} session={sid}")
+            # 6 = LOGOFF (Signing out), 7 = LOCK (LogonUI khóa) — không gộp.
+            if code == 6:
+                _push_session_event("logoff", sid)
+            elif code == 7:
+                _push_session_event("lock", sid)
+            elif code in (5, 8):
+                _push_session_event("interactive", sid)
+            return 0
+        if msg == WM_DESTROY:
+            user32.PostQuitMessage(0)
+            return 0
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    _wts_wndproc_ref = WNDPROC(wndproc)
+    wc = WNDCLASSW()
+    wc.lpfnWndProc = _wts_wndproc_ref
+    wc.hInstance = kernel32.GetModuleHandleW(None)
+    wc.lpszClassName = "EasyRDWTSNotify"
+    atom = user32.RegisterClassW(ctypes.byref(wc))
+    if not atom and ctypes.get_last_error() not in (0, 1410):
+        log(f"RegisterClassW WTS notify thất bại: {ctypes.get_last_error()}")
+        return
+    hwnd = user32.CreateWindowExW(
+        0, wc.lpszClassName, "EasyRDWTSNotify", 0,
+        0, 0, 0, 0, HWND_MESSAGE, None, wc.hInstance, None
+    )
+    if not hwnd:
+        log(f"CreateWindowExW message-only thất bại: {ctypes.get_last_error()}")
+        return
+    if not wtsapi32.WTSRegisterSessionNotification(hwnd, 1):
+        log(f"WTSRegisterSessionNotification thất bại: {ctypes.get_last_error()}")
+        return
+    log("Đã đăng ký WTSRegisterSessionNotification (LOGOFF=Signing out, LOCK=LogonUI).")
+    msg = wintypes.MSG()
+    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+
 def terminate_process_with_pid(pid):
     if not pid:
         return
@@ -544,17 +692,32 @@ def main():
     import threading
     t = threading.Thread(target=service_events_listener_thread, daemon=True)
     t.start()
+    t_wts = threading.Thread(target=wts_session_notification_thread, daemon=True)
+    t_wts.start()
 
     current_agent_pid = None
     gui_agent_pid = None
     clipboard_agent_pid = None
     last_session_id = None
+    was_logged_in = None
+    is_logged_in = False
+    is_screen_locked = False
+    force_logoff_until = 0.0
+    lock_pending_until = 0.0
+    in_signing_out = False
+    in_lock_transition = False
+    last_agent_spawn_ts = 0.0
+    winlogon_standby_pid = None
 
     while True:
         try:
+            if BROKER_MODE:
+                ensure_broker_running()
+
             active_session_id = get_active_session_id()
             if active_session_id == 0xFFFFFFFF or active_session_id == -1:
-                time.sleep(5)
+                # Khoảng console_disconnect → connect: không ngủ 5s (hụt màn Signing out).
+                time.sleep(0.15)
                 continue
 
             # Check if user is logged in
@@ -569,56 +732,166 @@ def main():
             # Check if screen is locked (LogonUI is running)
             is_screen_locked = is_logon_ui_running(active_session_id)
 
+            for ev in pop_session_events():
+                kind = ev.get("kind")
+                if kind == "logoff":
+                    # Signing out: token/user desktop còn, LogonUI chưa chắc đã chạy.
+                    force_logoff_until = time.time() + 20.0
+                    lock_pending_until = 0.0
+                    log(
+                        f"WTS_SESSION_LOGOFF session={ev.get('session_id')}: "
+                        "giữ Agent, vòng capture PrintWindow trên Winlogon (không kill)."
+                    )
+                elif kind == "lock":
+                    # Khóa máy: LogonUI, không phải khoảng Signing out.
+                    lock_pending_until = time.time() + 8.0
+                    force_logoff_until = 0.0
+                    log(f"WTS_SESSION_LOCK session={ev.get('session_id')}: chuyển Winlogon cho màn hình khóa.")
+                elif kind == "interactive":
+                    force_logoff_until = 0.0
+                    lock_pending_until = 0.0
+                    log(f"WTS logon/unlock session={ev.get('session_id')}: hết logoff/lock.")
+
             session_changed = (last_session_id is not None and last_session_id != active_session_id)
+            in_signing_out = time.time() < force_logoff_until
+            in_lock_transition = (time.time() < lock_pending_until) or is_screen_locked
+            want_winlogon = (not is_logged_in) or in_signing_out or in_lock_transition
+            target_desktop = "winlogon" if want_winlogon else "default"
 
             if session_changed:
-                log(f"Session ID đã thay đổi từ {last_session_id} sang {active_session_id}. Đang tắt Agent để chuyển session.")
+                if BROKER_MODE:
+                    # Worker cũ chết theo session Windows. Không taskkill — broker giữ
+                    # viewer; chỉ quên PID cũ để spawn worker session mới ngay.
+                    log(f"Session ID đổi {last_session_id} -> {active_session_id}. Broker: spawn worker mới (không kill).")
+                    current_agent_pid = None
+                    if gui_agent_pid:
+                        terminate_process_with_pid(gui_agent_pid)
+                        gui_agent_pid = None
+                    if clipboard_agent_pid:
+                        terminate_process_with_pid(clipboard_agent_pid)
+                        clipboard_agent_pid = None
+                else:
+                    log(f"Session ID đổi {last_session_id} -> {active_session_id}. Tắt Agent để chuyển session.")
+                    old_pid = current_agent_pid
+                    if current_agent_pid:
+                        terminate_process_with_pid(current_agent_pid)
+                        current_agent_pid = None
+                    if gui_agent_pid:
+                        terminate_process_with_pid(gui_agent_pid)
+                        gui_agent_pid = None
+                    if clipboard_agent_pid:
+                        terminate_process_with_pid(clipboard_agent_pid)
+                        clipboard_agent_pid = None
+                    wait_until = time.time() + 2.0
+                    while old_pid and is_process_alive(old_pid) and time.time() < wait_until:
+                        time.sleep(0.05)
+            elif BROKER_MODE and (not want_winlogon):
+                # Sau logon: GIU worker dang capture (thuong la Winlogon), spawn Default
+                # song song. Khong doi mutex winlogon (ten mutex co the lech desktop).
+                if agent_mutex_present(active_session_id, "default"):
+                    if winlogon_standby_pid and is_process_alive(winlogon_standby_pid):
+                        log(f"Default đã sẵn sàng. Tắt Winlogon standby PID {winlogon_standby_pid}.")
+                        terminate_process_with_pid(winlogon_standby_pid)
+                    winlogon_standby_pid = None
+                elif current_agent_pid and is_process_alive(current_agent_pid):
+                    already_spawning_default = (
+                        winlogon_standby_pid
+                        and current_agent_pid != winlogon_standby_pid
+                        and is_process_alive(current_agent_pid)
+                    )
+                    if not already_spawning_default:
+                        winlogon_standby_pid = current_agent_pid
+                        log(f"Logon xong: spawn Default song song, giữ PID {winlogon_standby_pid}.")
+                        pid = spawn_agent(
+                            active_session_id, is_logged_in, False, force_winlogon=False
+                        )
+                        if pid:
+                            current_agent_pid = pid
+                            last_agent_spawn_ts = time.time()
+            elif (not BROKER_MODE) and (not want_winlogon) and agent_mutex_present(active_session_id, "winlogon") and not agent_mutex_present(active_session_id, "default"):
+                # Da logon nhung agent van o Winlogon: spawn Default de broker handoff.
+                log("Agent vẫn ở Winlogon sau khi đã logon. Tắt để spawn lại trên Default.")
                 if current_agent_pid:
                     terminate_process_with_pid(current_agent_pid)
+                    wait_until = time.time() + 1.0
+                    while is_process_alive(current_agent_pid) and time.time() < wait_until:
+                        time.sleep(0.05)
                     current_agent_pid = None
-                if gui_agent_pid:
-                    terminate_process_with_pid(gui_agent_pid)
-                    gui_agent_pid = None
+                if clipboard_agent_pid:
+                    terminate_process_with_pid(clipboard_agent_pid)
+                    clipboard_agent_pid = None
+            elif in_lock_transition and (not in_signing_out) and agent_mutex_present(active_session_id, "default"):
+                log("Agent đang ở Default lúc màn hình khóa. Tắt để spawn lại trên Winlogon.")
+                if current_agent_pid:
+                    terminate_process_with_pid(current_agent_pid)
+                    wait_until = time.time() + 2.0
+                    while is_process_alive(current_agent_pid) and time.time() < wait_until:
+                        time.sleep(0.05)
+                    current_agent_pid = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
 
             last_session_id = active_session_id
+            was_logged_in = is_logged_in
 
             if current_agent_pid and not is_process_alive(current_agent_pid):
                 log(f"Agent với PID {current_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                 current_agent_pid = None
 
-            agent_running = False
-            for desktop_name in ['default', 'winlogon']:
-                mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{active_session_id}_{desktop_name}"
-                try:
-                    h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, mutex_name)
-                    win32api.CloseHandle(h_mutex)
-                    agent_running = True
-                    break
-                except Exception as e:
-                    err_code = 0
-                    if hasattr(e, 'winerror'):
-                        err_code = e.winerror
-                    elif hasattr(e, 'args') and len(e.args) > 0:
-                        err_code = e.args[0]
-                    
-                    if err_code != 2:
-                        agent_running = True
-                        break
+            if in_signing_out:
+                agent_running = (
+                    agent_mutex_present(active_session_id, "default")
+                    or agent_mutex_present(active_session_id, "winlogon")
+                )
+            else:
+                agent_running = agent_mutex_present(active_session_id, target_desktop)
 
             if not agent_running:
-                if current_agent_pid and is_process_alive(current_agent_pid):
+                other_desk = "winlogon" if target_desktop == "default" else "default"
+                has_other = agent_mutex_present(active_session_id, other_desk)
+                live = current_agent_pid and is_process_alive(current_agent_pid)
+                # Chi coi la "kẹt" khi PID sống mà KHÔNG có mutex desktop nào — đừng
+                # giết worker Winlogon đang capture chỉ vì chưa có mutex Default.
+                stuck_starting = (
+                    live
+                    and last_agent_spawn_ts
+                    and (time.time() - last_agent_spawn_ts) > 8.0
+                    and not has_other
+                    and current_agent_pid != winlogon_standby_pid
+                )
+                if stuck_starting:
+                    log(f"Agent PID {current_agent_pid} khởi động quá 8s mà mutex {target_desktop} chưa sẵn sàng. Kill và spawn lại.")
+                    terminate_process_with_pid(current_agent_pid)
+                    current_agent_pid = None
+                    live = False
+                if live and (has_other or current_agent_pid == winlogon_standby_pid):
+                    # Worker kia dang capture desktop khac — khong cho, spawn da xu ly o tren.
+                    pass
+                elif live:
                     log(f"Mutex của Agent chưa sẵn sàng nhưng tiến trình {current_agent_pid} vẫn đang khởi động. Chờ đợi...")
+                elif (not (BROKER_MODE and session_changed)) and (in_signing_out or session_changed) and (time.time() - last_agent_spawn_ts) < 2.0:
+                    # Tránh "respawn storm" khi session đang bị hủy: agent spawn vào
+                    # session đang chết sẽ chết ngay. Chờ session ổn định rồi mới spawn.
+                    pass
                 else:
-                    log(f"Không tìm thấy Mutex của Agent cho session {active_session_id}. Đang khởi chạy Agent mới (LoggedIn={is_logged_in}, Locked={is_screen_locked})")
-                    pid = spawn_agent(active_session_id, is_logged_in, is_screen_locked)
+                    log(
+                        f"Khởi chạy Agent session {active_session_id} desktop={target_desktop} "
+                        f"(LoggedIn={is_logged_in}, Locked={is_screen_locked}, "
+                        f"SigningOut={in_signing_out})"
+                    )
+                    pid = spawn_agent(
+                        active_session_id,
+                        is_logged_in,
+                        is_screen_locked or in_lock_transition,
+                        force_winlogon=want_winlogon,
+                    )
                     if pid:
                         current_agent_pid = pid
+                        last_agent_spawn_ts = time.time()
 
-            # Spawn or check Clipboard Agent (only when user is logged in and not locked)
-            if is_logged_in and not is_screen_locked:
+            # Clipboard: không chạy lúc lock, cũng không lúc Signing out.
+            if is_logged_in and not is_screen_locked and not in_signing_out:
                 if clipboard_agent_pid and not is_process_alive(clipboard_agent_pid):
                     log(f"Clipboard Agent với PID {clipboard_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                     clipboard_agent_pid = None
@@ -659,7 +932,11 @@ def main():
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")
 
-        time.sleep(1)
+        # Sign-out / logon: poll nhanh hơn để agent Winlogon lên kịp màn hình khóa.
+        if not is_logged_in or is_screen_locked or in_signing_out or in_lock_transition:
+            time.sleep(0.15)
+        else:
+            time.sleep(1)
 
 if __name__ == '__main__':
     main()

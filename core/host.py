@@ -72,10 +72,401 @@ def decrypt_text(encrypted_text, key="AntigravityP2P"):
 from os_utils.system import (
     get_session_id,
     get_desktop_name,
+    get_input_desktop_name,
     is_secure_desktop,
     check_desktop_change,
-    is_machine_domain_joined
+    is_machine_domain_joined,
+    open_input_desktop_handle,
+    open_named_desktop_handle,
+    attach_process_window_station,
 )
+
+def _encode_switching_desktop():
+    desk = ""
+    try:
+        desk = get_input_desktop_name()
+    except Exception:
+        try:
+            desk = get_desktop_name()
+        except Exception:
+            desk = ""
+    return json.dumps({"type": "switching_desktop", "desktop": desk}).encode("utf-8")
+
+def _is_secure_capture_desktop():
+    """Winlogon / UAC / sign-out — không phải Default hay màn riêng tư."""
+    try:
+        name = (get_desktop_name() or "default").lower()
+        return name not in ("default", "", "agprivacydesk")
+    except Exception:
+        return False
+
+def _is_winlogon_thread_desktop():
+    return _is_secure_capture_desktop()
+
+def _logonui_running():
+    if sys.platform != "win32":
+        return False
+    now = time.time()
+    cache = getattr(_logonui_running, "_c", (0.0, False))
+    if now - cache[0] < 0.12:
+        return cache[1]
+    found = False
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if str(p.info.get("name") or "").lower() == "logonui.exe":
+                found = True
+                break
+    except Exception:
+        found = False
+    _logonui_running._c = (now, found)
+    return found
+
+def _session_has_interactive_user():
+    """True/False nếu gọi được WTSQueryUserToken (agent SYSTEM). None nếu không xác định."""
+    if sys.platform != "win32":
+        return None
+    now = time.time()
+    cache = getattr(_session_has_interactive_user, "_c", (0.0, None))
+    if now - cache[0] < 0.2:
+        return cache[1]
+    val = None
+    try:
+        import win32ts
+        import win32api
+        sid = get_session_id()
+        h = win32ts.WTSQueryUserToken(int(sid))
+        win32api.CloseHandle(h)
+        val = True
+    except Exception as e:
+        err = getattr(e, "winerror", None)
+        if err is None and getattr(e, "args", None):
+            err = e.args[0]
+        # 5 ACCESS_DENIED, 1314 PRIVILEGE_NOT_HELD: không phải SYSTEM → bỏ qua.
+        if err in (5, 1314):
+            val = None
+        else:
+            val = False
+    _session_has_interactive_user._c = (now, val)
+    return val
+
+def _explorer_running():
+    if sys.platform != "win32":
+        return False
+    now = time.time()
+    cache = getattr(_explorer_running, "_c", (0.0, False))
+    if now - cache[0] < 0.08:
+        return cache[1]
+    found = False
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if str(p.info.get("name") or "").lower() == "explorer.exe":
+                found = True
+                break
+    except Exception:
+        found = False
+    _explorer_running._c = (now, found)
+    return found
+
+def _input_desktop_name():
+    try:
+        return (get_input_desktop_name() or "default").lower()
+    except Exception:
+        return "default"
+
+def _user_desktop_was_shown(val=None):
+    if val is not None:
+        _user_desktop_was_shown._v = bool(val)
+        return _user_desktop_was_shown._v
+    return bool(getattr(_user_desktop_was_shown, "_v", False))
+
+def _pid_image_basename(pid):
+    if not pid:
+        return ""
+    try:
+        k32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        PROCESS_QUERY_INFORMATION = 0x0400
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not h:
+            h = k32.OpenProcess(PROCESS_QUERY_INFORMATION, False, int(pid))
+        if not h:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            size = ctypes.c_ulong(32768)
+            if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return ""
+            return os.path.basename(buf.value).lower()
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return ""
+
+def _pid_image_is_logonui(pid):
+    return _pid_image_basename(pid) == "logonui.exe"
+
+def _pid_is_secure_ui(pid):
+    return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe")
+
+def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
+    """Cửa sổ visible trên HDESK (không cần thread đang gắn desktop đó)."""
+    out = []
+    if not hdesk:
+        return out
+    user32 = ctypes.windll.user32
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    rect = wintypes.RECT()
+
+    def _cb(hwnd, _lp):
+        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+            return True
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return True
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        if w < min_w or h < min_h:
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        out.append((hwnd, w, h, int(pid.value), int(rect.left), int(rect.top)))
+        return True
+
+    user32.EnumDesktopWindows(hdesk, WNDENUMPROC(_cb), 0)
+    return out
+
+def _winlogon_secure_ui_hwnds():
+    """HWND LogonUI.exe / winlogon.exe trên desktop Winlogon (Signing out, Welcome, khóa)."""
+    if sys.platform != "win32":
+        return []
+    logoff = getattr(_wts_phase, "_v", "none") == "logoff" or (
+        float(getattr(_wts_phase, "_until", 0) or 0) > time.time()
+    )
+    now = time.time()
+    cache = getattr(_winlogon_secure_ui_hwnds, "_c", (0.0, []))
+    if (not logoff) and now - cache[0] < 0.06:
+        return cache[1]
+    found = []
+    hdesk = None
+    try:
+        hdesk = open_named_desktop_handle("Winlogon")
+        if hdesk:
+            try:
+                sw = int(ctypes.windll.user32.GetSystemMetrics(0))
+                sh = int(ctypes.windll.user32.GetSystemMetrics(1))
+            except Exception:
+                sw, sh = 800, 600
+            for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
+                name = _pid_image_basename(pid)
+                if name == "logonui.exe":
+                    found.append((hwnd, w, h, pid, x, y))
+                elif name == "winlogon.exe":
+                    if logoff or (w >= max(200, int(sw * 0.45)) and h >= max(150, int(sh * 0.45))):
+                        found.append((hwnd, w, h, pid, x, y))
+    except Exception:
+        found = []
+    finally:
+        if hdesk:
+            try:
+                ctypes.windll.user32.CloseDesktop(hdesk)
+            except Exception:
+                pass
+    _winlogon_secure_ui_hwnds._c = (now, found)
+    return found
+
+def _winlogon_has_logonui_windows():
+    """Signing out / Welcome: UI trên Winlogon (LogonUI hoặc status winlogon)."""
+    return bool(_winlogon_secure_ui_hwnds())
+
+def _wts_phase(val=None):
+    """none | logoff | lock — WTS 6 và 7 không cùng một trạng thái."""
+    if val is not None:
+        _wts_phase._v = val
+        if val == "logoff":
+            _wts_phase._until = time.time() + 25.0
+        elif val != "logoff":
+            _wts_phase._until = 0.0
+        return val
+    v = getattr(_wts_phase, "_v", "none")
+    until = float(getattr(_wts_phase, "_until", 0) or 0)
+    if v == "logoff" or (until and time.time() < until):
+        return "logoff"
+    return v
+
+_wts_phase_listener_started = False
+
+def _ensure_host_wts_phase_listener():
+    global _wts_phase_listener_started
+    if sys.platform != "win32" or _wts_phase_listener_started:
+        return
+    _wts_phase_listener_started = True
+    threading.Thread(target=_host_wts_phase_listener, name="HostWTSPhase", daemon=True).start()
+
+def _host_wts_phase_listener():
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        wtsapi32.WTSRegisterSessionNotification.argtypes = [wintypes.HWND, wintypes.DWORD]
+        wtsapi32.WTSRegisterSessionNotification.restype = wintypes.BOOL
+        WNDPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+        )
+
+        class WNDCLASSW(ctypes.Structure):
+            _fields_ = [
+                ("style", wintypes.UINT),
+                ("lpfnWndProc", WNDPROC),
+                ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int),
+                ("hInstance", wintypes.HINSTANCE),
+                ("hIcon", wintypes.HANDLE),
+                ("hCursor", wintypes.HANDLE),
+                ("hbrBackground", wintypes.HANDLE),
+                ("lpszMenuName", wintypes.LPCWSTR),
+                ("lpszClassName", wintypes.LPCWSTR),
+            ]
+
+        WM_WTSSESSION_CHANGE = 0x02B1
+        names = {5: "logon", 6: "logoff", 7: "lock", 8: "unlock"}
+
+        def wndproc(hwnd, msg, wparam, lparam):
+            if msg == WM_WTSSESSION_CHANGE:
+                code = int(wparam)
+                kind = names.get(code, "")
+                if code == 6:
+                    _wts_phase("logoff")
+                    print(f"[Host] WTS_SESSION_LOGOFF session={int(lparam)} — Signing out, capture loop Winlogon")
+                elif code == 7:
+                    _wts_phase("lock")
+                    print(f"[Host] WTS_SESSION_LOCK session={int(lparam)} — LogonUI khóa")
+                elif code in (5, 8):
+                    _wts_phase("none")
+                    print(f"[Host] WTS {kind} — hết lock/logoff")
+                return 0
+            return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        _host_wts_phase_listener._proc = WNDPROC(wndproc)
+        wc = WNDCLASSW()
+        wc.lpfnWndProc = _host_wts_phase_listener._proc
+        wc.hInstance = kernel32.GetModuleHandleW(None)
+        wc.lpszClassName = "EasyRDHostWTSPhase"
+        user32.RegisterClassW(ctypes.byref(wc))
+        hwnd = user32.CreateWindowExW(
+            0, wc.lpszClassName, "", 0, 0, 0, 0, 0, wintypes.HWND(-3), None, wc.hInstance, None
+        )
+        if not hwnd:
+            print(f"[Host] WTS phase listener: CreateWindowExW failed err={ctypes.get_last_error()}")
+            return
+        if not wtsapi32.WTSRegisterSessionNotification(hwnd, 1):
+            print(f"[Host] WTS phase listener: WTSRegisterSessionNotification failed err={ctypes.get_last_error()}")
+            return
+        print(f"[Host] WTS phase listener registered (agent PID={os.getpid()}, desk={get_desktop_name()}).")
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+    except Exception as e:
+        print(f"[Host] WTS phase listener: {e}")
+
+def _should_capture_logon_ui():
+    """True khi màn hình người dùng thấy là logon / sign-out / khóa."""
+    _ensure_host_wts_phase_listener()
+    phase = _wts_phase()
+    input_name = _input_desktop_name()
+    logged_in = _session_has_interactive_user()
+    explorer = _explorer_running()
+    secure_ui = _winlogon_has_logonui_windows()
+    logonui = _logonui_running() or secure_ui
+    saw = _user_desktop_was_shown()
+
+    # Logoff: khoảng Signing out — không chờ LogonUI như lúc Lock.
+    if phase == "logoff":
+        return True
+    if logged_in is False:
+        _user_desktop_was_shown(False)
+        return True
+    if input_name == "winlogon":
+        return True
+    # Lock: LogonUI trên Winlogon, explorer thường vẫn sống.
+    if phase == "lock" and (logonui or secure_ui or input_name == "winlogon"):
+        return True
+    if saw and secure_ui:
+        return True
+    if saw and not explorer:
+        return True
+    if saw and logonui:
+        return True
+    if logonui and not explorer:
+        return True
+    if input_name in ("default", "", "agprivacydesk") and (explorer or logged_in is True):
+        return False
+    if logonui:
+        return True
+    return False
+
+def _pin_capture_to_winlogon_if_needed():
+    """Sign-out/logon: input có thể còn Default trong khi UI đã ở Winlogon."""
+    if not _should_capture_logon_ui():
+        return False
+    if get_desktop_name() == "winlogon":
+        return False
+    return _switch_capture_thread_to_named_desktop("Winlogon")
+
+def _switch_capture_thread_to_named_desktop(name):
+    attach_process_window_station("WinSta0")
+    hdesk = open_named_desktop_handle(name)
+    if not hdesk:
+        return False
+    try:
+        result = ctypes.windll.user32.SetThreadDesktop(hdesk)
+        if result:
+            print(f"[Host] Capture thread switched to {name}")
+        return bool(result)
+    finally:
+        try:
+            ctypes.windll.user32.CloseDesktop(hdesk)
+        except Exception:
+            pass
+
+def _switch_capture_thread_to_input_desktop():
+    hdesk = None
+    try:
+        hdesk = open_input_desktop_handle()
+        if not hdesk:
+            thread_name = get_desktop_name()
+            target_name = "Winlogon" if thread_name == "default" else "Default"
+            hdesk = open_named_desktop_handle(target_name)
+            if hdesk:
+                print(f"[Host] Opened {target_name} desktop by name (fallback)")
+        if not hdesk:
+            print("[Host] OpenInputDesktop failed for all access masks.")
+            return False
+        result = ctypes.windll.user32.SetThreadDesktop(hdesk)
+        if not result:
+            print("[Host] SetThreadDesktop() failed (thread may have existing windows). Retrying...")
+            return False
+        return True
+    except Exception as e:
+        print(f"[Host] SetThreadDesktop exception: {e}")
+        return False
+    finally:
+        if hdesk:
+            try:
+                ctypes.windll.user32.CloseDesktop(hdesk)
+            except Exception:
+                pass
+
+def _frame_is_nearly_black(frame, max_mean=6.0):
+    try:
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return True
+        return float(np.mean(frame)) < max_mean
+    except Exception:
+        return False
 
 def host_type_password(password):
     import time
@@ -220,15 +611,16 @@ def _clip_tile_onto_canvas(canvas, tile, x, y):
     return True
 
 
-def grab_gdi_primary_bgr():
-    """BitBlt màn chính — ổn định trên Windows 7 (không DXGI, không mss virtual desktop)."""
+def grab_gdi_primary_bgr(use_screen_dc=False):
+    """BitBlt màn chính — ổn định trên Windows 7 (không DXGI, không mss virtual desktop).
+    use_screen_dc=True: GetDC(0) — cần cho Winlogon/Server sau SetThreadDesktop."""
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
     w = int(user32.GetSystemMetrics(0))
     h = int(user32.GetSystemMetrics(1))
     if w < 1 or h < 1:
         raise RuntimeError("GDI invalid screen size")
-    hwnd = user32.GetDesktopWindow()
+    hwnd = 0 if use_screen_dc else user32.GetDesktopWindow()
     hdc = user32.GetDC(hwnd)
     if not hdc:
         raise RuntimeError("GDI GetDC failed")
@@ -284,6 +676,341 @@ def grab_gdi_primary_bgr():
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(memdc)
         user32.ReleaseDC(hwnd, hdc)
+
+
+def _printwindow_hwnd_bgr(hwnd, w, h):
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    hdc = user32.GetDC(hwnd)
+    if not hdc:
+        return None
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    old = gdi32.SelectObject(memdc, hbmp)
+    try:
+        PW_RENDERFULLCONTENT = 2
+        if not user32.PrintWindow(hwnd, memdc, PW_RENDERFULLCONTENT):
+            if not user32.PrintWindow(hwnd, memdc, 0):
+                return None
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER)]
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = 0
+        buf = (ctypes.c_ubyte * (w * h * 4))()
+        bmi.bmiHeader.biHeight = -h
+        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+        top_down = True
+        if got == 0:
+            bmi.bmiHeader.biHeight = h
+            got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+            top_down = False
+        if got == 0:
+            return None
+        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        if not top_down:
+            img = np.flipud(img).copy()
+        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        if _frame_is_nearly_black(frame):
+            return None
+        return frame, w, h, (0, 0)
+    finally:
+        gdi32.SelectObject(memdc, old)
+        gdi32.DeleteObject(hbmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(hwnd, hdc)
+
+
+def _bitblt_hwnd_bgr(hwnd, w, h):
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    hdc = user32.GetWindowDC(hwnd)
+    if not hdc:
+        return None
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    old = gdi32.SelectObject(memdc, hbmp)
+    try:
+        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020):
+            return None
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER)]
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = 0
+        buf = (ctypes.c_ubyte * (w * h * 4))()
+        bmi.bmiHeader.biHeight = -h
+        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+        top_down = True
+        if got == 0:
+            bmi.bmiHeader.biHeight = h
+            got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+            top_down = False
+        if got == 0:
+            return None
+        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        if not top_down:
+            img = np.flipud(img).copy()
+        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        if _frame_is_nearly_black(frame):
+            return None
+        return frame, w, h, (0, 0)
+    finally:
+        gdi32.SelectObject(memdc, old)
+        gdi32.DeleteObject(hbmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(hwnd, hdc)
+
+
+def _capture_hwnd_bgr(hwnd, w, h):
+    r = _printwindow_hwnd_bgr(hwnd, w, h)
+    if r is not None:
+        return r
+    return _bitblt_hwnd_bgr(hwnd, w, h)
+
+
+def _logonui_window_captures():
+    """Cửa sổ LogonUI / Sign out trên desktop Winlogon — enum theo HDESK, không theo thread hiện tại."""
+    if sys.platform != "win32":
+        return []
+    out = []
+    seen = set()
+    for hwnd, w, h, _pid, x, y in _winlogon_secure_ui_hwnds():
+        if hwnd in seen:
+            continue
+        seen.add(hwnd)
+        cap = _capture_hwnd_bgr(hwnd, w, h)
+        if cap is None:
+            continue
+        out.append((cap[0], x, y, w, h))
+    if out:
+        return out
+    # Thread đã ở Winlogon: enum desktop hiện tại (LogonUI mới spawn).
+    hdesk = None
+    try:
+        hdesk = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+        for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
+            if hwnd in seen or not _pid_is_secure_ui(pid):
+                continue
+            seen.add(hwnd)
+            cap = _capture_hwnd_bgr(hwnd, w, h)
+            if cap is None:
+                continue
+            out.append((cap[0], x, y, w, h))
+    except Exception:
+        pass
+    return out
+
+
+def grab_current_desktop_printwindow():
+    """Logon / Sign out / UAC: PrintWindow cửa sổ lớn nhất trên desktop của thread."""
+    if sys.platform != "win32":
+        return None
+    user32 = ctypes.windll.user32
+    from ctypes import wintypes
+    hwnds = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, _lp):
+        if user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd):
+            hwnds.append(hwnd)
+        return True
+
+    cb = WNDENUMPROC(_cb)
+    if not user32.EnumDesktopWindows(None, cb, 0):
+        user32.EnumWindows(cb, 0)
+
+    extra_pids = set()
+    try:
+        import psutil
+        for p in psutil.process_iter(["name", "pid"]):
+            nm = str(p.info.get("name") or "").lower()
+            if nm in ("logonui.exe", "winlogon.exe"):
+                extra_pids.add(int(p.info["pid"]))
+    except Exception:
+        pass
+    if extra_pids:
+        def _cb_pid(hwnd, _lp):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in extra_pids and user32.IsWindowVisible(hwnd):
+                hwnds.append(hwnd)
+            return True
+        user32.EnumWindows(WNDENUMPROC(_cb_pid), 0)
+
+    best = None
+    best_area = 0
+    rect = wintypes.RECT()
+    seen = set()
+    for hwnd in hwnds:
+        if hwnd in seen:
+            continue
+        seen.add(hwnd)
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            continue
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        area = w * h
+        if w >= 200 and h >= 200 and area > best_area:
+            best_area = area
+            best = (hwnd, w, h)
+    if not best:
+        return None
+    hwnd, w, h = best
+    return _printwindow_hwnd_bgr(hwnd, w, h)
+
+
+def grab_logonui_printwindow():
+    return grab_current_desktop_printwindow()
+
+
+def _grab_secure_desktop_bgr_here():
+    """PrintWindow HWND LogonUI/winlogon → BitBlt HWND → BitBlt cả desktop Winlogon."""
+    overlays = _logonui_window_captures()
+    if overlays:
+        overlays.sort(key=lambda t: t[3] * t[4], reverse=True)
+        tile, _x, _y, tw, th = overlays[0]
+        if not _frame_is_nearly_black(tile):
+            try:
+                sw = int(ctypes.windll.user32.GetSystemMetrics(0))
+                sh = int(ctypes.windll.user32.GetSystemMetrics(1))
+            except Exception:
+                sw, sh = tw, th
+            if tw >= max(200, int(sw * 0.6)) and th >= max(200, int(sh * 0.6)):
+                return tile, tw, th, (0, 0)
+
+    frame_bgr = None
+    cap_w = cap_h = 0
+    origin = (0, 0)
+    try:
+        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=True)
+    except Exception:
+        try:
+            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=False)
+        except Exception:
+            frame_bgr = None
+
+    if overlays and frame_bgr is not None:
+        left0 = origin[0] if origin else 0
+        top0 = origin[1] if origin else 0
+        try:
+            left0 = int(ctypes.windll.user32.GetSystemMetrics(76))
+            top0 = int(ctypes.windll.user32.GetSystemMetrics(77))
+        except Exception:
+            pass
+        for tile, x, y, _tw, _th in overlays:
+            if _frame_is_nearly_black(tile):
+                continue
+            _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0)
+        if not _frame_is_nearly_black(frame_bgr):
+            return frame_bgr, cap_w, cap_h, origin
+
+    if frame_bgr is not None and not _frame_is_nearly_black(frame_bgr):
+        return frame_bgr, cap_w, cap_h, origin
+
+    try:
+        alt = grab_gdi_primary_bgr(use_screen_dc=False)
+        if alt is not None and not _frame_is_nearly_black(alt[0]):
+            return alt
+    except Exception:
+        pass
+    alt = grab_current_desktop_printwindow()
+    if alt is not None:
+        return alt
+    if frame_bgr is not None:
+        return frame_bgr, cap_w, cap_h, origin
+    raise RuntimeError("Winlogon desktop capture failed")
+
+
+_winlogon_grab_lock = threading.Lock()
+_winlogon_grab_req = queue.Queue(maxsize=1)
+_winlogon_grab_res = queue.Queue(maxsize=1)
+_winlogon_grab_thread = None
+
+def _winlogon_grab_loop():
+    """Thread sạch (không cửa sổ DXGI) — SetThreadDesktop(Winlogon) giống lúc Login."""
+    if _switch_capture_thread_to_named_desktop("Winlogon"):
+        print("[Host] Dedicated Winlogon capture thread attached")
+    else:
+        print("[Host] Dedicated Winlogon capture thread: SetThreadDesktop failed")
+    while True:
+        _winlogon_grab_req.get()
+        try:
+            if get_desktop_name() != "winlogon":
+                _switch_capture_thread_to_named_desktop("Winlogon")
+            _winlogon_grab_res.put(_grab_secure_desktop_bgr_here())
+        except Exception as e:
+            try:
+                _winlogon_grab_res.put(e)
+            except Exception:
+                pass
+
+def grab_secure_desktop_bgr():
+    """Luôn capture từ thread đã SetThreadDesktop(Winlogon) — DXGI Default hay trả về đen."""
+    if sys.platform != "win32":
+        return _grab_secure_desktop_bgr_here()
+    global _winlogon_grab_thread
+    with _winlogon_grab_lock:
+        if _winlogon_grab_thread is None or not _winlogon_grab_thread.is_alive():
+            _winlogon_grab_thread = threading.Thread(
+                target=_winlogon_grab_loop, name="WinlogonGrab", daemon=True
+            )
+            _winlogon_grab_thread.start()
+    try:
+        while True:
+            try:
+                _winlogon_grab_res.get_nowait()
+            except queue.Empty:
+                break
+        _winlogon_grab_req.put(True, timeout=0.15)
+        r = _winlogon_grab_res.get(timeout=0.7)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    except Exception:
+        if get_desktop_name() != "winlogon":
+            _switch_capture_thread_to_named_desktop("Winlogon")
+        return _grab_secure_desktop_bgr_here()
 
 
 def _open_dxcam_outputs():
@@ -753,8 +1480,8 @@ class HostMixin:
                     
                 import platform
                 computer_name = platform.node()
+                is_android = False
                 try:
-                    import os, sys
                     is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
                     if hasattr(sys, 'getandroidapilevel'):
                         is_android = True
@@ -793,7 +1520,8 @@ class HostMixin:
                     "zalo_phone": self.load_zalo_phone_from_xml(),
                     "is_domain": is_domain,
                     "chk_reason": chk_reason,
-                    "os_release": platform.release()
+                    "os_release": "android" if is_android else platform.release(),
+                    "is_android": is_android,
                 }).encode('utf-8')
                 send_msg(conn, res_info, client_pass)
                 
@@ -931,6 +1659,9 @@ class HostMixin:
                 if _is_legacy_windows_host():
                     print("[Host] Using GDI BitBlt capture (Windows 7)")
                     return self
+                if _should_capture_logon_ui():
+                    print("[Host] Winlogon/Signing out: PrintWindow/BitBlt HWND (skip DXGI)")
+                    return self
                 if sys.platform == "win32":
                     self.dx_cams = _open_dxcam_outputs()
                 try:
@@ -939,7 +1670,7 @@ class HostMixin:
                 except Exception as e:
                     print(f"[Host] mss init failed: {e}")
                     self.sct = None
-                if not self.dx_cams and not self.sct:
+                if not self.dx_cams and not self.sct and not _should_capture_logon_ui():
                     raise RuntimeError("no screen capture backend")
                 return self
             def __exit__(self, exc_type, exc_val, exc_tb):
@@ -973,6 +1704,29 @@ class HostMixin:
         _legacy_host = _is_legacy_windows_host()
         _last_hb = time.time()
         _last_switching_signal_time = 0
+        _last_lock_sync = 0
+        _last_sent_locked = None
+
+        def _sync_lock_status():
+            nonlocal _last_lock_sync, _last_sent_locked
+            try:
+                locked_now = (
+                    (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
+                    or _logonui_running()
+                    or _session_has_interactive_user() is False
+                )
+                now_l = time.time()
+                if locked_now != _last_sent_locked or (locked_now and now_l - _last_lock_sync >= 8):
+                    send_msg(conn, json.dumps({
+                        "type": "domain_status",
+                        "is_locked": locked_now,
+                        "reason": "winlogon" if locked_now else "desktop",
+                    }).encode("utf-8"), password)
+                    _last_sent_locked = locked_now
+                    _last_lock_sync = now_l
+            except Exception:
+                pass
+
         while client_state.get("running", False):
             try:
                 if time.time() - _last_hb >= 2.5:
@@ -983,6 +1737,20 @@ class HostMixin:
                         pass
                 # Early check for desktop status
                 needs_switch, is_blocked = check_desktop_change()
+                # Sign-out / logon: ghim Winlogon khi UI khóa; khi đã vào Default thì phải rời ra.
+                if _should_capture_logon_ui():
+                    if get_desktop_name() != "winlogon":
+                        _pin_capture_to_winlogon_if_needed()
+                    is_blocked = False
+                    needs_switch = False
+                elif get_desktop_name() == "winlogon":
+                    print("[Host] User desktop ready. Leaving Winlogon capture for Default.")
+                    if not _switch_capture_thread_to_input_desktop():
+                        _switch_capture_thread_to_named_desktop("Default")
+                    is_blocked = False
+                    needs_switch = False
+                    client_state["force_update"] = True
+                    client_state.pop("prev_sent_img", None)
                 if is_blocked:
                     # Throttle: only send switching_desktop signal once every 12 seconds
                     # to avoid resetting the client's countdown timer in an infinite loop
@@ -990,11 +1758,11 @@ class HostMixin:
                     if now - _last_switching_signal_time >= 12:
                         print("[Host] Secure Desktop detected and cannot be accessed. Signaling client...")
                         try:
-                            signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                            send_msg(conn, signal, password)
+                            send_msg(conn, _encode_switching_desktop(), password)
                         except:
                             pass
                         _last_switching_signal_time = now
+                    _sync_lock_status()
                     time.sleep(0.5)
                     continue
 
@@ -1002,43 +1770,7 @@ class HostMixin:
                 if needs_switch:
                     _last_switching_signal_time = 0  # Reset throttle so next block event signals immediately
                     print("[Host] Desktop change detected. Switching thread desktop...")
-                    try:
-                        hdesk = None
-                        for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                            try:
-                                hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
-                                if hdesk:
-                                    break
-                            except:
-                                pass
-                        
-                        # Fallback: if OpenInputDesktop fails, try opening desktop by name
-                        if not hdesk:
-                            thread_name = get_desktop_name()
-                            # Try the opposite desktop
-                            target_name = "Winlogon" if thread_name == "default" else "Default"
-                            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                                try:
-                                    hdesk = ctypes.windll.user32.OpenDesktopW(target_name, 0, False, access_mask)
-                                    if hdesk:
-                                        print(f"[Host] Opened {target_name} desktop by name (fallback)")
-                                        break
-                                except:
-                                    pass
-                                
-                        if hdesk:
-                            result = ctypes.windll.user32.SetThreadDesktop(hdesk)
-                            ctypes.windll.user32.CloseDesktop(hdesk)
-                            if not result:
-                                print("[Host] SetThreadDesktop() failed (thread may have existing windows). Retrying...")
-                                time.sleep(0.3)
-                                continue
-                        else:
-                            print("[Host] OpenInputDesktop failed for all access masks.")
-                            time.sleep(0.3)
-                            continue
-                    except Exception as e:
-                        print(f"[Host] SetThreadDesktop exception: {e}")
+                    if not _switch_capture_thread_to_input_desktop():
                         time.sleep(0.3)
                         continue
                     
@@ -1061,24 +1793,26 @@ class HostMixin:
                                     _last_hb = time.time()
                                 except Exception:
                                     pass
-                            # Check for mid-session desktop transitions
+                                _sync_lock_status()
                             if not _legacy_host:
-                                inner_needs_switch, inner_is_blocked = check_desktop_change()
-                                if inner_is_blocked or inner_needs_switch:
-                                    if inner_is_blocked:
-                                        print("[Host] Secure Desktop appeared mid-session and blocked. Signaling client...")
-                                        now = time.time()
-                                        if now - _last_switching_signal_time >= 12:
-                                            try:
-                                                signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                                                send_msg(conn, signal, password)
-                                            except:
-                                                pass
-                                            _last_switching_signal_time = now
-                                        time.sleep(0.5)
-                                    else:
-                                        print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
-                                    break  # Break inner loop to recreate mss.mss() on new desktop
+                                want_logon = _should_capture_logon_ui()
+                                thread_desk = get_desktop_name()
+                                if want_logon and dx_cams:
+                                    print("[Host] Signing out/logon: drop DXGI, keep PrintWindow loop on Winlogon.")
+                                    break
+                                if (not want_logon) and thread_desk == "winlogon":
+                                    print("[Host] Explorer/Default ready. Dropping Winlogon capture to show desktop.")
+                                    client_state["force_update"] = True
+                                    client_state.pop("prev_sent_img", None)
+                                    break
+                                if not want_logon:
+                                    inner_needs_switch, inner_is_blocked = check_desktop_change()
+                                    if inner_is_blocked or inner_needs_switch:
+                                        if inner_is_blocked:
+                                            print("[Host] Secure Desktop mid-session: recreate capture after desktop switch...")
+                                        else:
+                                            print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
+                                        break
                                 
                             sys_w, sys_h = 0, 0
                             try:
@@ -1095,10 +1829,28 @@ class HostMixin:
                                 last_vw, last_vh = sys_w, sys_h
                                 
                             grabbed = False
-                            if _legacy_host:
-                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                            on_winlogon = _should_capture_logon_ui()
+                            if _legacy_host or on_winlogon:
+                                if on_winlogon:
+                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
+                                else:
+                                    frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
                                 self._capture_origin = origin
                                 grabbed = True
+                                if on_winlogon:
+                                    _now_diag = time.time()
+                                    if _now_diag - client_state.get("_secure_diag_ts", 0) >= 0.8:
+                                        client_state["_secure_diag_ts"] = _now_diag
+                                        try:
+                                            _mean = float(np.mean(frame_bgr))
+                                        except Exception:
+                                            _mean = -1.0
+                                        print(
+                                            f"[SecureCap] phase={_wts_phase()} thread_desk={get_desktop_name()} "
+                                            f"input={_input_desktop_name()} secure_ui={len(_winlogon_secure_ui_hwnds())} "
+                                            f"logonui={_logonui_running()} explorer={_explorer_running()} "
+                                            f"mean={_mean:.1f} size={cap_w}x{cap_h}"
+                                        )
                             if dx_cams and not grabbed:
                                 retries = 8 if not client_state.get("_got_frame") else 1
                                 for _try in range(retries):
@@ -1110,9 +1862,11 @@ class HostMixin:
                                     if grabbed:
                                         break
                                     time.sleep(0.01)
+                                if grabbed and _frame_is_nearly_black(frame_bgr):
+                                    grabbed = False
                             if not grabbed:
-                                if sct is None:
-                                    frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                if on_winlogon or sct is None:
+                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr() if on_winlogon else grab_gdi_primary_bgr()
                                     self._capture_origin = origin
                                 else:
                                     frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
@@ -1120,11 +1874,22 @@ class HostMixin:
                                     )
                                     client_state["_stitch_canvas"] = frame_bgr
                                     self._capture_origin = origin
+
+                            if (
+                                not on_winlogon
+                                and (get_desktop_name() or "default") in ("default", "")
+                                and _explorer_running()
+                                and not _logonui_running()
+                                and not _winlogon_has_logonui_windows()
+                            ):
+                                _user_desktop_was_shown(True)
                             
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
                             
                             force_update = client_state.pop("force_update", False)
+                            if on_winlogon:
+                                force_update = True
                             if not client_state.get("_first_sent"):
                                 force_update = True
                             if client_state.get("last_target_w") != target_w or client_state.get("last_target_h") != target_h:
@@ -1235,11 +2000,12 @@ class HostMixin:
                                         client_state["dyn_scale"] = min(target_scale, current_s + 0.1)
                                     static_frame = False 
                                 else:
+                                    wait_s = 0.08 if _user_desktop_was_shown() else 1.0
                                     if "wake_event" in client_state:
-                                        client_state["wake_event"].wait(1.0)
+                                        client_state["wake_event"].wait(wait_s)
                                         client_state["wake_event"].clear()
                                     else:
-                                        time.sleep(1.0)
+                                        time.sleep(wait_s)
                                     continue
                                     
                             if diff_bbox is not None and not static_frame and not force_update:
@@ -1304,6 +2070,8 @@ class HostMixin:
                                 client_state["_first_sent"] = True
                                 client_state["_got_frame"] = True
                                 continue
+                            if on_winlogon:
+                                sleep_time = min(float(sleep_time), 1.0 / 12.0)
                             time.sleep(sleep_time)
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
@@ -1530,7 +2298,10 @@ class HostMixin:
             except Exception as ex:
                 chk_reason = f"Error: {ex}"
             
-            is_locked = (get_desktop_name() == "winlogon")
+            try:
+                is_locked = (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
+            except Exception:
+                is_locked = (get_desktop_name() or "default") not in ("default", "", "agprivacydesk")
             
             try:
                 with open("domain_debug.log", "a", encoding="utf-8") as df:

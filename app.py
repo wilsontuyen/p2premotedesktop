@@ -345,7 +345,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             pass
         
         # Check headless flag (run in Session 0 / background service mode)
-        self.is_headless = "--headless" in sys.argv
+        # Capture-worker (broker architecture): chay nhu headless nhung KHONG mo
+        # mang phia viewer; thay vao do noi toi broker qua IPC noi bo.
+        self.is_capture_worker = "--capture-worker" in sys.argv
+        self.is_headless = ("--headless" in sys.argv) or self.is_capture_worker
         
         # Tạm ẩn cửa sổ trắng trong lúc khởi tạo giao diện
         self.withdraw()
@@ -438,17 +441,52 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     except Exception as ree:
                         print(f"[Diagnostics] Registry read failed: {ree}")
                     
-                    # Check scheduled task status
-                    try:
-                        import subprocess
-                        res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
-                        print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
-                    except Exception as te:
-                        print(f"[Diagnostics] Failed to query scheduled task: {te}")
+                    # Check scheduled task status in background: schtasks is slow (~2-4s)
+                    # and must not delay TCP listen / screen capture during signout/logon.
+                    def _diag_schtask():
+                        try:
+                            import subprocess
+                            res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
+                            print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+                        except Exception as te:
+                            print(f"[Diagnostics] Failed to query scheduled task: {te}")
+                    threading.Thread(target=_diag_schtask, name="DiagSchtask", daemon=True).start()
             except Exception as de:
                 print(f"[Diagnostics] Diagnostics gathering failed: {de}")
         except Exception as e:
             pass
+
+        if self.is_capture_worker:
+            # Fast path: bo UI/diagnostics de worker Winlogon kip man Signing out.
+            self.my_password = ""
+            pass_path = os.path.join(app_dir, "session_pass.txt")
+            try:
+                if os.path.exists(pass_path):
+                    with open(pass_path, "r", encoding="utf-8") as f:
+                        self.my_password = f.read().strip()
+            except Exception:
+                pass
+            if not self.my_password:
+                self.my_password = str(random.randint(1000, 9999))
+                try:
+                    with open(pass_path, "w", encoding="utf-8") as f:
+                        f.write(self.my_password)
+                except Exception:
+                    pass
+            self.fixed_password = ""
+            try:
+                self.fixed_password = self.load_fixed_password_from_xml()
+            except Exception:
+                pass
+            self.running_server = True
+            self.active_clients = {}
+            self.active_viewers = []
+            self.server_socket = None
+            self._capture_origin = (0, 0)
+            print("[Worker] Fast-start: skip UI, connect broker now")
+            import core.broker
+            threading.Thread(target=core.broker.run_capture_worker, args=(self,), daemon=True).start()
+            return
         
         # Thiết lập icon cho cửa sổ chính
         try:
@@ -783,7 +821,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             print(f"CRASH IN SETUP_UI: {e}")
         
         # Start background services
-        threading.Thread(target=self.init_network_services, daemon=True).start()
+        if getattr(self, "is_capture_worker", False):
+            # Broker architecture: worker chi capture/input, noi toi broker qua IPC.
+            import core.broker
+            threading.Thread(target=core.broker.run_capture_worker, args=(self,), daemon=True).start()
+        else:
+            threading.Thread(target=self.init_network_services, daemon=True).start()
         
         # Bắt đầu polling Signaling status trên main thread (độ tin cậy cao hơn self.after từ background thread)
         self.after(3000, self._poll_signaling_status)
@@ -3939,7 +3982,7 @@ if __name__ == '__main__':
     import time
     
 
-    is_headless = "--headless" in sys.argv
+    is_headless = ("--headless" in sys.argv) or ("--capture-worker" in sys.argv)
     is_clipboard_agent = "--clipboard-agent" in sys.argv
     
     # --- Chế độ Clipboard Agent: Chỉ lắng nghe Pipe và nạp Clipboard, thoát sớm ---
@@ -3982,6 +4025,26 @@ if __name__ == '__main__':
             pass
         
         run_clipboard_agent_mode()  # Vòng lặp vô tận, không return
+        sys.exit(0)
+
+    # --- Chế độ Broker (Session 0, không Tk): giữ kết nối viewer, proxy tới worker ---
+    if "--broker" in sys.argv:
+        try:
+            log_path = os.path.join(app_dir, "broker.log")
+            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stderr = sys.stdout
+        except Exception:
+            pass
+        if sys.platform == "win32":
+            try:
+                import win32event, win32api, winerror
+                _bm = win32event.CreateMutex(None, False, "Global\\AntigravityP2PBrokerMutex")
+                if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                    sys.exit(0)
+            except Exception:
+                pass
+        import core.broker
+        core.broker.run_broker()
         sys.exit(0)
     
 
@@ -4039,6 +4102,13 @@ if __name__ == '__main__':
                 print("[Headless] All SYSTEM privileges successfully enabled for the agent process.")
             except Exception as e:
                 print(f"[Headless] Failed to enable SYSTEM privileges: {e}")
+
+            try:
+                from os_utils.windows_system import attach_process_window_station
+                if attach_process_window_station("WinSta0"):
+                    print("[Headless] SetProcessWindowStation(WinSta0) OK")
+            except Exception as e:
+                print(f"[Headless] WinSta0 attach: {e}")
 
             # Service headless helper uses mutex index 1
             mutex_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{desktop_name}"

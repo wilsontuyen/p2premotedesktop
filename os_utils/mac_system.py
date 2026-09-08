@@ -9,6 +9,18 @@ def get_desktop_name():
     # Return the current display or session type
     return os.environ.get("XDG_SESSION_TYPE", "x11")
 
+def get_input_desktop_name():
+    return get_desktop_name()
+
+def open_input_desktop_handle():
+    return None
+
+def open_named_desktop_handle(name):
+    return None
+
+def attach_process_window_station(station="WinSta0"):
+    return False
+
 def is_secure_desktop():
     # Linux doesn't have the concept of a Windows secure desktop (like UAC/Winlogon)
     # in the same way that blocks screenshotting without root (unless it's Wayland,
