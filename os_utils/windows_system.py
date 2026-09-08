@@ -42,6 +42,13 @@ def check_desktop_change():
                 break
         
         if not h_input:
+            # Windows 7: OpenInputDesktop hay fail (kể cả desktop Default) → đừng coi là Secure Desktop.
+            try:
+                v = __import__("sys").getwindowsversion()
+                if v.major < 6 or (v.major == 6 and v.minor < 2):
+                    return False, False
+            except Exception:
+                pass
             thread_name = get_desktop_name()
             if thread_name == "winlogon":
                 return False, False

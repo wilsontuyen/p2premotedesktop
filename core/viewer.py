@@ -23,7 +23,7 @@ from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, r
 
 from core.i18n import _
 from utils.logger import log_debug, log_activity
-from network.socket_utils import send_msg, recv_msg
+from network.socket_utils import send_msg, recv_msg, ensure_session_socket_blocking
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
 
 if getattr(sys, 'frozen', False):
@@ -49,6 +49,7 @@ client_host_computer_name_override = None
 def client_receiver_thread(sock, password):
     global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown
     client_pending_bbox = None
+    ensure_session_socket_blocking(sock)
     while client_running:
         try:
             msg = recv_msg(sock, password)
@@ -150,7 +151,13 @@ def client_receiver_thread(sock, password):
                 client_switching_desktop_countdown = 0
             except Exception as ie:
                 with open("client_error.log", "a", encoding="utf-8") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
+        except BlockingIOError:
+            ensure_session_socket_blocking(sock)
+            continue
         except Exception as e:
+            if getattr(e, "winerror", None) == 10035:
+                ensure_session_socket_blocking(sock)
+                continue
             with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
             # Nếu host là Linux/Ubuntu, socket error thường do shutdown/restart
             host_os = globals().get('client_host_os_release', '10')
@@ -259,15 +266,12 @@ def uninstall_keyboard_hook():
         print("[Client] Keyboard hook uninstalled.")
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release=""):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
     global client_switching_desktop_countdown, client_host_computer_name_override
     
     try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
     except: pass
-    
-    # [FIX] Trong Windows, multiprocessing.Process khởi tạo tiến trình con mới hoàn toàn.
-    # Từ điển socket_passwords toàn cục bị trống, dẫn đến encrypt_payload mặc định dùng APP_KEY,
-    # gây ra lỗi InvalidTag khi Host giải mã dữ liệu clipboard/file.
+
     if partner_pass:
         socket_passwords[sock] = partner_pass
         
@@ -308,6 +312,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         os.environ['SDL_RENDER_DRIVER'] = 'hardware'
         pygame.init()
         pygame.key.set_repeat(500, 50)
+        ensure_session_socket_blocking(sock)
         
         info = pygame.display.Info()
         client_max_w = info.current_w - 100
@@ -388,6 +393,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             client_running = True
             client_host_did_shutdown = False
             client_is_domain = is_domain
+            ping_limit = 90.0 if str(os_release) in ("7", "Vista", "XP", "8", "8.1") else 25.0
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
@@ -411,6 +417,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             except Exception:
                 pass
             hidden_root.withdraw()
+            ensure_session_socket_blocking(sock)
             if clipboard_sync_manager:
                 clipboard_sync_manager.register_app(hidden_root)
             
@@ -433,7 +440,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             _mouse_move_has_new = threading.Event()
             
             def event_sender_thread():
-                last_ping_time = time.time()
+                last_ping_time = 0.0
                 while client_running:
                     try:
                         now = time.time()
@@ -1162,7 +1169,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     was_switching = False
                     send_event({"type": "check_domain"})
                 
-                if client_last_recv_time > 0 and time.time() - client_last_recv_time > 25.0:
+                if client_last_recv_time > 0 and time.time() - client_last_recv_time > ping_limit:
                     print("[Client] Connection ping timeout. Disconnecting.")
                     # Nếu host là Linux/Ubuntu, ping timeout thường do shutdown/restart
                     host_os = globals().get('client_host_os_release', '10')
@@ -1222,6 +1229,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
                                 print("[Client] Received shared socket. Resuming session!")
                                 sock = socket.fromshare(new_sock[1])
+                                ensure_session_socket_blocking(sock)
                                 if partner_pass:
                                     socket_passwords[sock] = partner_pass
                                 sock_acquired = True

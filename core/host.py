@@ -161,6 +161,22 @@ def set_windows_graphics_effects(enabled=True):
 
 _MAX_SEND_EDGE_LAN = 4096
 _MAX_SEND_EDGE_WAN = 2560
+_MAX_SEND_EDGE_LEGACY = 1920
+
+
+def _is_legacy_windows_host():
+    """Windows 7/Vista: không có DXGI Desktop Duplication; JPEG 4:4:4 cũng quá nặng."""
+    if sys.platform != "win32":
+        return False
+    try:
+        v = sys.getwindowsversion()
+        return v.major < 6 or (v.major == 6 and v.minor < 2)
+    except Exception:
+        return str(platform.release()) in ("7", "Vista", "XP")
+
+
+def _windows_has_dxgi_duplication():
+    return sys.platform == "win32" and not _is_legacy_windows_host()
 
 
 def _virtual_screen_rect():
@@ -204,9 +220,76 @@ def _clip_tile_onto_canvas(canvas, tile, x, y):
     return True
 
 
+def grab_gdi_primary_bgr():
+    """BitBlt màn chính — ổn định trên Windows 7 (không DXGI, không mss virtual desktop)."""
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    w = int(user32.GetSystemMetrics(0))
+    h = int(user32.GetSystemMetrics(1))
+    if w < 1 or h < 1:
+        raise RuntimeError("GDI invalid screen size")
+    hwnd = user32.GetDesktopWindow()
+    hdc = user32.GetDC(hwnd)
+    if not hdc:
+        raise RuntimeError("GDI GetDC failed")
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    old = gdi32.SelectObject(memdc, hbmp)
+    try:
+        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020):
+            raise RuntimeError("GDI BitBlt failed")
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER)]
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = 0
+        buf = (ctypes.c_ubyte * (w * h * 4))()
+        DIB_RGB_COLORS = 0
+        bmi.bmiHeader.biHeight = -h
+        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+        top_down = True
+        if got == 0:
+            bmi.bmiHeader.biHeight = h
+            got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+            top_down = False
+        if got == 0:
+            raise RuntimeError("GDI GetDIBits failed")
+        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        if not top_down:
+            img = np.flipud(img).copy()
+        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        return frame, w, h, (0, 0)
+    finally:
+        gdi32.SelectObject(memdc, old)
+        gdi32.DeleteObject(hbmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(hwnd, hdc)
+
+
 def _open_dxcam_outputs():
     cams = []
-    if sys.platform != "win32":
+    if not _windows_has_dxgi_duplication():
+        print("[Host] Skip dxcam (Windows 7/Vista không hỗ trợ Desktop Duplication)")
         return cams
     try:
         import dxcam
@@ -647,17 +730,26 @@ class HostMixin:
                 # Cấu hình TCP Keep-Alive bảo vệ kết nối đục lỗ khỏi bị đóng bởi Firewall/Router
                 try:
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    conn.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
+                    if not _is_legacy_windows_host():
+                        ka = (1, 10000, 2000) if is_lan_socket(conn) else (1, 1000, 1000)
+                        conn.ioctl(socket.SIOC_KEEPALIVE_VALS, ka)
                 except Exception as e:
                     print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Host: {e}")
                 
-                # Toàn bộ desktop ảo (mọi màn hình). monitors[1] chỉ là màn chính —
-                # máy 2 màn + DPI khác nhau bị GetSystemMetrics hiểu nhầm là đổi độ phân giải rồi ngắt.
-                with mss.mss() as sct:
-                    monitor = sct.monitors[0]
-                    host_w = monitor['width']
-                    host_h = monitor['height']
-                    self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
+                if _is_legacy_windows_host():
+                    host_w = int(ctypes.windll.user32.GetSystemMetrics(0))
+                    host_h = int(ctypes.windll.user32.GetSystemMetrics(1))
+                    if host_w < 1 or host_h < 1:
+                        host_w, host_h = 1024, 768
+                    self._capture_origin = (0, 0)
+                    monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
+                    print(f"[Host] Win7 GDI handshake size {host_w}x{host_h}")
+                else:
+                    with mss.mss() as sct:
+                        monitor = sct.monitors[0]
+                        host_w = monitor['width']
+                        host_h = monitor['height']
+                        self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
                 import platform
                 computer_name = platform.node()
@@ -707,9 +799,10 @@ class HostMixin:
                 
                 client_state = {"running": True, "net_class": "medium", "wake_event": threading.Event()}
                 
-                # Speed test: client LAN gửi result ngay; WAN 1 ping + gói nhỏ
+                # Speed test: WAN đo 1 vòng. LAN: client không gửi result trước khi mở viewer
+                # (tránh flood JPEG rồi nhân socket → mất kết nối ngay). Ping từ viewer = sẵn sàng.
                 try:
-                    conn.settimeout(8.0)
+                    conn.settimeout(15.0)
                     while client_state.get("running", True):
                         probe_msg = recv_msg(conn, client_pass)
                         if not probe_msg:
@@ -719,6 +812,7 @@ class HostMixin:
                         except Exception:
                             break
                         act = probe.get("action")
+                        evt = probe.get("type")
                         if act == "speed_test_ping":
                             send_msg(conn, json.dumps({"action": "speed_test_pong"}).encode("utf-8"), client_pass)
                         elif act == "speed_test_bw_req":
@@ -731,10 +825,16 @@ class HostMixin:
                             client_state["net_class"] = net_class
                             bandwidth = probe.get("bandwidth", 32.0)
                             print(f"[Host] Speed test finished. Class: {net_class}, Bandwidth: {bandwidth:.2f} Mbps")
-                            if net_class == "high":
-                                set_windows_graphics_effects(True)
-                            else:
-                                set_windows_graphics_effects(False)
+                            if not _is_legacy_windows_host():
+                                if net_class == "high":
+                                    set_windows_graphics_effects(True)
+                                else:
+                                    set_windows_graphics_effects(False)
+                            break
+                        elif evt == "ping":
+                            if is_lan_socket(conn):
+                                client_state["net_class"] = "high"
+                            print("[Host] Viewer ready (ping). Starting capture.")
                             break
                         else:
                             break
@@ -746,7 +846,8 @@ class HostMixin:
                 
                 # Hiển thị thông báo và viền đỏ sau khi test xong
                 self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
-                self.after(0, self.show_host_connection_border)
+                if not _is_legacy_windows_host():
+                    self.after(0, self.show_host_connection_border)
                 self.wake_display()
                 
                 self.active_clients[addr] = client_state
@@ -761,7 +862,7 @@ class HostMixin:
                 t_receiver.start()
                 
                 # Khởi chạy luồng đồng bộ Clipboard File cho Host
-                if clipboard_sync_manager:
+                if clipboard_sync_manager and not _is_legacy_windows_host():
                     clipboard_sync_manager.add_socket(conn)
                 
                 try:
@@ -771,7 +872,8 @@ class HostMixin:
                     t_sender.join()
                     if clipboard_sync_manager:
                         clipboard_sync_manager.remove_socket(conn)
-                    set_windows_graphics_effects(True) # Restore graphics effects upon disconnection
+                    if not _is_legacy_windows_host():
+                        set_windows_graphics_effects(True)
                     
                     print(f"[Host] Đã đóng kết nối với Client {addr[0]}:{addr[1]}.")
                     try: log_activity(_("Ngắt kết nối với ID {id} ({comp})").format(id=fmt_client_id, comp=client_comp))
@@ -826,6 +928,9 @@ class HostMixin:
                 self.dx_cams = []
                 self.sct = None
             def __enter__(self):
+                if _is_legacy_windows_host():
+                    print("[Host] Using GDI BitBlt capture (Windows 7)")
+                    return self
                 if sys.platform == "win32":
                     self.dx_cams = _open_dxcam_outputs()
                 try:
@@ -852,9 +957,10 @@ class HostMixin:
                     self.sct = None
 
         
-        try:
-            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 30000)
-        except: pass
+        if not _is_legacy_windows_host():
+            try:
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 30000)
+            except: pass
         try:
             client_state["is_lan"] = is_lan_socket(conn)
         except Exception:
@@ -864,9 +970,17 @@ class HostMixin:
         except Exception:
             pass
 
+        _legacy_host = _is_legacy_windows_host()
+        _last_hb = time.time()
         _last_switching_signal_time = 0
         while client_state.get("running", False):
             try:
+                if time.time() - _last_hb >= 2.5:
+                    try:
+                        send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password)
+                        _last_hb = time.time()
+                    except Exception:
+                        pass
                 # Early check for desktop status
                 needs_switch, is_blocked = check_desktop_change()
                 if is_blocked:
@@ -941,23 +1055,30 @@ class HostMixin:
                         
                     while client_state.get("running", False):
                         try:
+                            if time.time() - _last_hb >= 2.0:
+                                try:
+                                    send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password)
+                                    _last_hb = time.time()
+                                except Exception:
+                                    pass
                             # Check for mid-session desktop transitions
-                            inner_needs_switch, inner_is_blocked = check_desktop_change()
-                            if inner_is_blocked or inner_needs_switch:
-                                if inner_is_blocked:
-                                    print("[Host] Secure Desktop appeared mid-session and blocked. Signaling client...")
-                                    now = time.time()
-                                    if now - _last_switching_signal_time >= 12:
-                                        try:
-                                            signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
-                                            send_msg(conn, signal, password)
-                                        except:
-                                            pass
-                                        _last_switching_signal_time = now
-                                    time.sleep(0.5)
-                                else:
-                                    print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
-                                break  # Break inner loop to recreate mss.mss() on new desktop
+                            if not _legacy_host:
+                                inner_needs_switch, inner_is_blocked = check_desktop_change()
+                                if inner_is_blocked or inner_needs_switch:
+                                    if inner_is_blocked:
+                                        print("[Host] Secure Desktop appeared mid-session and blocked. Signaling client...")
+                                        now = time.time()
+                                        if now - _last_switching_signal_time >= 12:
+                                            try:
+                                                signal = json.dumps({"type": "switching_desktop"}).encode('utf-8')
+                                                send_msg(conn, signal, password)
+                                            except:
+                                                pass
+                                            _last_switching_signal_time = now
+                                        time.sleep(0.5)
+                                    else:
+                                        print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
+                                    break  # Break inner loop to recreate mss.mss() on new desktop
                                 
                             sys_w, sys_h = 0, 0
                             try:
@@ -974,7 +1095,11 @@ class HostMixin:
                                 last_vw, last_vh = sys_w, sys_h
                                 
                             grabbed = False
-                            if dx_cams:
+                            if _legacy_host:
+                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                self._capture_origin = origin
+                                grabbed = True
+                            if dx_cams and not grabbed:
                                 retries = 8 if not client_state.get("_got_frame") else 1
                                 for _try in range(retries):
                                     frame_bgr, cap_w, cap_h, origin, grabbed = grab_dxcam_virtual_bgr(
@@ -987,13 +1112,14 @@ class HostMixin:
                                     time.sleep(0.01)
                             if not grabbed:
                                 if sct is None:
-                                    time.sleep(0.05)
-                                    continue
-                                frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
-                                    sct, client_state.get("_stitch_canvas")
-                                )
-                                client_state["_stitch_canvas"] = frame_bgr
-                                self._capture_origin = origin
+                                    frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                    self._capture_origin = origin
+                                else:
+                                    frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
+                                        sct, client_state.get("_stitch_canvas")
+                                    )
+                                    client_state["_stitch_canvas"] = frame_bgr
+                                    self._capture_origin = origin
                             
                             target_w = getattr(self, 'client_viewer_w', 1280)
                             target_h = getattr(self, 'client_viewer_h', 720)
@@ -1008,6 +1134,8 @@ class HostMixin:
 
                             net_class = client_state.get("net_class", "medium")
                             q_mode = getattr(self, 'client_quality_mode', 'quality')
+                            if _legacy_host:
+                                q_mode = "speed"
                             
                             if q_mode == "quality":
                                 base_quality = 96
@@ -1017,10 +1145,10 @@ class HostMixin:
                                 base_quality = 98
                                 fps_limit = 60
                                 res_scale = -1.0
-                            elif net_class == "low":
-                                base_quality = 40
-                                fps_limit = 12
-                                res_scale = 0.6
+                            elif net_class == "low" or _legacy_host:
+                                base_quality = 55 if _legacy_host else 40
+                                fps_limit = 10 if _legacy_host else 12
+                                res_scale = 0.7 if _legacy_host else 0.6
                             else:
                                 base_quality = 75
                                 fps_limit = 30
@@ -1033,7 +1161,7 @@ class HostMixin:
                             if "start_time" not in client_state:
                                 client_state["start_time"] = time.time()
                                 
-                            if time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
+                            if (not _legacy_host) and time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
                                 quality = min(98, quality + 10)
                                 if dyn_scale >= 0:
                                     dyn_scale = min(1.0, dyn_scale + 0.1)
@@ -1051,7 +1179,9 @@ class HostMixin:
                                     pass
 
                             # dyn_scale < 0 = gửi gần độ phân giải gốc (không thu về kích thước cửa sổ viewer)
-                            send_max_edge = _MAX_SEND_EDGE_LAN if client_state.get("is_lan") or net_class == "high" else _MAX_SEND_EDGE_WAN
+                            send_max_edge = _MAX_SEND_EDGE_LEGACY if _legacy_host else (
+                                _MAX_SEND_EDGE_LAN if client_state.get("is_lan") or net_class == "high" else _MAX_SEND_EDGE_WAN
+                            )
                             if dyn_scale >= 0:
                                 w = int(target_w * dyn_scale)
                                 h = int(target_h * dyn_scale)
@@ -1122,9 +1252,9 @@ class HostMixin:
                                     send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
                             
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
-                            if hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
+                            if (not _legacy_host) and hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_OPTIMIZE), 1])
-                            if quality >= 88 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
+                            if (not _legacy_host) and quality >= 88 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
                             if not result:
@@ -1135,6 +1265,7 @@ class HostMixin:
                             t_start_send = time.time()
                             send_msg(conn, jpeg_data, password)
                             send_time = time.time() - t_start_send
+                            _last_hb = time.time()
                             
                             if "send_ema" not in client_state:
                                 client_state["send_ema"] = send_time

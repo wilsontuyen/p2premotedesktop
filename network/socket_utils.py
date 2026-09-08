@@ -2,6 +2,7 @@ import socket
 import struct
 import threading
 import ipaddress
+import select
 from .crypto import encrypt_payload, decrypt_payload
 
 _socket_send_locks = {}
@@ -82,10 +83,34 @@ def tune_socket_for_lan_bulk(sock):
     except Exception:
         pass
 
+def ensure_session_socket_blocking(sock):
+    """Pygame/Tk trên Windows hay để socket FIONBIO → recv WinError 10035."""
+    if not sock:
+        return
+    try:
+        sock.settimeout(None)
+    except Exception:
+        pass
+    try:
+        sock.setblocking(True)
+    except Exception:
+        pass
+
+
 def recv_exact(sock, length):
     data = b''
     while len(data) < length:
-        packet = sock.recv(length - len(data))
+        try:
+            packet = sock.recv(length - len(data))
+        except BlockingIOError:
+            ensure_session_socket_blocking(sock)
+            try:
+                select.select([sock], [], [], 0.25)
+            except Exception:
+                pass
+            continue
+        except InterruptedError:
+            continue
         if not packet:
             return None
         data += packet

@@ -40,17 +40,9 @@ def client_quick_link_probe(sock, password, status_cb=None):
                 pass
 
     if is_lan_socket(sock):
-        net_class, ping, bandwidth = "high", 1.0, 100.0
-        try:
-            send_msg(sock, json.dumps({
-                "action": "speed_test_result",
-                "net_class": net_class,
-                "ping": ping,
-                "bandwidth": bandwidth,
-            }).encode("utf-8"), password)
-        except Exception:
-            pass
-        return net_class, ping, bandwidth
+        # Không gửi result trước khi mở viewer: host sẽ flood JPEG trên LAN
+        # rồi multiprocessing nhân socket → Win7/LAN RST ngay ("mất kết nối").
+        return "high", 1.0, 100.0
 
     _status(_("Đang kiểm tra chất lượng mạng..."))
     net_class, ping, bandwidth = "medium", 50.0, 10.0
@@ -573,7 +565,8 @@ class NetworkMixin:
             tune_socket_for_lan_bulk(sock)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
+            if sys.platform == "win32":
+                sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 10000, 2000))
         except: pass
 
         try:
@@ -600,9 +593,8 @@ class NetworkMixin:
                 is_domain = res.get("is_domain", False)
                 partner_id = hwid
 
-                # LAN: bỏ đo băng thông 2 vòng để hiện khung hình ngay
+                # LAN: không đo băng thông / không báo result trước — mở viewer trước, host còn đang chờ.
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
-                client_quick_link_probe(sock, password, self.update_status)
                 sock.settimeout(None)
                 self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, False, os_release)
             else:
@@ -1247,7 +1239,10 @@ class NetworkMixin:
         # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 1000, 1000))
+            if sys.platform == "win32":
+                # 1s/1s trên LAN + spawn viewer process dễ RST (Win7 đặc biệt)
+                ka = (1, 10000, 2000) if is_lan_socket(sock) else (1, 1000, 1000)
+                sock.ioctl(socket.SIOC_KEEPALIVE_VALS, ka)
         except Exception as e:
             print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
             
@@ -1313,6 +1308,11 @@ class NetworkMixin:
                     status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
                     self.update_status(status_text)
+                try:
+                    sock.settimeout(None)
+                    sock.setblocking(True)
+                except Exception:
+                    pass
                     
                 # Pygame window sẽ mở đúng với độ phân giải thật của host. 
                 # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
@@ -1384,7 +1384,11 @@ class NetworkMixin:
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
-            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release), daemon=True)
+            p = mp.Process(
+                target=run_client_viewer_loop,
+                args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release),
+                daemon=True,
+            )
             p.start()
             
             # Track active viewer
@@ -1395,9 +1399,7 @@ class NetworkMixin:
                 "partner_id": partner_id
             })
             
-            # Close the socket handle in the parent process ONLY AFTER the viewer process exits.
-            # This ensures the child process has full ownership of the socket without the parent dropping it prematurely,
-            # while still preventing port leakage when the session ends.
+            # Parent giữ socket đến khi viewer thoát — không close sớm (Win7 sẽ RST).
             def wait_and_close():
                 try:
                     p.join()
@@ -1407,10 +1409,8 @@ class NetworkMixin:
                     sock.close()
                 except:
                     pass
-            import threading
             threading.Thread(target=wait_and_close, daemon=True).start()
             
-            # Reconnection Monitor Thread
             if partner_id and partner_pass:
                 def monitor_reconnect(process, pid, ppass, req_queue):
                     while process.is_alive():
@@ -1425,9 +1425,7 @@ class NetworkMixin:
                                 time.sleep(0.5)
                         except:
                             pass
-                    
-                    code = process.exitcode
-                    print(f"[Client Monitor] Pygame viewer process exited with code: {code}")
+                    print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
                     
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
             
