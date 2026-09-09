@@ -312,6 +312,7 @@ class ProgressDialog(tk.Toplevel):
         self.lift()
         self.total_size = total_size
         self.filename = str(filename) if filename is not None else "Unknown"
+        self._title_text = title_text
         self.start_time = time.time()
         self.history = [(self.start_time, 0)]
         self.on_cancel = on_cancel
@@ -322,11 +323,15 @@ class ProgressDialog(tk.Toplevel):
         display_name = self.filename
         if len(display_name) > 40:
             display_name = display_name[:20] + "..." + display_name[-15:]
+
+        action_row = tk.Frame(top_frame, bg="#FFFFFF")
+        action_row.pack(fill=tk.X)
+        self.lbl_action = tk.Label(action_row, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_action.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lbl_percent = tk.Label(action_row, text="0%", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="e")
+        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
             
-        self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
-        self.lbl_action.pack(fill=tk.X)
-        
-        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  0%  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
@@ -335,7 +340,7 @@ class ProgressDialog(tk.Toplevel):
         self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_files.pack(fill=tk.X)
         
-        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  0%  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
@@ -360,9 +365,9 @@ class ProgressDialog(tk.Toplevel):
             btn_cancel.bind("<Enter>", btn_enter)
             btn_cancel.bind("<Leave>", btn_leave)
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
-            dialog_h = 270
+            dialog_h = 286
         else:
-            dialog_h = 225
+            dialog_h = 241
             
         self.update_idletasks()
         dialog_w = 400
@@ -585,6 +590,11 @@ class ProgressDialog(tk.Toplevel):
 
                 self.prog1["value"] = percent
                 self.prog2["value"] = percent
+                try:
+                    self.lbl_percent.config(text=f"{percent}%")
+                    self.title_lbl.config(text=f"{self._title_text}  —  {percent}%")
+                except Exception:
+                    pass
 
                 current_time = time.time()
                 self.history.append((current_time, sent_bytes))
@@ -617,8 +627,8 @@ class ProgressDialog(tk.Toplevel):
                 sent_str = self.format_size(sent_bytes)
                 total_str = self.format_size(self.total_size)
 
-                self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {speed_str}  {time_str}")
-                self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {time_str}")
+                self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {percent}%  {speed_str}  {time_str}")
+                self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {percent}%  {time_str}")
             except: pass
         try:
             self.after(0, _do_update)

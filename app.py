@@ -458,24 +458,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         if self.is_capture_worker:
             # Fast path: bo UI/diagnostics de worker Winlogon kip man Signing out.
+            # Khong sinh/ghi de session_pass.txt — neu worker ghi de, GUI hien mat khau A
+            # con broker doc mat khau B → handshake "khong giai ma duoc".
             self.my_password = ""
             pass_path = os.path.join(app_dir, "session_pass.txt")
             try:
                 if os.path.exists(pass_path):
-                    with open(pass_path, "r", encoding="utf-8") as f:
+                    with open(pass_path, "r", encoding="utf-8-sig") as f:
                         self.my_password = f.read().strip()
             except Exception:
                 pass
-            if not self.my_password:
-                self.my_password = str(random.randint(1000, 9999))
-                try:
-                    with open(pass_path, "w", encoding="utf-8") as f:
-                        f.write(self.my_password)
-                except Exception:
-                    pass
             self.fixed_password = ""
             try:
-                self.fixed_password = self.load_fixed_password_from_xml()
+                self.fixed_password = self.load_fixed_password_from_xml() or ""
             except Exception:
                 pass
             self.running_server = True
@@ -3760,39 +3755,7 @@ Comment=Remote Desktop P2P AutoStart
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
 
-    def wake_on_lan(self, mac_str):
-        # mac_str can be multiple MACs separated by comma
-        for m in mac_str.split(','):
-            m = m.strip()
-            if not m: continue
-            try:
-                # Remove common separators
-                mac = m.replace(':', '').replace('-', '').replace('.', '')
-                if len(mac) != 12:
-                    continue
-                data = bytes.fromhex('F' * 12 + mac * 16)
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                try:
-                    sock.sendto(data, ('255.255.255.255', 9))
-                except:
-                    pass
-                # Try subnet broadcasts
-                try:
-                    local_ips = getattr(self, 'local_ip', get_local_ip()).split(',')
-                    for lip in local_ips:
-                        lip = lip.strip()
-                        if lip and not lip.startswith('127.'):
-                            parts = lip.split('.')
-                            if len(parts) == 4:
-                                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
-                                sock.sendto(data, (subnet_broadcast, 9))
-                except:
-                    pass
-                sock.close()
-                self.update_status(_("Đã gửi Wake-On-Lan tới MAC") + f" {m}", is_success=True)
-            except Exception as e:
-                print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
+
 
     # ==================== LAN DISCOVERY (UDP Broadcast) ====================
 

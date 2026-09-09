@@ -47,6 +47,17 @@ AGENT_IPC_PORT = 12400          # 127.0.0.1 only: worker <-> broker
 VIEWER_PORT = 12345             # LAN-direct viewer (Phase 1)
 
 
+def _decrypt_fixed_password(encrypted_text, key="AntigravityP2P"):
+    if not encrypted_text:
+        return ""
+    import base64
+    try:
+        decoded = base64.b64decode(encrypted_text.encode("utf-8")).decode("utf-8")
+        return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(decoded))
+    except Exception:
+        return ""
+
+
 def _app_dir():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -196,13 +207,47 @@ class Broker:
         try:
             p = os.path.join(_app_dir(), "session_pass.txt")
             if os.path.exists(p):
-                with open(p, "r", encoding="utf-8") as f:
+                with open(p, "r", encoding="utf-8-sig") as f:
                     v = f.read().strip()
                     if v:
                         return v
         except Exception as e:
             print(f"[Broker] doc session_pass.txt loi: {e}")
         return None
+
+    def _fixed_password(self):
+        try:
+            xml_path = os.path.join(_app_dir(), "saved_computers.xml")
+            if not os.path.exists(xml_path):
+                return None
+            import xml.etree.ElementTree as ET
+            root = ET.parse(xml_path).getroot()
+            node = root.find("fixed_password")
+            if node is not None and node.text:
+                v = _decrypt_fixed_password(node.text)
+                v = (v or "").strip()
+                return v or None
+        except Exception as e:
+            print(f"[Broker] doc mat khau co dinh loi: {e}")
+        return None
+
+    def _handshake_passwords(self, worker):
+        """Reload session + fixed luc bat tay (khong dung mat khau worker dong bang luc start)."""
+        cands = []
+
+        def add(p):
+            if not p:
+                return
+            p = str(p).strip()
+            if p and p not in cands:
+                cands.append(p)
+
+        if worker:
+            for p in (worker.passwords or []):
+                add(p)
+        add(self._current_password())
+        add(self._fixed_password())
+        return cands
 
     def _next_token(self):
         with self.pending_cv:
@@ -448,27 +493,37 @@ class Broker:
                 print("[Broker] khong co worker de capture.")
                 conn.close(); return
 
-            candidates = list(worker.passwords)
+            candidates = self._handshake_passwords(worker)
             sp = self._current_password()
-            if sp and sp not in candidates:
-                candidates.append(sp)
+            fp = self._fixed_password()
             if not candidates:
                 print("[Broker] Chua co mat khau, tu choi viewer.")
                 conn.close(); return
+            print(f"[Broker] handshake: {len(candidates)} khoa (session={'y' if sp else 'n'} fixed={'y' if fp else 'n'})")
 
             self._tune_viewer_socket(conn)
 
-            socket_passwords[conn] = candidates
-            msg = recv_msg(conn, candidates)
+            decrypt_keys = list(candidates)
+            if APP_KEY not in decrypt_keys:
+                decrypt_keys.append(APP_KEY)
+            socket_passwords[conn] = decrypt_keys
+            msg = recv_msg(conn, decrypt_keys)
             if not msg:
                 print("[Broker] handshake: khong giai ma duoc.")
+                try:
+                    send_msg(conn, json.dumps({
+                        "status": "error",
+                        "message": "Sai mat khau ket noi hoac du lieu khong hop le!"
+                    }).encode("utf-8"), APP_KEY)
+                except Exception:
+                    pass
                 conn.close(); return
             data = json.loads(msg.decode("utf-8"))
             client_pass = data.get("password")
             if client_pass not in candidates:
                 print("[Broker] handshake: sai mat khau.")
                 try:
-                    send_msg(conn, json.dumps({"status": "error", "message": "Sai mat khau"}).encode("utf-8"), candidates[0])
+                    send_msg(conn, json.dumps({"status": "error", "message": "Sai mat khau"}).encode("utf-8"), APP_KEY)
                 except Exception:
                     pass
                 conn.close(); return
@@ -1004,8 +1059,27 @@ def _run_worker_session(app, cmd):
     socket_passwords[ds] = password
 
     print(f"[Worker] Session bat dau token={token} net={net_class} {w}x{h}")
+    clipboard_mgr = None
+    try:
+        from core.clipboard_agent import clipboard_sync_manager as clipboard_mgr
+        if clipboard_mgr:
+            clipboard_mgr.register_app(app)
+            clipboard_mgr.add_socket(ds)
+            print("[Worker] Clipboard gan data socket (text 2 chieu).")
+    except Exception as e:
+        print(f"[Worker] clipboard add_socket: {e}")
+        clipboard_mgr = None
+    def _recv_wrap():
+        try:
+            app.host_receiver_thread(ds, client_state, password)
+        finally:
+            try:
+                if clipboard_mgr:
+                    clipboard_mgr.remove_socket(ds)
+            except Exception:
+                pass
     t_send = threading.Thread(target=app.host_sender_thread, args=(ds, monitor, client_state, password), daemon=True)
-    t_recv = threading.Thread(target=app.host_receiver_thread, args=(ds, client_state, password), daemon=True)
+    t_recv = threading.Thread(target=_recv_wrap, daemon=True)
     t_send.start()
     t_recv.start()
 

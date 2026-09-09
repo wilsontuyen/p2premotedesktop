@@ -232,8 +232,32 @@ class NetworkMixin:
         except Exception as e:
             print(f"[Host] Failed to configure registry for UAC: {e}")
 
-    def wake_on_lan(self, mac_str):
+    def wake_on_lan(self, mac_str, extra_ips=None):
         # mac_str can be multiple MACs separated by comma
+        dest_ips = ["255.255.255.255"]
+        try:
+            local_ips = getattr(self, 'local_ip', get_local_ip()).split(',')
+            for lip in local_ips:
+                lip = lip.strip()
+                if lip and not lip.startswith('127.'):
+                    parts = lip.split('.')
+                    if len(parts) == 4:
+                        dest_ips.append(f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+        except Exception:
+            pass
+        for extra in extra_ips or []:
+            if not extra:
+                continue
+            for ip in str(extra).split(","):
+                ip = ip.strip()
+                if ip and ip not in dest_ips:
+                    dest_ips.append(ip)
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                        if bcast not in dest_ips:
+                            dest_ips.append(bcast)
+        sent_any = False
         for m in mac_str.split(','):
             m = m.strip()
             if not m: continue
@@ -245,26 +269,19 @@ class NetworkMixin:
                 data = bytes.fromhex('F' * 12 + mac * 16)
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                try:
-                    sock.sendto(data, ('255.255.255.255', 9))
-                except:
-                    pass
-                # Try subnet broadcasts
-                try:
-                    local_ips = getattr(self, 'local_ip', get_local_ip()).split(',')
-                    for lip in local_ips:
-                        lip = lip.strip()
-                        if lip and not lip.startswith('127.'):
-                            parts = lip.split('.')
-                            if len(parts) == 4:
-                                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
-                                sock.sendto(data, (subnet_broadcast, 9))
-                except:
-                    pass
+                for ip in dest_ips:
+                    for port in (9, 7):
+                        try:
+                            sock.sendto(data, (ip, port))
+                        except Exception:
+                            pass
                 sock.close()
-                self.update_status(_("Đã gửi Wake-On-Lan tới MAC {mac}").format(mac=m))
+                sent_any = True
+                self.update_status(_("Đã gửi Wake-On-Lan tới MAC {mac}").format(mac=m), is_success=True)
             except Exception as e:
                 print(f"[WOL] Lỗi gửi Wake-On-Lan tới MAC {m}: {e}")
+        if not sent_any:
+            print("[WOL] Không gửi được: MAC trống hoặc không hợp lệ.")
 
     # ==================== LAN DISCOVERY (UDP Broadcast) ====================
     def start_lan_discovery(self):
@@ -377,6 +394,9 @@ class NetworkMixin:
                 with self.lan_peers_lock:
                     old_info = self.lan_peers.get(peer_hwid)
                     is_new = old_info is None
+                    # Beacon rỗng không được xóa MAC đã lưu — WOL cần MAC khi máy đã tắt.
+                    if old_info and not peer_info.get("macs") and old_info.get("macs"):
+                        peer_info["macs"] = old_info["macs"]
                     should_save = is_new or old_info.get("local_ip") != peer_info["local_ip"] or old_info.get("macs") != peer_info["macs"]
                     # Update without erasing history if already saved
                     self.lan_peers[peer_hwid] = peer_info
@@ -554,7 +574,14 @@ class NetworkMixin:
                     if age < LAN_OFFLINE_TIMEOUT:
                         btn = tk.Button(row, text=_("Kết nối"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda h=hwid, i=info: connect_to_peer(h, i))
                     else:
-                        btn = tk.Button(row, text=_("Bật nguồn (WOL)"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg="#D35400", activebackground="#E67E22", relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2", command=lambda m=info.get("macs", ""): self.wake_on_lan(m))
+                        btn = tk.Button(
+                            row, text=_("Bật nguồn (WOL)"), font=("Segoe UI", 9, "bold"),
+                            fg=self.text_white, bg="#D35400", activebackground="#E67E22",
+                            relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2",
+                            command=lambda m=info.get("macs", ""), i=info: self.wake_on_lan(
+                                m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                            ),
+                        )
                         if not info.get("macs"):
                             btn.config(state=tk.DISABLED, bg="#3A3A4A", disabledforeground="#F39C12")
                     btn.pack(side=tk.RIGHT, padx=10, pady=5)

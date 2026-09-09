@@ -194,7 +194,8 @@ class ClipboardEventListener:
             reg_res = user32.RegisterClassExW(ctypes.byref(wndclass))
             log_debug(f"[Listener] RegisterClassExW trả về: {reg_res}")
             
-            self.hwnd = user32.CreateWindowExW(0, wndclass.lpszClassName, "HiddenWindow", 0, 0, 0, 0, 0, ctypes.c_void_p(HWND_MESSAGE), None, wndclass.hInstance, None)
+            # Cửa sổ ẩn thật (không HWND_MESSAGE): message-only thường không nhận WM_CLIPBOARDUPDATE.
+            self.hwnd = user32.CreateWindowExW(0, wndclass.lpszClassName, "HiddenWindow", 0, 0, 0, 0, 0, None, None, wndclass.hInstance, None)
             log_debug(f"[Listener] CreateWindowExW trả về HWND: {self.hwnd}")
             
             try:
@@ -519,6 +520,9 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
             if proc_name in ("vmtoolsd.exe", "vboxtray.exe", "rdpclip.exe", "mstsc.exe", "vncviewer.exe", "teamviewer.exe", "anydesk.exe"):
                 log_debug(f"[check_is_menu_query] Tra ve BACKGROUND: Phat hien {proc_name} dang mo clipboard")
                 return "BACKGROUND"
+            if pid.value == os.getpid():
+                log_debug("[check_is_menu_query] Tra ve BACKGROUND: chinh process nay dang mo clipboard (poll/scanner)")
+                return "BACKGROUND"
     except Exception as e:
         pass
         
@@ -736,6 +740,25 @@ class ClipboardSyncManager:
             hr, data = win32file.ReadFile(pipe_handle, 65536)
             if hr == 0 and data:
                 raw = data.decode('utf-8').strip()
+                if raw.startswith("COPIED_TEXT|"):
+                    parts = raw.split("|", 1)
+                    text = ""
+                    try:
+                        text = json.loads(parts[1]) if len(parts) > 1 else ""
+                    except Exception:
+                        text = parts[1] if len(parts) > 1 else ""
+                    if text and self.active_sockets:
+                        if text != getattr(self, "last_received_text", "") and text != getattr(self, "last_sent_text", ""):
+                            self.last_sent_text = text
+                            pkt = json.dumps({"type": "clipboard_text", "text": text}).encode("utf-8")
+                            with self.lock:
+                                for s in list(self.active_sockets):
+                                    try:
+                                        send_msg(s, pkt)
+                                    except Exception:
+                                        pass
+                            print("[Clipboard] Host→client: đã gửi text từ Clipboard Agent.")
+                    return
                 # Clipboard Agent gửi REQUEST_FILES khi người dùng thực hiện Paste
                 if raw.startswith("REQUEST_FILES"):
                     log_debug("[_handle_uppipe_client] Nhận REQUEST_FILES từ Clipboard Agent. Bắt đầu tải file...")
@@ -825,8 +848,11 @@ class ClipboardSyncManager:
         self._gui_poll_gen = getattr(self, "_gui_poll_gen", 0) + 1
         self.poll_gui_queue(self._gui_poll_gen)
         if getattr(self.app, 'is_headless', False):
-            threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
-            threading.Thread(target=self._start_uppipe_server, daemon=True).start()
+            if not getattr(self, "_uppipe_started", False):
+                self._uppipe_started = True
+                threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
+                threading.Thread(target=self._start_uppipe_server, daemon=True).start()
+                threading.Thread(target=self._host_text_poll_loop, daemon=True, name="HostClipPoll").start()
 
     def _cancel_listener_thread(self):
         import win32event
@@ -851,6 +877,31 @@ class ClipboardSyncManager:
             if rc == win32event.WAIT_OBJECT_0:
                 log_debug("[_cancel_listener_thread] Nhận tín hiệu hủy truyền tải từ Agent.")
                 self.cancel_active_transfer(remote_triggered=False)
+
+    def _host_text_poll_loop(self):
+        """Backup: SYSTEM/worker có thể không nhận WM_CLIPBOARDUPDATE — poll text khi đang có viewer."""
+        last = None
+        while True:
+            time.sleep(0.4)
+            try:
+                if not self.active_sockets:
+                    last = None
+                    continue
+                if getattr(self, "pending_remote_files", None) or getattr(self, "dummy_h_active", False):
+                    continue
+                if getattr(self, "is_rendering", False) or self.transfer_in_progress:
+                    continue
+                text = get_clipboard_text()
+                if not text or text == last:
+                    continue
+                if text == getattr(self, "last_received_text", "") or text == getattr(self, "last_sent_text", ""):
+                    last = text
+                    continue
+                last = text
+                print("[Clipboard] Host poll: phát hiện text mới, gửi sang client.")
+                self._process_clipboard_change_debounced()
+            except Exception:
+                pass
 
     def _send_progress_signal(self, data_type, payload):
         """
@@ -1864,17 +1915,8 @@ class ClipboardSyncManager:
             print("[Clipboard] Đã xóa clipboard theo yêu cầu đối tác.")
             return
 
-        # Text: không ghi đè clipboard máy thật khi user đang làm việc ngoài viewer.
-        # File meta: vẫn nhận khi Explorer đang focus — đó là lúc user paste host→client.
-        if ptype == "clipboard_text":
-            if getattr(self, 'pygame_hwnd', None):
-                user32 = ctypes.windll.user32
-                user32.GetForegroundWindow.restype = ctypes.c_void_p
-                fg_hwnd = user32.GetForegroundWindow()
-                if fg_hwnd != self.pygame_hwnd:
-                    log_debug(f"[handle_received_packet] Bỏ qua clipboard_text do cửa sổ Viewer không được kích hoạt (Giữ clipboard cho máy thật).")
-                    return
-                    
+        # Text host→client: luôn nhận khi đang có phiên viewer (giống RDP).
+        # Nếu chỉ nhận lúc pygame đang focus thì Alt+Tab sang Notepad để dán sẽ mất text. 
         # Nếu đang hủy hoặc đã hủy nhận, bỏ qua các gói tin liên quan đến truyền lô file hiện tại
         if getattr(self, '_receive_cancelled', False) and ptype in ("file_start", "file_chunk", "file_end", "batch_end"):
             log_debug(f"[handle_received_packet] Bỏ qua gói tin {ptype} do tiến trình tải đã bị hủy.")
@@ -2434,11 +2476,13 @@ def run_clipboard_agent_mode():
             return 0
 
         if msg == 0x031D: # WM_CLIPBOARDUPDATE
-            if _ignore_destroy:
+            if _ignore_destroy or _pending_info or _is_rendering:
                 return 0
             def _send_clipboard():
                 import time
                 time.sleep(0.2) # wait for clipboard to settle
+                if _pending_info or _is_rendering:
+                    return
                 files = get_clipboard_files()
                 if files:
                     try:
@@ -2452,6 +2496,20 @@ def run_clipboard_agent_mode():
                         agent_print(f"[ClipboardAgent] Đã gửi {len(files)} COPIED_FILES cho Service.")
                     except Exception as e:
                         agent_print(f"Failed to send COPIED_FILES: {e}")
+                    return
+                text = get_clipboard_text()
+                if text:
+                    try:
+                        import win32pipe, win32file, json
+                        pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
+                        win32pipe.WaitNamedPipe(pipe_name, 5000)
+                        pipe_handle = win32file.CreateFile(pipe_name, win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, 0, None)
+                        msg = "COPIED_TEXT|" + json.dumps(text)
+                        win32file.WriteFile(pipe_handle, msg.encode('utf-8'))
+                        win32file.CloseHandle(pipe_handle)
+                        agent_print("[ClipboardAgent] Đã gửi COPIED_TEXT cho Service.")
+                    except Exception as e:
+                        agent_print(f"Failed to send COPIED_TEXT: {e}")
             threading.Thread(target=_send_clipboard, daemon=True).start()
             return 0
 
@@ -2619,11 +2677,15 @@ def run_clipboard_agent_mode():
         hwnd = user32.CreateWindowExW(
             0, cls_name, "ClipboardAgent",
             0, 0, 0, 0, 0,
-            ctypes.c_void_p(-3),  # HWND_MESSAGE
-            None, wc.hInstance, None
+            None, None, wc.hInstance, None
         )
         _agent_hwnd = hwnd
         agent_print(f"[ClipboardAgent] Window ẩn đã tạo. HWND={hwnd}")
+        try:
+            add_ok = user32.AddClipboardFormatListener(ctypes.c_void_p(hwnd))
+            agent_print(f"[ClipboardAgent] AddClipboardFormatListener={add_ok}")
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] AddClipboardFormatListener lỗi: {e}")
 
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
@@ -2632,6 +2694,33 @@ def run_clipboard_agent_mode():
 
     threading.Thread(target=_create_agent_window, daemon=True, name="AgentWin32MsgLoop").start()
     time.sleep(0.1)  # Chờ window khởi tạo
+
+    def _agent_text_poll_loop():
+        last = None
+        while True:
+            time.sleep(0.45)
+            try:
+                if _pending_info or _is_rendering:
+                    continue
+                # Không gọi get_clipboard_files: GetClipboardData(CF_HDROP) kích delayed-render = Paste giả.
+                text = get_clipboard_text()
+                if not text or text == last:
+                    continue
+                try:
+                    import win32pipe, win32file, json
+                    pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
+                    win32pipe.WaitNamedPipe(pipe_name, 800)
+                    pipe_handle = win32file.CreateFile(pipe_name, win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, 0, None)
+                    win32file.WriteFile(pipe_handle, ("COPIED_TEXT|" + json.dumps(text)).encode("utf-8"))
+                    win32file.CloseHandle(pipe_handle)
+                    last = text
+                    agent_print("[ClipboardAgent] Poll: đã gửi COPIED_TEXT.")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    threading.Thread(target=_agent_text_poll_loop, daemon=True, name="AgentClipPoll").start()
 
     def trigger_cancel():
         """Giải phóng luồng chờ WM_RENDERFORMAT và xóa trạng thái pending."""

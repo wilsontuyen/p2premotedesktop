@@ -154,8 +154,33 @@ def setup_clipboard_exclusions():
         log_debug(msg)
 
 
+_SYNC_CLIPBOARD_WND_CLASSES = (
+    "AntigravityClipboardAgentWnd",
+    "AntigravityClipboardSyncWnd",
+    "HiddenClipboardListener",
+)
+
+
+def _clipboard_owned_by_sync_window():
+    """True nếu clipboard đang do cửa sổ delayed-render của app sở hữu.
+    Không được GetClipboardData trong trường hợp này — sẽ kích WM_RENDERFORMAT
+    như một lần Paste giả và tải file trước khi user dán."""
+    try:
+        user32 = ctypes.windll.user32
+        owner = user32.GetClipboardOwner()
+        if not owner:
+            return False
+        cls_buffer = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(owner, cls_buffer, 256)
+        return cls_buffer.value in _SYNC_CLIPBOARD_WND_CLASSES
+    except Exception:
+        return False
+
+
 def get_clipboard_files(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return []
+    if _clipboard_owned_by_sync_window():
+        return []
     paths = []
     
     # 1. Mở Clipboard trước
@@ -255,13 +280,8 @@ def get_clipboard_text(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return None
     text = None
     try:
-        user32 = ctypes.windll.user32
-        owner = user32.GetClipboardOwner()
-        if owner:
-            cls_buffer = ctypes.create_unicode_buffer(256)
-            user32.GetClassNameW(owner, cls_buffer, 256)
-            if cls_buffer.value in ("AntigravityClipboardAgentWnd", "AntigravityClipboardSyncWnd"):
-                return None
+        if _clipboard_owned_by_sync_window():
+            return None
                 
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
