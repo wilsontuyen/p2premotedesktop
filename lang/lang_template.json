@@ -180,7 +180,7 @@
     "Mã ID của bạn:": "Mã ID của bạn:",
     "Mạng LAN": "Mạng LAN",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "Mất kết nối toàn bộ Signaling Server. Đang thử lại...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "Mất kết nối. Đang thử kết nối lại lần {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "Đang thử kết nối lại lần {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "Mất kết nối. Đang thử kết nối lại... ",
     "Mật khẩu (Password)": "Mật khẩu (Password)",
     "Mật khẩu cố định": "Mật khẩu cố định",

@@ -172,7 +172,7 @@
     "Mã ID của bạn:": "Votre ID :",
     "Mạng LAN": "Réseau LAN",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "Perte de connexion à tous les serveurs Signaling. Tentative...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "Perte de connexion. Tentative de reconnexion {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "Tentative de reconnexion {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "Perte de connexion. Tentative de reconnexion... ",
     "Mật khẩu (Password)": "Mot de passe",
     "Mật khẩu cố định": "Mot de passe permanent",

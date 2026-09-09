@@ -172,7 +172,7 @@
     "Mã ID của bạn:": "귀하의 ID:",
     "Mạng LAN": "LAN 네트워크",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "모든 Signaling 서버 연결이 끊겼습니다. 재시도 중...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "연결 끊김. 재연결 시도 중 {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "재연결 시도 중 {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "연결 끊김. 재시도 중...",
     "Mật khẩu (Password)": "비밀번호 (Password)",
     "Mật khẩu cố định": "고정 비밀번호",

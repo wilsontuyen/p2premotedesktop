@@ -172,7 +172,7 @@
     "Mã ID của bạn:": "Ваш ID:",
     "Mạng LAN": "Локальная сеть",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "Потеряно соединение со всеми Signaling-серверами. Повтор...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "Соединение потеряно. Попытка переподключения {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "Попытка переподключения {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "Соединение потеряно. Повтор...",
     "Mật khẩu (Password)": "Пароль (Password)",
     "Mật khẩu cố định": "Постоянный пароль",

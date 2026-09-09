@@ -172,7 +172,7 @@
     "Mã ID của bạn:": "您的 ID：",
     "Mạng LAN": "局域网 (LAN)",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "与所有 Signaling 服务器断开连接。正在重试...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "连接丢失。正在尝试重连 {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "正在尝试重连 {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "连接丢失。正在重试...",
     "Mật khẩu (Password)": "密码 (Password)",
     "Mật khẩu cố định": "固定密码",

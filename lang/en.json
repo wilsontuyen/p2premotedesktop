@@ -172,7 +172,7 @@
     "Mã ID của bạn:": "Your ID:",
     "Mạng LAN": "LAN",
     "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "Lost connection to all Signaling Servers. Retrying...",
-    "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "Connection lost. Retrying connection attempt {count}/30...",
+    "Đang thử kết nối lại lần {count}/30...": "Retrying connection attempt {count}/30...",
     "Mất kết nối. Đang thử kết nối lại... ": "Connection lost. Retrying... ",
     "Mật khẩu (Password)": "Password",
     "Mật khẩu cố định": "Permanent password",

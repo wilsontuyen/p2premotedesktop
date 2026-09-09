@@ -45,11 +45,11 @@ def _handshake_is_android(res):
 
 
 def client_android_speed_test(sock, password, status_cb=None):
-    """Protocol cũ (trước refactor): 2 vòng ping + dummy RAW rồi speed_test_result.
+    """Mở khóa startFrameSender trên host Android.
 
-    Host Android (DataTransferClient.runBandwidthTest) chỉ gọi startFrameSender
-    sau khi xong đúng sequence này. Bản refactor bỏ đo trên LAN / chỉ 1 vòng
-    → Android kẹt ở bandwidth test, không gửi JPEG → viewer trắng.
+    Handshake Android gọi triggerFullFrame() (xóa lastJpegBytes). Trong lúc
+    đọc dummy, ImageReader kịp ghi lại JPEG cache. Gửi result quá sớm
+    → FrameSender vào lúc cache trống, phải đợi capture mới (chậm hơn).
     """
     def _status(msg):
         if status_cb:
@@ -61,54 +61,42 @@ def client_android_speed_test(sock, password, status_cb=None):
     net_class, avg_ping, bandwidth = "medium", 50.0, 10.0
     try:
         sock.settimeout(8.0)
-        runs = []
-        for run_idx in range(2):
-            _status(_("Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần {n}/2...").format(n=run_idx + 1))
-            rtts = []
-            for _ in range(3):
-                t0 = time.time()
-                send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode("utf-8"), password)
-                pong_msg = recv_msg(sock, password)
-                if pong_msg:
-                    try:
-                        pong_data = json.loads(pong_msg.decode("utf-8"))
-                    except Exception:
-                        pong_data = {}
-                    if pong_data.get("action") == "speed_test_pong":
-                        rtts.append(time.time() - t0)
-                time.sleep(0.05)
-            run_ping = (sum(rtts) / len(rtts)) * 1000.0 if rtts else 50.0
+        _status(_("Đang kiểm tra chất lượng mạng..."))
+        t0 = time.time()
+        send_msg(sock, json.dumps({"action": "speed_test_ping"}).encode("utf-8"), password)
+        pong_msg = recv_msg(sock, password)
+        if pong_msg:
+            try:
+                pong_data = json.loads(pong_msg.decode("utf-8"))
+            except Exception:
+                pong_data = {}
+            if pong_data.get("action") == "speed_test_pong":
+                avg_ping = (time.time() - t0) * 1000.0
 
-            run_bw = 10.0
-            send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode("utf-8"), password)
-            bw_start_msg = recv_msg(sock, password)
-            if bw_start_msg:
-                try:
-                    bw_start_data = json.loads(bw_start_msg.decode("utf-8"))
-                except Exception:
-                    bw_start_data = {}
-                if bw_start_data.get("action") == "speed_test_bw_start":
-                    dummy_size = int(bw_start_data.get("size", 1572864))
-                    dummy_size = max(1024, min(dummy_size, 1572864))
-                    got = b""
-                    while len(got) < dummy_size:
-                        chunk = sock.recv(min(65536, dummy_size - len(got)))
-                        if not chunk:
-                            break
-                        got += chunk
-                    if len(got) == dummy_size:
-                        run_bw = 100.0
-            runs.append((run_ping, run_bw))
-            if run_idx == 0:
-                time.sleep(0.2)
+        send_msg(sock, json.dumps({"action": "speed_test_bw_req"}).encode("utf-8"), password)
+        bw_start_msg = recv_msg(sock, password)
+        if bw_start_msg:
+            try:
+                bw_start_data = json.loads(bw_start_msg.decode("utf-8"))
+            except Exception:
+                bw_start_data = {}
+            if bw_start_data.get("action") == "speed_test_bw_start":
+                dummy_size = int(bw_start_data.get("size", 1572864))
+                dummy_size = max(1024, min(dummy_size, 1572864))
+                got = b""
+                t_bw = time.time()
+                while len(got) < dummy_size:
+                    chunk = sock.recv(min(65536, dummy_size - len(got)))
+                    if not chunk:
+                        break
+                    got += chunk
+                dur = time.time() - t_bw
+                if dur > 0 and len(got) == dummy_size:
+                    bandwidth = (dummy_size * 8.0) / (dur * 1024.0 * 1024.0)
 
-        if runs:
-            best_run = max(runs, key=lambda x: x[1])
-            avg_ping = best_run[0]
-            bandwidth = best_run[1]
-        if bandwidth > 20.0 and avg_ping < 10.0:
+        if bandwidth > 20.0 and avg_ping < 30.0:
             net_class = "high"
-        elif bandwidth < 5.0 or avg_ping > 50.0:
+        elif bandwidth < 5.0 or avg_ping > 80.0:
             net_class = "low"
         else:
             net_class = "medium"
@@ -1217,7 +1205,7 @@ class NetworkMixin:
                     
             if not signaling_success:
                 if reconnect_queue and retry_count < 30:
-                    status_msg = _("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+                    status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
                     try: reconnect_queue.put(f"STATUS|{status_msg}")
                     except: pass
                     time.sleep(2)
@@ -1469,7 +1457,7 @@ class NetworkMixin:
                 socket_passwords.pop(sock, None)
         except Exception as e:
             if reconnect_queue and retry_count < 30:
-                status_msg = _("Mất kết nối. Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+                status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
                 try: reconnect_queue.put(f"STATUS|{status_msg}")
                 except: pass
                 if sock:
