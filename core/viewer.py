@@ -471,11 +471,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             last_full_frame_req = time.time()
             android_full_frame_tries = 0
             globals()['viewer_cover_state'] = False
-
-            # Android: FrameSender đã gửi JPEG cache trong lúc spawn viewer.
-            # Mở receiver trước Tk để lấy frame đó ngay, không chờ hidden_root.
-            t = threading.Thread(target=client_receiver_thread, args=(sock, partner_pass), daemon=True)
-            t.start()
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
@@ -502,6 +497,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             ensure_session_socket_blocking(sock)
             if clipboard_sync_manager:
                 clipboard_sync_manager.register_app(hidden_root)
+            
+            # Start receiver thread
+            t = threading.Thread(target=client_receiver_thread, args=(sock, partner_pass), daemon=True)
+            t.start()
             
             # Gắn kết socket vào trình quản lý Event Listener của Clipboard
             if clipboard_sync_manager:
@@ -572,7 +571,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
             if is_android:
                 send_event({"type": "request_read_text_file", "path": "/sys/block/mmcblk0/device/serial"})
-                send_event({"type": "request_cached_frame"})
                 
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
@@ -993,13 +991,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 with client_frame_lock:
                     frame_to_draw = client_latest_frame
 
+                # Chỉ xin frame mới khi đã chờ lâu — request_full_frame trên Android
+                # xóa JPEG cache, màn đứng im phải đợi VirtualDisplay tạo frame mới.
                 if is_android and frame_to_draw is None and android_full_frame_tries < 2:
                     now_req = time.time()
                     if now_req - last_full_frame_req >= 4.0:
                         send_event({"type": "request_full_frame"})
                         last_full_frame_req = now_req
                         android_full_frame_tries += 1
-
+                    
                 if frame_to_draw is not None:
                     try:
                         frame_to_draw = _pil_to_rgb(frame_to_draw)
@@ -1009,7 +1009,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                         if w == window_w and h == window_h:
                             scaled_surf = surf
-                        elif is_android or w >= window_w or h >= window_h:
+                        elif w >= window_w and h >= window_h:
                             scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
                         else:
                             scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
@@ -1337,7 +1337,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     reconnect_queue.put("RECONNECT_REQUEST|LOGIN" if session_handoff else "RECONNECT_REQUEST")
                 except: pass
                 
-                status_msg_text = _("Đang thử kết nối lại lần {count}/30...").format(count=1)
+                status_msg_text = None
                 
                 while countdown > 0 and outer_running:
                     for event in pygame.event.get():

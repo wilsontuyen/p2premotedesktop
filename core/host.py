@@ -356,7 +356,7 @@ def _host_wts_phase_listener():
         wc.lpszClassName = "EasyRDHostWTSPhase"
         user32.RegisterClassW(ctypes.byref(wc))
         hwnd = user32.CreateWindowExW(
-            0, wc.lpszClassName, "", 0, 0, 0, 0, 0, wintypes.HWND(-3), None, wc.hInstance, None
+            0, wc.lpszClassName, "EasyRDHostWTSPhase", 0, 0, 0, 0, 0, 0, None, wc.hInstance, None
         )
         if not hwnd:
             print(f"[Host] WTS phase listener: CreateWindowExW failed err={ctypes.get_last_error()}")
@@ -985,10 +985,10 @@ def _winlogon_grab_loop():
             except Exception:
                 pass
 
-def grab_secure_desktop_bgr():
-    """Luôn capture từ thread đã SetThreadDesktop(Winlogon) — DXGI Default hay trả về đen."""
+def _ensure_winlogon_grab_thread():
+    """Gắn thread Winlogon từ lúc worker start — Sign out không chờ SetThreadDesktop."""
     if sys.platform != "win32":
-        return _grab_secure_desktop_bgr_here()
+        return
     global _winlogon_grab_thread
     with _winlogon_grab_lock:
         if _winlogon_grab_thread is None or not _winlogon_grab_thread.is_alive():
@@ -996,6 +996,12 @@ def grab_secure_desktop_bgr():
                 target=_winlogon_grab_loop, name="WinlogonGrab", daemon=True
             )
             _winlogon_grab_thread.start()
+
+def grab_secure_desktop_bgr():
+    """Luôn capture từ thread đã SetThreadDesktop(Winlogon) — DXGI Default hay trả về đen."""
+    if sys.platform != "win32":
+        return _grab_secure_desktop_bgr_here()
+    _ensure_winlogon_grab_thread()
     try:
         while True:
             try:
@@ -1797,9 +1803,15 @@ class HostMixin:
                             if not _legacy_host:
                                 want_logon = _should_capture_logon_ui()
                                 thread_desk = get_desktop_name()
-                                if want_logon and dx_cams:
-                                    print("[Host] Signing out/logon: drop DXGI, keep PrintWindow loop on Winlogon.")
-                                    break
+                                if want_logon:
+                                    # PrintWindow ngay frame này. Không break DXGI trước — teardown
+                                    # DXGI mất trăm ms và nuốt man Signing out.
+                                    client_state["_secure_frames"] = client_state.get("_secure_frames", 0) + 1
+                                    if dx_cams and client_state["_secure_frames"] > 8:
+                                        print("[Host] Signing out/logon: drop DXGI after Winlogon frames.")
+                                        break
+                                else:
+                                    client_state["_secure_frames"] = 0
                                 if (not want_logon) and thread_desk == "winlogon":
                                     print("[Host] Explorer/Default ready. Dropping Winlogon capture to show desktop.")
                                     client_state["force_update"] = True

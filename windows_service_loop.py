@@ -8,6 +8,8 @@ import win32profile
 import sys
 import os
 import time
+import json
+import socket
 import traceback
 import threading
 
@@ -40,6 +42,29 @@ def _broker_mode_enabled():
 
 BROKER_MODE = _broker_mode_enabled()
 broker_pid = None
+BROKER_IPC_PORT = 12400
+
+def notify_broker_session_event(kind, session_id):
+    """Bao broker/worker Default: PrintWindow Winlogon ngay, khong cho spawn process moi."""
+    if not BROKER_MODE:
+        return
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect(("127.0.0.1", BROKER_IPC_PORT))
+        payload = json.dumps({
+            "role": "session_event",
+            "kind": kind,
+            "session": int(session_id) if session_id is not None else 0,
+        }) + "\n"
+        s.sendall(payload.encode("utf-8"))
+        try:
+            s.close()
+        except Exception:
+            pass
+        log(f"Đã báo broker session_event={kind} session={session_id}")
+    except Exception as e:
+        log(f"Báo broker {kind} thất bại: {e}")
 
 def log(msg):
     try:
@@ -530,10 +555,15 @@ def service_events_listener_thread():
 _session_event_lock = threading.Lock()
 _session_events = []
 _wts_wndproc_ref = None
+_wake_service = threading.Event()
 
 def _push_session_event(kind, session_id):
     with _session_event_lock:
         _session_events.append({"kind": kind, "session_id": int(session_id), "ts": time.time()})
+    _wake_service.set()
+    # Bao worker ngay trong callback WTS — không đợi vòng lặp service (sleep 1s).
+    if kind in ("logoff", "lock", "interactive"):
+        notify_broker_session_event(kind, session_id)
 
 def pop_session_events():
     with _session_event_lock:
@@ -581,7 +611,6 @@ def wts_session_notification_thread():
 
     WM_WTSSESSION_CHANGE = 0x02B1
     WM_DESTROY = 0x0002
-    HWND_MESSAGE = wintypes.HWND(-3)
     names = {
         1: "console_connect",
         2: "console_disconnect",
@@ -621,10 +650,10 @@ def wts_session_notification_thread():
         return
     hwnd = user32.CreateWindowExW(
         0, wc.lpszClassName, "EasyRDWTSNotify", 0,
-        0, 0, 0, 0, HWND_MESSAGE, None, wc.hInstance, None
+        0, 0, 0, 0, 0, None, wc.hInstance, None
     )
     if not hwnd:
-        log(f"CreateWindowExW message-only thất bại: {ctypes.get_last_error()}")
+        log(f"CreateWindowExW WTS notify thất bại: {ctypes.get_last_error()}")
         return
     if not wtsapi32.WTSRegisterSessionNotification(hwnd, 1):
         log(f"WTSRegisterSessionNotification thất bại: {ctypes.get_last_error()}")
@@ -707,6 +736,7 @@ def main():
     in_signing_out = False
     in_lock_transition = False
     last_agent_spawn_ts = 0.0
+    last_winlogon_spawn_ts = 0.0
     winlogon_standby_pid = None
 
     while True:
@@ -717,7 +747,8 @@ def main():
             active_session_id = get_active_session_id()
             if active_session_id == 0xFFFFFFFF or active_session_id == -1:
                 # Khoảng console_disconnect → connect: không ngủ 5s (hụt màn Signing out).
-                time.sleep(0.15)
+                _wake_service.wait(0.15)
+                _wake_service.clear()
                 continue
 
             # Check if user is logged in
@@ -735,13 +766,35 @@ def main():
             for ev in pop_session_events():
                 kind = ev.get("kind")
                 if kind == "logoff":
-                    # Signing out: token/user desktop còn, LogonUI chưa chắc đã chạy.
+                    # Signing out: Default còn sống nhưng UI đã sang Winlogon (thường
+                    # session mới). Spawn Winlogon ngay, không đợi mutex Default mất.
                     force_logoff_until = time.time() + 20.0
                     lock_pending_until = 0.0
                     log(
                         f"WTS_SESSION_LOGOFF session={ev.get('session_id')}: "
-                        "giữ Agent, vòng capture PrintWindow trên Winlogon (không kill)."
+                        "spawn Winlogon song song (không kill Default)."
                     )
+                    if BROKER_MODE:
+                        sids = []
+                        try:
+                            ev_sid = int(ev.get("session_id"))
+                        except Exception:
+                            ev_sid = None
+                        # Session cu truoc, session active (moi) sau — worker moi dang ky last-wins.
+                        if ev_sid not in (None, 0xFFFFFFFF, -1, 0):
+                            sids.append(ev_sid)
+                        if active_session_id not in (None, 0xFFFFFFFF, -1, 0) and active_session_id not in sids:
+                            sids.append(active_session_id)
+                        for sid in sids:
+                            if agent_mutex_present(sid, "winlogon"):
+                                log(f"Winlogon worker đã có mutex session={sid}, không spawn lại.")
+                                continue
+                            log(f"LOGOFF: spawn Winlogon ngay session={sid}")
+                            pid = spawn_agent(sid, False, True, force_winlogon=True)
+                            last_winlogon_spawn_ts = time.time()
+                            if pid:
+                                current_agent_pid = pid
+                                last_agent_spawn_ts = time.time()
                 elif kind == "lock":
                     # Khóa máy: LogonUI, không phải khoảng Signing out.
                     lock_pending_until = time.time() + 8.0
@@ -762,8 +815,15 @@ def main():
                 if BROKER_MODE:
                     # Worker cũ chết theo session Windows. Không taskkill — broker giữ
                     # viewer; chỉ quên PID cũ để spawn worker session mới ngay.
+                    # Neu vua spawn Winlogon tren session MOI (LOGOFF), giu PID do.
+                    already_new_winlogon = (
+                        current_agent_pid
+                        and is_process_alive(current_agent_pid)
+                        and agent_mutex_present(active_session_id, "winlogon")
+                    )
                     log(f"Session ID đổi {last_session_id} -> {active_session_id}. Broker: spawn worker mới (không kill).")
-                    current_agent_pid = None
+                    if not already_new_winlogon:
+                        current_agent_pid = None
                     if gui_agent_pid:
                         terminate_process_with_pid(gui_agent_pid)
                         gui_agent_pid = None
@@ -840,14 +900,36 @@ def main():
                 current_agent_pid = None
 
             if in_signing_out:
-                agent_running = (
-                    agent_mutex_present(active_session_id, "default")
-                    or agent_mutex_present(active_session_id, "winlogon")
-                )
+                # Mutex Default van con luc logoff KHONG du — Signing Out o Winlogon.
+                agent_running = agent_mutex_present(active_session_id, "winlogon")
             else:
                 agent_running = agent_mutex_present(active_session_id, target_desktop)
 
-            if not agent_running:
+            need_winlogon_parallel = (
+                BROKER_MODE
+                and in_signing_out
+                and not agent_mutex_present(active_session_id, "winlogon")
+            )
+
+            if need_winlogon_parallel:
+                if last_winlogon_spawn_ts and (time.time() - last_winlogon_spawn_ts) < 1.0:
+                    pass
+                else:
+                    log(
+                        f"Signing out: spawn Winlogon song song session {active_session_id} "
+                        f"(Default vẫn sống={agent_mutex_present(active_session_id, 'default')})"
+                    )
+                    pid = spawn_agent(
+                        active_session_id,
+                        is_logged_in,
+                        True,
+                        force_winlogon=True,
+                    )
+                    last_winlogon_spawn_ts = time.time()
+                    if pid:
+                        current_agent_pid = pid
+                        last_agent_spawn_ts = time.time()
+            elif not agent_running:
                 other_desk = "winlogon" if target_desktop == "default" else "default"
                 has_other = agent_mutex_present(active_session_id, other_desk)
                 live = current_agent_pid and is_process_alive(current_agent_pid)
@@ -889,6 +971,8 @@ def main():
                     if pid:
                         current_agent_pid = pid
                         last_agent_spawn_ts = time.time()
+                        if want_winlogon:
+                            last_winlogon_spawn_ts = time.time()
 
             # Clipboard: không chạy lúc lock, cũng không lúc Signing out.
             if is_logged_in and not is_screen_locked and not in_signing_out:
@@ -932,11 +1016,9 @@ def main():
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")
 
-        # Sign-out / logon: poll nhanh hơn để agent Winlogon lên kịp màn hình khóa.
-        if not is_logged_in or is_screen_locked or in_signing_out or in_lock_transition:
-            time.sleep(0.15)
-        else:
-            time.sleep(1)
+        # Sign-out / logon: WTS callback đánh thức ngay (đừng sleep 1s lúc desktop bình thường).
+        _wake_service.wait(0.15 if (not is_logged_in or is_screen_locked or in_signing_out or in_lock_transition) else 1.0)
+        _wake_service.clear()
 
 if __name__ == '__main__':
     main()

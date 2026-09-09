@@ -119,9 +119,13 @@ class Worker:
 class Broker:
     def __init__(self):
         self.active_worker = None            # Worker hien dang capture
+        self.workers = []                    # tat ca worker control (broadcast logoff)
         self.worker_lock = threading.Lock()
         self.pending_data = {}               # token -> data socket (worker vua mo)
         self.pending_cv = threading.Condition()
+        self.handoff_gen = 0                 # tang khi can doi data channel ngay
+        self.live_data_socks = []            # data sock dang relay — dong de unblocking _read_frame
+        self.live_data_lock = threading.Lock()
         self._token_seq = 0
         self._nonce_seq = int(time.time()) & 0xFFFF
         self.identity = {"hwid": "", "computer_name": "", "local_ip": "", "macs": ""}
@@ -240,6 +244,10 @@ class Broker:
                 with self.pending_cv:
                     self.pending_data[token] = conn
                     self.pending_cv.notify_all()
+            elif role == "session_event":
+                self._on_session_event(info)
+                try: conn.close()
+                except: pass
             else:
                 conn.close()
         except Exception as e:
@@ -247,14 +255,63 @@ class Broker:
             try: conn.close()
             except: pass
 
+    def _bump_handoff(self, reason=""):
+        """Dong data sock hien tai de _relay_loop gan ngay worker moi (Signing out)."""
+        with self.live_data_lock:
+            self.handoff_gen += 1
+            socks = list(self.live_data_socks)
+            self.live_data_socks = []
+        for s in socks:
+            try:
+                s.close()
+            except Exception:
+                pass
+        print(f"[Broker] Handoff gen={self.handoff_gen} {reason} (dong {len(socks)} data sock)")
+
+    def _track_data_sock(self, sock):
+        if sock is None:
+            return
+        with self.live_data_lock:
+            self.live_data_socks.append(sock)
+
+    def _untrack_data_sock(self, sock):
+        if sock is None:
+            return
+        with self.live_data_lock:
+            try:
+                self.live_data_socks.remove(sock)
+            except ValueError:
+                pass
+
+    def _broadcast_workers(self, obj):
+        with self.worker_lock:
+            workers = [w for w in self.workers if w.alive]
+        for w in workers:
+            w.send_cmd(obj)
+
+    def _on_session_event(self, info):
+        """Service bao WTS logoff/lock — worker Default phai PrintWindow ngay."""
+        kind = (info.get("kind") or "").lower()
+        sid = info.get("session")
+        print(f"[Broker] session_event kind={kind} session={sid}")
+        if kind == "logoff":
+            self._broadcast_workers({"cmd": "session_phase", "phase": "logoff"})
+        elif kind == "lock":
+            self._broadcast_workers({"cmd": "session_phase", "phase": "lock"})
+        elif kind in ("interactive", "logon", "unlock"):
+            self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
+
     def _register_worker(self, conn, info):
         w = Worker(conn, info)
         with self.worker_lock:
             old = self.active_worker
             self.active_worker = w
+            self.workers.append(w)
         print(f"[Broker] Worker moi active: pid={w.pid} session={w.session} "
               f"desktop={w.desktop} {w.width}x{w.height}"
               + (f" (thay pid={old.pid})" if old else ""))
+        # Khong handoff ngay khi Winlogon dang ky: process moi chua kip gui frame.
+        # Default PrintWindow Signing out; doi data sock Default chet roi moi gan worker moi.
         # Giu control socket song; neu worker chet, doc se loi -> danh dau
         try:
             while True:
@@ -272,6 +329,7 @@ class Broker:
             pass
         w.alive = False
         with self.worker_lock:
+            self.workers = [x for x in self.workers if x is not w]
             if self.active_worker is w:
                 # khong xoa active_worker ngay: co the worker moi chua ket noi
                 pass
@@ -501,6 +559,7 @@ class Broker:
                         ds.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     except Exception:
                         pass
+                    self._track_data_sock(ds)
                     return ds, w
                 time.sleep(0.2)
             return None, None
@@ -559,7 +618,9 @@ class Broker:
                     break
 
         def worker_to_viewer():
+            import select
             dead_worker = None
+            local_gen = self.handoff_gen
             while not stop.is_set():
                 try:
                     ds = data_holder["sock"]
@@ -573,11 +634,29 @@ class Broker:
                         data_holder["sock"] = ds
                         data_holder["worker"] = w
                         dead_worker = None
+                        local_gen = self.handoff_gen
                         print(f"[Broker] Data channel san sang cho viewer {addr[0]} (worker pid={getattr(w,'pid',None)}).")
+                    if self.handoff_gen != local_gen:
+                        print(f"[Broker] Handoff gen doi, ngat data channel hien tai cho {addr[0]}...")
+                        dead_worker = data_holder.get("worker")
+                        self._untrack_data_sock(ds)
+                        try: ds.close()
+                        except: pass
+                        data_holder["sock"] = None
+                        data_holder["worker"] = None
+                        local_gen = self.handoff_gen
+                        continue
+                    try:
+                        r, _w, _e = select.select([ds], [], [], 0.2)
+                    except Exception:
+                        r = [ds]
+                    if not r:
+                        continue
                     frame = _read_frame(ds)
                     if frame is None:
                         print(f"[Broker] Data channel dut, handoff worker moi cho {addr[0]}...")
                         dead_worker = data_holder.get("worker")
+                        self._untrack_data_sock(ds)
                         try: ds.close()
                         except: pass
                         data_holder["sock"] = None
@@ -594,6 +673,7 @@ class Broker:
                     dead_worker = data_holder.get("worker")
                     try:
                         ds = data_holder.get("sock")
+                        self._untrack_data_sock(ds)
                         if ds:
                             ds.close()
                     except Exception:
@@ -933,6 +1013,12 @@ def _run_worker_session(app, cmd):
 def run_capture_worker(app):
     """Vong lap worker: giu ket noi control toi broker, nhan lenh start/stop."""
     print(f"\n--- Capture worker started at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+    try:
+        from core.host import _ensure_host_wts_phase_listener, _ensure_winlogon_grab_thread
+        _ensure_host_wts_phase_listener()
+        _ensure_winlogon_grab_thread()
+    except Exception as e:
+        print(f"[Worker] WTS/Winlogon grab: {e}")
     while True:
         ctrl = None
         try:
@@ -977,6 +1063,14 @@ def run_capture_worker(app):
                     continue
                 if cmd.get("cmd") == "start_session":
                     _run_worker_session(app, cmd)
+                elif cmd.get("cmd") == "session_phase":
+                    try:
+                        from core.host import _wts_phase
+                        ph = cmd.get("phase") or "none"
+                        _wts_phase(ph)
+                        print(f"[Worker] session_phase={ph} (tu broker/service)")
+                    except Exception as e:
+                        print(f"[Worker] session_phase: {e}")
         except Exception as e:
             print(f"[Worker] control loi: {e}")
         finally:
