@@ -300,33 +300,10 @@ class ClipboardEventListener:
                 EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                 None, self.wineventproc_c, 0, 0, WINEVENT_OUTOFCONTEXT
             )
+            # Không cài WH_KEYBOARD_LL / WH_MOUSE_LL trên viewer/client:
+            # hook nằm cùng thread GetMessage (OpenClipboard/RENDERFORMAT) sẽ treo chuột+phím
+            # cả máy local (vd. F2 đổi tên trong Explorer). Agent host vẫn cài LL hook riêng.
 
-            def _stamp_ctrl_v():
-                if not self.manager:
-                    return
-                self.manager.last_ctrl_v_time = time.time()
-                if getattr(self.manager, "dummy_h_active", False):
-                    self.manager.dummy_h_active = False
-                    self.manager.setup_delayed_rendering()
-
-            def _stamp_lbutton():
-                if not self.manager:
-                    return
-                self.manager.last_lbutton_time = time.time()
-                if getattr(self.manager, "dummy_h_active", False):
-                    self.manager.dummy_h_active = False
-                    self.manager.setup_delayed_rendering()
-
-            def _stamp_rbutton():
-                if not self.manager:
-                    return
-                self.manager.last_rbutton_time = time.time()
-                if getattr(self.manager, "dummy_h_active", False):
-                    self.manager.dummy_h_active = False
-                    self.manager.setup_delayed_rendering()
-
-            _install_paste_ll_hooks(_stamp_ctrl_v, _stamp_lbutton, _stamp_rbutton)
-            
             msg = wintypes.MSG()
             while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
                 user32.TranslateMessage(ctypes.byref(msg))
@@ -777,18 +754,17 @@ class _MSLLHOOKSTRUCT(ctypes.Structure):
 
 
 _HOOKPROC = ctypes.WINFUNCTYPE(LRESULT_64, ctypes.c_int, WPARAM_64, LPARAM_64)
+_CallNextHookEx = ctypes.WINFUNCTYPE(
+    LRESULT_64, ctypes.c_void_p, ctypes.c_int, WPARAM_64, LPARAM_64
+)(("CallNextHookEx", ctypes.windll.user32))
 
 
 def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
-    """Hook bàn phím/chuột mức thấp — poll 50ms hay bỏ lỡ Ctrl+V inject từ viewer."""
+    """Hook LL chỉ cho clipboard-agent (host). Callback phải PostMessage, không OpenClipboard."""
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
-    try:
-        user32.SetWindowsHookExW.restype = ctypes.c_void_p
-        user32.CallNextHookEx.restype = LRESULT_64
-        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
-    except Exception:
-        pass
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    user32.SetWindowsHookExW.restype = ctypes.c_void_p
 
     def _kb(nCode, wParam, lParam):
         try:
@@ -801,7 +777,7 @@ def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
                     on_ctrl_v()
         except Exception:
             pass
-        return user32.CallNextHookEx(None, nCode, WPARAM_64(wParam), LPARAM_64(lParam))
+        return _CallNextHookEx(None, nCode, wParam, lParam)
 
     def _mouse(nCode, wParam, lParam):
         try:
@@ -813,7 +789,7 @@ def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
                     on_rbutton()
         except Exception:
             pass
-        return user32.CallNextHookEx(None, nCode, WPARAM_64(wParam), LPARAM_64(lParam))
+        return _CallNextHookEx(None, nCode, wParam, lParam)
 
     kb_proc = _HOOKPROC(_kb)
     mouse_proc = _HOOKPROC(_mouse)

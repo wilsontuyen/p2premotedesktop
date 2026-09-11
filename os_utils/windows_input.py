@@ -129,6 +129,17 @@ vk_map = {
     'menu': 0x5D,       # VK_APPS (phím right-click / context menu trên bàn phím)
     'application': 0x5D,# VK_APPS (tên thay thế trong một số layout)
     'insert': 0x2D,     # VK_INSERT
+    'numlock': 0x90,    # VK_NUMLOCK
+    'num lock': 0x90,
+    'scroll lock': 0x91,# VK_SCROLL
+    'scrolllock': 0x91,
+    'pause': 0x13,      # VK_PAUSE
+    'break': 0x13,
+    'print screen': 0x2C,  # VK_SNAPSHOT
+    'printscreen': 0x2C,
+    'sys req': 0x2C,
+    'clear': 0x0C,      # VK_CLEAR (numpad 5 NumLock off)
+    'help': 0x2F,       # VK_HELP
     '[0]': 0x60,        # VK_NUMPAD0
     '[1]': 0x61,        # VK_NUMPAD1
     '[2]': 0x62,        # VK_NUMPAD2
@@ -159,7 +170,9 @@ vk_map = {
     'keypad *': 0x6A,
     'keypad -': 0x6D,
     'keypad +': 0x6B,
-    'keypad enter': 0x0D,
+    'keypad enter': 0x0D,   # VK_RETURN + EXTENDED
+    'keypad equals': 0x0C,  # VK_CLEAR / OEM NEC equal fallback
+    'keypad =': 0x0C,
 }
 
 # Track remote modifier key state (set of held modifier key names) to avoid
@@ -212,20 +225,21 @@ def send_input_keyboard_event(key_name, pressed):
             # Get hardware scan code from VK for maximum compatibility
             scan = ctypes.windll.user32.MapVirtualKeyW(vk, 0)  # MAPVK_VK_TO_VSC
                 
-            # Check for extended keys
+            # Extended keys (E0 prefix). Numpad / and Enter must be extended or they become main / and Enter.
             extended_vks = [
                 0x25, 0x26, 0x27, 0x28, # Arrows
                 0x2D, 0x2E,             # Insert, Delete
                 0x24, 0x23,             # Home, End
                 0x21, 0x22,             # PageUp, PageDown
-                0x90,                   # Numlock
-                0x2F,                   # Print screen
+                0x90,                   # NumLock
+                0x2C,                   # Print Screen (VK_SNAPSHOT)
+                0x6F,                   # VK_DIVIDE (numpad /)
                 0xA5,                   # VK_RMENU (Right Alt)
                 0xA3,                   # VK_RCONTROL (Right Ctrl)
                 0x5B, 0x5C,             # LWIN, RWIN
                 0x5D                    # VK_APPS (Menu/Application key)
             ]
-            if vk in extended_vks:
+            if vk in extended_vks or key_name in ('keypad enter', 'keypad /', '[/]'):
                 flags |= KEYEVENTF_EXTENDEDKEY
                 
             # Map left/right modifiers to their generic VK equivalents.

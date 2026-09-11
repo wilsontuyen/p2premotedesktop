@@ -25,6 +25,7 @@ from core.i18n import _
 from utils.logger import log_debug, log_activity
 from network.socket_utils import send_msg, recv_msg, ensure_session_socket_blocking
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
+from utils.keyboard_map import pygame_key_canonical_name
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
@@ -237,41 +238,53 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
 
 _keyboard_hook = None
 _keyboard_hook_id = None
+_keyboard_hook_thread_id = None
+_keyboard_call_next = None
 
 def install_keyboard_hook(hwnd, send_event_fn):
     import sys
     if sys.platform != "win32":
         return
-    global _keyboard_hook, _keyboard_hook_id
-    
+    global _keyboard_hook, _keyboard_hook_id, _keyboard_hook_thread_id, _keyboard_call_next
+
+    uninstall_keyboard_hook()
+
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
-    
+
     LRESULT = ctypes.c_int64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_int32
     WPARAM = ctypes.c_size_t
     LPARAM = ctypes.c_size_t
-    
     HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, WPARAM, LPARAM)
-    
+    # Prototype riêng — không ghi argtypes lên windll.user32.CallNextHookEx (tránh đua với clipboard hook).
+    _keyboard_call_next = ctypes.WINFUNCTYPE(
+        LRESULT, ctypes.c_void_p, ctypes.c_int, WPARAM, LPARAM
+    )(("CallNextHookEx", user32))
+
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+    SetWindowsHookExW = ctypes.WINFUNCTYPE(
+        wintypes.HANDLE, ctypes.c_int, HOOKPROC, wintypes.HANDLE, wintypes.DWORD
+    )(("SetWindowsHookExW", user32))
+
+    hwnd_i = int(hwnd) if hwnd else 0
+
     def hook_proc(nCode, wParam, lParam):
-        if nCode >= 0:
+        if nCode >= 0 and hwnd_i:
             try:
-                user32.GetForegroundWindow.restype = ctypes.c_void_p
-                active_hwnd = user32.GetForegroundWindow()
-                if hwnd and active_hwnd == hwnd:
-                    kbd = KBDLLHOOKSTRUCT.from_address(lParam)
+                active = user32.GetForegroundWindow()
+                if active and int(active) == hwnd_i:
+                    kbd = KBDLLHOOKSTRUCT.from_address(int(lParam))
                     vkCode = kbd.vkCode
-                    
                     is_win_key = (vkCode == 0x5B or vkCode == 0x5C)
-                    is_menu_key = (vkCode == 0x5D)  # VK_APPS - phím Menu/Application (right-click keyboard key)
-                    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-                    user32.GetAsyncKeyState.restype = ctypes.c_short
+                    is_menu_key = (vkCode == 0x5D)
                     is_ctrl_esc = (vkCode == 0x1B and (user32.GetAsyncKeyState(0x11) & 0x8000))
                     is_alt_f4 = (vkCode == 0x73 and (kbd.flags & 0x20))
-                    
                     if is_win_key or is_ctrl_esc or is_menu_key or is_alt_f4:
-                        pressed = (wParam == 0x0100 or wParam == 0x0104) # WM_KEYDOWN or WM_SYSKEYDOWN
-                        
+                        pressed = (int(wParam) == 0x0100 or int(wParam) == 0x0104)
                         if is_win_key:
                             key_name = 'left windows' if vkCode == 0x5B else 'right windows'
                         elif is_menu_key:
@@ -280,47 +293,57 @@ def install_keyboard_hook(hwnd, send_event_fn):
                             key_name = 'f4'
                         else:
                             key_name = 'escape'
-                            
                         send_event_fn({
                             "type": "key_event",
                             "key": key_name,
                             "pressed": pressed
                         })
-                        
                         return 1
             except Exception:
                 pass
-                
-        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, WPARAM, LPARAM]
-        user32.CallNextHookEx.restype = LRESULT
-        return user32.CallNextHookEx(None, nCode, wParam, lParam)
-        
-    _keyboard_hook = HOOKPROC(hook_proc)
-    
-    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
-    h_mod = kernel32.GetModuleHandleW(None)
-    
-    user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HANDLE, wintypes.DWORD]
-    user32.SetWindowsHookExW.restype = wintypes.HANDLE
-    
-    _keyboard_hook_id = user32.SetWindowsHookExW(13, _keyboard_hook, h_mod, 0)
-    if not _keyboard_hook_id:
-        print(f"[Client] Hook keyboard failed. Error: {ctypes.GetLastError()}")
-    else:
-        print(f"[Client] Keyboard hook installed successfully: {_keyboard_hook_id}")
+        return _keyboard_call_next(None, nCode, wParam, lParam)
+
+    def _hook_thread():
+        global _keyboard_hook, _keyboard_hook_id, _keyboard_hook_thread_id
+        _keyboard_hook_thread_id = kernel32.GetCurrentThreadId()
+        _keyboard_hook = HOOKPROC(hook_proc)
+        h_mod = kernel32.GetModuleHandleW(None)
+        hid = SetWindowsHookExW(13, _keyboard_hook, h_mod, 0)
+        _keyboard_hook_id = hid
+        if not hid:
+            print(f"[Client] Hook keyboard failed. Error: {ctypes.GetLastError()}")
+            return
+        print(f"[Client] Keyboard hook installed successfully: {hid}")
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+        user32.UnhookWindowsHookEx(hid)
+        if _keyboard_hook_id == hid:
+            _keyboard_hook_id = None
+
+    threading.Thread(target=_hook_thread, daemon=True, name="ViewerKbHook").start()
 
 def uninstall_keyboard_hook():
     import sys
     if sys.platform != "win32":
         return
-    global _keyboard_hook_id
-    if _keyboard_hook_id:
-        user32 = ctypes.windll.user32
+    global _keyboard_hook_id, _keyboard_hook_thread_id
+    user32 = ctypes.windll.user32
+    hid = _keyboard_hook_id
+    tid = _keyboard_hook_thread_id
+    if hid:
         user32.UnhookWindowsHookEx.argtypes = [wintypes.HANDLE]
         user32.UnhookWindowsHookEx.restype = wintypes.BOOL
-        user32.UnhookWindowsHookEx(_keyboard_hook_id)
+        user32.UnhookWindowsHookEx(hid)
         _keyboard_hook_id = None
         print("[Client] Keyboard hook uninstalled.")
+    if tid:
+        try:
+            user32.PostThreadMessageW(tid, 0x0012, 0, 0)  # WM_QUIT
+        except Exception:
+            pass
+        _keyboard_hook_thread_id = None
 
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
@@ -944,7 +967,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "mouse_scroll", "dx": event.x, "dy": event.y})
                         
                     elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
-                        key_name = pygame.key.name(event.key)
+                        key_name = pygame_key_canonical_name(event)
                         
                         char_to_send = key_name
                         if event.type == pygame.KEYDOWN:
@@ -985,12 +1008,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         active_unicode_map[event.key] = ""
                                         continue
                             else:
-                                # For Windows hosts, send raw key_name for letters/digits so host IME can compose
-                                if len(key_name) == 1 and (key_name.isalpha() or key_name.isdigit()):
-                                    char_to_send = key_name  # Raw key, let host IME handle it
-                                elif hasattr(event, 'unicode') and event.unicode and len(event.unicode) == 1 and ord(event.unicode) >= 32:
-                                    if key_name not in ['space', 'delete', 'home', 'end', 'page up', 'page down', 'insert', 'escape', 'tab', 'backspace', 'return', 'enter']:
-                                        char_to_send = event.unicode
+                                # Host Windows/Linux: luôn gửi phím vật lý (104-key).
+                                # Không dùng event.unicode — keypad * unicode '*' bị VkKeyScan thành 8.
+                                char_to_send = key_name
                             
                             active_unicode_map[event.key] = char_to_send
                         else:

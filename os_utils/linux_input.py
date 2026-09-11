@@ -117,6 +117,7 @@ KEY_COMMA       = 51
 KEY_DOT         = 52
 KEY_SLASH       = 53
 KEY_RIGHTSHIFT  = 54
+KEY_KPASTERISK  = 55
 KEY_LEFTALT     = 56
 KEY_SPACE       = 57
 KEY_CAPSLOCK    = 58
@@ -132,11 +133,26 @@ KEY_F9          = 67
 KEY_F10         = 68
 KEY_NUMLOCK     = 69
 KEY_SCROLLLOCK  = 70
+KEY_KP7         = 71
+KEY_KP8         = 72
+KEY_KP9         = 73
+KEY_KPMINUS     = 74
+KEY_KP4         = 75
+KEY_KP5         = 76
+KEY_KP6         = 77
+KEY_KPPLUS      = 78
+KEY_KP1         = 79
+KEY_KP2         = 80
+KEY_KP3         = 81
+KEY_KP0         = 82
+KEY_KPDOT       = 83
 KEY_F11         = 87
 KEY_F12         = 88
 KEY_KPENTER     = 96
 KEY_RIGHTCTRL   = 97
+KEY_KPSLASH     = 98
 KEY_SYSRQ       = 99
+KEY_KPEQUAL     = 117
 KEY_RIGHTALT    = 100
 KEY_HOME        = 102
 KEY_UP          = 103
@@ -215,7 +231,24 @@ _name_to_keycode = {
     'menu':         KEY_COMPOSE,
     'print screen': KEY_SYSRQ,
     'printscreen':  KEY_SYSRQ,
+    'sys req':      KEY_SYSRQ,
     'pause':        KEY_PAUSE,
+    'break':        KEY_PAUSE,
+
+    # Numpad (104-key)
+    '[0]': KEY_KP0, '[1]': KEY_KP1, '[2]': KEY_KP2, '[3]': KEY_KP3,
+    '[4]': KEY_KP4, '[5]': KEY_KP5, '[6]': KEY_KP6, '[7]': KEY_KP7,
+    '[8]': KEY_KP8, '[9]': KEY_KP9,
+    '[.]': KEY_KPDOT, '[/]': KEY_KPSLASH, '[*]': KEY_KPASTERISK,
+    '[-]': KEY_KPMINUS, '[+]': KEY_KPPLUS,
+    'keypad 0': KEY_KP0, 'keypad 1': KEY_KP1, 'keypad 2': KEY_KP2,
+    'keypad 3': KEY_KP3, 'keypad 4': KEY_KP4, 'keypad 5': KEY_KP5,
+    'keypad 6': KEY_KP6, 'keypad 7': KEY_KP7, 'keypad 8': KEY_KP8,
+    'keypad 9': KEY_KP9,
+    'keypad .': KEY_KPDOT, 'keypad /': KEY_KPSLASH, 'keypad *': KEY_KPASTERISK,
+    'keypad -': KEY_KPMINUS, 'keypad +': KEY_KPPLUS,
+    'keypad enter': KEY_KPENTER,
+    'keypad equals': KEY_KPEQUAL, 'keypad =': KEY_KPEQUAL,
 }
 
 # Single character -> keycode (lowercase only, for standard US keyboard layout)
