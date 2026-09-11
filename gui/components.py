@@ -472,11 +472,17 @@ class ProgressDialog(tk.Toplevel):
         self._move_to_screen(x, y)
 
     def trigger_cancel(self):
-        try: self.destroy()
-        except: pass
-        if self.on_cancel:
-            try: self.on_cancel()
-            except: pass
+        cb = self.on_cancel
+        self.on_cancel = None
+        if cb:
+            try:
+                cb()
+            except Exception:
+                pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def _hwnd(self):
         try:

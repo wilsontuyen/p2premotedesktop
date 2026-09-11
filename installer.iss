@@ -95,5 +95,3 @@ begin
     Exec('taskkill.exe', '/F /IM RemoteDesktopP2P.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
-
-

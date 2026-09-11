@@ -145,6 +145,42 @@ sys.stderr = sys.stdout
 
 clients = {}
 clients_lock = threading.Lock()
+# GUI with background broker registers as {hwid}_{port} so it does not steal the 12-digit ID.
+_HOST_PORTS = ("12345", "12346", "12347", "12348", "12349")
+
+
+def _norm_hwid(s):
+    return str(s or "").replace(" ", "").strip()
+
+
+def _base_hwid(s):
+    t = _norm_hwid(s)
+    if "_" in t:
+        left, right = t.rsplit("_", 1)
+        if left.isdigit() and len(left) == 12 and right in _HOST_PORTS:
+            return left
+    return t
+
+
+def lookup_peer(target):
+    """Prefer the canonical 12-digit registration (broker), else GUI suffix IDs."""
+    t = _norm_hwid(target)
+    if not t:
+        return None
+    base = _base_hwid(t)
+    with clients_lock:
+        if t in clients:
+            return clients[t]
+        if base != t and base in clients:
+            return clients[base]
+        if base.isdigit() and len(base) == 12:
+            if base in clients:
+                return clients[base]
+            for p in _HOST_PORTS:
+                key = f"{base}_{p}"
+                if key in clients:
+                    return clients[key]
+    return None
 
 relay_pairs = {}
 relay_lock = threading.Lock()
@@ -315,8 +351,7 @@ def handle_client(conn, addr):
                 
             elif action == "connect_request":
                 target = req.get("target")
-                with clients_lock:
-                    target_conn = clients.get(target)
+                target_conn = lookup_peer(target)
                 
                 if target_conn:
                     print(f"[Signal] Yêu cầu kết nối từ {hwid} -> {target}")
@@ -335,8 +370,7 @@ def handle_client(conn, addr):
 
             elif action == "connect_accept":
                 target = req.get("target")
-                with clients_lock:
-                    target_conn = clients.get(target)
+                target_conn = lookup_peer(target)
                     
                 if target_conn:
                     print(f"[Signal] {hwid} chấp nhận kết nối từ {target}")
@@ -352,8 +386,7 @@ def handle_client(conn, addr):
             
             elif action == "relay_request":
                 target = req.get("target")
-                with clients_lock:
-                    target_conn = clients.get(target)
+                target_conn = lookup_peer(target)
                 if target_conn:
                     print(f"[Signal] Yêu cầu RELAY từ {hwid} -> {target}")
                     forward_msg = json.dumps({
@@ -365,8 +398,7 @@ def handle_client(conn, addr):
             
             elif action == "check_online":
                 target = req.get("target")
-                with clients_lock:
-                    is_online = target in clients
+                is_online = lookup_peer(target) is not None
                 if LOG_CHECKONLINE:
                     print(f"[Signal] Yêu cầu check_online ID: {target} -> Kết quả: {'ONLINE' if is_online else 'OFFLINE'}")
                 res_msg = json.dumps({

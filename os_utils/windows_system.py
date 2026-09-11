@@ -1,3 +1,4 @@
+import sys
 import ctypes
 
 def get_session_id():
@@ -64,6 +65,57 @@ def attach_process_window_station(station="WinSta0"):
                 pass
     return False
 
+def prompt_on_secure_desktop_enabled():
+    try:
+        from utils.windows_uac import prompt_on_secure_desktop_enabled as _reg
+        return bool(_reg())
+    except Exception:
+        return True
+
+
+def uac_on_secure_desktop():
+    """True only if consent.exe is running AND Windows still uses Secure Desktop."""
+    return bool(uac_consent_running() and prompt_on_secure_desktop_enabled())
+
+
+def attach_thread_for_remote_input():
+    """e57ebbc: OpenInputDesktop với mask yếu (Win11 Access Denied), SetThreadDesktop — không SwitchDesktop."""
+    user32 = ctypes.windll.user32
+    h_input = None
+    for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
+        try:
+            h_input = user32.OpenInputDesktop(0, False, access_mask)
+            if h_input:
+                break
+        except Exception:
+            pass
+    if not h_input:
+        thread_name = get_desktop_name()
+        target_name = "Winlogon" if thread_name == "default" else "Default"
+        for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0):
+            try:
+                h_input = user32.OpenDesktopW(target_name, 0, False, access_mask)
+                if h_input:
+                    print(f"[Host Input] Opened {target_name} desktop by name (fallback)")
+                    break
+            except Exception:
+                pass
+    if not h_input:
+        return False
+    try:
+        name_input = _desktop_name_from_handle(h_input)
+        name_thread = get_desktop_name()
+        if name_input and name_input != name_thread:
+            print(f"[Host Input] Desktop changed from {name_thread} to {name_input}. Switching input thread...")
+            result = user32.SetThreadDesktop(h_input)
+            if not result:
+                print(f"[Host Input] SetThreadDesktop failed. Error code: {ctypes.get_last_error()}")
+            return bool(result)
+        return True
+    finally:
+        user32.CloseDesktop(h_input)
+
+
 def get_input_desktop_name():
     try:
         h_input = open_input_desktop_handle()
@@ -89,6 +141,27 @@ def is_secure_desktop():
     except:
         return False
 
+def uac_consent_running():
+    """consent.exe = hộp thoại UAC (cài phần mềm, Run as admin) trên Secure Desktop."""
+    if sys.platform != "win32":
+        return False
+    now = __import__("time").time()
+    cache = getattr(uac_consent_running, "_c", (0.0, False))
+    if now - cache[0] < 0.15:
+        return cache[1]
+    found = False
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if str(p.info.get("name") or "").lower() == "consent.exe":
+                found = True
+                break
+    except Exception:
+        found = False
+    uac_consent_running._c = (now, found)
+    return found
+
+
 def check_desktop_change():
     """(needs_switch, is_blocked). Winlogon trên Server vẫn OpenInputDesktop được
     với MAXIMUM_ALLOWED nhưng OpenDesktopW(GENERIC_ALL) hay fail — không được
@@ -102,7 +175,15 @@ def check_desktop_change():
             finally:
                 ctypes.windll.user32.CloseDesktop(h_input)
             if input_name and input_name != thread_name:
-                return True, False
+                for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
+                    try:
+                        h_target = ctypes.windll.user32.OpenDesktopW(input_name, 0, False, access_mask)
+                        if h_target:
+                            ctypes.windll.user32.CloseDesktop(h_target)
+                            return True, False
+                    except Exception:
+                        pass
+                return False, True
             return False, False
 
         try:

@@ -79,6 +79,8 @@ from os_utils.system import (
     open_input_desktop_handle,
     open_named_desktop_handle,
     attach_process_window_station,
+    uac_consent_running,
+    attach_thread_for_remote_input,
 )
 
 def _encode_switching_desktop():
@@ -208,7 +210,7 @@ def _pid_image_is_logonui(pid):
     return _pid_image_basename(pid) == "logonui.exe"
 
 def _pid_is_secure_ui(pid):
-    return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe")
+    return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe", "consent.exe")
 
 def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
     """Cửa sổ visible trên HDESK (không cần thread đang gắn desktop đó)."""
@@ -259,7 +261,7 @@ def _winlogon_secure_ui_hwnds():
                 sw, sh = 800, 600
             for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
                 name = _pid_image_basename(pid)
-                if name == "logonui.exe":
+                if name in ("logonui.exe", "consent.exe"):
                     found.append((hwnd, w, h, pid, x, y))
                 elif name == "winlogon.exe":
                     if logoff or (w >= max(200, int(sw * 0.45)) and h >= max(150, int(sh * 0.45))):
@@ -274,6 +276,76 @@ def _winlogon_secure_ui_hwnds():
                 pass
     _winlogon_secure_ui_hwnds._c = (now, found)
     return found
+
+def _consent_hwnds_on_desktop(desk_name):
+    """HWND consent.exe trên Default hoặc Winlogon."""
+    found = []
+    hdesk = None
+    try:
+        hdesk = open_named_desktop_handle(desk_name)
+        if not hdesk:
+            return found
+        for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
+            if _pid_image_basename(pid) == "consent.exe":
+                found.append((hwnd, w, h, pid, x, y))
+    except Exception:
+        found = []
+    finally:
+        if hdesk:
+            try:
+                ctypes.windll.user32.CloseDesktop(hdesk)
+            except Exception:
+                pass
+    return found
+
+def grab_uac_dialog_bgr():
+    """Win11 DXGI lúc UAC = màn trắng. GDI + PrintWindow consent.exe (Default hoặc Winlogon)."""
+    attach_thread_for_remote_input()
+    on_wl = _consent_hwnds_on_desktop("Winlogon")
+    on_def = _consent_hwnds_on_desktop("Default")
+    if on_wl and not on_def:
+        if get_desktop_name() != "winlogon":
+            _switch_capture_thread_to_named_desktop("Winlogon")
+        hwnds = on_wl
+    else:
+        if get_desktop_name() == "winlogon":
+            _switch_capture_thread_to_named_desktop("Default")
+        hwnds = on_def or on_wl
+        attach_thread_for_remote_input()
+
+    frame_bgr = None
+    cap_w = cap_h = 0
+    origin = (0, 0)
+    try:
+        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=True)
+    except Exception:
+        try:
+            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=False)
+        except Exception:
+            frame_bgr = None
+
+    overlays = []
+    for hwnd, w, h, _pid, x, y in hwnds:
+        cap = _capture_hwnd_bgr(hwnd, w, h)
+        if cap is None:
+            continue
+        overlays.append((cap[0], x, y, w, h))
+
+    if frame_bgr is None:
+        if overlays:
+            overlays.sort(key=lambda t: t[3] * t[4], reverse=True)
+            tile, x, y, tw, th = overlays[0]
+            return tile, tw, th, (int(x), int(y))
+        alt = grab_current_desktop_printwindow()
+        if alt is not None:
+            return alt
+        raise RuntimeError("UAC GDI capture failed")
+
+    left0 = origin[0] if origin else 0
+    top0 = origin[1] if origin else 0
+    for tile, x, y, _tw, _th in overlays:
+        _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0)
+    return frame_bgr, cap_w, cap_h, origin
 
 def _winlogon_has_logonui_windows():
     """Signing out / Welcome: UI trên Winlogon (LogonUI hoặc status winlogon)."""
@@ -290,8 +362,12 @@ def _wts_phase(val=None):
         return val
     v = getattr(_wts_phase, "_v", "none")
     until = float(getattr(_wts_phase, "_until", 0) or 0)
-    if v == "logoff" or (until and time.time() < until):
-        return "logoff"
+    if v == "logoff":
+        if until and time.time() < until:
+            return "logoff"
+        _wts_phase._v = "none"
+        _wts_phase._until = 0.0
+        return "none"
     return v
 
 _wts_phase_listener_started = False
@@ -373,7 +449,10 @@ def _host_wts_phase_listener():
         print(f"[Host] WTS phase listener: {e}")
 
 def _should_capture_logon_ui():
-    """True khi màn hình người dùng thấy là logon / sign-out / khóa."""
+    """True khi màn hình người dùng thấy là logon / sign-out / khóa.
+    UAC: DXGI Win11 trắng — dùng GDI riêng (grab_uac_dialog_bgr), không ghim Winlogon."""
+    if uac_consent_running():
+        return False
     _ensure_host_wts_phase_listener()
     phase = _wts_phase()
     input_name = _input_desktop_name()
@@ -389,7 +468,10 @@ def _should_capture_logon_ui():
     if logged_in is False:
         _user_desktop_was_shown(False)
         return True
+    # Win11 OpenInputDesktop đôi khi báo winlogon dù user đang ở Default + Explorer.
     if input_name == "winlogon":
+        if explorer and not logonui and phase == "none":
+            return False
         return True
     # Lock: LogonUI trên Winlogon, explorer thường vẫn sống.
     if phase == "lock" and (logonui or secure_ui or input_name == "winlogon"):
@@ -465,6 +547,15 @@ def _frame_is_nearly_black(frame, max_mean=6.0):
         if frame is None or getattr(frame, "size", 0) == 0:
             return True
         return float(np.mean(frame)) < max_mean
+    except Exception:
+        return False
+
+def _frame_is_nearly_white(frame, min_mean=235.0):
+    """DXGI lúc UAC Win11 hay trả desktop mờ trắng, không có hộp Yes/No."""
+    try:
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return False
+        return float(np.mean(frame)) > min_mean
     except Exception:
         return False
 
@@ -865,7 +956,7 @@ def grab_current_desktop_printwindow():
         import psutil
         for p in psutil.process_iter(["name", "pid"]):
             nm = str(p.info.get("name") or "").lower()
-            if nm in ("logonui.exe", "winlogon.exe"):
+            if nm in ("logonui.exe", "winlogon.exe", "consent.exe"):
                 extra_pids.add(int(p.info["pid"]))
     except Exception:
         pass
@@ -1115,6 +1206,32 @@ def scale_frame_for_send(frame_bgr, cap_w, cap_h, max_edge=2560):
     return cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
 
 
+def _fm_host_should_stop():
+    cm = clipboard_sync_manager
+    ev = getattr(cm, "_fm_send_abort", None) if cm else None
+    return bool(ev is not None and ev.is_set())
+
+
+def _fm_host_send(c, payload, pwd):
+    """Gửi gói File Manager; timeout 2s, dừng khi Hủy."""
+    if _fm_host_should_stop():
+        return False
+    old = None
+    try:
+        old = c.gettimeout()
+        c.settimeout(2.0)
+        send_msg(c, json.dumps(payload).encode("utf-8"), pwd)
+        return True
+    except Exception as e:
+        print(f"[Host] FM send loi/timeout: {e}")
+        return False
+    finally:
+        try:
+            c.settimeout(old)
+        except Exception:
+            pass
+
+
 class HostMixin:
     def ensure_input_thread_desktop(self, force=False):
         if getattr(self, 'is_headless', False) is False and sys.platform != "win32":
@@ -1125,45 +1242,8 @@ class HostMixin:
         if not force and (now - last_check < 0.2):
             return
         self._last_input_desktop_check = now
-        
         try:
-            h_input = None
-            # Try specific desktop rights (0x01FF) first, as it is more likely to succeed for SYSTEM than GENERIC_ALL
-            for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                try:
-                    h_input = ctypes.windll.user32.OpenInputDesktop(0, False, access_mask)
-                    if h_input:
-                        break
-                except:
-                    pass
-                    
-            if not h_input:
-                # Fallback: if OpenInputDesktop fails, try opening the opposite desktop by name
-                thread_name = get_desktop_name()
-                target_name = "Winlogon" if thread_name == "default" else "Default"
-                for access_mask in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                    try:
-                        h_input = ctypes.windll.user32.OpenDesktopW(target_name, 0, False, access_mask)
-                        if h_input:
-                            print(f"[Host Input] Opened {target_name} desktop by name (fallback)")
-                            break
-                    except:
-                        pass
-
-            if h_input:
-                name_input = ctypes.create_unicode_buffer(256)
-                ctypes.windll.user32.GetUserObjectInformationW(h_input, 2, name_input, ctypes.sizeof(name_input), None)
-                
-                h_thread = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
-                name_thread = ctypes.create_unicode_buffer(256)
-                ctypes.windll.user32.GetUserObjectInformationW(h_thread, 2, name_thread, ctypes.sizeof(name_thread), None)
-                
-                if name_input.value.lower() != name_thread.value.lower():
-                    print(f"[Host Input] Desktop changed from {name_thread.value} to {name_input.value}. Switching input thread...")
-                    result = ctypes.windll.user32.SetThreadDesktop(h_input)
-                    if not result:
-                        print(f"[Host Input] SetThreadDesktop failed. Error code: {ctypes.get_last_error()}")
-                ctypes.windll.user32.CloseDesktop(h_input)
+            attach_thread_for_remote_input()
         except Exception as e:
             print(f"[Host Input] Error in ensure_input_thread_desktop: {e}")
 
@@ -1229,6 +1309,19 @@ class HostMixin:
                 time.sleep(0.1)
                 continue
                 
+    def _physical_virtual_screen(self):
+        """Physical pixel rect of the virtual desktop (correct at 125%/150% DPI). Tk winfo_screen* is logical."""
+        user32 = ctypes.windll.user32
+        vx = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
+        vy = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
+        vw = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
+        vh = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
+        if vw <= 0 or vh <= 0:
+            vx, vy = 0, 0
+            vw = int(user32.GetSystemMetrics(0))
+            vh = int(user32.GetSystemMetrics(1))
+        return vx, vy, vw, vh
+
     def show_host_connection_border(self):
         if sys.platform != "win32":
             return
@@ -1238,8 +1331,7 @@ class HostMixin:
             import tkinter as tk
             self.host_border_wins = []
             
-            w = self.winfo_screenwidth()
-            h = self.winfo_screenheight()
+            vx, vy, w, h = self._physical_virtual_screen()
             self._last_border_w = w
             self._last_border_h = h
             
@@ -1253,7 +1345,7 @@ class HostMixin:
             win.attributes("-topmost", True)
             win.attributes("-alpha", 0.8)
             win.configure(bg=color)
-            win.geometry(f"{w}x{h}+0+0")
+            win.geometry(f"{w}x{h}+{vx}+{vy}")
             win.update_idletasks()
             
             try:
@@ -1287,22 +1379,6 @@ class HostMixin:
                 except:
                     pass
                 
-                # Set border region on the Tk widget HWND
-                outer = ctypes.windll.gdi32.CreateRectRgn(0, 0, w, h)
-                inner = ctypes.windll.gdi32.CreateRectRgn(thickness, thickness, w - thickness, h - thickness)
-                ctypes.windll.gdi32.CombineRgn(outer, outer, inner, 4)  # RGN_DIFF
-                ctypes.windll.user32.SetWindowRgn(tk_hwnd, outer, True)
-                ctypes.windll.gdi32.DeleteObject(inner)
-                
-                # Also set region on root HWND if different
-                if root and root != tk_hwnd and root != ctypes.windll.user32.GetDesktopWindow():
-                    outer2 = ctypes.windll.gdi32.CreateRectRgn(0, 0, w, h)
-                    inner2 = ctypes.windll.gdi32.CreateRectRgn(thickness, thickness, w - thickness, h - thickness)
-                    ctypes.windll.gdi32.CombineRgn(outer2, outer2, inner2, 4)
-                    ctypes.windll.user32.SetWindowRgn(root, outer2, True)
-                    ctypes.windll.gdi32.DeleteObject(inner2)
-                
-                # Apply WS_EX_TOOLWINDOW on ALL HWNDs to guarantee taskbar hiding
                 GWL_EXSTYLE = -20
                 WS_EX_TRANSPARENT = 0x00000020
                 WS_EX_TOOLWINDOW = 0x00000080
@@ -1312,13 +1388,44 @@ class HostMixin:
                 SWP_NOSIZE = 0x0001
                 SWP_NOZORDER = 0x0004
                 SWP_FRAMECHANGED = 0x0020
+                SWP_NOACTIVATE = 0x0010
+                HWND_TOPMOST = -1
                 
+                pos_hwnd = root if (root and root != ctypes.windll.user32.GetDesktopWindow()) else tk_hwnd
+                try:
+                    dpi = int(ctypes.windll.user32.GetDpiForWindow(pos_hwnd))
+                    if dpi > 0:
+                        thickness = max(4, int(round(5 * dpi / 96.0)))
+                except Exception:
+                    pass
+                
+                # Apply WS_EX_TOOLWINDOW on ALL HWNDs to guarantee taskbar hiding
                 for hwnd in hwnds_to_style:
                     style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     new_style = (style & ~WS_EX_APPWINDOW) | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
                     ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
                     ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE)
+                
+                # Tk geometry is logical pixels; pin the window to physical virtual-screen size.
+                ctypes.windll.user32.SetWindowPos(
+                    pos_hwnd, HWND_TOPMOST, vx, vy, w, h, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE
+                )
+                if tk_hwnd != pos_hwnd:
+                    ctypes.windll.user32.SetWindowPos(
+                        tk_hwnd, 0, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+                    )
+                
+                def _apply_frame_rgn(hwnd):
+                    outer = ctypes.windll.gdi32.CreateRectRgn(0, 0, w, h)
+                    inner = ctypes.windll.gdi32.CreateRectRgn(thickness, thickness, w - thickness, h - thickness)
+                    ctypes.windll.gdi32.CombineRgn(outer, outer, inner, 4)  # RGN_DIFF
+                    ctypes.windll.user32.SetWindowRgn(hwnd, outer, True)
+                    ctypes.windll.gdi32.DeleteObject(inner)
+                
+                _apply_frame_rgn(tk_hwnd)
+                if root and root != tk_hwnd and root != ctypes.windll.user32.GetDesktopWindow():
+                    _apply_frame_rgn(root)
                     
             except Exception as rgn_err:
                 print(f"[Host] Failed to set border region/style: {rgn_err}")
@@ -1338,8 +1445,7 @@ class HostMixin:
             return
             
         try:
-            current_w = self.winfo_screenwidth()
-            current_h = self.winfo_screenheight()
+            _vx, _vy, current_w, current_h = self._physical_virtual_screen()
             last_w = getattr(self, '_last_border_w', 0)
             last_h = getattr(self, '_last_border_h', 0)
             
@@ -1716,11 +1822,14 @@ class HostMixin:
         def _sync_lock_status():
             nonlocal _last_lock_sync, _last_sent_locked
             try:
-                locked_now = (
-                    (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
-                    or _logonui_running()
-                    or _session_has_interactive_user() is False
-                )
+                if uac_consent_running():
+                    locked_now = False
+                else:
+                    locked_now = (
+                        (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
+                        or _logonui_running()
+                        or _session_has_interactive_user() is False
+                    )
                 now_l = time.time()
                 if locked_now != _last_sent_locked or (locked_now and now_l - _last_lock_sync >= 8):
                     send_msg(conn, json.dumps({
@@ -1817,7 +1926,7 @@ class HostMixin:
                                     client_state["force_update"] = True
                                     client_state.pop("prev_sent_img", None)
                                     break
-                                if not want_logon:
+                                if not want_logon and not uac_consent_running():
                                     inner_needs_switch, inner_is_blocked = check_desktop_change()
                                     if inner_is_blocked or inner_needs_switch:
                                         if inner_is_blocked:
@@ -1842,7 +1951,19 @@ class HostMixin:
                                 
                             grabbed = False
                             on_winlogon = _should_capture_logon_ui()
-                            if _legacy_host or on_winlogon:
+                            on_uac = uac_consent_running()
+                            if on_uac:
+                                try:
+                                    frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
+                                    self._capture_origin = origin
+                                    grabbed = bool(
+                                        frame_bgr is not None
+                                        and getattr(frame_bgr, "size", 0)
+                                        and not _frame_is_nearly_black(frame_bgr)
+                                    )
+                                except Exception:
+                                    grabbed = False
+                            elif _legacy_host or on_winlogon:
                                 if on_winlogon:
                                     frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
                                 else:
@@ -1876,8 +1997,13 @@ class HostMixin:
                                     time.sleep(0.01)
                                 if grabbed and _frame_is_nearly_black(frame_bgr):
                                     grabbed = False
+                                elif grabbed and on_uac and _frame_is_nearly_white(frame_bgr):
+                                    grabbed = False
                             if not grabbed:
-                                if on_winlogon or sct is None:
+                                if on_uac:
+                                    frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
+                                    self._capture_origin = origin
+                                elif on_winlogon or sct is None:
                                     frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr() if on_winlogon else grab_gdi_primary_bgr()
                                     self._capture_origin = origin
                                 else:
@@ -1900,7 +2026,7 @@ class HostMixin:
                             target_h = getattr(self, 'client_viewer_h', 720)
                             
                             force_update = client_state.pop("force_update", False)
-                            if on_winlogon:
+                            if on_winlogon or on_uac:
                                 force_update = True
                             if not client_state.get("_first_sent"):
                                 force_update = True
@@ -2133,53 +2259,8 @@ class HostMixin:
                     _last_desk_check_time = now
                     if sys.platform == "win32":
                         try:
-                            import ctypes as _ct
-                            # Lấy tên desktop hiện tại để phát hiện thay đổi (UAC/Winlogon)
-                            _buf = _ct.create_unicode_buffer(256)
-                            _hd_cur = _ct.windll.user32.GetThreadDesktop(_ct.windll.kernel32.GetCurrentThreadId())
-                            _ct.windll.user32.GetUserObjectInformationW(_hd_cur, 2, _buf, _ct.sizeof(_buf), None)
-                            _cur_name = _buf.value.lower() if _buf.value else None
-
-                            _hdesk_new = None
-                            # Try multiple access masks (Win11 blocks GENERIC_ALL for elevated windows)
-                            for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0]:
-                                _hdesk_new = _ct.windll.user32.OpenInputDesktop(0, False, _am)
-                                if _hdesk_new:
-                                    break
-                            
-                            # Fallback: open desktop by name if OpenInputDesktop fails
-                            if not _hdesk_new:
-                                _target_name = "Winlogon" if _cur_name == "default" else "Default"
-                                for _am in [0x01FF, 0x02000000, 0x80000000, 0x0001, 0]:
-                                    _hdesk_new = _ct.windll.user32.OpenDesktopW(_target_name, 0, False, _am)
-                                    if _hdesk_new:
-                                        break
-                            
-                            if _hdesk_new:
-                                # Lấy tên của input desktop mới
-                                _buf2 = _ct.create_unicode_buffer(256)
-                                _ct.windll.user32.GetUserObjectInformationW(_hdesk_new, 2, _buf2, _ct.sizeof(_buf2), None)
-                                _new_name = _buf2.value.lower() if _buf2.value else None
-
-                                if _new_name != _last_desk_name:
-                                    # Desktop đã thay đổi → switch thread sang desktop mới
-                                    if _ct.windll.user32.SetThreadDesktop(_hdesk_new):
-                                        _last_desk_name = _new_name
-                                        print(f"[Host] Switched input desktop: {_last_desk_name}")
-                                        if getattr(self, 'host_block_input_active', False):
-                                            try:
-                                                _ct.windll.user32.BlockInput(False)
-                                                _ct.windll.user32.BlockInput(True)
-                                            except: pass
-                                        # Đóng handle cũ sau khi switch thành công
-                                        if hasattr(self, '_last_hdesk') and self._last_hdesk:
-                                            _ct.windll.user32.CloseDesktop(self._last_hdesk)
-                                        self._last_hdesk = _hdesk_new
-                                        _hdesk_new = None  # Prevent double-close below
-                                    # else: SetThreadDesktop thất bại → giữ nguyên desktop cũ
-                                # Đóng handle nếu không được lưu lại (không có thay đổi hoặc switch fail)
-                                if _hdesk_new:
-                                    _ct.windll.user32.CloseDesktop(_hdesk_new)
+                            attach_thread_for_remote_input()
+                            _last_desk_name = get_desktop_name()
                         except Exception:
                             pass
                     
@@ -2188,8 +2269,9 @@ class HostMixin:
                 
                 if getattr(self, 'head_screen_cover_active', False):
                     try:
-                        # Luôn re-apply BlockInput mỗi 0.2s để chống lại SAS (Ctrl+Alt+Del)
-                        if not self._apply_block_input(True):
+                        if uac_consent_running():
+                            self._apply_block_input(False)
+                        elif not self._apply_block_input(True):
                             self._apply_block_input(False)
                             self._apply_block_input(True)
                     except: pass
@@ -2205,7 +2287,7 @@ class HostMixin:
                 try:
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
-                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image", "clear_clipboard"):
+                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack", "clipboard_text", "clipboard_image", "clear_clipboard"):
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
                     else:
@@ -2311,7 +2393,10 @@ class HostMixin:
                 chk_reason = f"Error: {ex}"
             
             try:
-                is_locked = (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
+                if uac_consent_running():
+                    is_locked = False
+                else:
+                    is_locked = (get_input_desktop_name() or "default") not in ("default", "", "agprivacydesk")
             except Exception:
                 is_locked = (get_desktop_name() or "default") not in ("default", "", "agprivacydesk")
             
@@ -2376,15 +2461,22 @@ class HostMixin:
                 def download_thread(p, t_dir, c, pwd):
                     try:
                         import os, base64, time
+                        cm = clipboard_sync_manager
+                        if cm and getattr(cm, "_fm_send_abort", None) is not None:
+                            cm._fm_send_abort.clear()
                         size = os.path.getsize(p)
                         name = os.path.basename(p)
                         
                         start_msg = {"type": "file_start", "name": name, "size": size, "target_dir": t_dir}
-                        send_msg(c, json.dumps(start_msg).encode('utf-8'), pwd)
+                        if not _fm_host_send(c, start_msg, pwd):
+                            return
                         time.sleep(0.5)
                         
                         with open(p, "rb") as f:
                             while True:
+                                if _fm_host_should_stop():
+                                    print("[Host] FM download dung (Huy).")
+                                    break
                                 chunk = f.read(65536)
                                 if not chunk: break
                                 chunk_msg = {
@@ -2392,11 +2484,12 @@ class HostMixin:
                                     "name": name,
                                     "data": base64.b64encode(chunk).decode('utf-8')
                                 }
-                                send_msg(c, json.dumps(chunk_msg).encode('utf-8'), pwd)
-                                time.sleep(0.01)
+                                if not _fm_host_send(c, chunk_msg, pwd):
+                                    break
                                 
-                        end_msg = {"type": "file_end", "name": name}
-                        send_msg(c, json.dumps(end_msg).encode('utf-8'), pwd)
+                        if not _fm_host_should_stop():
+                            end_msg = {"type": "file_end", "name": name}
+                            _fm_host_send(c, end_msg, pwd)
                     except Exception as e:
                         print(f"[Host] File download error: {e}")
                 import threading
@@ -2409,6 +2502,9 @@ class HostMixin:
             def download_batch_thread(pts, t_dir, c, pwd):
                 try:
                     import os, base64, time
+                    cm = clipboard_sync_manager
+                    if cm and getattr(cm, "_fm_send_abort", None) is not None:
+                        cm._fm_send_abort.clear()
                     all_files = []
                     total_sz = 0
                     
@@ -2430,7 +2526,7 @@ class HostMixin:
 
                     if not all_files:
                         batch_end_msg = {"type": "batch_end"}
-                        send_msg(c, json.dumps(batch_end_msg).encode('utf-8'), pwd)
+                        _fm_host_send(c, batch_end_msg, pwd)
                         return
                         
                     display_name = all_files[0][1]
@@ -2438,10 +2534,14 @@ class HostMixin:
                         display_name += f" và {len(pts)-1} mục khác"
                         
                     batch_start_msg = {"type": "batch_start", "total_size": total_sz, "display_name": display_name}
-                    send_msg(c, json.dumps(batch_start_msg).encode('utf-8'), pwd)
+                    if not _fm_host_send(c, batch_start_msg, pwd):
+                        return
                     time.sleep(0.5)
                         
                     for fpath, rname, sz in all_files:
+                        if _fm_host_should_stop():
+                            print("[Host] FM batch dung (Huy).")
+                            break
                         parts = rname.split('/')
                         fname = parts[-1]
                         sub_dir = "/".join(parts[:-1])
@@ -2452,11 +2552,14 @@ class HostMixin:
                             final_t_dir += sub_dir
                             
                         start_msg = {"type": "file_start", "name": fname, "size": sz, "target_dir": final_t_dir}
-                        send_msg(c, json.dumps(start_msg).encode('utf-8'), pwd)
+                        if not _fm_host_send(c, start_msg, pwd):
+                            break
                         time.sleep(0.5)
                         
                         with open(fpath, "rb") as f:
                             while True:
+                                if _fm_host_should_stop():
+                                    break
                                 chunk = f.read(65536)
                                 if not chunk: break
                                 chunk_msg = {
@@ -2464,15 +2567,19 @@ class HostMixin:
                                     "name": fname,
                                     "data": base64.b64encode(chunk).decode('utf-8')
                                 }
-                                send_msg(c, json.dumps(chunk_msg).encode('utf-8'), pwd)
-                                time.sleep(0.01)
+                                if not _fm_host_send(c, chunk_msg, pwd):
+                                    break
                                 
+                        if _fm_host_should_stop():
+                            break
                         end_msg = {"type": "file_end", "name": fname}
-                        send_msg(c, json.dumps(end_msg).encode('utf-8'), pwd)
+                        if not _fm_host_send(c, end_msg, pwd):
+                            break
                         time.sleep(0.1)
                         
-                    batch_end_msg = {"type": "batch_end"}
-                    send_msg(c, json.dumps(batch_end_msg).encode('utf-8'), pwd)
+                    if not _fm_host_should_stop():
+                        batch_end_msg = {"type": "batch_end"}
+                        _fm_host_send(c, batch_end_msg, pwd)
                         
                 except Exception as e:
                     print(f"[Host] Batch download error: {e}")

@@ -160,6 +160,33 @@ _SYNC_CLIPBOARD_WND_CLASSES = (
     "HiddenClipboardListener",
 )
 
+_last_own_clip_seq = None
+
+
+def get_clipboard_sequence_number():
+    """Windows tăng số này mỗi lần clipboard đổi — kể cả copy cùng một chuỗi."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+        return int(user32.GetClipboardSequenceNumber())
+    except Exception:
+        return 0
+
+
+def mark_own_clipboard_write():
+    """Gọi sau khi app tự SetClipboardData — lần WM_CLIPBOARDUPDATE/poll kế không gửi lại echo."""
+    global _last_own_clip_seq
+    _last_own_clip_seq = get_clipboard_sequence_number()
+
+
+def is_own_clipboard_write():
+    if _last_own_clip_seq is None:
+        return False
+    seq = get_clipboard_sequence_number()
+    return seq != 0 and seq == _last_own_clip_seq
+
 
 def _clipboard_owned_by_sync_window():
     """True nếu clipboard đang do cửa sổ delayed-render của app sở hữu.
@@ -270,6 +297,7 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
                     last_clipboard_set_time = time.time()
             finally:
                 fn_CloseClipboard()
+            mark_own_clipboard_write()
         else:
             fn_GlobalFree(hGlobal)
             print("[Clipboard] Lỗi: OpenClipboard thất bại khi ghi dữ liệu.")
@@ -335,6 +363,7 @@ def set_clipboard_text(text, owner_hwnd=None):
             time.sleep(0.05)
             
         if opened:
+            ok = False
             try:
                 fn_EmptyClipboard()
                 res = fn_SetClipboardData(13, hGlobal)
@@ -343,9 +372,13 @@ def set_clipboard_text(text, owner_hwnd=None):
                     return False
                 global last_clipboard_set_time
                 last_clipboard_set_time = time.time()
-                return True
+                ok = True
             finally:
                 fn_CloseClipboard()
+            if ok:
+                mark_own_clipboard_write()
+                return True
+            return False
         else:
             fn_GlobalFree(hGlobal)
             print("[Clipboard] Lỗi: OpenClipboard thất bại khi ghi dữ liệu text.")

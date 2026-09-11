@@ -215,22 +215,14 @@ class NetworkMixin:
     def configure_uac_registry(self):
         if sys.platform != "win32":
             return
-        try:
-            import winreg
-            path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-            try:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
-            except WindowsError:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
-            winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
-            winreg.CloseKey(key)
+        from utils.windows_uac import apply_remote_uac_desktop_policy
+        ok, err = apply_remote_uac_desktop_policy()
+        if ok:
             print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
-        except PermissionError:
-            # Không có quyền Admin → UAC vẫn sẽ dùng Secure Desktop → cảnh báo người dùng ở console/log
+        elif isinstance(err, PermissionError) or (err and "Access is denied" in str(err)):
             print("[Host] WARNING: No Admin rights → PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
-        except Exception as e:
-            print(f"[Host] Failed to configure registry for UAC: {e}")
+        elif err:
+            print(f"[Host] Failed to configure registry for UAC: {err}")
 
     def wake_on_lan(self, mac_str, extra_ips=None):
         # mac_str can be multiple MACs separated by comma
@@ -835,6 +827,7 @@ class NetworkMixin:
                 else:
                     is_svc_active = getattr(self, 'is_service_active', False)
                 register_id = self.my_id_clean if (BOUND_PORT == PORTS_TO_TRY[0] and not is_svc_active) else f"{self.my_id_clean}_{BOUND_PORT}"
+                print(f"[Signaling] Register as {register_id} (port={BOUND_PORT}, service={is_svc_active})")
                 
                 req = json.dumps({"action": "register", "hwid": register_id})
                 req_data = req.encode('utf-8')
@@ -960,7 +953,7 @@ class NetworkMixin:
             elif action == "online_status":
                 target = res.get("target")
                 online = res.get("online", False)
-                self.after(0, lambda t=target, o=online: self.update_saved_computer_status(t, o))
+                self.after(0, lambda t=target, o=online: self._on_check_online_result(t, o))
                 
         except Exception as e:
             print(f"[Signaling] Lỗi xử lý tin nhắn từ {host}: {e}")
@@ -1194,14 +1187,6 @@ class NetworkMixin:
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
 
-            req = json.dumps({
-                "action": "connect_request",
-                "target": partner_id,
-                "port": BOUND_PORT,
-                "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
-                "local_port": BOUND_PORT
-            }) + '\n'
-            
             sockets_to_try = []
             with self.signaling_lock:
                 if getattr(self, 'primary_signaling_socket', None):
@@ -1212,22 +1197,35 @@ class NetworkMixin:
                         
             self.update_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
             
+            from utils.hwid import signaling_lookup_ids
             signaling_success = False
-            for s in sockets_to_try:
-                self.pending_connection_info = None
-                try:
-                    with self.signaling_lock:
-                        send_msg(s, req.encode('utf-8'), APP_KEY)
-                except Exception:
-                    continue
-                    
-                wait_timeout = 6.0
-                while wait_timeout > 0 and self.pending_connection_info is None:
-                    time.sleep(0.2)
-                    wait_timeout -= 0.2
-                    
-                if self.pending_connection_info and self.pending_connection_info != "error":
-                    signaling_success = True
+            lookup_ids = signaling_lookup_ids(partner_id)
+            for target_id in lookup_ids:
+                req = json.dumps({
+                    "action": "connect_request",
+                    "target": target_id,
+                    "port": BOUND_PORT,
+                    "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
+                    "local_port": BOUND_PORT
+                }) + '\n'
+                wait_timeout = 6.0 if target_id == lookup_ids[0] else 2.0
+                for s in sockets_to_try:
+                    self.pending_connection_info = None
+                    try:
+                        with self.signaling_lock:
+                            send_msg(s, req.encode('utf-8'), APP_KEY)
+                    except Exception:
+                        continue
+                        
+                    remain = wait_timeout
+                    while remain > 0 and self.pending_connection_info is None:
+                        time.sleep(0.2)
+                        remain -= 0.2
+                        
+                    if self.pending_connection_info and self.pending_connection_info != "error":
+                        signaling_success = True
+                        break
+                if signaling_success:
                     break
                     
             if not signaling_success:

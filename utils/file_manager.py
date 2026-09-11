@@ -1470,11 +1470,18 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
                         if not lan:
                             time.sleep(0.5)
-                        chunk_size = (1024 * 1024) if lan else (16 * 1024)
+                        chunk_size = 64 * 1024
 
                         with open(path, "rb") as f:
                             while True:
                                 if st.is_cancelled: break
+                                try:
+                                    from core.clipboard_agent import clipboard_sync_manager as _cm
+                                    ev = getattr(_cm, "_fm_send_abort", None)
+                                    if ev is not None and ev.is_set():
+                                        break
+                                except Exception:
+                                    pass
 
                                 chunk = f.read(chunk_size)
                                 if not chunk: break

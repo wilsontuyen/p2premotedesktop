@@ -479,6 +479,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             self.server_socket = None
             self._capture_origin = (0, 0)
             print("[Worker] Fast-start: skip UI, connect broker now")
+            if clipboard_sync_manager:
+                try:
+                    clipboard_sync_manager.register_app(self)
+                    print("[Worker] Clipboard UpPipe/cancel listener da bat (fast-start).")
+                except Exception as e:
+                    print(f"[Worker] Clipboard register_app: {e}")
             import core.broker
             threading.Thread(target=core.broker.run_capture_worker, args=(self,), daemon=True).start()
             return
@@ -543,22 +549,31 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 import win32gui, win32con, win32api
                 def WndProc(hwnd, msg, wparam, lparam):
                     if msg == win32con.WM_QUERYENDSESSION:
-                        if not (lparam & 0x80000000): # 0x80000000 is ENDSESSION_LOGOFF
+                        if not (lparam & 0x80000000):  # 0x80000000 is ENDSESSION_LOGOFF — Signing Out giu viewer
                             print("[Host] System Shutdown/Restart detected!")
                             try:
-                                from network.socket_utils import socket_passwords, send_msg
-                                from core.clipboard_agent import clipboard_sync_manager
-                                import json
-                                if clipboard_sync_manager:
-                                    clipboard_sync_manager.clear_local_and_notify_peers()
-                                for conn in list(socket_passwords.keys()):
-                                    try:
-                                        send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
-                                    except: pass
-                            except: pass
+                                from core.broker import notify_broker_power_event
+                                notify_broker_power_event("shutdown")
+                            except Exception:
+                                pass
+                            if not getattr(self, "is_service_active", False):
+                                try:
+                                    from network.socket_utils import socket_passwords, send_msg
+                                    from core.clipboard_agent import clipboard_sync_manager
+                                    import json
+                                    if clipboard_sync_manager:
+                                        clipboard_sync_manager.clear_local_and_notify_peers()
+                                    for conn in list(socket_passwords.keys()):
+                                        try:
+                                            send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
                         return True
                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
-                
+
+                self._shutdown_wnd_proc = WndProc
                 wc = win32gui.WNDCLASS()
                 wc.lpfnWndProc = WndProc
                 wc.lpszClassName = "AntigravityShutdownListener"
@@ -657,8 +672,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         setup_app_theme(self, self.config_file)
         
         self.my_id_clean, self.my_id_formatted, self.my_macs = get_hwid()
+        try:
+            from utils.hwid import save_hwid
+            save_hwid(self.my_id_clean)
+        except Exception:
+            pass
         
-        # Check if service (headless agent) is active by checking the mutex
+        # Check if background host (broker / scheduled task) is actually running.
+        # Installed copies must NOT assume this — otherwise GUI skips TCP 12345,
+        # registers {HWID}_12346, and never appears online.
         self.is_service_active = False
         if not self.is_headless:
             exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
@@ -666,47 +688,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if sys.platform != "win32":
                 if "/opt/p2p_remote" in exe_path_abs:
                     self.is_service_active = True
-                    
-        if sys.platform == "win32" and not self.is_headless:
-            import win32event, win32con
-            
-            # Since the service is actually a Scheduled Task (EasyRemoteDesktopAgent),
-            # we check if we are running from the installation directory and wait for the headless agent.
-            is_installed_version = False
-            try:
-                if "c:\\apps\\p2p" in exe_path_abs or "program files" in exe_path_abs:
-                    is_installed_version = True
-            except:
-                pass
-
-            session_id = 1
-            try:
-                sid = ctypes.c_ulong()
-                if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
-                    session_id = sid.value
-            except:
-                pass
-
-            if is_installed_version:
-                # If running from installation directory, always assume service is active to avoid port 12345 hijacking
-                self.is_service_active = True
-            else:
-                # Fallback to checking Mutex for portable versions
-                for d_name in ["default", "winlogon"]:
-                    m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
-                    try:
-                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
-                        if h_mutex:
-                            win32api.CloseHandle(h_mutex)
-                            self.is_service_active = True
-                            break
-                    except Exception as e:
-                        err_code = getattr(e, 'winerror', 0)
-                        if not err_code and hasattr(e, 'args') and len(e.args) > 0:
-                            err_code = e.args[0]
-                        if err_code == 5: # ERROR_ACCESS_DENIED
-                            self.is_service_active = True
-                            break
+            elif sys.platform == "win32":
+                self.is_service_active = self.check_if_service_active()
+                print(f"[Host GUI] Background host running: {self.is_service_active}")
 
         # Load or generate password
         if self.is_headless:
@@ -725,19 +709,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 import core.config; core.config.BOUND_PORT = 12346
                 import core.network_manager; core.network_manager.BOUND_PORT = 12346
                 import core.host; core.host.BOUND_PORT = 12346
+            # Mỗi lần mở GUI: mật khẩu kết nối mới. Broker đọc lại session_pass.txt lúc handshake.
+            self.my_password = str(random.randint(1000, 9999))
+            try:
                 pass_path = os.path.join(app_dir, "session_pass.txt")
-                if os.path.exists(pass_path):
-                    try:
-                        with open(pass_path, "r", encoding="utf-8") as f:
-                            self.my_password = f.read().strip()
-                        print(f"[Host GUI] Loaded shared session password from {pass_path}: {self.my_password}")
-                    except Exception as e:
-                        print(f"[Host GUI] Failed to load shared session password: {e}")
-                        self.my_password = str(random.randint(1000, 9999))
-                else:
-                    self.my_password = str(random.randint(1000, 9999))
-            else:
-                self.my_password = str(random.randint(1000, 9999))
+                with open(pass_path, "w", encoding="utf-8") as f:
+                    f.write(self.my_password)
+                print(f"[Host GUI] New session password saved to {pass_path}")
+            except Exception as e:
+                print(f"[Host GUI] Failed to save session password: {e}")
         # Migrate old fixed_password.txt to XML if it exists
         self.fixed_password = ""
         if os.path.exists("fixed_password.txt"):
@@ -3255,6 +3235,10 @@ Comment=Remote Desktop P2P AutoStart
         self._status_query_worker_started = True
         import queue
         self._status_query_q = queue.Queue()
+        self._online_vote_lock = threading.Lock()
+        self._online_expect = {}
+        self._online_got = {}
+        self._online_any = {}
 
         def worker():
             while True:
@@ -3267,14 +3251,50 @@ Comment=Remote Desktop P2P AutoStart
                     self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
                     continue
                 try:
-                    req = json.dumps({"action": "check_online", "target": cid})
-                    with self.signaling_lock:
-                        send_msg(sock, req.encode("utf-8"), APP_KEY)
+                    from utils.hwid import signaling_lookup_ids
+                    aliases = signaling_lookup_ids(cid)
+                    with self._online_vote_lock:
+                        self._online_expect[cid] = len(aliases)
+                        self._online_got[cid] = 0
+                        self._online_any[cid] = False
+                    for alias in aliases:
+                        req = json.dumps({"action": "check_online", "target": alias})
+                        with self.signaling_lock:
+                            send_msg(sock, req.encode("utf-8"), APP_KEY)
+                        time.sleep(0.02)
                 except Exception:
                     self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
                 time.sleep(0.025)
 
         threading.Thread(target=worker, daemon=True, name="StatusQueryWorker").start()
+
+    def _on_check_online_result(self, target, online):
+        from utils.hwid import canonical_hwid
+        base = canonical_hwid(target)
+        lock = getattr(self, "_online_vote_lock", None)
+        if lock is None or not hasattr(self, "_online_expect"):
+            self.update_saved_computer_status(base, online)
+            return
+        with lock:
+            if base not in self._online_expect:
+                apply_now = True
+                final = online
+            else:
+                apply_now = False
+                final = False
+                if online:
+                    self._online_any[base] = True
+                    apply_now = True
+                    final = True
+                self._online_got[base] = self._online_got.get(base, 0) + 1
+                if self._online_got[base] >= self._online_expect.get(base, 1):
+                    apply_now = True
+                    final = bool(self._online_any.get(base))
+                    self._online_expect.pop(base, None)
+                    self._online_got.pop(base, None)
+                    self._online_any.pop(base, None)
+        if apply_now:
+            self.update_saved_computer_status(base, final)
 
 
     def check_and_default_offline(self, clean_id):
@@ -3291,7 +3311,8 @@ Comment=Remote Desktop P2P AutoStart
 
 
     def update_saved_computer_status(self, partner_id, is_online):
-        clean_id = partner_id.replace(" ", "")
+        from utils.hwid import canonical_hwid
+        clean_id = canonical_hwid(partner_id)
         if clean_id in self.status_dots_widgets:
             widgets = self.status_dots_widgets[clean_id]
             status_changed = False
@@ -3625,43 +3646,31 @@ Comment=Remote Desktop P2P AutoStart
 
 
     def check_if_service_active(self):
+        """True only if a background host (service/broker/headless agent) is running — not this GUI."""
         if getattr(self, 'is_headless', False):
             return False
-            
-        # 1. Quick check if RemoteDesktopService.exe is running in the system process list
+        my_pid = os.getpid()
         try:
             import psutil
-            for proc in psutil.process_iter(['name']):
-                if proc.info['name'] and proc.info['name'].lower() == "remotedesktopservice.exe":
-                    return True
-        except:
-            pass
-            
-        # 2. Mutex fallback check
-        session_id = 1
-        try:
-            import win32event, win32con, win32api
-            sid = ctypes.c_ulong()
-            if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
-                session_id = sid.value
+            for proc in psutil.process_iter(['name', 'pid', 'cmdline']):
+                try:
+                    pid = proc.info.get('pid')
+                    if pid == my_pid:
+                        continue
+                    name = (proc.info.get('name') or '').lower()
+                    if name == "remotedesktopservice.exe":
+                        return True
+                    if name == "remotedesktopp2p.exe":
+                        cmd = proc.info.get('cmdline') or []
+                        joined = " ".join(str(x) for x in cmd).lower()
+                        if "--capture-worker" in joined:
+                            continue
+                        if "--broker" in joined or "--headless" in joined:
+                            return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
         except Exception:
-            return False
-        except:
             pass
-            
-        for d_name in ["default", "winlogon"]:
-            m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
-            try:
-                h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
-                if h_mutex:
-                    win32api.CloseHandle(h_mutex)
-                    return True
-            except Exception as e:
-                err_code = getattr(e, 'winerror', 0)
-                if not err_code and hasattr(e, 'args') and len(e.args) > 0:
-                    err_code = e.args[0]
-                if err_code == 5: # ERROR_ACCESS_DENIED means it exists
-                    return True
         return False
 
     def _poll_signaling_status(self):
@@ -3737,22 +3746,14 @@ Comment=Remote Desktop P2P AutoStart
     def configure_uac_registry(self):
         if sys.platform != "win32":
             return
-        try:
-            import winreg
-            path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-            try:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
-            except WindowsError:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
-            winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
-            winreg.CloseKey(key)
+        from utils.windows_uac import apply_remote_uac_desktop_policy
+        ok, err = apply_remote_uac_desktop_policy()
+        if ok:
             print("[Host] Successfully configured registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
-        except PermissionError:
-            # Không có quyền Admin → UAC vẫn sẽ dùng Secure Desktop → cảnh báo người dùng ở console/log
+        elif isinstance(err, PermissionError) or (err and "Access is denied" in str(err)):
             print("[Host] WARNING: No Admin rights → PromptOnSecureDesktop cannot be set. UAC prompts may freeze screen.")
-        except Exception as e:
-            print(f"[Host] Failed to configure registry for UAC: {e}")
+        elif err:
+            print(f"[Host] Failed to configure registry for UAC: {err}")
 
 
 
@@ -3947,6 +3948,15 @@ if __name__ == '__main__':
 
     is_headless = ("--headless" in sys.argv) or ("--capture-worker" in sys.argv)
     is_clipboard_agent = "--clipboard-agent" in sys.argv
+
+    if "--set-uac-desktop" in sys.argv:
+        from utils.windows_uac import apply_remote_uac_desktop_policy
+        ok, err = apply_remote_uac_desktop_policy()
+        if ok:
+            print("[UAC] PromptOnSecureDesktop=0 OK")
+            sys.exit(0)
+        print(f"[UAC] Failed: {err}")
+        sys.exit(1)
     
     # --- Chế độ Clipboard Agent: Chỉ lắng nghe Pipe và nạp Clipboard, thoát sớm ---
     if is_clipboard_agent:

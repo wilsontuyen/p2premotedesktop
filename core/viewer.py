@@ -126,7 +126,7 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "screen_cover_state":
                         globals()['viewer_cover_state'] = bool(event.get("active"))
                         continue
-                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "clipboard_text", "clipboard_image", "clear_clipboard"):
+                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack", "clipboard_text", "clipboard_image", "clear_clipboard"):
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
                         continue
@@ -150,14 +150,15 @@ def client_receiver_thread(sock, password):
                         if client_switching_desktop_countdown <= 0:
                             client_switching_desktop_countdown = 10
                         continue
-                    elif evt_type == "host_shutdown":
-                        print("[Client] Received host_shutdown. Exiting viewer immediately.")
+                    elif evt_type in ("host_shutdown", "host_restart"):
+                        print(f"[Client] Received {evt_type}. Closing viewer (no reconnect).")
                         try:
                             if clipboard_sync_manager:
                                 clipboard_sync_manager.handle_received_packet({"type": "clear_clipboard"})
                         except Exception:
                             pass
                         client_host_did_shutdown = True
+                        client_running = False
                         import pygame
                         pygame.event.post(pygame.event.Event(pygame.QUIT))
                         continue
@@ -458,6 +459,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
         clock = pygame.time.Clock()
         button_map = {1: 'left', 2: 'middle', 3: 'right'}
+        toolbar_collapsed = False
         
         while outer_running:
             exit_due_to_disconnect = True
@@ -676,9 +678,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 power_btn_w, power_btn_h = 40, 22
                 rec_btn_w, rec_btn_h = 30, 22
                 close_btn_w, close_btn_h = 40, 22
+                fold_btn_w, fold_btn_h = 28, 16
                 
                 is_switching = (globals().get('client_switching_desktop_countdown', 0) > 0)
                 show_buttons = not is_switching
+                show_toolbar = show_buttons and (not toolbar_collapsed)
                 
                 show_cad_button = show_buttons and not is_android
                 show_file_button = show_buttons and is_android
@@ -693,12 +697,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 show_eye_button = show_cad_button and is_host_windows and (host_os not in ["7", "8", "8.1", "post2008Server", "post2012Server"])
                 
                 total_w = 0
-                if show_buttons:
+                if show_toolbar:
                     total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (eye_btn_w + 10 if show_eye_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
                     
                 start_x = (window_w - total_w) // 2
                 
-                if show_buttons:
+                if show_toolbar:
                     min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
                     current_x = start_x + min_btn_w + 10
                     
@@ -729,6 +733,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)
                     current_x += rec_btn_w + 10
                     close_btn_rect = pygame.Rect(current_x, 0, close_btn_w, close_btn_h)
+                    if show_cad_button:
+                        fold_btn_rect = pygame.Rect(cad_btn_rect.centerx - fold_btn_w // 2, cad_btn_rect.bottom + 2, fold_btn_w, fold_btn_h)
+                    else:
+                        fold_btn_rect = pygame.Rect(start_x + max(total_w, fold_btn_w) // 2 - fold_btn_w // 2, min_btn_h + 2, fold_btn_w, fold_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     file_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
@@ -737,15 +745,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     rec_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    if show_buttons:
+                        fold_btn_rect = pygame.Rect((window_w - fold_btn_w) // 2, 0, fold_btn_w, fold_btn_h)
+                    else:
+                        fold_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
 
                 mx, my = pygame.mouse.get_pos()
-                min_is_hover = min_btn_rect.collidepoint(mx, my) if show_buttons else False
-                file_is_hover = file_btn_rect.collidepoint(mx, my) if show_buttons else False
-                power_is_hover = power_btn_rect.collidepoint(mx, my) if show_buttons else False
-                eye_is_hover = eye_btn_rect.collidepoint(mx, my) if show_buttons else False
-                cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_buttons else False
-                rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_buttons else False
-                close_is_hover = close_btn_rect.collidepoint(mx, my) if show_buttons else False
+                min_is_hover = min_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                file_is_hover = file_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                power_is_hover = power_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                eye_is_hover = eye_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                close_is_hover = close_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                fold_is_hover = fold_btn_rect.collidepoint(mx, my) if show_buttons else False
      
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -760,7 +773,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or eye_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)):
+                        if show_buttons and (fold_btn_rect.collidepoint(event.pos) or (show_toolbar and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or eye_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)))):
                             continue
                         mx_pos, my_pos = event.pos
                         host_x = int(mx_pos * (host_w / window_w))
@@ -779,12 +792,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             send_event({"type": "mouse_move", "x": host_x, "y": host_y})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                        if show_buttons and min_btn_rect.collidepoint(event.pos):
+                        if show_buttons and fold_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                toolbar_collapsed = not toolbar_collapsed
+                            continue
+                        if show_toolbar and min_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Minimize Button Clicked. Minimizing viewer.")
                                 pygame.display.iconify()
                             continue
-                        if show_buttons and file_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and file_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 import utils.file_manager as fm
                                 if hasattr(fm, 'fm_top') and fm.fm_top:
@@ -802,19 +819,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
                                 threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), kwargs={"send_event_sync": send_event_sync}, daemon=True).start()
                             continue
-                        if show_buttons and power_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Power Button Clicked. Sending power key event to Android.")
                                 send_event({"type": "key_event", "key": "power", "pressed": True})
                             continue
-                        if show_buttons and eye_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and eye_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Eye Button Clicked. Sending toggle_screen_cover to host.")
                                 state = globals().get('viewer_cover_state', False)
                                 globals()['viewer_cover_state'] = not state
                                 send_event({"type": "toggle_screen_cover"})
                             continue
-                        if show_buttons and cad_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and cad_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 is_host_win = globals().get('client_host_os_release', '10') in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in globals().get('client_host_os_release', '10')
                                 if is_host_win:
@@ -824,7 +841,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     print("[Client] Terminal Button Clicked. Sending trigger_terminal to host.")
                                     send_event({"type": "trigger_terminal"})
                             continue
-                        if show_buttons and rec_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and rec_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 import cv2 as _cv2
                                 import os as _os
@@ -855,7 +872,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 globals()['viewer_record_state'] = state
                             continue
 
-                        if show_buttons and close_btn_rect.collidepoint(event.pos):
+                        if show_toolbar and close_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Close Button Clicked. Exiting viewer.")
                                 pygame.event.post(pygame.event.Event(pygame.QUIT))
@@ -1081,7 +1098,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     blink_frames_remaining -= 1
                     
                 # Draw floating buttons on top
-                if show_buttons:
+                if show_toolbar:
                     # Minimize button
                     min_bg_color = (51, 153, 255) if min_is_hover else (0, 102, 204)
                     min_border_color = (255, 255, 255)
@@ -1235,6 +1252,45 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     close_text_surf = btn_font.render("X", True, (255, 255, 255))
                     close_text_rect = close_text_surf.get_rect(center=close_btn_rect.center)
                     screen.blit(close_text_surf, close_text_rect)
+
+                if show_buttons:
+                    if pygame_theme == "light":
+                        fold_border = (0, 173, 181)
+                        fold_bg = (220, 220, 235) if fold_is_hover else (245, 245, 255)
+                        fold_fg = (40, 40, 50)
+                    elif pygame_theme == "gray":
+                        fold_border = (0, 173, 181)
+                        fold_bg = (99, 106, 115) if fold_is_hover else (82, 89, 98)
+                        fold_fg = (240, 240, 240)
+                    elif pygame_theme == "pink":
+                        fold_border = (255, 105, 180)
+                        fold_bg = (255, 105, 180) if fold_is_hover else (255, 182, 193)
+                        fold_fg = (255, 255, 255)
+                    elif pygame_theme == "crystal":
+                        fold_border = (128, 222, 234)
+                        fold_bg = (38, 198, 218) if fold_is_hover else (0, 188, 212)
+                        fold_fg = (255, 255, 255)
+                    elif pygame_theme == "orange":
+                        fold_border = (255, 167, 38)
+                        fold_bg = (255, 183, 77) if fold_is_hover else (255, 152, 0)
+                        fold_fg = (255, 255, 255)
+                    elif pygame_theme == "red":
+                        fold_border = (229, 57, 53)
+                        fold_bg = (239, 154, 154) if fold_is_hover else (244, 67, 54)
+                        fold_fg = (255, 255, 255)
+                    else:
+                        fold_border = (0, 173, 181)
+                        fold_bg = (58, 58, 77) if fold_is_hover else (42, 42, 53)
+                        fold_fg = (255, 255, 255)
+                    pygame.draw.rect(screen, fold_bg, fold_btn_rect, border_radius=4)
+                    pygame.draw.rect(screen, fold_border, fold_btn_rect, width=1, border_radius=4)
+                    cx, cy = fold_btn_rect.center
+                    tw, th = 8, 5
+                    if toolbar_collapsed:
+                        fold_pts = [(cx - tw // 2, cy - th // 2), (cx + tw // 2, cy - th // 2), (cx, cy + th // 2)]
+                    else:
+                        fold_pts = [(cx, cy - th // 2), (cx - tw // 2, cy + th // 2), (cx + tw // 2, cy + th // 2)]
+                    pygame.draw.polygon(screen, fold_fg, fold_pts)
                     
                 current_countdown = globals().get('client_switching_desktop_countdown', 0)
                 if current_countdown > 0:
@@ -1298,6 +1354,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 pygame.display.flip()
                 clock.tick(60)
                 
+            if client_host_did_shutdown:
+                exit_due_to_disconnect = False
+                outer_running = False
+
             uninstall_keyboard_hook()
             
             state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
@@ -1431,6 +1491,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         try: log_activity(_("Ngừng điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
         except: pass
         import os
+        if client_host_did_shutdown:
+            print("[Client] Viewer closed because host shutdown/restart.")
+            os._exit(0)
         if exit_due_to_disconnect:
             print("[Client] Viewer exited due to disconnect. Exit code 99.")
             os._exit(99)
@@ -1443,6 +1506,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         # try: pygame.quit()
         # except: pass
         import os
+        if client_host_did_shutdown:
+            os._exit(0)
         if exit_due_to_disconnect:
             os._exit(99)
         os._exit(1)

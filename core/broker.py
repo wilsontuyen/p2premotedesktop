@@ -58,6 +58,26 @@ def _decrypt_fixed_password(encrypted_text, key="AntigravityP2P"):
         return ""
 
 
+def notify_broker_power_event(kind="shutdown"):
+    """GUI / service / worker bao broker: host shutdown hoac restart (khong phai logoff)."""
+    kind = (kind or "shutdown").lower()
+    if kind not in ("shutdown", "restart"):
+        kind = "shutdown"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.8)
+        s.connect(("127.0.0.1", AGENT_IPC_PORT))
+        s.sendall(json.dumps({"role": "power_event", "kind": kind}).encode("utf-8") + b"\n")
+        try:
+            s.close()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f"[Broker] notify power_event {kind} loi: {e}")
+        return False
+
+
 def _app_dir():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -140,10 +160,18 @@ class Broker:
         self._token_seq = 0
         self._nonce_seq = int(time.time()) & 0xFFFF
         self.identity = {"hwid": "", "computer_name": "", "local_ip": "", "macs": ""}
+        try:
+            from utils.hwid import load_saved_hwid
+            saved = load_saved_hwid()
+            if saved:
+                self.identity["hwid"] = saved
+        except Exception:
+            pass
         self.signaling_lock = threading.Lock()
         self.signaling_sockets = {}
         self.active_viewers = []  # [(sock, password), ...]
         self.viewers_lock = threading.Lock()
+        self._shutdown_sent = False
         threading.Thread(target=self._load_identity, daemon=True).start()
 
     def _register_viewer(self, conn, password):
@@ -154,17 +182,26 @@ class Broker:
         with self.viewers_lock:
             self.active_viewers = [(c, p) for c, p in self.active_viewers if c is not conn]
 
-    def notify_viewers_shutdown(self):
-        """Bao viewer khi broker/service tat (dong app, taskkill co the khong toi day)."""
+    def notify_viewers_shutdown(self, kind="shutdown"):
+        """Bao viewer dong cua so ngay (khong hien 'Mat ket noi'). shutdown va restart giong nhau ve UX."""
+        kind = (kind or "shutdown").lower()
+        if kind not in ("shutdown", "restart"):
+            kind = "shutdown"
+        ptype = "host_restart" if kind == "restart" else "host_shutdown"
         with self.viewers_lock:
+            if self._shutdown_sent:
+                return
+            self._shutdown_sent = True
             viewers = list(self.active_viewers)
-        pkt = json.dumps({"type": "host_shutdown"}).encode("utf-8")
+        pkt = json.dumps({"type": ptype, "kind": kind}).encode("utf-8")
         for conn, pw in viewers:
             try:
                 send_msg(conn, pkt, pw)
             except Exception:
                 pass
-        print(f"[Broker] Da gui host_shutdown toi {len(viewers)} viewer.")
+        print(f"[Broker] Da gui {ptype} toi {len(viewers)} viewer.")
+        if viewers:
+            time.sleep(0.35)
 
     def _tune_viewer_socket(self, sock):
         try:
@@ -180,26 +217,38 @@ class Broker:
             pass
 
     def _load_identity(self):
-        """HWID/IP cua may — khong phu thuoc worker (fast-start khong goi get_hwid)."""
+        """HWID/IP cua may. Luc boot: doc host_hwid.txt truoc (GUI da ghi), roi get_hwid."""
         import platform
-        hwid, macs, lip = "", "", ""
-        try:
-            from utils.hwid import get_hwid, get_local_ip
-            hwid, _fmt, macs = get_hwid()
-            lip = get_local_ip() or ""
-        except Exception as e:
-            print(f"[Broker] load identity loi: {e}")
+        from utils.hwid import get_hwid, get_local_ip, load_saved_hwid, save_hwid
+        hwid, macs, lip = load_saved_hwid(), "", ""
+        if hwid:
+            print(f"[Broker] HWID tu host_hwid.txt: {hwid}")
+        for attempt in range(24):
+            try:
+                got, _fmt, macs = get_hwid()
+                if got:
+                    if not hwid:
+                        hwid = got
+                    elif got == hwid:
+                        save_hwid(got)
+                    lip = get_local_ip() or lip
+                    break
+            except Exception as e:
+                print(f"[Broker] load identity loi (lan {attempt+1}): {e}")
+            if hwid and attempt >= 2:
+                break
+            time.sleep(2.0)
         if not lip or str(lip).startswith("127."):
             try:
                 lip = _worker_local_ip()
             except Exception:
                 pass
-        self.identity = {
-            "hwid": hwid or "",
-            "computer_name": platform.node(),
-            "local_ip": lip or "",
-            "macs": macs or "",
-        }
+        ident = dict(self.identity or {})
+        ident["hwid"] = hwid or ident.get("hwid") or ""
+        ident["computer_name"] = platform.node() or ident.get("computer_name") or ""
+        ident["local_ip"] = lip or ident.get("local_ip") or ""
+        ident["macs"] = macs or ident.get("macs") or ""
+        self.identity = ident
         print(f"[Broker] LAN identity hwid={self.identity['hwid']} ip={self.identity['local_ip']} name={self.identity['computer_name']}")
 
     # ---------- password ----------
@@ -293,6 +342,10 @@ class Broker:
                 self._on_session_event(info)
                 try: conn.close()
                 except: pass
+            elif role == "power_event":
+                self._on_power_event(info)
+                try: conn.close()
+                except: pass
             else:
                 conn.close()
         except Exception as e:
@@ -346,8 +399,95 @@ class Broker:
         elif kind in ("interactive", "logon", "unlock"):
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
 
+    def _on_power_event(self, info):
+        kind = (info.get("kind") or "shutdown").lower()
+        if kind not in ("shutdown", "restart"):
+            kind = "shutdown"
+        print(f"[Broker] power_event kind={kind}")
+        self.notify_viewers_shutdown(kind)
+
+    def _start_power_listener(self):
+        """Nhan shutdown/restart cua Windows (khong phai logoff) de bao viewer dong cua so."""
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.windll.kernel32
+            CTRL_SHUTDOWN_EVENT = 6
+            HandlerRoutine = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+            def _ctrl(ctrl_type):
+                if ctrl_type == CTRL_SHUTDOWN_EVENT:
+                    print("[Broker] CTRL_SHUTDOWN_EVENT (shutdown/restart)")
+                    self.notify_viewers_shutdown("shutdown")
+                    return True
+                return False
+
+            self._power_ctrl_handler = HandlerRoutine(_ctrl)
+            kernel32.SetConsoleCtrlHandler(self._power_ctrl_handler, True)
+        except Exception as e:
+            print(f"[Broker] SetConsoleCtrlHandler: {e}")
+
+        def _power_window_thread():
+            # Cua so phai tao tren chinh thread pump, neu khong se khong nhan QUERYENDSESSION.
+            try:
+                import win32gui, win32con, win32api
+                ENDSESSION_LOGOFF = 0x80000000
+
+                def wnd_proc(hwnd, msg, wparam, lparam):
+                    if msg in (win32con.WM_QUERYENDSESSION, win32con.WM_ENDSESSION):
+                        if msg == win32con.WM_ENDSESSION and not wparam:
+                            return True
+                        if lparam & ENDSESSION_LOGOFF:
+                            return True
+                        print("[Broker] WM_QUERYENDSESSION/ENDSESSION shutdown or restart")
+                        self.notify_viewers_shutdown("shutdown")
+                        return True
+                    return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+
+                self._power_wnd_proc = wnd_proc
+                wc = win32gui.WNDCLASS()
+                wc.lpfnWndProc = wnd_proc
+                wc.lpszClassName = "BrokerPowerListener"
+                wc.hInstance = win32api.GetModuleHandle(None)
+                try:
+                    win32gui.RegisterClass(wc)
+                except Exception:
+                    pass
+                hwnd = win32gui.CreateWindow(
+                    wc.lpszClassName, "BrokerPower", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None
+                )
+                self._power_hwnd = hwnd
+                win32gui.PumpMessages()
+            except Exception as e:
+                print(f"[Broker] power window: {e}")
+
+        threading.Thread(target=_power_window_thread, daemon=True, name="BrokerPowerPump").start()
+
     def _register_worker(self, conn, info):
         w = Worker(conn, info)
+        beacon = info.get("beacon") or {}
+        wh = str(beacon.get("hwid") or "").replace(" ", "").strip()
+        if wh.isdigit() and len(wh) == 12:
+            cur = (self.identity or {}).get("hwid") or ""
+            try:
+                from utils.hwid import load_saved_hwid, save_hwid
+                saved = load_saved_hwid()
+            except Exception:
+                saved = ""
+                save_hwid = None
+            if saved:
+                if cur != saved:
+                    self.identity["hwid"] = saved
+            elif cur != wh:
+                self.identity["hwid"] = wh
+                if save_hwid:
+                    try:
+                        save_hwid(wh)
+                    except Exception:
+                        pass
+                print(f"[Broker] HWID tu worker: {wh}")
         with self.worker_lock:
             old = self.active_worker
             self.active_worker = w
@@ -488,18 +628,15 @@ class Broker:
 
     def _handle_viewer(self, conn, addr):
         try:
-            worker = self._get_active_worker()
-            if worker is None:
-                print("[Broker] khong co worker de capture.")
-                conn.close(); return
-
+            # Handshake khong doi worker — luc boot chua login, Winlogon worker co the chua kip.
+            worker = self._get_active_worker(timeout=0.4)
             candidates = self._handshake_passwords(worker)
             sp = self._current_password()
             fp = self._fixed_password()
             if not candidates:
                 print("[Broker] Chua co mat khau, tu choi viewer.")
                 conn.close(); return
-            print(f"[Broker] handshake: {len(candidates)} khoa (session={'y' if sp else 'n'} fixed={'y' if fp else 'n'})")
+            print(f"[Broker] handshake: {len(candidates)} khoa (session={'y' if sp else 'n'} fixed={'y' if fp else 'n'} worker={'y' if worker else 'n'})")
 
             self._tune_viewer_socket(conn)
 
@@ -530,8 +667,10 @@ class Broker:
             password = client_pass
             socket_passwords[conn] = password
 
-            host_w = worker.width or 1920
-            host_h = worker.height or 1080
+            if worker is None:
+                worker = self._get_active_worker(timeout=8.0)
+            host_w = (worker.width if worker else 0) or 1920
+            host_h = (worker.height if worker else 0) or 1080
             import platform
             res_info = json.dumps({
                 "status": "ok",
@@ -777,15 +916,15 @@ class Broker:
             threading.Thread(target=self._signaling_maintainer, args=(host,), daemon=True).start()
 
     def _signaling_maintainer(self, host):
-        hwid = self._wait_hwid()
-        if not hwid:
-            print(f"[Broker] Signaling {host}: chua co HWID, thu lai...")
-            time.sleep(5)
-            hwid = self._wait_hwid()
         retry_delay = 2
         fail_count = 0
         port = core.config.SIGNALING_SERVER_PORT
         while True:
+            hwid = self._wait_hwid(timeout=8.0)
+            if not hwid:
+                print(f"[Broker] Signaling {host}: chua co HWID, doi...")
+                time.sleep(2)
+                continue
             sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -839,6 +978,18 @@ class Broker:
                         last_ping = now
                     if now - last_pong > 50:
                         print(f"[Broker] Signaling heartbeat timeout {host}")
+                        break
+                    now_id = (self.identity or {}).get("hwid") or ""
+                    try:
+                        from utils.hwid import load_saved_hwid
+                        saved = load_saved_hwid()
+                        if saved and saved != now_id:
+                            self.identity["hwid"] = saved
+                            now_id = saved
+                    except Exception:
+                        pass
+                    if now_id and now_id != hwid:
+                        print(f"[Broker] Signaling HWID doi {hwid} -> {now_id}, dang ky lai")
                         break
             except Exception as e:
                 print(f"[Broker] Signaling {host}: {e}")
@@ -946,6 +1097,10 @@ def run_broker():
         atexit.register(b.notify_viewers_shutdown)
     except Exception:
         pass
+    try:
+        b._start_power_listener()
+    except Exception as e:
+        print(f"[Broker] start power listener: {e}")
     threading.Thread(target=b.start_agent_listener, daemon=True).start()
     threading.Thread(target=b.start_viewer_listener, daemon=True).start()
     threading.Thread(target=b.start_lan_beacon, daemon=True).start()
@@ -1088,6 +1243,15 @@ def run_capture_worker(app):
     """Vong lap worker: giu ket noi control toi broker, nhan lenh start/stop."""
     print(f"\n--- Capture worker started at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
     try:
+        from utils.windows_uac import apply_remote_uac_desktop_policy
+        ok, err = apply_remote_uac_desktop_policy()
+        if ok:
+            print("[Worker] PromptOnSecureDesktop=0 (UAC on user desktop)")
+        elif err:
+            print(f"[Worker] PromptOnSecureDesktop not set: {err}")
+    except Exception as e:
+        print(f"[Worker] UAC policy: {e}")
+    try:
         from core.host import _ensure_host_wts_phase_listener, _ensure_winlogon_grab_thread
         _ensure_host_wts_phase_listener()
         _ensure_winlogon_grab_thread()
@@ -1117,6 +1281,11 @@ def run_capture_worker(app):
                 "local_ip": _lip,
                 "macs": getattr(app, "my_macs", "") or "",
             }
+            try:
+                from utils.hwid import save_hwid
+                save_hwid(beacon.get("hwid"))
+            except Exception:
+                pass
             _write_line(ctrl, {
                 "role": "control",
                 "session": _worker_session_id(),

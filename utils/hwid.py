@@ -1,7 +1,68 @@
 import os
+import sys
 import subprocess
 import hashlib
 import socket
+
+HWID_FILENAME = "host_hwid.txt"
+
+
+def _hwid_data_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def load_saved_hwid():
+    """HWID 12 so da ghi luc GUI/worker chay — broker dung luc boot chua login."""
+    try:
+        p = os.path.join(_hwid_data_dir(), HWID_FILENAME)
+        if not os.path.exists(p):
+            return ""
+        with open(p, "r", encoding="utf-8-sig") as f:
+            v = (f.read() or "").strip().split()[0]
+        if v.isdigit() and len(v) == 12:
+            return v
+    except Exception:
+        pass
+    return ""
+
+
+def canonical_hwid(hwid):
+    """12-digit ID, stripping GUI suffix like _12346 used when service owns 12345."""
+    t = str(hwid or "").replace(" ", "").strip()
+    if "_" in t:
+        left, right = t.rsplit("_", 1)
+        if left.isdigit() and len(left) == 12 and right.isdigit():
+            return left
+    return t
+
+
+def signaling_lookup_ids(target):
+    """Canonical HWID plus port-suffixed IDs the GUI registers when broker holds 12345."""
+    base = canonical_hwid(target)
+    ids = []
+    if base:
+        ids.append(base)
+    if base.isdigit() and len(base) == 12:
+        for p in (12345, 12346, 12347, 12348, 12349):
+            a = f"{base}_{p}"
+            if a not in ids:
+                ids.append(a)
+    return ids
+
+
+def save_hwid(hwid):
+    hwid = str(hwid or "").strip().replace(" ", "")
+    if not (hwid.isdigit() and len(hwid) == 12):
+        return False
+    try:
+        p = os.path.join(_hwid_data_dir(), HWID_FILENAME)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(hwid)
+        return True
+    except Exception:
+        return False
 
 def get_hwid():
     cpu = "FALLBACK_CPUID_888"

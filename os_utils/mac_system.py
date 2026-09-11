@@ -27,6 +27,15 @@ def is_secure_desktop():
     # but that's handled differently).
     return False
 
+def uac_consent_running():
+    return False
+
+def uac_on_secure_desktop():
+    return False
+
+def attach_thread_for_remote_input():
+    return True
+
 def check_desktop_change():
     # Needs switch, is_blocked
     return False, False

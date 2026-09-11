@@ -44,6 +44,55 @@ BROKER_MODE = _broker_mode_enabled()
 broker_pid = None
 BROKER_IPC_PORT = 12400
 
+def notify_broker_power_event(kind="shutdown"):
+    """Bao broker: host shutdown/restart — viewer dong cua so, khong hien mat ket noi."""
+    if not BROKER_MODE:
+        return
+    kind = (kind or "shutdown").lower()
+    if kind not in ("shutdown", "restart"):
+        kind = "shutdown"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.8)
+        s.connect(("127.0.0.1", BROKER_IPC_PORT))
+        s.sendall(json.dumps({"role": "power_event", "kind": kind}).encode("utf-8") + b"\n")
+        try:
+            s.close()
+        except Exception:
+            pass
+        log(f"Đã báo broker power_event={kind}")
+    except Exception as e:
+        log(f"Báo broker power_event thất bại: {e}")
+
+
+_shutdown_ctrl_handler = None
+
+def install_power_event_handler():
+    """CTRL_SHUTDOWN_EVENT = shutdown hoac restart. Bo qua CTRL_LOGOFF (Signing Out)."""
+    global _shutdown_ctrl_handler
+    try:
+        import ctypes
+        from ctypes import wintypes
+        CTRL_LOGOFF_EVENT = 5
+        CTRL_SHUTDOWN_EVENT = 6
+        HandlerRoutine = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+        def _ctrl(ctrl_type):
+            if ctrl_type == CTRL_LOGOFF_EVENT:
+                return False
+            if ctrl_type == CTRL_SHUTDOWN_EVENT:
+                log("CTRL_SHUTDOWN_EVENT: shutdown/restart — báo broker đóng viewer")
+                notify_broker_power_event("shutdown")
+                return True
+            return False
+
+        _shutdown_ctrl_handler = HandlerRoutine(_ctrl)
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_shutdown_ctrl_handler, True)
+        log("Đã cài SetConsoleCtrlHandler cho shutdown/restart.")
+    except Exception as e:
+        log(f"SetConsoleCtrlHandler thất bại: {e}")
+
+
 def notify_broker_session_event(kind, session_id):
     """Bao broker/worker Default: PrintWindow Winlogon ngay, khong cho spawn process moi."""
     if not BROKER_MODE:
@@ -203,36 +252,52 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
 
 def configure_uac_registry():
     """
-    Configure registry to disable UAC secure desktop switching (PromptOnSecureDesktop = 0).
-    This ensures that on virtual machines (or when GPU display drivers are limited),
-    UAC prompt windows are displayed on the default user desktop where they can be captured
-    and controlled without session freeze or connection loss.
+    PromptOnSecureDesktop=0: hộp UAC hiện trên desktop người dùng (không Secure Desktop)
+    để viewer capture và bấm được Yes/No.
     """
-    try:
-        import winreg
-        path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-        try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_ALL_ACCESS)
-        except WindowsError:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
-        
-        winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
-        winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
-        winreg.CloseKey(key)
+    from utils.windows_uac import apply_remote_uac_desktop_policy
+    ok, err = apply_remote_uac_desktop_policy()
+    if ok:
         log("Đã cấu hình thành công Registry (PromptOnSecureDesktop=0, SoftwareSASGeneration=3).")
-    except Exception as e:
-        log(f"Thất bại khi cấu hình Registry: {e}")
+    else:
+        log(f"Thất bại khi cấu hình Registry: {err}")
 
 def get_active_session_id():
+    """Session tuong tac (khac Session 0).
+    User dang login / Signing out: uu tien WTSActive (session cu con man Signing out).
+    Chua login: WTSGetActiveConsoleSessionId hoac WTSConnected."""
+    WTSActive = 0
+    WTSConnected = 1
+    invalid = {0xFFFFFFFF, -1, 0}
+
+    sessions = []
     try:
         sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
-        for s in sessions:
-            if s['State'] == 0:  # WTSActive
-                return s['SessionId']
     except Exception as e:
         log(f"Lỗi liệt kê các session WTS: {e}")
-    # Fallback
-    return win32ts.WTSGetActiveConsoleSessionId()
+
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        if s.get("State") == WTSActive:
+            return sid
+
+    console = 0xFFFFFFFF
+    try:
+        console = win32ts.WTSGetActiveConsoleSessionId()
+    except Exception:
+        pass
+    if console not in invalid:
+        return console
+
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        if s.get("State") == WTSConnected:
+            return sid
+    return 0xFFFFFFFF
 
 def is_logon_ui_running(session_id):
     try:
@@ -564,6 +629,24 @@ def _push_session_event(kind, session_id):
     # Bao worker ngay trong callback WTS — không đợi vòng lặp service (sleep 1s).
     if kind in ("logoff", "lock", "interactive"):
         notify_broker_session_event(kind, session_id)
+    # Signing out: spawn Winlogon ngay, ke ca khi console session dang 0xFFFFFFFF
+    # (neu doi vong lap main continue, hu man Signing out).
+    if kind == "logoff" and BROKER_MODE:
+        spawn_winlogon_for_logoff(session_id)
+
+
+def spawn_winlogon_for_logoff(session_id):
+    try:
+        sid = int(session_id)
+    except Exception:
+        return None
+    if sid in (0xFFFFFFFF, -1, 0):
+        return None
+    if agent_mutex_present(sid, "winlogon"):
+        log(f"Winlogon worker đã có mutex session={sid}, không spawn lại.")
+        return None
+    log(f"LOGOFF: spawn Winlogon ngay session={sid}")
+    return spawn_agent(sid, False, True, force_winlogon=True)
 
 def pop_session_events():
     with _session_event_lock:
@@ -707,6 +790,7 @@ def is_process_alive(pid):
 def main():
     enable_all_privileges()
     log("Vòng lặp service Easy Remote Desktop Agent bắt đầu chạy.")
+    install_power_event_handler()
     configure_uac_registry()
     
     # Clean up any lingering agent processes
@@ -745,24 +829,8 @@ def main():
                 ensure_broker_running()
 
             active_session_id = get_active_session_id()
-            if active_session_id == 0xFFFFFFFF or active_session_id == -1:
-                # Khoảng console_disconnect → connect: không ngủ 5s (hụt màn Signing out).
-                _wake_service.wait(0.15)
-                _wake_service.clear()
-                continue
 
-            # Check if user is logged in
-            is_logged_in = False
-            try:
-                h_token = win32ts.WTSQueryUserToken(active_session_id)
-                is_logged_in = True
-                win32api.CloseHandle(h_token)
-            except Exception:
-                pass
-
-            # Check if screen is locked (LogonUI is running)
-            is_screen_locked = is_logon_ui_running(active_session_id)
-
+            # Drain WTS TRUOC khi continue (console_disconnect = 0xFFFFFFFF luc Signing out).
             for ev in pop_session_events():
                 kind = ev.get("kind")
                 if kind == "logoff":
@@ -786,11 +854,7 @@ def main():
                         if active_session_id not in (None, 0xFFFFFFFF, -1, 0) and active_session_id not in sids:
                             sids.append(active_session_id)
                         for sid in sids:
-                            if agent_mutex_present(sid, "winlogon"):
-                                log(f"Winlogon worker đã có mutex session={sid}, không spawn lại.")
-                                continue
-                            log(f"LOGOFF: spawn Winlogon ngay session={sid}")
-                            pid = spawn_agent(sid, False, True, force_winlogon=True)
+                            pid = spawn_winlogon_for_logoff(sid)
                             last_winlogon_spawn_ts = time.time()
                             if pid:
                                 current_agent_pid = pid
@@ -804,6 +868,24 @@ def main():
                     force_logoff_until = 0.0
                     lock_pending_until = 0.0
                     log(f"WTS logon/unlock session={ev.get('session_id')}: hết logoff/lock.")
+
+            if active_session_id in (0xFFFFFFFF, -1, 0):
+                # Chua co session console (boot som / console_disconnect) hoac Session 0.
+                _wake_service.wait(0.15)
+                _wake_service.clear()
+                continue
+
+            # Check if user is logged in
+            is_logged_in = False
+            try:
+                h_token = win32ts.WTSQueryUserToken(active_session_id)
+                is_logged_in = True
+                win32api.CloseHandle(h_token)
+            except Exception:
+                pass
+
+            # Check if screen is locked (LogonUI is running)
+            is_screen_locked = is_logon_ui_running(active_session_id)
 
             session_changed = (last_session_id is not None and last_session_id != active_session_id)
             in_signing_out = time.time() < force_logoff_until
