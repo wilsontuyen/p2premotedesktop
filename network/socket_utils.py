@@ -36,17 +36,76 @@ def force_close_socket(sock):
         _socket_send_locks.pop(sock, None)
     socket_passwords.pop(sock, None)
 
-def send_msg(sock, data_bytes, password=None):
+def send_msg(sock, data_bytes, password=None, should_stop=None, lock_timeout=None):
+    """Gửi 1 khung. Mặc định sendall (signaling/video). should_stop/lock_timeout chỉ dùng lúc gửi file/Hủy."""
+    if should_stop and should_stop():
+        return False
     if password is None:
         password = socket_passwords.get(sock, APP_KEY)
+    lock = _get_socket_send_lock(sock)
+
+    # Signaling, ping, video: giữ sendall như cũ. select() + lock sai indent làm mất đăng ký online.
+    if should_stop is None and lock_timeout is None:
+        try:
+            with lock:
+                encrypted_data = encrypt_payload(data_bytes, password)
+                msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
+                sock.sendall(msg)
+            return True
+        except Exception as e:
+            print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+            return False
+
+    acquired = False
     try:
-        lock = _get_socket_send_lock(sock)
-        with lock:
-            encrypted_data = encrypt_payload(data_bytes, password)
-            msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
-            sock.sendall(msg)
+        if should_stop:
+            while True:
+                if should_stop():
+                    return False
+                acquired = lock.acquire(timeout=0.2)
+                if acquired:
+                    break
+        else:
+            acquired = lock.acquire(timeout=float(lock_timeout))
+            if not acquired:
+                return False
+        encrypted_data = encrypt_payload(data_bytes, password)
+        msg = struct.pack('>I', len(encrypted_data)) + encrypted_data
+        view = memoryview(msg)
+        sent = 0
+        while sent < len(msg):
+            if sent == 0 and should_stop and should_stop():
+                return False
+            try:
+                writable = select.select([], [sock], [], 0.2)[1]
+            except Exception:
+                writable = [sock]
+            if not writable:
+                continue
+            try:
+                n = sock.send(view[sent:sent + min(65536, len(msg) - sent)])
+            except BlockingIOError:
+                continue
+            except InterruptedError:
+                continue
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+                return False
+            if n == 0:
+                return False
+            sent += n
+        return True
     except Exception as e:
         print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+        return False
+    finally:
+        if acquired:
+            try:
+                lock.release()
+            except Exception:
+                pass
 
 def is_private_ip(ip):
     if not ip:

@@ -2289,7 +2289,7 @@ class HostMixin:
                     evt_type = event.get("type", "")
                     if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack", "clipboard_text", "clipboard_image", "clear_clipboard"):
                         if clipboard_sync_manager:
-                            clipboard_sync_manager.handle_received_packet(event)
+                            clipboard_sync_manager.enqueue_packet(event)
                     else:
                         self.host_handle_event(event, conn, password)
                         if evt_type in ("mouse_click", "mouse_scroll", "key_event"):

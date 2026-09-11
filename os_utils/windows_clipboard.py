@@ -300,6 +300,32 @@ class ClipboardEventListener:
                 EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                 None, self.wineventproc_c, 0, 0, WINEVENT_OUTOFCONTEXT
             )
+
+            def _stamp_ctrl_v():
+                if not self.manager:
+                    return
+                self.manager.last_ctrl_v_time = time.time()
+                if getattr(self.manager, "dummy_h_active", False):
+                    self.manager.dummy_h_active = False
+                    self.manager.setup_delayed_rendering()
+
+            def _stamp_lbutton():
+                if not self.manager:
+                    return
+                self.manager.last_lbutton_time = time.time()
+                if getattr(self.manager, "dummy_h_active", False):
+                    self.manager.dummy_h_active = False
+                    self.manager.setup_delayed_rendering()
+
+            def _stamp_rbutton():
+                if not self.manager:
+                    return
+                self.manager.last_rbutton_time = time.time()
+                if getattr(self.manager, "dummy_h_active", False):
+                    self.manager.dummy_h_active = False
+                    self.manager.setup_delayed_rendering()
+
+            _install_paste_ll_hooks(_stamp_ctrl_v, _stamp_lbutton, _stamp_rbutton)
             
             msg = wintypes.MSG()
             while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
@@ -726,6 +752,76 @@ def _cursor_in_explorer_command_bar():
 
 
 _DUMMY_HDROP_PATH = r"C:\RemoteDesktop_Paste_Trigger.tmp"
+_LL_HOOK_KEEPALIVE = []
+
+
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt_x", ctypes.c_long),
+        ("pt_y", ctypes.c_long),
+        ("mouseData", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+_HOOKPROC = ctypes.WINFUNCTYPE(LRESULT_64, ctypes.c_int, WPARAM_64, LPARAM_64)
+
+
+def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
+    """Hook bàn phím/chuột mức thấp — poll 50ms hay bỏ lỡ Ctrl+V inject từ viewer."""
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    try:
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.CallNextHookEx.restype = LRESULT_64
+        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    except Exception:
+        pass
+
+    def _kb(nCode, wParam, lParam):
+        try:
+            if nCode >= 0 and int(wParam) in (0x0100, 0x0104):
+                kb = ctypes.cast(int(lParam), ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
+                vk = int(kb.vkCode)
+                ctrl = bool(user32.GetAsyncKeyState(0x11) & 0x8000)
+                shift = bool(user32.GetAsyncKeyState(0x10) & 0x8000)
+                if (vk in (0x56, 0x76) and ctrl) or (vk == 0x2D and shift):
+                    on_ctrl_v()
+        except Exception:
+            pass
+        return user32.CallNextHookEx(None, nCode, WPARAM_64(wParam), LPARAM_64(lParam))
+
+    def _mouse(nCode, wParam, lParam):
+        try:
+            if nCode >= 0:
+                msg = int(wParam)
+                if msg in (0x0201, 0x0203):
+                    on_lbutton()
+                elif msg in (0x0204, 0x0206):
+                    on_rbutton()
+        except Exception:
+            pass
+        return user32.CallNextHookEx(None, nCode, WPARAM_64(wParam), LPARAM_64(lParam))
+
+    kb_proc = _HOOKPROC(_kb)
+    mouse_proc = _HOOKPROC(_mouse)
+    hmod = kernel32.GetModuleHandleW(None)
+    hk_kb = user32.SetWindowsHookExW(13, kb_proc, hmod, 0)
+    hk_mouse = user32.SetWindowsHookExW(14, mouse_proc, hmod, 0)
+    _LL_HOOK_KEEPALIVE.extend((kb_proc, mouse_proc, hk_kb, hk_mouse))
+    return hk_kb, hk_mouse
 
 
 def _offer_probe_hdrop():
@@ -768,20 +864,30 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     time_since_lbutton = t_now - last_lbutton
     time_since_rbutton = t_now - last_rbutton
     meta_age = t_now - meta_arrival_time
+    lmb_down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+    hwnd_menu = user32.FindWindowW("#32768", None)
+    menu_visible = bool(hwnd_menu and user32.IsWindowVisible(hwnd_menu))
     
     # --- 1. KIỂM TRA THAO TÁC PASTE RÕ RÀNG (Ưu tiên cao nhất) ---
     # Không dùng phím Enter: Explorer dùng Enter để mở thư mục — GetData lúc đó không phải Paste.
     is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
     is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
-    if is_ctrl_v or is_shift_ins or (last_ctrl_v >= meta_arrival_time and t_now - last_ctrl_v < 2.0):
+    # 3.0s: Ctrl+V inject từ viewer thường đã nhả phím trước khi Explorer gọi GetData.
+    if is_ctrl_v or is_shift_ins or (last_ctrl_v >= meta_arrival_time and t_now - last_ctrl_v < 3.0):
         log_debug(f"[check_is_menu_query] Tra ve False: Phim dan/lenh duoc nhan")
         return False
 
-    # Chuột trái chọn Paste trên context menu — RMB phải xảy ra SAU khi đã có file trên clipboard.
-    if (time_since_lbutton < 1.5 and (last_lbutton > last_rbutton)
-            and (last_lbutton - last_rbutton < 5.0)
-            and last_rbutton >= meta_arrival_time and last_lbutton >= meta_arrival_time):
-        log_debug(f"[check_is_menu_query] Tra ve False: Vua click chuot trai chon Paste sau khi click chuot phai ({last_lbutton - last_rbutton:.2f}s)")
+    # Click Paste trên context menu: LMB đang giữ trong lúc menu còn mở (poll 50ms hay trễ hơn GetData).
+    if lmb_down and menu_visible:
+        log_debug("[check_is_menu_query] Tra ve False: LMB + menu #32768 (chon Paste)")
+        return False
+
+    # Chuột trái chọn Paste — RMB phải xảy ra SAU khi đã có file trên clipboard.
+    if last_rbutton >= meta_arrival_time and (
+            (lmb_down and time_since_rbutton < 8.0)
+            or (time_since_lbutton < 1.5 and last_lbutton > last_rbutton and (last_lbutton - last_rbutton) < 5.0)
+    ):
+        log_debug("[check_is_menu_query] Tra ve False: Paste sau chuot phai")
         return False
 
     # --- 2. LOẠI TRỪ CỬA SỔ GUI CỦA APP ---
@@ -929,6 +1035,9 @@ class ClipboardSyncManager:
         self._cancelled_paste_ids = set()
         self._fm_send_abort = threading.Event()
         self._last_cancel_ack_time = 0.0
+        self._pkt_queue = queue.Queue()
+        self._pkt_worker = threading.Thread(target=self._packet_loop, daemon=True, name="ClipPkt")
+        self._pkt_worker.start()
         self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
         self.cacher_thread.start()
         
@@ -938,6 +1047,26 @@ class ClipboardSyncManager:
         
         # Không cần luồng theo dõi paste vì dùng delayed rendering thực tế
         pass
+
+    def enqueue_packet(self, packet):
+        """Nhận packet clipboard/file ngoài luồng input — tránh kẹt chuột viewer khi ghi pipe/file."""
+        try:
+            self._pkt_queue.put(packet)
+        except Exception:
+            pass
+
+    def _packet_loop(self):
+        while True:
+            try:
+                packet = self._pkt_queue.get()
+            except Exception:
+                continue
+            if packet is None:
+                break
+            try:
+                self.handle_received_packet(packet)
+            except Exception as e:
+                print(f"[Clipboard] Packet worker: {e}")
 
     def clear_local_and_notify_peers(self):
         """Xóa clipboard máy này và báo client/agent xóa theo."""
@@ -1464,8 +1593,8 @@ class ClipboardSyncManager:
         print(f"[FileTransfer] Arm xfer ({reason}) id={self._send_xfer_id} paste_id={tok}")
         return True
 
-    def _disarm_file_xfer(self, reason=""):
-        """Hủy: tắt cờ, vòng gửi phải dừng ngay."""
+    def _disarm_file_xfer(self, reason="", cancelled_paste_id=None):
+        """Hủy: tắt cờ, vòng gửi phải dừng ngay. Chỉ blacklist paste_id đang chạy — không blacklist id kế."""
         self._allow_file_xfer = False
         self._send_cancelled = True
         self._receive_cancelled = True
@@ -1479,7 +1608,9 @@ class ClipboardSyncManager:
             pass
         self._cancel_gen = getattr(self, "_cancel_gen", 0) + 1
         self._send_xfer_id = getattr(self, "_send_xfer_id", 0) + 1
-        self._xfer_cancel_token = int(getattr(self, "_clipboard_paste_id", 0) or 0)
+        if cancelled_paste_id is None:
+            cancelled_paste_id = int(getattr(self, "_clipboard_paste_id", 0) or 0)
+        self._xfer_cancel_token = int(cancelled_paste_id or 0)
         self._note_cancelled_paste_id(self._xfer_cancel_token)
         print(f"[FileTransfer] Disarm xfer ({reason}) token={self._xfer_cancel_token} id={self._send_xfer_id}")
 
@@ -1561,37 +1692,12 @@ class ClipboardSyncManager:
                     pass
 
     def _send_file_msg(self, sock, data_bytes, my_id):
-        """Gửi gói file; timeout 2s. Timeout + Hủy → False; timeout do lag → retry cùng gói."""
+        """Gửi gói file bằng sendall (cùng lock với chuột). Không select-wait — host không recv thì select giữ lock → treo chuột viewer."""
         if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
             return False
-        old_to = None
-        try:
-            try:
-                old_to = sock.gettimeout()
-            except Exception:
-                old_to = None
-            sock.settimeout(2.0)
-            for _ in range(3):
-                if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
-                    return False
-                try:
-                    send_msg(sock, data_bytes)
-                    break
-                except socket.timeout:
-                    if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
-                        return False
-                    continue
-                except Exception as e:
-                    print(f"[FileTransfer] send_msg loi: {e}")
-                    return False
-            else:
-                return False
-        finally:
-            try:
-                sock.settimeout(old_to)
-            except Exception:
-                pass
-        return not (not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id))
+        if not send_msg(sock, data_bytes):
+            return False
+        return not self._send_should_stop(my_id)
 
     def _maybe_send_cancel_ack(self):
         """Báo máy gửi dừng vòng chunk; máy nhận vẫn recv/drain socket."""
@@ -1603,10 +1709,14 @@ class ClipboardSyncManager:
         if not sock:
             return
         try:
-            send_msg(sock, json.dumps({
-                "type": "cancel_ack",
-                "paste_id": int(getattr(self, "_clipboard_paste_id", 0) or 0),
-            }).encode("utf-8"))
+            send_msg(
+                sock,
+                json.dumps({
+                    "type": "cancel_ack",
+                    "paste_id": int(getattr(self, "_xfer_cancel_token", 0) or getattr(self, "_clipboard_paste_id", 0) or 0),
+                }).encode("utf-8"),
+                lock_timeout=0.05,
+            )
         except Exception:
             pass
 
@@ -1614,10 +1724,11 @@ class ClipboardSyncManager:
         # Tắt cờ gửi ngay — vòng _process_send_requests / send_msg phải dừng.
         cur = int(getattr(self, "_clipboard_paste_id", 0) or 0)
         self._note_cancelled_paste_id(cur)
-        self._clipboard_paste_id = cur + 1
-        self._disarm_file_xfer("Huy")
+        self._disarm_file_xfer("Huy", cancelled_paste_id=cur)
         self._maybe_send_cancel_ack()
+        self._clipboard_paste_id = cur + 1
         self._suppress_request_files_until = time.time() + 8.0
+        # Chỉ chặn gói request_files không paste_id (request trễ). Paste mới có paste_id khác.
         self._suppress_render_until = max(getattr(self, "_suppress_render_until", 0), time.time() + 1.5)
         self._xfer_cancel_at = time.time()
         self.last_ctrl_v_time = 0.0
@@ -1646,7 +1757,7 @@ class ClipboardSyncManager:
                 pass
             for conn in list(socks):
                 try:
-                    send_msg(conn, pkt)
+                    send_msg(conn, pkt, lock_timeout=0.5)
                 except Exception as e:
                     print(f"[FileTransfer] Lỗi gửi tín hiệu hủy: {e}")
         if self.app and getattr(self.app, 'is_headless', False):
@@ -2318,10 +2429,10 @@ class ClipboardSyncManager:
         if not getattr(self, "_allow_file_xfer", False):
             print("[FileTransfer] Bo request_pending_files (allow_file_xfer=False).")
             return
-        if time.time() < getattr(self, "_suppress_request_files_until", 0):
-            print("[FileTransfer] Bo request_pending_files (vua Huy).")
-            return
         pid = int(getattr(self, "_clipboard_paste_id", 0) or 0)
+        if pid in (getattr(self, "_cancelled_paste_ids", None) or set()):
+            print(f"[FileTransfer] Bo request_pending_files paste_id={pid} (blacklist Huy).")
+            return
         send_msg(self.sock, json.dumps({
             "type": "request_files",
             "files": self.pending_remote_files,
@@ -2340,9 +2451,6 @@ class ClipboardSyncManager:
     def _process_send_requests(self, sock, files):
         if not getattr(self, "_allow_file_xfer", False):
             print("[FileTransfer] Bo qua gui file (allow_file_xfer=False).")
-            return
-        if time.time() < getattr(self, "_suppress_request_files_until", 0):
-            print("[FileTransfer] Bo qua gui file (vua Huy).")
             return
         my_id = getattr(self, "_send_xfer_id", 0)
         self._send_loop_gen = getattr(self, "_cancel_gen", 0)
@@ -2407,6 +2515,7 @@ class ClipboardSyncManager:
                     with open(filepath, "rb") as fh:
                         while True:
                             if self._send_should_stop(my_id):
+                                print("[FileTransfer] Huy — dung doc file phia client.")
                                 break
                             
                             if not lan:
@@ -2421,11 +2530,15 @@ class ClipboardSyncManager:
                             chunk_data = fh.read(chunk_size)
                             if not chunk_data:
                                 break
+                            if self._send_should_stop(my_id):
+                                print("[FileTransfer] Huy sau read — khong encode/gui chunk tiep.")
+                                break
                                 
                             b64 = base64.b64encode(chunk_data).decode('utf-8')
                             if not self._send_file_msg(sock, json.dumps(self._attach_xfer_id({
                                 "type": "file_chunk", "name": filename, "data": b64
                             }, my_id)).encode('utf-8'), my_id):
+                                print("[FileTransfer] Huy luc gui — dong file, ngung doc.")
                                 break
                             
                             file_sent_bytes += len(chunk_data)
@@ -2516,7 +2629,11 @@ class ClipboardSyncManager:
 
         if ptype == "cancel_ack":
             print("[FileTransfer] Nhan cancel_ack — ngat vong gui.")
-            self._disarm_file_xfer("cancel_ack")
+            try:
+                ack_id = int(packet.get("paste_id") or 0)
+            except Exception:
+                ack_id = 0
+            self._disarm_file_xfer("cancel_ack", cancelled_paste_id=ack_id)
             return
 
         if ptype == "cancel_transfer":
@@ -2612,19 +2729,16 @@ class ClipboardSyncManager:
             return
             
         elif ptype == "request_files":
-            if time.time() < getattr(self, "_suppress_request_files_until", 0):
-                print("[FileTransfer] Bo request_files sau Huy (tranh gui ngam).")
-                return
             try:
                 tok = int(packet.get("paste_id") or 0)
             except Exception:
                 tok = 0
-            if tok in (getattr(self, "_cancelled_paste_ids", None) or set()):
+            cancelled = getattr(self, "_cancelled_paste_ids", None) or set()
+            if tok and tok in cancelled:
                 print(f"[FileTransfer] Bo request_files paste_id={tok} (blacklist Huy).")
                 return
-            cancel_tok = int(getattr(self, "_xfer_cancel_token", 0) or 0)
-            if not getattr(self, "_allow_file_xfer", False) and tok <= cancel_tok:
-                print(f"[FileTransfer] Bo request_files sau Huy (paste_id={tok} <= token={cancel_tok}).")
+            if not tok and time.time() < getattr(self, "_suppress_request_files_until", 0):
+                print("[FileTransfer] Bo request_files khong paste_id sau Huy.")
                 return
             if tok:
                 self._clipboard_paste_id = tok
@@ -3075,6 +3189,10 @@ def run_clipboard_agent_mode():
     _agent_xfer_cancel_at = 0.0
     _agent_ctrl_v_held = False
     _agent_shift_ins_held = False
+    _agent_download_active = False
+    _agent_conflict_event = threading.Event()
+    _agent_conflict_choice = "replace"
+    _agent_conflict_skip = set()
 
     def _agent_emit_copied_files(force=False):
         nonlocal _agent_last_copied_seq
@@ -3283,9 +3401,76 @@ def run_clipboard_agent_mode():
         finally:
             _ignore_destroy = False
 
+    def _agent_complete_download(info, dest_dir):
+        """Chờ FILES rồi chuyển vào thư mục Explorer — KHÔNG chạy trong WM_RENDERFORMAT (tránh deadlock OLE)."""
+        nonlocal _agent_allow_xfer, _agent_accept_files, _agent_download_active
+        nonlocal _files_ready_paths, _files_ready_event, _pending_info, _agent_conflict_choice, _agent_conflict_skip
+        try:
+            while _agent_allow_xfer and not _agent_conflict_event.is_set():
+                _agent_conflict_event.wait(0.2)
+            if (not _agent_allow_xfer) or _agent_conflict_choice == "cancel":
+                agent_print("[ClipboardAgent] Huy do ghi de / conflict.")
+                gui_queue.put(("cancel", None))
+                return
+
+            deadline = time.time() + 600.0
+            while time.time() < deadline:
+                if not _agent_allow_xfer:
+                    agent_print("[ClipboardAgent] Huy luc cho file (nen).")
+                    break
+                if _files_ready_event.wait(0.2):
+                    break
+            if _agent_allow_xfer and _files_ready_event.is_set() and _files_ready_paths:
+                final_paths = list(_files_ready_paths)
+                meta_files = (info.get("files") if info else None) or _pending_info.get("files") or []
+                if not _paths_match_expected_sizes(final_paths, meta_files):
+                    agent_print("[ClipboardAgent] File chưa đủ dung lượng — không chuyển.")
+                    gui_queue.put(("cancel", None))
+                else:
+                    skip = set(_agent_conflict_skip or [])
+                    to_move = []
+                    for p in final_paths:
+                        dest_p = os.path.join(dest_dir, os.path.basename(p)) if dest_dir else p
+                        try:
+                            dest_key = os.path.normcase(os.path.abspath(dest_p))
+                        except Exception:
+                            dest_key = dest_p
+                        if dest_key in skip:
+                            try:
+                                if os.path.isdir(p):
+                                    import shutil
+                                    shutil.rmtree(p, ignore_errors=True)
+                                elif os.path.isfile(p):
+                                    os.remove(p)
+                            except Exception:
+                                pass
+                            continue
+                        to_move.append(p)
+                    if dest_dir and to_move:
+                        to_move, moved_all = relocate_transfer_files(to_move, dest_dir)
+                        agent_print(f"[ClipboardAgent] Paste dest={dest_dir} moved_all={moved_all} n={len(to_move)}")
+                    elif not to_move:
+                        agent_print("[ClipboardAgent] Khong chuyen file (skip het / Huy).")
+                    gui_queue.put(("end", None))
+                    agent_print("[ClipboardAgent] Da chuyen file xong (sau khi thoat RENDERFORMAT).")
+                    _pending_info.clear()
+            else:
+                gui_queue.put(("cancel", None))
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] Loi hoan tat paste nen: {e}")
+            gui_queue.put(("cancel", None))
+        finally:
+            _agent_accept_files = False
+            _agent_allow_xfer = False
+            _agent_download_active = False
+            _files_ready_event.clear()
+            _files_ready_paths.clear()
+            if _pending_info:
+                _agent_schedule_rearm(0.45)
+
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
-        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active, _agent_cached_explorer_path, _agent_suppress_render_until, _agent_expect_repaste_until, _agent_paste_id, _agent_accept_files, _agent_allow_xfer, _agent_xfer_cancel_at
+        nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active, _agent_cached_explorer_path, _agent_suppress_render_until, _agent_expect_repaste_until, _agent_paste_id, _agent_accept_files, _agent_allow_xfer, _agent_xfer_cancel_at, _agent_download_active, _agent_conflict_choice, _agent_conflict_skip
 
         if msg == WM_USER_SETUP_DELAYED:
             if _pending_info:
@@ -3345,11 +3530,10 @@ def run_clipboard_agent_mode():
             return 0
 
         if msg == WM_RENDERFORMAT and wparam == CF_HDROP:
-            if _is_rendering:
-                agent_print("[ClipboardAgent] WM_RENDERFORMAT trùng — dummy HDROP.")
+            if _agent_download_active or _is_rendering:
+                agent_print("[ClipboardAgent] Dang tai / WM_RENDERFORMAT trung — dummy HDROP.")
                 if _offer_probe_hdrop():
                     _agent_dummy_h_active = True
-                    ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 return 0
             if time.time() < _agent_suppress_render_until:
                 agent_print("[ClipboardAgent] Ngay sau Hủy — dummy HDROP, không tải ngầm.")
@@ -3391,92 +3575,49 @@ def run_clipboard_agent_mode():
                     return 0
 
             _is_rendering = True
+            _agent_download_active = True
             _agent_expect_repaste_until = 0.0
             _agent_paste_id += 1
             _agent_accept_files = True
             _agent_allow_xfer = True
             agent_print("[ClipboardAgent] Nhận WM_RENDERFORMAT → người dùng đã Paste. Bắt đầu tải file...")
             try:
-                # Hiển thị dialog qua gui_queue ngay lập tức
                 info = _pending_info.copy()
-                gui_queue.put(("start", (info.get("display_name", "Files"), info.get("total_size", 0))))
-
-                # Yêu cầu host bắt đầu gửi file
+                _agent_conflict_event.clear()
+                _agent_conflict_choice = "replace"
+                _agent_conflict_skip = set()
+                gui_queue.put(("conflict_check", (
+                    _agent_cached_explorer_path,
+                    list(info.get("files") or []),
+                    info.get("display_name", "Files"),
+                    info.get("total_size", 0),
+                    _agent_paste_id,
+                )))
                 _files_ready_event.clear()
                 _files_ready_paths.clear()
-                _send_request_files_to_host(
-                    info.get("files", []), _agent_cached_explorer_path, _agent_paste_id
-                )
-
-                deadline = time.time() + 600.0
-                while time.time() < deadline:
-                    if not _agent_allow_xfer:
-                        agent_print("[ClipboardAgent] Huy — dung cho file.")
-                        break
-                    if _files_ready_event.is_set():
-                        break
-                    if not _pump_messages_except_clipboard_render():
-                        time.sleep(0.01)
-
-                if _files_ready_event.is_set() and _files_ready_paths:
-                    dest_dir = _agent_cached_explorer_path
-                    final_paths = list(_files_ready_paths)
-                    meta_files = (info.get("files") if info else None) or _pending_info.get("files") or []
-                    if not _paths_match_expected_sizes(final_paths, meta_files):
-                        agent_print("[ClipboardAgent] File chưa đủ dung lượng / thiếu metadata — không dán.")
-                        final_paths = []
-                    if final_paths:
-                        moved_all = False
-                        if dest_dir:
-                            final_paths, moved_all = relocate_transfer_files(final_paths, dest_dir)
-                            agent_print(f"[ClipboardAgent] Paste dest={dest_dir} moved_all={moved_all} n={len(final_paths)}")
-                        if moved_all:
-                            empty_hdrop = create_hdrop_data([])
-                            if empty_hdrop:
-                                _ignore_destroy = True
-                                try:
-                                    res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
-                                    if not res:
-                                        fn_GlobalFree(empty_hdrop)
-                                    agent_print(f"[ClipboardAgent] Đã chuyển file tới đích, hủy paste Explorer. res={res}")
-                                finally:
-                                    _ignore_destroy = False
-                        else:
-                            hGlobal = create_hdrop_data(final_paths)
-                            if hGlobal:
-                                _ignore_destroy = True
-                                try:
-                                    res = fn_SetClipboardData(CF_HDROP, hGlobal)
-                                    if not res:
-                                        fn_GlobalFree(hGlobal)
-                                    agent_print(f"[ClipboardAgent] Đã nạp HDROP vào clipboard. res={res}")
-                                except Exception as e:
-                                    agent_print(f"[ClipboardAgent] Lỗi SetClipboardData: {e}")
-                                    fn_GlobalFree(hGlobal)
-                                finally:
-                                    _ignore_destroy = False
-                        gui_queue.put(("end", None))
-                        agent_print("[ClipboardAgent] Đã nạp data thực thành công.")
-                        _pending_info.clear()
-                    else:
-                        _files_ready_paths.clear()
-                if not (_files_ready_event.is_set() and _files_ready_paths):
-                    agent_print("[ClipboardAgent] Hết thời gian chờ file hoặc bị hủy — HDROP rỗng, rồi delayed lại.")
-                    empty_hdrop = create_hdrop_data([])
-                    if empty_hdrop:
-                        _ignore_destroy = True
-                        try:
-                            res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
-                            if not res:
-                                fn_GlobalFree(empty_hdrop)
-                            agent_print(f"[ClipboardAgent] HDROP rỗng sau hủy. res={res}")
-                        finally:
-                            _ignore_destroy = False
-                    if _pending_info:
-                        _agent_schedule_rearm(0.45)
-                    gui_queue.put(("cancel", None))
+                # Trả HDROP rỗng NGAY — không chờ 100% trong GetData (move file lúc Explorer lock thư mục = treo máy).
+                empty_hdrop = create_hdrop_data([])
+                if empty_hdrop:
+                    _ignore_destroy = True
+                    try:
+                        res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                        if not res:
+                            fn_GlobalFree(empty_hdrop)
+                        agent_print(f"[ClipboardAgent] Unblock Explorer, tai file o nen. res={res}")
+                    finally:
+                        _ignore_destroy = False
+                dest = _agent_cached_explorer_path
+                threading.Thread(
+                    target=_agent_complete_download,
+                    args=(info, dest),
+                    daemon=True,
+                    name="AgentPasteFinish",
+                ).start()
             except Exception as e:
                 agent_print(f"[ClipboardAgent] Lỗi xử lý WM_RENDERFORMAT: {e}")
+                _agent_download_active = False
+                _agent_allow_xfer = False
+                _agent_accept_files = False
                 empty_hdrop = create_hdrop_data([])
                 if empty_hdrop:
                     _ignore_destroy = True
@@ -3491,10 +3632,6 @@ def run_clipboard_agent_mode():
                 gui_queue.put(("cancel", None))
             finally:
                 _is_rendering = False
-                _agent_accept_files = False
-                _agent_allow_xfer = False
-                _files_ready_event.clear()
-                _files_ready_paths.clear()
             return 0
 
         if msg == WM_DESTROYCLIPBOARD and not _ignore_destroy:
@@ -3571,6 +3708,36 @@ def run_clipboard_agent_mode():
         except Exception as e:
             agent_print(f"[ClipboardAgent] AddClipboardFormatListener lỗi: {e}")
 
+        def _stamp_ctrl_v():
+            nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active
+            _agent_last_ctrl_v_time = time.time()
+            if _agent_dummy_h_active and _agent_hwnd:
+                _agent_dummy_h_active = False
+                ctypes.windll.user32.PostMessageW(
+                    ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0
+                )
+
+        def _stamp_lbutton():
+            nonlocal _agent_last_lbutton_time, _agent_dummy_h_active
+            _agent_last_lbutton_time = time.time()
+            if _agent_dummy_h_active and _agent_hwnd:
+                _agent_dummy_h_active = False
+                ctypes.windll.user32.PostMessageW(
+                    ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0
+                )
+
+        def _stamp_rbutton():
+            nonlocal _agent_last_rbutton_time, _agent_dummy_h_active
+            _agent_last_rbutton_time = time.time()
+            if _agent_dummy_h_active and _agent_hwnd:
+                _agent_dummy_h_active = False
+                ctypes.windll.user32.PostMessageW(
+                    ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0
+                )
+
+        hk_kb, hk_mouse = _install_paste_ll_hooks(_stamp_ctrl_v, _stamp_lbutton, _stamp_rbutton)
+        agent_print(f"[ClipboardAgent] LL hooks kb={hk_kb} mouse={hk_mouse}")
+
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
             user32.TranslateMessage(ctypes.byref(msg))
@@ -3613,11 +3780,14 @@ def run_clipboard_agent_mode():
         """Dừng tải hiện tại nhưng giữ PENDING để user Paste lại."""
         nonlocal _agent_expect_repaste_until, _agent_accept_files, _agent_paste_id, _agent_allow_xfer
         nonlocal _agent_xfer_cancel_at, _agent_suppress_render_until, _agent_last_ctrl_v_time, _agent_ctrl_v_held
+        nonlocal _agent_conflict_choice
         _agent_allow_xfer = False
         _agent_accept_files = False
         _agent_paste_id += 1
         _files_ready_paths.clear()
         _files_ready_event.set()
+        _agent_conflict_choice = "cancel"
+        _agent_conflict_event.set()
         _agent_xfer_cancel_at = time.time()
         _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + 1.5)
         _agent_last_ctrl_v_time = 0.0
@@ -3641,6 +3811,7 @@ def run_clipboard_agent_mode():
 
     def poll_gui_queue():
         nonlocal active_dialog, _agent_meta_arrival_time, _agent_allow_xfer, _agent_suppress_render_until
+        nonlocal _agent_conflict_choice, _agent_conflict_skip
         while not gui_queue.empty():
             try:
                 action, val = gui_queue.get_nowait()
@@ -3708,6 +3879,137 @@ def run_clipboard_agent_mode():
                                 except: pass
                                 active_dialog = None
                         root.after(500, _close)
+                elif action == "conflict_check":
+                    dest_dir, files, display_name, total_size, paste_id = val
+                    _agent_conflict_choice = "replace"
+                    _agent_conflict_skip = set()
+
+                    def _file_dest_key(f_or_path):
+                        if isinstance(f_or_path, dict):
+                            filename = str(f_or_path.get("name") or "")
+                            dest_path = os.path.join(dest_dir, filename.replace("/", os.sep)) if dest_dir else filename
+                        else:
+                            dest_path = f_or_path
+                        try:
+                            return os.path.normcase(os.path.abspath(dest_path))
+                        except Exception:
+                            return dest_path
+
+                    def _files_not_skipped():
+                        skip = set(_agent_conflict_skip)
+                        out = []
+                        size = 0
+                        for f in files:
+                            if _file_dest_key(f) in skip:
+                                continue
+                            out.append(f)
+                            try:
+                                size += int(f.get("size") or 0)
+                            except Exception:
+                                pass
+                        return out, size
+
+                    def _begin_download(files_req=None, size=None):
+                        req = files if files_req is None else files_req
+                        sz = total_size if size is None else size
+                        if not req:
+                            return False
+                        name = display_name
+                        if len(req) == 1:
+                            name = req[0].get("name") or display_name
+                        gui_queue.put(("start", (name, sz)))
+                        _send_request_files_to_host(req, dest_dir, paste_id)
+                        return True
+
+                    try:
+                        if not dest_dir or not os.path.isdir(dest_dir) or not files:
+                            _begin_download()
+                            _agent_conflict_event.set()
+                            continue
+                        conflicts = []
+                        for f in files:
+                            filename = str(f.get("name") or "")
+                            if not filename:
+                                continue
+                            dest_path = os.path.join(dest_dir, filename.replace("/", os.sep))
+                            if not os.path.exists(dest_path):
+                                continue
+                            source_info = {
+                                "size": f.get("size", 0),
+                                "mtime": f.get("mtime", 0),
+                                "path": f.get("path") or filename,
+                            }
+                            try:
+                                st = os.stat(dest_path)
+                                dest_info = {"size": st.st_size, "mtime": st.st_mtime, "path": dest_path}
+                            except Exception:
+                                dest_info = {"size": 0, "mtime": 0, "path": dest_path}
+                            conflicts.append((os.path.basename(filename.replace("\\", "/")), source_info, dest_info, dest_path))
+                        if not conflicts:
+                            _begin_download()
+                            _agent_conflict_event.set()
+                            continue
+                        replace_all = False
+                        skip_all = False
+                        has_multiple = len(files) > 1
+                        cancelled = False
+                        idx = 0
+                        while idx < len(conflicts):
+                            filename, source_info, dest_info, dest_path = conflicts[idx]
+                            def _skip_path(dp):
+                                try:
+                                    _agent_conflict_skip.add(os.path.normcase(os.path.abspath(dp)))
+                                except Exception:
+                                    _agent_conflict_skip.add(dp)
+                            if skip_all:
+                                _skip_path(dest_path)
+                                idx += 1
+                                continue
+                            if replace_all:
+                                idx += 1
+                                continue
+                            dialog = ClassicCopyDialog(root, filename, source_info, dest_info, has_multiple)
+                            try:
+                                dialog.grab_set()
+                            except Exception:
+                                pass
+                            root.wait_window(dialog)
+                            choice = dialog.choice if dialog.choice else "cancel"
+                            apply_all = bool(getattr(dialog, "var_all", None) and dialog.var_all.get())
+                            if choice == "replace_all" or (choice == "replace" and apply_all):
+                                replace_all = True
+                                idx += 1
+                                continue
+                            if choice == "replace":
+                                idx += 1
+                                continue
+                            if choice == "skip_all" or (choice == "skip" and apply_all):
+                                for j in range(idx, len(conflicts)):
+                                    _skip_path(conflicts[j][3])
+                                break
+                            if choice == "skip":
+                                _skip_path(dest_path)
+                                idx += 1
+                                continue
+                            cancelled = True
+                            break
+                        if cancelled:
+                            _agent_conflict_choice = "cancel"
+                            trigger_cancel_win32()
+                        else:
+                            req, sz = _files_not_skipped()
+                            if not req:
+                                _agent_conflict_choice = "cancel"
+                                agent_print("[ClipboardAgent] Don't copy — khong tai, khong mo dialog tien trinh.")
+                                _agent_schedule_rearm(0.45)
+                            else:
+                                _agent_conflict_choice = "replace"
+                                _begin_download(req, sz)
+                    except Exception as e:
+                        agent_print(f"[ClipboardAgent] Lỗi dialog ghi đè: {e}")
+                        _agent_conflict_choice = "replace"
+                        _begin_download()
+                    _agent_conflict_event.set()
                 elif action == "cancel":
                     if active_dialog:
                         try: active_dialog.destroy()
