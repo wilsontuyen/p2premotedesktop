@@ -344,7 +344,62 @@ def _is_transfer_staging_dir(path):
     return abs_path in staging
 
 
-def relocate_transfer_files(src_paths, dest_dir):
+def _localized_batch_name(files, fallback=""):
+    files = files or []
+    if not files:
+        return fallback or _("Tệp tin")
+    first = files[0]
+    if isinstance(first, dict):
+        first = str(first.get("name") or fallback or _("Tệp tin"))
+    else:
+        first = str(first or fallback or _("Tệp tin"))
+    extra = len(files) - 1
+    if extra > 0:
+        first += _(" và {count} mục khác").format(count=extra)
+    return first
+
+
+def _same_volume(path_a, path_b):
+    try:
+        return os.path.splitdrive(os.path.abspath(path_a))[0].lower() == os.path.splitdrive(os.path.abspath(path_b))[0].lower()
+    except Exception:
+        return False
+
+
+def _path_byte_size(path):
+    try:
+        if os.path.isfile(path):
+            return os.path.getsize(path)
+        total = 0
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except Exception:
+                    pass
+        return total
+    except Exception:
+        return 0
+
+
+def _copy_file_with_progress(src, dst, on_progress=None):
+    import shutil
+    with open(src, "rb") as inf, open(dst, "wb") as outf:
+        while True:
+            buf = inf.read(1024 * 1024)
+            if not buf:
+                break
+            outf.write(buf)
+            if on_progress:
+                on_progress(len(buf))
+    try:
+        shutil.copystat(src, dst, follow_symlinks=True)
+    except Exception:
+        pass
+    os.remove(src)
+
+
+def relocate_transfer_files(src_paths, dest_dir, on_progress=None):
     """Chuyển file từ thư mục tạm sang thư mục Explorer đang Paste. Trả về (paths, moved_all)."""
     import shutil
     if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir):
@@ -359,6 +414,8 @@ def relocate_transfer_files(src_paths, dest_dir):
         src_dir = os.path.normcase(os.path.dirname(src_abs))
         if src_dir == dest_abs:
             moved.append(src_abs)
+            if on_progress:
+                on_progress(_path_byte_size(src_abs))
             continue
         dest_path = os.path.join(dest_dir, os.path.basename(src_abs))
         try:
@@ -367,7 +424,12 @@ def relocate_transfer_files(src_paths, dest_dir):
                     shutil.rmtree(dest_path, ignore_errors=True)
                 else:
                     os.remove(dest_path)
-            shutil.move(src_abs, dest_path)
+            if os.path.isdir(src_abs) or _same_volume(src_abs, dest_path):
+                shutil.move(src_abs, dest_path)
+                if on_progress:
+                    on_progress(_path_byte_size(dest_path))
+            else:
+                _copy_file_with_progress(src_abs, dest_path, on_progress)
             moved.append(os.path.abspath(dest_path))
         except Exception as e:
             log_debug(f"[relocate_transfer_files] move failed {src_abs} -> {dest_path}: {e}")
@@ -375,9 +437,10 @@ def relocate_transfer_files(src_paths, dest_dir):
                 if os.path.isdir(src_abs):
                     shutil.copytree(src_abs, dest_path)
                     shutil.rmtree(src_abs, ignore_errors=True)
+                    if on_progress:
+                        on_progress(_path_byte_size(dest_path))
                 else:
-                    shutil.copy2(src_abs, dest_path)
-                    os.remove(src_abs)
+                    _copy_file_with_progress(src_abs, dest_path, on_progress)
                 moved.append(os.path.abspath(dest_path))
             except Exception as e2:
                 log_debug(f"[relocate_transfer_files] copy fallback failed: {e2}")
@@ -598,7 +661,7 @@ def create_named_pipe_with_everyone_dacl():
         CLIPBOARD_PIPE_NAME,
         win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
         win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
-        1,       # Số instance tối đa
+        4,       # Số instance tối đa
         10 * 1024 * 1024,    # Output buffer size (10MB)
         10 * 1024 * 1024,    # Input buffer size (10MB)
         0,       # Default timeout
@@ -729,6 +792,9 @@ def _cursor_in_explorer_command_bar():
 
 
 _DUMMY_HDROP_PATH = r"C:\RemoteDesktop_Paste_Trigger.tmp"
+_PROBE_STUB_DIR = os.path.join(
+    os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopPasteProbe"
+)
 _LL_HOOK_KEEPALIVE = []
 
 
@@ -800,9 +866,39 @@ def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
     return hk_kb, hk_mouse
 
 
-def _offer_probe_hdrop():
+def _probe_stub_paths(pending_files=None):
+    """File thật (0 byte) để Explorer Win11 bật Paste; đường dẫn giả không tồn tại thì ẩn Paste."""
+    names = []
+    for item in pending_files or []:
+        if isinstance(item, dict):
+            raw = str(item.get("name") or item.get("path") or "")
+        else:
+            raw = str(item or "")
+        base = os.path.basename(raw.replace("/", os.sep).rstrip("\\/"))
+        if base:
+            names.append(base)
+    if not names:
+        names = [os.path.basename(_DUMMY_HDROP_PATH)]
+    try:
+        os.makedirs(_PROBE_STUB_DIR, exist_ok=True)
+    except Exception:
+        return [_DUMMY_HDROP_PATH]
+    paths = []
+    for name in names[:32]:
+        path = os.path.join(_PROBE_STUB_DIR, name)
+        try:
+            if not os.path.exists(path):
+                with open(path, "ab"):
+                    pass
+        except Exception:
+            continue
+        paths.append(path)
+    return paths or [_DUMMY_HDROP_PATH]
+
+
+def _offer_probe_hdrop(pending_files=None):
     """Luôn SetClipboardData khi Explorer GetData — return không data = menu chuột phải treo hàng giây."""
-    dummy_h = create_hdrop_data([_DUMMY_HDROP_PATH])
+    dummy_h = create_hdrop_data(_probe_stub_paths(pending_files))
     if dummy_h:
         fn_SetClipboardData(15, dummy_h)
         return True
@@ -980,6 +1076,9 @@ class ClipboardSyncManager:
         self.meta_arrival_time = 0
         self.last_sent_text = ""
         self.last_received_text = ""
+        self._down_pipe_q = queue.Queue()
+        self._down_pipe_started = False
+        self._delayed_setup_tries = 0
         self._last_sent_clip_seq = 0
         self._send_cancelled = False
         self._receive_cancelled = False
@@ -1228,6 +1327,7 @@ class ClipboardSyncManager:
                 threading.Thread(target=self._cancel_listener_thread, daemon=True).start()
                 threading.Thread(target=self._start_uppipe_server, daemon=True).start()
                 threading.Thread(target=self._host_text_poll_loop, daemon=True, name="HostClipPoll").start()
+            self._ensure_down_pipe()
 
     def _cancel_listener_thread(self):
         import win32event
@@ -1283,113 +1383,71 @@ class ClipboardSyncManager:
                 pass
 
     def _send_progress_signal(self, data_type, payload):
-        """
-        Gửi tín hiệu tiến trình qua Named Pipe đang mở hoặc tạo mới nếu chưa có.
-        """
-        import win32file
-        import win32pipe
-        
-        if not hasattr(self, '_transfer_pipe') or self._transfer_pipe is None:
-            try:
-                log_debug("[_send_progress_signal] Đang tạo Named Pipe cho tiến trình tải file...")
-                self._transfer_pipe = create_named_pipe_with_everyone_dacl()
-                if self._transfer_pipe is None or self._transfer_pipe == -1:
-                    self._transfer_pipe = None
-                    log_debug("[_send_progress_signal] Lỗi: Không tạo được Named Pipe.")
-                    return
-                log_debug("[_send_progress_signal] Đang chờ Clipboard Agent kết nối...")
-                
-                try:
-                    win32pipe.ConnectNamedPipe(self._transfer_pipe, None)
-                except Exception as ce:
-                    if getattr(ce, 'winerror', 0) == 535 or (len(ce.args) > 0 and ce.args[0] == 535):
-                        log_debug("[_send_progress_signal] Client đã kết nối trước khi ConnectNamedPipe được gọi.")
-                    else:
-                        raise
-                        
-                log_debug("[_send_progress_signal] Clipboard Agent đã kết nối.")
-            except Exception as e:
-                log_debug(f"[_send_progress_signal] Lỗi tạo/kết nối Pipe: {e}")
-                if getattr(self, '_transfer_pipe', None) is not None and self._transfer_pipe != -1:
-                    try: win32file.CloseHandle(self._transfer_pipe)
-                    except: pass
-                self._transfer_pipe = None
-                return
-                
-        if self._transfer_pipe:
-            try:
-                msg = f"{data_type}:{payload}\x00"
-                data = msg.encode("utf-8")
-                win32file.WriteFile(self._transfer_pipe, data)
-            except Exception as e:
-                log_debug(f"[_send_progress_signal] Lỗi ghi Pipe: {e}. Đang dọn dẹp để kết nối lại...")
-                try:
-                    win32pipe.DisconnectNamedPipe(self._transfer_pipe)
-                    win32file.CloseHandle(self._transfer_pipe)
-                except:
-                    pass
-                self._transfer_pipe = None
+        """PROGRESS/FILES/CANCEL đi cùng pipe persistent xuống agent."""
+        self._send_to_pipe(data_type, payload)
 
     def _close_transfer_pipe(self):
-        if hasattr(self, '_transfer_pipe') and self._transfer_pipe is not None:
-            try:
-                import win32pipe
-                import win32file
-                win32file.FlushFileBuffers(self._transfer_pipe)
-                win32pipe.DisconnectNamedPipe(self._transfer_pipe)
-                win32file.CloseHandle(self._transfer_pipe)
-                log_debug("[_close_transfer_pipe] Đã đóng Pipe tiến trình tải file.")
-            except Exception as e:
-                log_debug(f"[_close_transfer_pipe] Lỗi đóng Pipe: {e}")
-            self._transfer_pipe = None
+        # Không ngắt pipe sau mỗi lần tải — agent giữ kết nối để PENDING lần sau hiện Paste ngay.
+        return
 
     def _send_to_pipe(self, data_type, payload):
-        """
-        Gửi dữ liệu (file hoặc text) qua Named Pipe cho Clipboard Agent.
-        Format gửi: "TYPE:payload"
-        """
-        import win32pipe
-        import win32file
+        """Gửi TYPE:payload xuống Clipboard Agent qua pipe giữ kết nối."""
+        self._ensure_down_pipe()
+        self._down_pipe_q.put((data_type, payload))
+        log_debug(f"[_send_to_pipe] Hàng đợi {data_type} ({len(str(payload))} bytes).")
 
-        pipe_handle = None
-        try:
-            log_debug(f"[_send_to_pipe] Đang tạo Named Pipe để gửi {data_type}...")
-            pipe_handle = create_named_pipe_with_everyone_dacl()
+    def _ensure_down_pipe(self):
+        if getattr(self, "_down_pipe_started", False):
+            return
+        self._down_pipe_started = True
+        threading.Thread(target=self._down_pipe_loop, daemon=True, name="ClipDownPipe").start()
 
-            if pipe_handle is None or pipe_handle == -1:
-                log_debug("[_send_to_pipe] Lỗi: Không tạo được Named Pipe.")
-                return
-
-            log_debug(f"[_send_to_pipe] Đang chờ Clipboard Agent kết nối tới Pipe...")
-            # Chờ Agent kết nối (blocking call)
+    def _down_pipe_loop(self):
+        """Giữ 1 kết nối Named Pipe xuống agent — không tạo/đóng pipe mỗi lần PENDING (trễ 0.5–1.5s)."""
+        while True:
+            pipe_handle = None
             try:
-                win32pipe.ConnectNamedPipe(pipe_handle, None)
-            except Exception as ce:
-                if getattr(ce, 'winerror', 0) == 535 or (len(ce.args) > 0 and ce.args[0] == 535):
-                    log_debug("[_send_to_pipe] Client đã kết nối trước khi ConnectNamedPipe được gọi.")
-                else:
-                    raise
-            log_debug(f"[_send_to_pipe] Agent đã kết nối. Đang gửi {data_type}...")
-
-            # Gửi dữ liệu dưới dạng "TYPE:payload" encoded in UTF-8
-            msg = f"{data_type}:{payload}\x00"
-            data = msg.encode("utf-8")
-            win32file.WriteFile(pipe_handle, data)
-
-            log_debug(f"[_send_to_pipe] Đã gửi thành công qua Pipe: {data_type}")
-            print(f"[Pipe] Đã gửi {data_type} qua Named Pipe.")
-
-        except Exception as e:
-            log_debug(f"[_send_to_pipe] Lỗi gửi qua Pipe: {e}")
-            print(f"[Pipe] Lỗi gửi qua Pipe: {e}")
-        finally:
-            if pipe_handle is not None and pipe_handle != -1:
+                pipe_handle = create_named_pipe_with_everyone_dacl()
+                if pipe_handle is None or pipe_handle == -1:
+                    time.sleep(0.15)
+                    continue
+                log_debug("[_down_pipe_loop] Đang chờ Clipboard Agent kết nối...")
                 try:
-                    win32file.FlushFileBuffers(pipe_handle)
-                    win32pipe.DisconnectNamedPipe(pipe_handle)
-                    win32file.CloseHandle(pipe_handle)
-                except:
-                    pass
+                    win32pipe.ConnectNamedPipe(pipe_handle, None)
+                except Exception as ce:
+                    err = getattr(ce, "winerror", 0) or (ce.args[0] if ce.args else 0)
+                    if err != 535:
+                        raise
+                log_debug("[_down_pipe_loop] Agent đã kết nối. Giữ pipe để gửi PENDING/TEXT.")
+                while True:
+                    data_type, payload = self._down_pipe_q.get()
+                    msg = f"{data_type}:{payload}\x00"
+                    try:
+                        win32file.WriteFile(pipe_handle, msg.encode("utf-8"))
+                    except Exception as we:
+                        log_debug(f"[_down_pipe_loop] WriteFile lỗi: {we}")
+                        try:
+                            self._down_pipe_q.put((data_type, payload))
+                        except Exception:
+                            pass
+                        break
+            except Exception as e:
+                log_debug(f"[_down_pipe_loop] {e}")
+            finally:
+                if pipe_handle is not None and pipe_handle != -1:
+                    try:
+                        win32file.FlushFileBuffers(pipe_handle)
+                    except Exception:
+                        pass
+                    try:
+                        win32pipe.DisconnectNamedPipe(pipe_handle)
+                    except Exception:
+                        pass
+                    try:
+                        win32file.CloseHandle(pipe_handle)
+                    except Exception:
+                        pass
+            time.sleep(0.05)
 
     def _send_path_to_pipe(self, file_path):
         """
@@ -1422,7 +1480,9 @@ class ClipboardSyncManager:
             try:
                 action, args = self.gui_queue.get_nowait()
                 if action == "create":
-                    title_text, filename, total_size = args
+                    title_text, filename, total_size = args[0], args[1], args[2]
+                    dest_dir = args[3] if len(args) > 3 else None
+                    reserve_finalize = args[4] if len(args) > 4 else False
                     existing = self.active_dialog
                     if existing:
                         try:
@@ -1444,8 +1504,22 @@ class ClipboardSyncManager:
                     self.active_dialog = ProgressDialog(
                         self.app, title_text, filename, total_size,
                         on_cancel=lambda: self.cancel_active_transfer(remote_triggered=False),
-                        owner_hwnd=owner_hwnd
+                        owner_hwnd=owner_hwnd,
+                        dest_dir=dest_dir,
+                        reserve_finalize=reserve_finalize
                     )
+                elif action == "finalize_start":
+                    if self.active_dialog:
+                        try: self.active_dialog.begin_finalize(args or 0)
+                        except: pass
+                elif action == "finalize_progress":
+                    if self.active_dialog:
+                        try: self.active_dialog.add_finalize_bytes(args or 0)
+                        except: pass
+                elif action == "complete":
+                    if self.active_dialog:
+                        try: self.active_dialog.mark_complete()
+                        except: pass
                 elif action == "update":
                     sent_bytes = args
                     if self.active_dialog:
@@ -1517,8 +1591,8 @@ class ClipboardSyncManager:
             # Also clean up socket passwords
             socket_passwords.pop(sock, None)
 
-    def show_dialog(self, title_text, filename, total_size):
-        self.gui_queue.put(("create", (title_text, filename, total_size)))
+    def show_dialog(self, title_text, filename, total_size, dest_dir=None, reserve_finalize=False):
+        self.gui_queue.put(("create", (title_text, filename, total_size, dest_dir, reserve_finalize)))
 
     def update_dialog(self, sent_bytes):
         import time
@@ -1536,6 +1610,15 @@ class ClipboardSyncManager:
     def close_dialog(self):
         self._recv_dialog_open = False
         self.gui_queue.put(("destroy", None))
+
+    def begin_dialog_finalize(self, total_bytes=0):
+        self.gui_queue.put(("finalize_start", total_bytes))
+
+    def add_dialog_finalize(self, n):
+        self.gui_queue.put(("finalize_progress", n))
+
+    def complete_dialog(self):
+        self.gui_queue.put(("complete", None))
 
     def _note_cancelled_paste_id(self, tok):
         try:
@@ -1859,7 +1942,7 @@ class ClipboardSyncManager:
 
     def _process_clipboard_change(self, provided_files=None, force=False):
         try:
-            time.sleep(0.05) # Chờ xíu để Windows thả file lock (giảm delay)
+            time.sleep(0.02) # Chờ xíu để Windows thả file lock (giảm delay)
             
             owner_hwnd = getattr(self, 'cached_app_hwnd', None)
             if provided_files is not None:
@@ -1871,7 +1954,7 @@ class ClipboardSyncManager:
                 # Explorer đôi khi vẫn giữ clipboard lúc WM_CLIPBOARDUPDATE; thử lại trước khi bỏ qua
                 if not current_files:
                     for _ in range(4):
-                        time.sleep(0.1)
+                        time.sleep(0.03)
                         current_files = get_clipboard_files(owner_hwnd)
                         if current_files:
                             break
@@ -1990,39 +2073,36 @@ class ClipboardSyncManager:
             return
             
         user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-        opened = False
+        hwnd = ctypes.c_void_p(self.listener.hwnd)
         log_debug(f"[_execute_setup_delayed_rendering] Đang cố gắng OpenClipboard với HWND: {self.listener.hwnd}")
-        for _ in range(30):
-            if user32.OpenClipboard(ctypes.c_void_p(self.listener.hwnd)):
-                opened = True
-                break
-            time.sleep(0.05)
+        if not user32.OpenClipboard(hwnd):
+            self._delayed_setup_tries = getattr(self, "_delayed_setup_tries", 0) + 1
+            if self._delayed_setup_tries <= 40:
+                threading.Timer(0.025, self.setup_delayed_rendering).start()
+            else:
+                err = ctypes.GetLastError()
+                log_debug(f"[_execute_setup_delayed_rendering] OpenClipboard THẤT BẠI sau retry. GetLastError: {err}")
+            return
+        self._delayed_setup_tries = 0
+        log_debug("[_execute_setup_delayed_rendering] OpenClipboard thành công. Đang EmptyClipboard...")
+        self.ignore_destroy_clipboard = True
+        try:
+            user32.EmptyClipboard()
+        finally:
+            self.ignore_destroy_clipboard = False
             
-        if opened:
-            log_debug("[_execute_setup_delayed_rendering] OpenClipboard thành công. Đang EmptyClipboard...")
-            self.ignore_destroy_clipboard = True
-            try:
-                user32.EmptyClipboard()
-            finally:
-                self.ignore_destroy_clipboard = False
-                
-            # Thiết lập các format loại trừ Clipboard History và Cloud Clipboard
-            setup_clipboard_exclusions()
-            
-            res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
-            if res:
-                global last_clipboard_set_time
-                last_clipboard_set_time = time.time()
-            err = ctypes.GetLastError()
-            log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
-            user32.CloseClipboard()
-            mark_own_clipboard_write()
-            print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard và loại trừ Clipboard History.")
-        else:
-            err = ctypes.GetLastError()
-            log_debug(f"[_execute_setup_delayed_rendering] OpenClipboard THẤT BẠI. GetLastError: {err}")
-            print("[Clipboard] Không thể OpenClipboard để thiết lập delayed rendering.")
+        # Thiết lập các format loại trừ Clipboard History và Cloud Clipboard
+        setup_clipboard_exclusions()
+        
+        res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
+        if res:
+            global last_clipboard_set_time
+            last_clipboard_set_time = time.time()
+        err = ctypes.GetLastError()
+        log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
+        user32.CloseClipboard()
+        mark_own_clipboard_write()
+        print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard và loại trừ Clipboard History.")
 
     def lost_ownership(self):
         if getattr(self, 'ignore_destroy_clipboard', False):
@@ -2085,13 +2165,13 @@ class ClipboardSyncManager:
         )
         if is_menu == "MENU":
             log_debug("[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và chờ user dán...")
-            if _offer_probe_hdrop():
+            if _offer_probe_hdrop(self.pending_remote_files):
                 self.dummy_h_active = True
                 self.setup_delayed_rendering()
             return
         elif is_menu == "BACKGROUND":
             log_debug("[render_format] Probe/menu Explorer — dummy HDROP (không tải, không treo GetData).")
-            if _offer_probe_hdrop():
+            if _offer_probe_hdrop(self.pending_remote_files):
                 self.dummy_h_active = True
                 self.setup_delayed_rendering()
             return
@@ -2106,21 +2186,21 @@ class ClipboardSyncManager:
             )
             if not new_kb and not new_menu:
                 log_debug("[render_format] Sau Hủy chưa có thao tác Paste mới — dummy HDROP.")
-                if _offer_probe_hdrop():
+                if _offer_probe_hdrop(self.pending_remote_files):
                     self.dummy_h_active = True
                     self.setup_delayed_rendering()
                 return
 
         if time.time() < getattr(self, "_suppress_render_until", 0):
             log_debug("[render_format] Ngay sau Hủy — dummy HDROP, không tải ngầm.")
-            if _offer_probe_hdrop():
+            if _offer_probe_hdrop(self.pending_remote_files):
                 self.dummy_h_active = True
                 self.setup_delayed_rendering()
             return
             
         if getattr(self, 'is_rendering', False):
             log_debug("[render_format] WM_RENDERFORMAT trùng — dummy HDROP (tránh treo Explorer).")
-            if _offer_probe_hdrop():
+            if _offer_probe_hdrop(self.pending_remote_files):
                 self.dummy_h_active = True
                 self.setup_delayed_rendering()
             return
@@ -2136,22 +2216,18 @@ class ClipboardSyncManager:
             log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             
             # --- HIỂN THỊ DIALOG TIẾN TRÌNH (chỉ GUI mode) ---
-            display_name = self.pending_remote_files[0].get("name") if self.pending_remote_files else "Files"
+            display_name = _localized_batch_name(self.pending_remote_files, _("Tệp tin"))
             total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
             log_debug(f"[render_format] Hiển thị dialog truyền tải: {display_name}, size={total_size}")
-            # render_format chỉ chạy trong GUI mode (WM_RENDERFORMAT từ ClipboardEventListener)
-            # HEADLESS mode xử lý dialog riêng trong Clipboard Agent (WM_RENDERFORMAT của agent)
+            dest_dir = self.get_active_explorer_path()
+            log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
             if not (self.app and getattr(self.app, 'is_headless', False)):
                 self._recv_dialog_open = True
-                self.show_dialog("Đang tải file về...", display_name, total_size)
+                self.show_dialog(_("Đang tải file về..."), display_name, total_size, dest_dir, reserve_finalize=True)
             
             # Giữ _receive_cancelled cho đến batch_start mới (xfer_id) để khỏi ghi chunk lần gửi cũ.
             self.batch_paths = []
             self.transfer_done_event.clear()
-            
-            # Lấy thư mục đích hoạt động của Explorer (nơi người dùng chuột phải Paste)
-            dest_dir = self.get_active_explorer_path()
-            log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
             
             def background_download():
                 try:
@@ -2276,7 +2352,10 @@ class ClipboardSyncManager:
                         temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                         dest_now = dest_dir or getattr(self, "cached_explorer_path", None)
                         if dest_now and os.path.isdir(dest_now) and _is_transfer_staging_dir(self.target_save_dir):
-                            relocated, moved_all = relocate_transfer_files(self.batch_paths, dest_now)
+                            self.begin_dialog_finalize(sum(_path_byte_size(p) for p in self.batch_paths))
+                            relocated, moved_all = relocate_transfer_files(
+                                self.batch_paths, dest_now, on_progress=self.add_dialog_finalize
+                            )
                             self.batch_paths = relocated
                             if moved_all:
                                 self.target_save_dir = dest_now
@@ -2323,6 +2402,8 @@ class ClipboardSyncManager:
                             else:
                                 log_debug("[render_format] Không tạo được hGlobal, hủy render.")
                                 self.pending_remote_files = []
+                        self.complete_dialog()
+                        self.close_dialog()
                     else:
                         log_debug(f"[render_format] Tải file thất bại hoặc hết thời gian chờ. succeeded={succeeded}")
                         reoffer = list(getattr(self, "_reoffer_files", None) or self.pending_remote_files or [])
@@ -2647,36 +2728,33 @@ class ClipboardSyncManager:
             # --- HEADLESS MODE (SYSTEM/Service): Gửi PENDING cho Clipboard Agent ---
             if self.app and getattr(self.app, 'is_headless', False):
                 transfer_dir = HEADLESS_TRANSFER_DIR
-                try:
-                    os.makedirs(transfer_dir, exist_ok=True)
-                    for item in os.listdir(transfer_dir):
-                        item_path = os.path.join(transfer_dir, item)
-                        if os.path.isfile(item_path):
-                            try: os.remove(item_path)
-                            except: pass
-                except Exception as e:
-                    log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục transfer: {e}")
                 self.target_save_dir = transfer_dir
                 self.batch_paths = []
                 self.transfer_done_event.clear()
-                
-                # Gửi PENDING: tới agent để nó chờ Paste và hiện dialog, thay vì tải ngay im lặng.
+
                 total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
-                display_name = "Files"
-                if self.pending_remote_files:
-                    display_name = self.pending_remote_files[0].get("name", "Files")
-                    if len(self.pending_remote_files) > 1:
-                        display_name += f" and {len(self.pending_remote_files) - 1} others"
-                        
+                display_name = _localized_batch_name(self.pending_remote_files, _("Tệp tin"))
                 msg_dict = {
                     "display_name": display_name,
                     "total_size": total_size,
                     "files": self.pending_remote_files
                 }
-                import json
-                msg = json.dumps(msg_dict)
-                threading.Thread(target=self._send_to_pipe, args=("PENDING", msg), daemon=True).start()
+                self._send_to_pipe("PENDING", json.dumps(msg_dict))
                 log_debug(f"[files_copied_meta] HEADLESS MODE: Đã gửi PENDING tới Agent để chờ Paste.")
+
+                def _cleanup_transfer():
+                    try:
+                        os.makedirs(transfer_dir, exist_ok=True)
+                        for item in os.listdir(transfer_dir):
+                            item_path = os.path.join(transfer_dir, item)
+                            if os.path.isfile(item_path):
+                                try:
+                                    os.remove(item_path)
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        log_debug(f"[files_copied_meta] Lỗi dọn dẹp thư mục transfer: {e}")
+                threading.Thread(target=_cleanup_transfer, daemon=True).start()
                 return
             
             # --- GUI MODE (User): Sử dụng delayed rendering như bình thường ---
@@ -2748,7 +2826,14 @@ class ClipboardSyncManager:
             # Paste host→client đã gọi show_dialog trong render_format — không tạo dialog thứ 2.
             if not (self.app and getattr(self.app, 'is_headless', False)):
                 if not getattr(self, "_recv_dialog_open", False):
-                    self.show_dialog("Đang tải file về...", display_name, self.batch_total_size)
+                    dest_dir = getattr(self, "_paste_dest_dir", None) or getattr(self, "cached_explorer_path", None)
+                    if dest_dir and _is_transfer_staging_dir(dest_dir):
+                        dest_dir = None
+                    if not dest_dir:
+                        save = getattr(self, "target_save_dir", None)
+                        if save and not _is_transfer_staging_dir(save):
+                            dest_dir = save
+                    self.show_dialog(_("Đang tải file về..."), display_name, self.batch_total_size, dest_dir)
             
         elif ptype == "file_start":
             filename = packet.get("name", "")
@@ -2892,14 +2977,15 @@ class ClipboardSyncManager:
                     log_debug(f"[file_end] Đã xử lý xong file: {filename}")
                     
                     if not self.incoming_transfers and getattr(self, 'active_batch', False) and getattr(self, 'batch_total_size', 0) > 0 and getattr(self, 'batch_received', 0) >= self.batch_total_size:
-                        if hasattr(self, 'active_dialog') and self.active_dialog:
-                            try:
-                                if hasattr(self.active_dialog, 'safe_destroy'):
-                                    self.active_dialog.safe_destroy()
-                                else:
-                                    self.active_dialog.destroy()
-                                self.active_dialog = None
-                            except: pass
+                        if not getattr(self, "_recv_dialog_open", False):
+                            if hasattr(self, 'active_dialog') and self.active_dialog:
+                                try:
+                                    if hasattr(self.active_dialog, 'safe_destroy'):
+                                        self.active_dialog.safe_destroy()
+                                    else:
+                                        self.active_dialog.destroy()
+                                    self.active_dialog = None
+                                except: pass
                         try:
                             import core.viewer
                             if core.viewer.file_manager_callback:
@@ -2916,7 +3002,8 @@ class ClipboardSyncManager:
                     self._close_transfer_pipe()
                 self.transfer_in_progress = False
                 return
-            self.close_dialog()
+            if not getattr(self, "_recv_dialog_open", False):
+                self.close_dialog()
             self.transfer_done_event.set()
             try:
                 import core.viewer
@@ -3046,7 +3133,7 @@ def run_clipboard_agent_mode():
                         )
                         break
                     except Exception:
-                        time.sleep(0.5)
+                        time.sleep(0.05)
 
                 agent_print(f"[ClipboardAgent] Đã kết nối thành công tới Pipe.")
 
@@ -3081,6 +3168,14 @@ def run_clipboard_agent_mode():
                                         try:
                                             import json
                                             info = json.loads(msg[8:])
+                                            try:
+                                                _pending_info.update(info)
+                                                if _agent_hwnd:
+                                                    ctypes.windll.user32.PostMessageW(
+                                                        ctypes.c_void_p(_agent_hwnd), 0x0400 + 201, 0, 0
+                                                    )
+                                            except Exception:
+                                                pass
                                             gui_queue.put(("pending", info))
                                         except Exception as e:
                                             agent_print(f"[ClipboardAgent] Lỗi parse PENDING JSON: {e}")
@@ -3117,9 +3212,7 @@ def run_clipboard_agent_mode():
                         win32file.CloseHandle(pipe_handle)
                     except:
                         pass
-            time.sleep(0.1)
-
-    # Khởi tạo Tkinter GUI
+            time.sleep(0.02)
     root = tk.Tk()
     root.attributes('-alpha', 0.0) # Tránh nháy cửa sổ
     root.withdraw()
@@ -3144,6 +3237,7 @@ def run_clipboard_agent_mode():
 
     _agent_hwnd = None              # HWND cửa sổ ẩn của agent
     _pending_info = {}              # {'display_name': ..., 'total_size': ...}
+    _agent_setup_tries = 0
     _files_ready_event = threading.Event()  # set khi host gửi FILES: xong
     _files_ready_paths = []        # các đưỜng dẫn file đã download
     _ignore_destroy = False        # tránh phản ứng WM_DESTROYCLIPBOARD do chính mình gây ra
@@ -3344,37 +3438,39 @@ def run_clipboard_agent_mode():
 
     def _execute_agent_delayed_rendering(hwnd):
         """Chạy trong WndProc thread: mở clipboard, đăng ký deferred CF_HDROP."""
-        nonlocal _ignore_destroy
+        nonlocal _ignore_destroy, _agent_setup_tries
         if not _pending_info:
             agent_print("[ClipboardAgent] Không có pending_info, bỏ qua setup delayed rendering.")
             return
             
         try:
-            _ignore_destroy = True
             user32 = ctypes.windll.user32
-            opened = False
-            for _ in range(30):
-                if user32.OpenClipboard(hwnd):
-                    opened = True
-                    break
-                time.sleep(0.05)
-            if opened:
+            if not user32.OpenClipboard(hwnd):
+                _agent_setup_tries += 1
+                if _agent_setup_tries <= 40:
+                    threading.Timer(
+                        0.025,
+                        lambda h=hwnd: ctypes.windll.user32.PostMessageW(
+                            ctypes.c_void_p(h), WM_USER_SETUP_DELAYED, 0, 0
+                        ),
+                    ).start()
+                else:
+                    err = ctypes.GetLastError()
+                    agent_print(f"[ClipboardAgent] OpenClipboard thất bại khi setup (hết retry). Err={err}")
+                return
+            _agent_setup_tries = 0
+            _ignore_destroy = True
+            try:
                 user32.EmptyClipboard()
-                
-                # Thiết lập loại trừ Clipboard History và Cloud Clipboard
                 setup_clipboard_exclusions()
-                
-                # SetClipboardData với NULL = hứa cung cấp dữ liệu khi được yêu cầu
                 res = fn_SetClipboardData(CF_HDROP, None)
                 user32.CloseClipboard()
                 mark_own_clipboard_write()
                 agent_print(f"[ClipboardAgent] Đã setup delayed rendering CF_HDROP. res={res}")
-            else:
-                err = ctypes.GetLastError()
-                agent_print(f"[ClipboardAgent] OpenClipboard thất bại khi setup (10 lần). Err={err}")
+            finally:
+                _ignore_destroy = False
         except Exception as e:
             agent_print(f"[ClipboardAgent] Lỗi setup delayed rendering: {e}")
-        finally:
             _ignore_destroy = False
 
     def _agent_complete_download(info, dest_dir):
@@ -3423,7 +3519,12 @@ def run_clipboard_agent_mode():
                             continue
                         to_move.append(p)
                     if dest_dir and to_move:
-                        to_move, moved_all = relocate_transfer_files(to_move, dest_dir)
+                        move_total = sum(_path_byte_size(p) for p in to_move)
+                        gui_queue.put(("finalize_start", move_total))
+                        to_move, moved_all = relocate_transfer_files(
+                            to_move, dest_dir,
+                            on_progress=lambda n: gui_queue.put(("finalize_progress", n)),
+                        )
                         agent_print(f"[ClipboardAgent] Paste dest={dest_dir} moved_all={moved_all} n={len(to_move)}")
                     elif not to_move:
                         agent_print("[ClipboardAgent] Khong chuyen file (skip het / Huy).")
@@ -3508,12 +3609,12 @@ def run_clipboard_agent_mode():
         if msg == WM_RENDERFORMAT and wparam == CF_HDROP:
             if _agent_download_active or _is_rendering:
                 agent_print("[ClipboardAgent] Dang tai / WM_RENDERFORMAT trung — dummy HDROP.")
-                if _offer_probe_hdrop():
+                if _offer_probe_hdrop(_pending_info.get("files")):
                     _agent_dummy_h_active = True
                 return 0
             if time.time() < _agent_suppress_render_until:
                 agent_print("[ClipboardAgent] Ngay sau Hủy — dummy HDROP, không tải ngầm.")
-                if _offer_probe_hdrop():
+                if _offer_probe_hdrop(_pending_info.get("files")):
                     _agent_dummy_h_active = True
                     ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 return 0
@@ -3525,13 +3626,13 @@ def run_clipboard_agent_mode():
             )
             if is_menu == "MENU":
                 agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Dummy HDROP, chờ user dán...")
-                if _offer_probe_hdrop():
+                if _offer_probe_hdrop(_pending_info.get("files")):
                     _agent_dummy_h_active = True
                     ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 return 0
             elif is_menu == "BACKGROUND":
                 agent_print("[ClipboardAgent] Probe Explorer — dummy HDROP (không tải, không treo menu).")
-                if _offer_probe_hdrop():
+                if _offer_probe_hdrop(_pending_info.get("files")):
                     _agent_dummy_h_active = True
                     ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 return 0
@@ -3545,7 +3646,7 @@ def run_clipboard_agent_mode():
                 )
                 if not new_kb and not new_menu:
                     agent_print("[ClipboardAgent] Sau Hủy chưa có Paste mới — dummy, không mở dialog.")
-                    if _offer_probe_hdrop():
+                    if _offer_probe_hdrop(_pending_info.get("files")):
                         _agent_dummy_h_active = True
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                     return 0
@@ -3834,27 +3935,41 @@ def run_clipboard_agent_mode():
                     if (not _agent_allow_xfer) or (time.time() < _agent_suppress_render_until):
                         agent_print("[ClipboardAgent] Bo dialog start (sau Huy / chua Paste moi).")
                         continue
-                    display_name, total_size = val
+                    display_name, total_size = val[0], val[1]
+                    dest_dir = val[2] if len(val) > 2 else None
+                    display_name = _localized_batch_name(_pending_info.get("files") or [], display_name)
                     if active_dialog:
                         try: active_dialog.destroy()
                         except: pass
                     active_dialog = ProgressDialog(
                         root, _("Đang tải file về..."), display_name, total_size,
-                        on_cancel=trigger_cancel_win32
+                        on_cancel=trigger_cancel_win32,
+                        dest_dir=dest_dir,
+                        reserve_finalize=True
                     )
                 elif action == "progress":
                     if active_dialog:
                         try: active_dialog.update_progress(val)
                         except: pass
+                elif action == "finalize_start":
+                    if active_dialog:
+                        try: active_dialog.begin_finalize(val or 0)
+                        except: pass
+                elif action == "finalize_progress":
+                    if active_dialog:
+                        try: active_dialog.add_finalize_bytes(val or 0)
+                        except: pass
                 elif action == "end":
                     if active_dialog:
+                        try: active_dialog.mark_complete()
+                        except: pass
                         def _close():
                             nonlocal active_dialog
                             if active_dialog:
                                 try: active_dialog.destroy()
                                 except: pass
                                 active_dialog = None
-                        root.after(500, _close)
+                        root.after(250, _close)
                 elif action == "conflict_check":
                     dest_dir, files, display_name, total_size, paste_id = val
                     _agent_conflict_choice = "replace"
@@ -3890,10 +4005,8 @@ def run_clipboard_agent_mode():
                         sz = total_size if size is None else size
                         if not req:
                             return False
-                        name = display_name
-                        if len(req) == 1:
-                            name = req[0].get("name") or display_name
-                        gui_queue.put(("start", (name, sz)))
+                        name = _localized_batch_name(req, display_name)
+                        gui_queue.put(("start", (name, sz, dest_dir)))
                         _send_request_files_to_host(req, dest_dir, paste_id)
                         return True
 

@@ -1415,7 +1415,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 is_cancelled = False
             state = UploadState()
 
-            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd, embed=True)
+            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd, embed=True, dest_dir=target_dir)
             dialog.update_progress(0)
             
             active_upload_dialog.clear()
@@ -1620,7 +1620,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 def _cancel():
                     cm.cancel_active_transfer(remote_triggered=False)
 
-                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd, embed=True)
+                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd, embed=True, dest_dir=target_dir)
                 dialog.update_progress(0)
                 cm.active_dialog = dialog
 

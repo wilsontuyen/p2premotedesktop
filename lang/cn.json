@@ -379,5 +379,15 @@
     "Đã xuất khẩu danh sách máy tính thành công!": "计算机列表导出成功！",
     "Đường dẫn": "小路",
     "Đồng ý (OK)": "同意（确定）",
-    "Thay đổi ngôn ngữ": "更改语言"
+    "Thay đổi ngôn ngữ": "更改语言",
+    "Sao chép tệp \"{name}\"": "正在复制文件 \"{name}\"",
+    "Thư mục đích": "目标文件夹",
+    "Đang chuyển vào thư mục đích...": "正在移动到目标文件夹...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} / {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n} 秒",
+    "{m} phút {n} giây": "{m} 分 {n} 秒",
+    "-- giây": "-- 秒",
+    "0 giây": "0 秒",
+    "Tệp tin": "文件",
+    "-- MB/s": "-- MB/s"
 }

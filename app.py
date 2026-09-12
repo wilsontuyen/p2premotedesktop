@@ -3997,6 +3997,16 @@ if __name__ == '__main__':
         except:
             pass
         
+        try:
+            from core.i18n import load_language
+            cfg_path = os.path.join(get_app_data_dir(), "window_config.json")
+            lang = "vi"
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    lang = json.load(f).get("language", "vi") or "vi"
+            load_language(lang)
+        except Exception:
+            pass
         run_clipboard_agent_mode()  # Vòng lặp vô tận, không return
         sys.exit(0)
 

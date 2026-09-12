@@ -392,5 +392,15 @@
     "Cam": "Cam",
     "About": "About",
     "AI Pro Version": "AI Pro Version",
-    "OK": "OK"
+    "OK": "OK",
+    "Sao chép tệp \"{name}\"": "Sao chép tệp \"{name}\"",
+    "Thư mục đích": "Thư mục đích",
+    "Đang chuyển vào thư mục đích...": "Đang chuyển vào thư mục đích...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} trên {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n} giây",
+    "{m} phút {n} giây": "{m} phút {n} giây",
+    "-- giây": "-- giây",
+    "0 giây": "0 giây",
+    "Tệp tin": "Tệp tin",
+    "-- MB/s": "-- MB/s"
 }

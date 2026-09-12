@@ -379,5 +379,15 @@
     "Đã xuất khẩu danh sách máy tính thành công!": "컴퓨터 목록을 성공적으로 내보냈습니다!",
     "Đường dẫn": "길",
     "Đồng ý (OK)": "동의한다(OK)",
-    "Thay đổi ngôn ngữ": "언어 변경"
+    "Thay đổi ngôn ngữ": "언어 변경",
+    "Sao chép tệp \"{name}\"": "파일 복사 \"{name}\"",
+    "Thư mục đích": "대상 폴더",
+    "Đang chuyển vào thư mục đích...": "대상 폴더로 이동 중...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} / {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n}초",
+    "{m} phút {n} giây": "{m}분 {n}초",
+    "-- giây": "--초",
+    "0 giây": "0초",
+    "Tệp tin": "파일",
+    "-- MB/s": "-- MB/s"
 }

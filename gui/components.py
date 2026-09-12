@@ -281,7 +281,7 @@ class ClassicCopyDialog(tk.Toplevel):
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None):
+    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False):
         super().__init__(parent)
         self.parent_window = parent
         self.host_hwnd = host_hwnd
@@ -310,9 +310,15 @@ class ProgressDialog(tk.Toplevel):
 
         self.attributes("-topmost", True)
         self.lift()
-        self.total_size = total_size
+        self.total_size = max(0, int(total_size or 0))
         self.filename = str(filename) if filename is not None else "Unknown"
         self._title_text = title_text
+        self._received = 0
+        self._copied = 0
+        self._copy_total = self._guess_copy_total(dest_dir, self.total_size) if reserve_finalize else 0
+        self._phase = "download"
+        self._done = False
+        self._last_ui = 0.0
         self.start_time = time.time()
         self.history = [(self.start_time, 0)]
         self.on_cancel = on_cancel
@@ -326,25 +332,34 @@ class ProgressDialog(tk.Toplevel):
 
         action_row = tk.Frame(top_frame, bg="#FFFFFF")
         action_row.pack(fill=tk.X)
-        self.lbl_action = tk.Label(action_row, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_action = tk.Label(action_row, text=_('Sao chép tệp "{name}"').format(name=display_name), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
         self.lbl_action.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.lbl_percent = tk.Label(action_row, text="0%", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="e")
         self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
+
+        dest_text = self._format_dest_dir(dest_dir)
+        extra_h = 0
+        if dest_text:
+            self.lbl_dest = tk.Label(
+                top_frame,
+                text=_("Thư mục đích") + ": " + dest_text,
+                font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF",
+                anchor="w", justify="left", wraplength=360
+            )
+            self.lbl_dest.pack(fill=tk.X, pady=(2, 0))
+            extra_h = 22
             
-        self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  0%  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_stats1 = tk.Label(
+            top_frame,
+            text=_("({done} trên {total})  {percent}%  {speed}  {eta}").format(
+                done="0 B", total=self.format_size(self._work_total()), percent=0, speed=_("-- MB/s"), eta=_("-- giây")
+            ),
+            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
+        )
         self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
-        self.prog1.pack(fill=tk.X, pady=(0, 10))
-        
-        self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
-        self.lbl_files.pack(fill=tk.X)
-        
-        self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  0%  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
-        self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
-        
-        self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
-        self.prog2.pack(fill=tk.X)
+        self.prog1.pack(fill=tk.X)
         
         bottom_frame = tk.Frame(self, bg="#F0F0F0", height=45)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
@@ -365,9 +380,9 @@ class ProgressDialog(tk.Toplevel):
             btn_cancel.bind("<Enter>", btn_enter)
             btn_cancel.bind("<Leave>", btn_leave)
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
-            dialog_h = 286
+            dialog_h = 210 + extra_h
         else:
-            dialog_h = 241
+            dialog_h = 165 + extra_h
             
         self.update_idletasks()
         dialog_w = 400
@@ -588,61 +603,137 @@ class ProgressDialog(tk.Toplevel):
         y = event.y_root - self._drag_offset_y
         self._move_to_screen(x, y)
 
-    def update_progress(self, sent_bytes):
+    @staticmethod
+    def _guess_copy_total(dest_dir, file_total):
+        """Paste sang ổ khác thư mục tạm thì còn một lượt copy cùng tổng n file."""
+        if not dest_dir or file_total <= 0:
+            return 0
+        try:
+            dest_drive = os.path.splitdrive(os.path.abspath(str(dest_dir)))[0].lower()
+            temp_drive = os.path.splitdrive(os.path.abspath(os.environ.get("TEMP") or "C:\\"))[0].lower()
+            if dest_drive and dest_drive != temp_drive:
+                return file_total
+        except Exception:
+            return file_total
+        return 0
+
+    def _work_total(self):
+        return max(1, int(self.total_size) + int(self._copy_total))
+
+    def _work_done(self):
+        return min(self._work_total(), int(self._received) + int(self._copied))
+
+    def begin_finalize(self, total_bytes=0):
+        extra = max(0, int(total_bytes or 0))
+        if extra and extra > self._copy_total:
+            self._copy_total = extra
+        self._phase = "finalize"
+        self._copied = 0
+        self._render_progress(status=_("Đang chuyển vào thư mục đích..."), force=True)
+
+    def add_finalize_bytes(self, n):
+        try:
+            self._copied += max(0, int(n or 0))
+        except Exception:
+            return
+        self._render_progress()
+
+    def mark_complete(self):
+        self._done = True
+        self._phase = "done"
+        self._received = max(self._received, self.total_size)
+        self._copied = max(self._copied, self._copy_total)
+        self._render_progress(force=True)
+
+    def update_progress(self, sent_bytes, status=None):
+        try:
+            self._received = max(0, int(sent_bytes or 0))
+        except Exception:
+            return
+        self._render_progress(status=status)
+
+    def _render_progress(self, status=None, force=False):
+        now = time.time()
+        if not force and (now - self._last_ui) < 0.05:
+            return
+        self._last_ui = now
+        status_text = status
+
         def _do_update():
             try:
-                percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
-                percent = max(0, min(100, percent))
+                work_total = self._work_total()
+                done = self._work_done()
+                if self._done:
+                    percent = 100
+                    done = work_total
+                else:
+                    percent = int(done * 100 / work_total) if work_total else 0
+                    percent = max(0, min(99, percent))
 
                 self.prog1["value"] = percent
-                self.prog2["value"] = percent
                 try:
                     self.lbl_percent.config(text=f"{percent}%")
-                    self.title_lbl.config(text=f"{self._title_text}  —  {percent}%")
+                    title = status_text if status_text else self._title_text
+                    self.title_lbl.config(text=f"{title}  —  {percent}%")
                 except Exception:
                     pass
 
                 current_time = time.time()
-                self.history.append((current_time, sent_bytes))
+                self.history.append((current_time, done))
                 while len(self.history) > 1 and current_time - self.history[0][0] > 2.0:
                     self.history.pop(0)
 
                 elapsed_time = current_time - self.history[0][0]
-                bytes_in_window = sent_bytes - self.history[0][1]
-                
-                if elapsed_time > 0 and bytes_in_window > 0:
-                    speed = bytes_in_window / elapsed_time
-                else:
-                    speed = 0
+                bytes_in_window = done - self.history[0][1]
+                speed = (bytes_in_window / elapsed_time) if elapsed_time > 0 and bytes_in_window > 0 else 0
+                remaining_bytes = max(0, work_total - done)
 
-                if speed > 0:
-                    remaining_bytes = self.total_size - sent_bytes
+                if self._done:
+                    time_str = _("0 giây")
+                    speed_str = f"{self.format_speed(speed)}" if speed > 0 else _("-- MB/s")
+                elif speed > 0 and remaining_bytes > 0:
                     remaining_time = remaining_bytes / speed
                     mins = int(remaining_time // 60)
                     secs = int(remaining_time % 60)
                     if mins > 0:
-                        time_str = f"{mins} min {secs} sec(s)"
+                        time_str = _("{m} phút {n} giây").format(m=mins, n=secs)
                     else:
-                        time_str = f"{secs} sec(s)"
-                if speed > 0:
+                        time_str = _("{n} giây").format(n=secs)
                     speed_str = f"{self.format_speed(speed)}"
                 else:
-                    speed_str = "-- MB/s"
-                    time_str = "-- sec(s)"
+                    speed_str = f"{self.format_speed(speed)}" if speed > 0 else _("-- MB/s")
+                    time_str = _("-- giây")
 
-                sent_str = self.format_size(sent_bytes)
-                total_str = self.format_size(self.total_size)
-
-                self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {percent}%  {speed_str}  {time_str}")
-                self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {percent}%  {time_str}")
-            except: pass
+                self.lbl_stats1.config(
+                    text=_("({done} trên {total})  {percent}%  {speed}  {eta}").format(
+                        done=self.format_size(done),
+                        total=self.format_size(work_total),
+                        percent=percent,
+                        speed=speed_str,
+                        eta=time_str,
+                    )
+                )
+            except Exception:
+                pass
         try:
             self.after(0, _do_update)
-        except: pass
+        except Exception:
+            pass
 
     def safe_destroy(self):
         try: self.after(0, self.destroy)
         except: pass
+
+    @staticmethod
+    def _format_dest_dir(dest_dir):
+        if not dest_dir:
+            return ""
+        path = str(dest_dir).strip().rstrip("\\/")
+        if not path:
+            return ""
+        if len(path) <= 56:
+            return path
+        return path[:20] + "..." + path[-33:]
 
     def format_size(self, size_bytes):
         if size_bytes < 1024: return f"{size_bytes} B"

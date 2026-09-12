@@ -379,5 +379,15 @@
     "Đã xuất khẩu danh sách máy tính thành công!": "コンピュータリストが正常にエクスポートされました。",
     "Đường dẫn": "パス",
     "Đồng ý (OK)": "同意する(OK)",
-    "Thay đổi ngôn ngữ": "言語を変更"
+    "Thay đổi ngôn ngữ": "言語を変更",
+    "Sao chép tệp \"{name}\"": "ファイルをコピー \"{name}\"",
+    "Thư mục đích": "保存先フォルダ",
+    "Đang chuyển vào thư mục đích...": "保存先フォルダへ移動中...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} / {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n} 秒",
+    "{m} phút {n} giây": "{m} 分 {n} 秒",
+    "-- giây": "-- 秒",
+    "0 giây": "0 秒",
+    "Tệp tin": "ファイル",
+    "-- MB/s": "-- MB/s"
 }

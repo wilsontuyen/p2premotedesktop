@@ -379,5 +379,15 @@
     "Đã xuất khẩu danh sách máy tính thành công!": "Computerliste erfolgreich exportiert!",
     "Đường dẫn": "Weg",
     "Đồng ý (OK)": "Zustimmen (OK)",
-    "Thay đổi ngôn ngữ": "Sprache ändern"
+    "Thay đổi ngôn ngữ": "Sprache ändern",
+    "Sao chép tệp \"{name}\"": "Datei kopieren \"{name}\"",
+    "Thư mục đích": "Zielordner",
+    "Đang chuyển vào thư mục đích...": "Verschiebe in den Zielordner...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} von {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n} Sek.",
+    "{m} phút {n} giây": "{m} Min. {n} Sek.",
+    "-- giây": "-- Sek.",
+    "0 giây": "0 Sek.",
+    "Tệp tin": "Dateien",
+    "-- MB/s": "-- MB/s"
 }

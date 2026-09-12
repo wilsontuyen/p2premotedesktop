@@ -392,5 +392,15 @@
     "Cam": "Cam",
     "About": "About",
     "AI Pro Version": "AI Pro Version",
-    "OK": "OK"
+    "OK": "OK",
+    "Sao chép tệp \"{name}\"": "Copy file \"{name}\"",
+    "Thư mục đích": "Destination folder",
+    "Đang chuyển vào thư mục đích...": "Moving to destination folder...",
+    "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} of {total})  {percent}%  {speed}  {eta}",
+    "{n} giây": "{n} sec",
+    "{m} phút {n} giây": "{m} min {n} sec",
+    "-- giây": "-- sec",
+    "0 giây": "0 sec",
+    "Tệp tin": "Files",
+    "-- MB/s": "-- MB/s"
 }
