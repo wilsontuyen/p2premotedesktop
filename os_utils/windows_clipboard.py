@@ -482,21 +482,56 @@ def _file_offer_fp(files):
     return tuple(parts)
 
 
-def _localized_batch_name(files, fallback=""):
-    files = files or []
-    if not files:
-        raw = fallback or _("Tệp tin")
-        return os.path.basename(str(raw).replace("\\", "/")) or raw
-    first = files[0]
-    if isinstance(first, dict):
-        first = str(first.get("name") or fallback or _("Tệp tin"))
+def _rel_copy_name(item):
+    if isinstance(item, dict):
+        raw = str(item.get("name") or "")
     else:
-        first = str(first or fallback or _("Tệp tin"))
-    first = os.path.basename(first.replace("\\", "/")) or first
-    extra = len(files) - 1
+        raw = str(item or "")
+    return raw.replace("\\", "/").strip("/")
+
+
+def _copy_batch_kind_and_name(files, fallback=""):
+    """Paste file → ('file', tên file); paste thư mục → ('folder', tên folder)."""
+    files = files or []
+    names = []
+    for item in files:
+        name = _rel_copy_name(item)
+        if name:
+            names.append(name)
+    if not names:
+        raw = fallback or _("Tệp tin")
+        return "file", os.path.basename(str(raw).replace("\\", "/")) or raw
+
+    folder_tops = []
+    seen_folders = set()
+    loose = []
+    for name in names:
+        parts = [p for p in name.split("/") if p]
+        if len(parts) >= 2:
+            top = parts[0]
+            if top not in seen_folders:
+                seen_folders.add(top)
+                folder_tops.append(top)
+        else:
+            loose.append(parts[0] if parts else name)
+
+    if folder_tops and not loose:
+        label = folder_tops[0]
+        extra = len(folder_tops) - 1
+        if extra > 0:
+            label += _(" và {count} mục khác").format(count=extra)
+        return "folder", label
+
+    label = os.path.basename(names[0]) or names[0]
+    extra = len(names) - 1
     if extra > 0:
-        first += _(" và {count} mục khác").format(count=extra)
-    return first
+        label += _(" và {count} mục khác").format(count=extra)
+    return "file", label
+
+
+def _localized_batch_name(files, fallback=""):
+    _kind, name = _copy_batch_kind_and_name(files, fallback)
+    return name
 
 
 def _same_volume(path_a, path_b):
@@ -594,6 +629,29 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
         try:
             if should_stop and should_stop():
                 raise InterruptedError("cancel")
+            # Folder paste: đích đã có file chuyển sớm — gộp, không rmtree xóa file đã xong.
+            if os.path.isdir(src_abs) and os.path.isdir(dest_path):
+                child_ok = True
+                try:
+                    names = os.listdir(src_abs)
+                except Exception:
+                    names = []
+                for name in names:
+                    child = os.path.join(src_abs, name)
+                    _nested, ok = _relocate_transfer_files_unlocked(
+                        [child], dest_path, on_progress, should_stop
+                    )
+                    if not ok:
+                        child_ok = False
+                if child_ok:
+                    try:
+                        os.rmdir(src_abs)
+                    except Exception:
+                        pass
+                else:
+                    all_in_dest = False
+                moved.append(os.path.abspath(dest_path))
+                continue
             if os.path.exists(dest_path):
                 if os.path.isdir(dest_path) and not os.path.islink(dest_path):
                     shutil.rmtree(dest_path, ignore_errors=True)
@@ -638,6 +696,41 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
                 all_in_dest = False
                 break
     return moved, bool(moved) and all_in_dest
+
+
+def _promote_completed_xfer_file(staging_path, dest_dir, rel_name):
+    """Đưa 1 file đã tải xong từ .rdxfer_* ra thư mục đích (giữ cây thư mục). Rename cùng ổ — không copy 4GB."""
+    import shutil
+    if not staging_path or not dest_dir or not os.path.isfile(staging_path):
+        return staging_path
+    if _is_transfer_staging_dir(dest_dir) or not os.path.isdir(dest_dir):
+        return staging_path
+    rel = str(rel_name or os.path.basename(staging_path)).replace("/", os.sep).replace("\\", os.sep)
+    rel = rel.lstrip("\\/")
+    if not rel:
+        rel = os.path.basename(staging_path)
+    dest_path = os.path.join(dest_dir, rel)
+    try:
+        if os.path.normcase(os.path.abspath(staging_path)) == os.path.normcase(os.path.abspath(dest_path)):
+            return dest_path
+    except Exception:
+        pass
+    parent = os.path.dirname(dest_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.exists(dest_path):
+        try:
+            if os.path.isdir(dest_path) and not os.path.islink(dest_path):
+                shutil.rmtree(dest_path, ignore_errors=True)
+            else:
+                os.remove(dest_path)
+        except Exception:
+            _retry_remove_path(dest_path)
+    try:
+        os.replace(staging_path, dest_path)
+    except OSError:
+        shutil.move(staging_path, dest_path)
+    return os.path.abspath(dest_path)
 
 
 def _collect_actual_file_sizes(paths):
@@ -2354,6 +2447,7 @@ class ClipboardSyncManager:
                     dest_dir = args[3] if len(args) > 3 else None
                     reserve_finalize = args[4] if len(args) > 4 else False
                     job_id = args[5] if len(args) > 5 else None
+                    item_kind = args[6] if len(args) > 6 else "file"
                     dialogs = getattr(self, "xfer_dialogs", None)
                     if dialogs is None:
                         self.xfer_dialogs = {}
@@ -2376,6 +2470,7 @@ class ClipboardSyncManager:
                         reserve_finalize=reserve_finalize,
                         stack_index=stack,
                         job_id=jid,
+                        item_kind=item_kind,
                     )
                     dialogs[jid] = dlg
                     self.active_dialog = dlg
@@ -2504,7 +2599,7 @@ class ClipboardSyncManager:
         self._paste_gesture_inc_at = now
         self._paste_gesture_id = getattr(self, "_paste_gesture_id", 0) + 1
 
-    def open_paste_progress_dialog(self, filename, total_size, dest_dir=None, reserve_finalize=True, job_id=None):
+    def open_paste_progress_dialog(self, filename, total_size, dest_dir=None, reserve_finalize=True, job_id=None, item_kind="file"):
         """Một lần Paste (job_id) → tối đa một dialog tiến trình."""
         if self.app and getattr(self.app, "is_headless", False):
             return
@@ -2517,11 +2612,11 @@ class ClipboardSyncManager:
         self._recv_dialog_open = True
         self.gui_queue.put((
             "create",
-            (_("Đang tải file về..."), filename, total_size, dest_dir, reserve_finalize, job_id),
+            (_("Đang tải file về..."), filename, total_size, dest_dir, reserve_finalize, job_id, item_kind),
         ))
 
-    def show_dialog(self, title_text, filename, total_size, dest_dir=None, reserve_finalize=False, job_id=None):
-        self.open_paste_progress_dialog(filename, total_size, dest_dir, reserve_finalize, job_id)
+    def show_dialog(self, title_text, filename, total_size, dest_dir=None, reserve_finalize=False, job_id=None, item_kind="file"):
+        self.open_paste_progress_dialog(filename, total_size, dest_dir, reserve_finalize, job_id, item_kind)
 
     def update_dialog(self, sent_bytes, job_id=None):
         import time
@@ -3505,14 +3600,15 @@ class ClipboardSyncManager:
             print("[Clipboard] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
             
-            display_name = _localized_batch_name(self.pending_remote_files, _("Tệp tin"))
+            item_kind, display_name = _copy_batch_kind_and_name(self.pending_remote_files, _("Tệp tin"))
             total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
-            log_debug(f"[render_format] Hiển thị dialog truyền tải: {display_name}, size={total_size}")
+            log_debug(f"[render_format] Hiển thị dialog truyền tải: {item_kind} {display_name}, size={total_size}")
             log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
             if not (self.app and getattr(self.app, 'is_headless', False)):
                 self.open_paste_progress_dialog(
                     display_name, total_size, dest_dir,
                     reserve_finalize=True, job_id=self._clipboard_paste_id,
+                    item_kind=item_kind,
                 )
             
             # Giữ _receive_cancelled cho đến batch_start mới (xfer_id) để khỏi ghi chunk lần gửi cũ.
@@ -3896,8 +3992,9 @@ class ClipboardSyncManager:
         log_debug(f"[_process_send_requests] Khởi chạy gửi {len(files)} file... xfer_id={my_id}")
         try:
             total_size = sum(f.get("size", 0) for f in files)
-            display_name = str(len(files)) + _(" tệp tin") if len(files) > 1 else files[0].get("name", "Unknown")
+            item_kind, display_name = _copy_batch_kind_and_name(files, _("Tệp tin"))
             self.batch_display_name = display_name
+            self.batch_item_kind = item_kind
             
             log_file_transfer(display_name, total_size)
             
@@ -3906,6 +4003,7 @@ class ClipboardSyncManager:
                 "count": len(files),
                 "total_size": total_size,
                 "display_name": display_name,
+                "item_kind": item_kind,
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
             self._xfer_need_resync = False
@@ -4174,9 +4272,10 @@ class ClipboardSyncManager:
                 self.batch_paths = []
             self.transfer_done_event.clear()
             total_size = sum((f.get("size", 0) if isinstance(f, dict) else 0) for f in files)
-            display_name = _localized_batch_name(files, _("Tệp tin"))
+            item_kind, display_name = _copy_batch_kind_and_name(files, _("Tệp tin"))
             msg_dict = {
                 "display_name": display_name,
+                "item_kind": item_kind,
                 "total_size": total_size,
                 "files": files,
                 "offer_id": oid,
@@ -4187,6 +4286,171 @@ class ClipboardSyncManager:
         temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
         self.target_save_dir = temp_dir
         self.setup_delayed_rendering()
+
+    def _paste_dest_for_job(self, job):
+        dest = (job or {}).get("paste_dest") or getattr(self, "_paste_dest_dir", None)
+        if dest and os.path.isdir(dest) and not _is_transfer_staging_dir(dest):
+            return dest
+        return None
+
+    def _ensure_dest_tree(self, dest, rel_name):
+        if not dest or not rel_name:
+            return
+        rel = str(rel_name).replace("\\", "/").strip("/")
+        top = rel.split("/")[0] if "/" in rel else None
+        if top:
+            try:
+                os.makedirs(os.path.join(dest, top), exist_ok=True)
+            except Exception:
+                pass
+
+    def _finalize_incoming_file(self, transfer, job, filename):
+        """close + kiểm size + đưa file ra thư mục đích. Chạy ngoài ClipPkt (tránh kẹt AV/close 4GB)."""
+        path = transfer.get("path")
+        expected = transfer.get("expected_size")
+        written = int(transfer.get("written") or 0)
+        handle = transfer.get("handle")
+        if handle is not None:
+            try:
+                handle.flush()
+            except Exception:
+                pass
+            try:
+                handle.close()
+            except Exception as e:
+                print(f"[FileTransfer] Lỗi đóng handle {filename}: {e}")
+        actual = -1
+        if path:
+            try:
+                actual = os.path.getsize(path) if os.path.exists(path) else -1
+            except Exception:
+                actual = -1
+        if expected is not None and actual != expected and written != int(expected or 0):
+            print(f"[FileTransfer] Sai kich thuoc {filename}: disk={actual} written={written} expected={expected}, xoa file.")
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+            return
+        dest = self._paste_dest_for_job(job)
+        final_path = path
+        if dest and path and os.path.isfile(path):
+            try:
+                final_path = _promote_completed_xfer_file(path, dest, filename)
+                print(f"[FileTransfer] Da chép {filename} -> {final_path}")
+            except Exception as e:
+                print(f"[FileTransfer] Promote {filename} loi: {e}")
+                final_path = path
+        xid = transfer.get("xfer_id")
+        job = job or (getattr(self, "_xfer_jobs", None) or {}).get(xid)
+        paths = job["paths"] if job is not None else self.batch_paths
+        top_level_name = str(filename or "").replace("\\", "/").split("/")[0]
+        if dest:
+            top_level_path = os.path.join(dest, top_level_name)
+        else:
+            base_save = (job or {}).get("save_dir") or self.target_save_dir
+            top_level_path = os.path.join(_xfer_staging_dir(base_save, xid), top_level_name)
+        if top_level_path not in paths:
+            paths.append(top_level_path)
+        log_debug(f"[file_end] Đã xử lý xong file: {filename} dest={final_path}")
+
+    def _complete_batch_after_files(self, packet):
+        xid = packet.get("xfer_id")
+        jobs = getattr(self, "_xfer_jobs", None) or {}
+        job = jobs.get(xid) if xid is not None else None
+        for ev in list((job or {}).get("finish_events") or []):
+            while not ev.wait(0.4):
+                if (xid is not None and xid in (getattr(self, "_aborted_xfer_ids", None) or set())):
+                    return
+                pid = (job or {}).get("paste_id")
+                try:
+                    pid = int(pid or 0)
+                except Exception:
+                    pid = 0
+                if pid and pid in (getattr(self, "_cancelled_paste_ids", None) or set()):
+                    return
+        self._finish_batch_end(packet)
+
+    def _finish_batch_end(self, packet):
+        xid = packet.get("xfer_id")
+        jobs = getattr(self, "_xfer_jobs", None) or {}
+        job = jobs.get(xid) if xid is not None else None
+        paste_id = 0
+        try:
+            paste_id = int((job or {}).get("paste_id") or packet.get("paste_id") or 0)
+        except Exception:
+            paste_id = 0
+        aborted = getattr(self, "_aborted_xfer_ids", None) or set()
+        if (xid is not None and xid in aborted) or (paste_id and paste_id in (getattr(self, "_cancelled_paste_ids", None) or set())):
+            log_debug("[batch_end] Đã hủy — bỏ qua FILES.")
+            self.close_dialog(job_id=paste_id or xid, reason="batch_end da huy")
+            jobs.pop(xid, None)
+            if not jobs:
+                self.transfer_done_event.set()
+                self.transfer_in_progress = False
+            return
+        ok_paths = list((job or {}).get("paths") or getattr(self, "batch_paths", None) or [])
+        self.close_dialog(job_id=paste_id or xid, reason="batch_end xong")
+        if not jobs or len(jobs) <= 1:
+            self.transfer_done_event.set()
+        try:
+            import core.viewer
+            if core.viewer.file_manager_callback:
+                core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
+        except: pass
+        print(f"[FileTransfer] batch_end xfer_id={xid} paste_id={paste_id} n={len(ok_paths)}")
+        log_debug(f"[batch_end] Đã nhận xong xfer_id={xid} paste_id={paste_id} n={len(ok_paths)}")
+        try:
+            name = (job or {}).get("display_name") or self.batch_display_name
+            total = (job or {}).get("total") or self.batch_total_size
+            log_activity(_("Nhận file: ") + str(name) + " - " + str(total) + _(" byte - Thành công"))
+        except: pass
+        try:
+            if self.sock:
+                send_msg(self.sock, json.dumps({"type": "upload_batch_ack", "xfer_id": xid}).encode('utf-8'))
+        except Exception:
+            pass
+        if self.app and getattr(self.app, 'is_headless', False):
+            meta = list((job or {}).get("expected_files") or [])
+            why = []
+            if meta and not _paths_match_expected_sizes(ok_paths, meta, detail=why):
+                print("[FileTransfer] batch_end: size khong khop snapshot paste, khong gui FILES. " + "; ".join(why))
+                log_debug("[batch_end] HEADLESS: size không khớp snapshot paste, không gửi FILES.")
+                ok_paths = []
+            dest = (job or {}).get("paste_dest") or getattr(self, "_paste_dest_dir", None)
+            if ok_paths and dest and os.path.isdir(dest) and not _is_transfer_staging_dir(dest):
+                try:
+                    ok_paths, _moved = _relocate_transfer_files_unlocked(ok_paths, dest)
+                except Exception as e:
+                    log_debug(f"[batch_end] relocate dest={dest}: {e}")
+            try:
+                stg_base = (job or {}).get("save_dir") or getattr(self, "target_save_dir", None)
+                _purge_rdxfer_staging(
+                    dest_dir=dest or stg_base,
+                    xfer_id=xid,
+                    extra_paths=list((job or {}).get("paths") or []) + list(ok_paths or []),
+                )
+                _purge_rdxfer_staging(dest_dir=stg_base, xfer_id=xid)
+                _schedule_scrub_probe(dest)
+            except Exception as e:
+                log_debug(f"[batch_end] purge staging: {e}")
+            if ok_paths:
+                files_str = str(paste_id) + "|" + "|".join(ok_paths)
+                self._send_progress_signal("FILES", files_str)
+                if hasattr(self, 'lock'):
+                    with self.lock:
+                        self.last_current_files = [os.path.abspath(p) for p in ok_paths if os.path.exists(p)]
+                        self.last_files_time = time.time()
+            else:
+                self._send_progress_signal("CANCEL", str(paste_id) if paste_id else "")
+            self._close_transfer_pipe()
+        jobs.pop(xid, None)
+        if not jobs:
+            self.transfer_in_progress = False
+            self._paste_dest_dir = None
+            if self.app and getattr(self.app, "is_headless", False):
+                self.target_save_dir = HEADLESS_TRANSFER_DIR
 
     def handle_received_packet(self, packet):
         ptype = packet.get("type")
@@ -4331,6 +4595,7 @@ class ClipboardSyncManager:
             except Exception:
                 paste_id = 0
             display_name = packet.get("display_name", "Files")
+            item_kind = packet.get("item_kind") or "file"
             total_size = packet.get("total_size", 0)
             job = {
                 "xfer_id": xid,
@@ -4339,6 +4604,7 @@ class ClipboardSyncManager:
                 "total": total_size,
                 "paths": [],
                 "display_name": display_name,
+                "item_kind": item_kind,
                 "last_progress": 0.0,
                 "last_chunk_at": time.time(),
                 "retry_ui": False,
@@ -4369,7 +4635,14 @@ class ClipboardSyncManager:
                     save = getattr(self, "target_save_dir", None)
                     if save and not _is_transfer_staging_dir(save):
                         dest_dir = save
-                self.open_paste_progress_dialog(display_name, total_size, dest_dir, job_id=paste_id or xid)
+                expected = job.get("expected_files") or []
+                kind, name = _copy_batch_kind_and_name(expected, display_name)
+                if not expected:
+                    kind = item_kind if item_kind in ("file", "folder") else kind
+                    name = display_name or name
+                self.open_paste_progress_dialog(
+                    name, total_size, dest_dir, job_id=paste_id or xid, item_kind=kind,
+                )
             return
 
         elif ptype == "file_start":
@@ -4427,7 +4700,9 @@ class ClipboardSyncManager:
                         pass
                 exists = os.path.exists(target_path)
                 mode = "r+b" if (resume_from > 0 and exists) else "wb"
-                fh = open(target_path, mode)
+                fh = open(target_path, mode, buffering=1024 * 1024)
+                dest_now = self._paste_dest_for_job(job)
+                self._ensure_dest_tree(dest_now, filename)
                 written = 0
                 if resume_from > 0:
                     try:
@@ -4544,118 +4819,26 @@ class ClipboardSyncManager:
                     return
                 transfer = self.incoming_transfers.pop(key, None)
                 if transfer:
-                    if transfer.get("handle") is not None:
+                    job = (getattr(self, "_xfer_jobs", None) or {}).get(transfer.get("xfer_id") if transfer.get("xfer_id") is not None else xid)
+                    ev = threading.Event()
+                    if job is not None:
+                        job.setdefault("finish_events", []).append(ev)
+                    def _finish(t=transfer, j=job, e=ev, fn=filename):
                         try:
-                            transfer["handle"].close()
-                            log_debug(f"[file_end] Đóng handle file thành công cho: {filename}")
-                        except Exception as e:
-                            log_debug(f"[file_end] Lỗi đóng handle file {filename}: {e}")
-
-                    path = transfer.get("path")
-                    expected = transfer.get("expected_size")
-                    if path and expected is not None:
-                        try:
-                            actual = os.path.getsize(path) if os.path.exists(path) else -1
-                        except Exception:
-                            actual = -1
-                        if actual != expected:
-                            print(f"[FileTransfer] Sai kich thuoc {filename}: {actual} != {expected}, xoa file.")
-                            log_debug(f"[file_end] Sai kích thước {filename}: {actual} != {expected}, xóa file.")
-                            try:
-                                if path and os.path.exists(path):
-                                    os.remove(path)
-                            except Exception:
-                                pass
-                            return
-                    
-                    xid = transfer.get("xfer_id")
-                    job = (getattr(self, "_xfer_jobs", None) or {}).get(xid)
-                    paths = job["paths"] if job is not None else self.batch_paths
-                    top_level_name = filename.replace('\\', '/').split('/')[0]
-                    base_save = (job or {}).get("save_dir") or self.target_save_dir
-                    top_level_path = os.path.join(_xfer_staging_dir(base_save, xid), top_level_name)
-                    if top_level_path not in paths:
-                        paths.append(top_level_path)
-                    log_debug(f"[file_end] Đã xử lý xong file: {filename}")
+                            self._finalize_incoming_file(t, j, fn)
+                        except Exception as ex:
+                            print(f"[FileTransfer] Finalize {fn} loi: {ex}")
+                        finally:
+                            e.set()
+                    threading.Thread(target=_finish, daemon=True, name="XferFinish").start()
             
         elif ptype == "batch_end":
-            xid = packet.get("xfer_id")
-            jobs = getattr(self, "_xfer_jobs", None) or {}
-            job = jobs.get(xid) if xid is not None else None
-            paste_id = 0
-            try:
-                paste_id = int((job or {}).get("paste_id") or packet.get("paste_id") or 0)
-            except Exception:
-                paste_id = 0
-            aborted = getattr(self, "_aborted_xfer_ids", None) or set()
-            if (xid is not None and xid in aborted) or (paste_id and paste_id in (getattr(self, "_cancelled_paste_ids", None) or set())):
-                log_debug("[batch_end] Đã hủy — bỏ qua FILES.")
-                self.close_dialog(job_id=paste_id or xid, reason="batch_end da huy")
-                jobs.pop(xid, None)
-                if not jobs:
-                    self.transfer_done_event.set()
-                    self.transfer_in_progress = False
-                return
-            ok_paths = list((job or {}).get("paths") or getattr(self, "batch_paths", None) or [])
-            self.close_dialog(job_id=paste_id or xid, reason="batch_end xong")
-            if not jobs or len(jobs) <= 1:
-                self.transfer_done_event.set()
-            try:
-                import core.viewer
-                if core.viewer.file_manager_callback:
-                    core.viewer.file_manager_callback({"type": "trigger_local_refresh"})
-            except: pass
-            log_debug(f"[batch_end] Đã nhận xong xfer_id={xid} paste_id={paste_id} n={len(ok_paths)}")
-            try:
-                name = (job or {}).get("display_name") or self.batch_display_name
-                total = (job or {}).get("total") or self.batch_total_size
-                log_activity(_("Nhận file: ") + str(name) + " - " + str(total) + _(" byte - Thành công"))
-            except: pass
-            try:
-                if self.sock:
-                    send_msg(self.sock, json.dumps({"type": "upload_batch_ack", "xfer_id": xid}).encode('utf-8'))
-            except Exception:
-                pass
-            if self.app and getattr(self.app, 'is_headless', False):
-                meta = list((job or {}).get("expected_files") or [])
-                why = []
-                if meta and not _paths_match_expected_sizes(ok_paths, meta, detail=why):
-                    print("[FileTransfer] batch_end: size khong khop snapshot paste, khong gui FILES. " + "; ".join(why))
-                    log_debug("[batch_end] HEADLESS: size không khớp snapshot paste, không gửi FILES.")
-                    ok_paths = []
-                dest = (job or {}).get("paste_dest") or getattr(self, "_paste_dest_dir", None)
-                if ok_paths and dest and os.path.isdir(dest) and not _is_transfer_staging_dir(dest):
-                    try:
-                        ok_paths, _moved = _relocate_transfer_files_unlocked(ok_paths, dest)
-                    except Exception as e:
-                        log_debug(f"[batch_end] relocate dest={dest}: {e}")
-                try:
-                    stg_base = (job or {}).get("save_dir") or getattr(self, "target_save_dir", None)
-                    _purge_rdxfer_staging(
-                        dest_dir=dest or stg_base,
-                        xfer_id=xid,
-                        extra_paths=list((job or {}).get("paths") or []) + list(ok_paths or []),
-                    )
-                    _purge_rdxfer_staging(dest_dir=stg_base, xfer_id=xid)
-                    _schedule_scrub_probe(dest)
-                except Exception as e:
-                    log_debug(f"[batch_end] purge staging: {e}")
-                if ok_paths:
-                    files_str = str(paste_id) + "|" + "|".join(ok_paths)
-                    self._send_progress_signal("FILES", files_str)
-                    if hasattr(self, 'lock'):
-                        with self.lock:
-                            self.last_current_files = [os.path.abspath(p) for p in ok_paths if os.path.exists(p)]
-                            self.last_files_time = time.time()
-                else:
-                    self._send_progress_signal("CANCEL", str(paste_id) if paste_id else "")
-                self._close_transfer_pipe()
-            jobs.pop(xid, None)
-            if not jobs:
-                self.transfer_in_progress = False
-                self._paste_dest_dir = None
-                if self.app and getattr(self.app, "is_headless", False):
-                    self.target_save_dir = HEADLESS_TRANSFER_DIR
+            threading.Thread(
+                target=self._complete_batch_after_files,
+                args=(packet,),
+                daemon=True,
+                name="XferBatchEnd",
+            ).start()
             return
 
 
@@ -5623,6 +5806,7 @@ def run_clipboard_agent_mode():
             try:
                 info = {
                     "display_name": _pending_info.get("display_name", "Files"),
+                    "item_kind": _pending_info.get("item_kind") or "file",
                     "total_size": _pending_info.get("total_size", 0),
                     "files": [dict(f) if isinstance(f, dict) else f for f in (_pending_info.get("files") or [])],
                 }
@@ -5939,7 +6123,14 @@ def run_clipboard_agent_mode():
             agent_print("[ClipboardAgent] Bo dialog (job da Huy).")
             return None
         job_files = ((job.get("info") or {}).get("files") if job else None) or []
-        name = _localized_batch_name(job_files, display_name)
+        if not job_files and job is not None:
+            job_files = job.get("requested_files") or []
+        kind, name = _copy_batch_kind_and_name(job_files, display_name)
+        pending_kind = ((job.get("info") or {}).get("item_kind") if job else None) or (
+            _pending_info.get("item_kind") if _pending_info else None
+        )
+        if pending_kind in ("file", "folder") and not job_files:
+            kind = pending_kind
         stack = len([d for d in active_dialogs.values() if d])
         dlg = ProgressDialog(
             root, _("Đang tải file về..."), name, total_size,
@@ -5948,6 +6139,7 @@ def run_clipboard_agent_mode():
             reserve_finalize=True,
             stack_index=stack,
             job_id=paste_id,
+            item_kind=kind,
         )
         if paste_id is not None:
             active_dialogs[paste_id] = dlg

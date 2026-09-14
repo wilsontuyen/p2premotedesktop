@@ -238,6 +238,7 @@
     "Sao chép (Copy)": "Copy",
     "Sao chép tệp": "Copy File",
     "Sao chép tệp \"{name}\"": "Copy file \"{name}\"",
+    "Sao chép thư mục \"{name}\"": "Copy folder \"{name}\"",
     "Sao chép và thay thế": "Copy and Replace",
     "Soạn thảo (Local) - {name}": "Editor (Local) - {name}",
     "Soạn thảo (Remote) - {name}": "Editor (Remote) - {name}",

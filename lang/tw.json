@@ -229,6 +229,7 @@
     "Sao chép (Copy)": "複製 (Copy)",
     "Sao chép tệp": "複製檔案",
     "Sao chép tệp \"{name}\"": "正在複製檔案 \"{name}\"",
+    "Sao chép thư mục \"{name}\"": "正在複製資料夾 \"{name}\"",
     "Sao chép và thay thế": "複製並取代",
     "Soạn thảo (Local) - {name}": "編輯器 (本機) - {name}",
     "Soạn thảo (Remote) - {name}": "編輯器 (遠端) - {name}",

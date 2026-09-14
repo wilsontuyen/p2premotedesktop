@@ -295,7 +295,7 @@ class ClassicCopyDialog(tk.Toplevel):
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False, stack_index=0, job_id=None):
+    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False, stack_index=0, job_id=None, item_kind="file"):
         super().__init__(parent)
         self.parent_window = parent
         self.host_hwnd = host_hwnd
@@ -356,11 +356,18 @@ class ProgressDialog(tk.Toplevel):
         top_frame = tk.Frame(self, bg="#FFFFFF")
         top_frame.pack(fill=tk.X, padx=12, pady=(6, 2))
         
-        display_name = self._short_copy_label(self.filename, max_len=32)
+        self.item_kind = "folder" if str(item_kind or "").lower() == "folder" else "file"
+        display_name = self._short_copy_label(
+            self.filename, max_len=32, is_folder=(self.item_kind == "folder"),
+        )
+        if self.item_kind == "folder":
+            action_text = _('Sao chép thư mục "{name}"').format(name=display_name)
+        else:
+            action_text = _('Sao chép tệp "{name}"').format(name=display_name)
 
         self.lbl_action = tk.Label(
             top_frame,
-            text=_('Sao chép tệp "{name}"').format(name=display_name),
+            text=action_text,
             font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF",
             anchor="w"
         )
@@ -690,8 +697,8 @@ class ProgressDialog(tk.Toplevel):
         self._move_to_screen(x, y)
 
     @staticmethod
-    def _short_copy_label(name, max_len=42):
-        """Rút gọn tên file, giữ đuôi — không cắt đầu+đuôi (trông như dính 2 tên)."""
+    def _short_copy_label(name, max_len=42, is_folder=False):
+        """Rút gọn tên file (giữ đuôi) hoặc tên folder — không cắt đầu+đuôi."""
         raw = str(name or "Unknown").replace("\\", "/")
         extra = ""
         marker = " và "
@@ -702,6 +709,11 @@ class ProgressDialog(tk.Toplevel):
         base = os.path.basename(raw) or raw
         if len(base) + len(extra) <= max_len:
             return base + extra
+        if is_folder:
+            keep = max_len - len(extra) - 3
+            if keep < 6:
+                return (base + extra)[: max_len - 3] + "..."
+            return base[:keep] + "..." + extra
         root, ext = os.path.splitext(base)
         room = max_len - len(extra) - len(ext) - 3
         if room < 6:

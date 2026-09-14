@@ -229,6 +229,7 @@
     "Sao chép (Copy)": "복사 (Copy)",
     "Sao chép tệp": "파일 복사",
     "Sao chép tệp \"{name}\"": "파일 복사 \"{name}\"",
+    "Sao chép thư mục \"{name}\"": "폴더 복사 \"{name}\"",
     "Sao chép và thay thế": "복사 및 바꾸기",
     "Soạn thảo (Local) - {name}": "편집기 (로컬) - {name}",
     "Soạn thảo (Remote) - {name}": "편집기 (원격) - {name}",
