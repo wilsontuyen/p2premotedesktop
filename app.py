@@ -49,6 +49,7 @@ import logging
 print("==== RUNNING APP VERSION: MAC_DEBUG_101 ====")
 
 import threading
+import queue
 import json
 import struct
 import time
@@ -760,6 +761,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._status_offline_strikes = {}
         self._saved_id_groups = {}
         self._status_fg_focus_group = None
+        self._status_ui_q = queue.Queue()
+        self._saved_list_open_flag = False
+        self._saved_collapsed_snapshot = set()
+        self._status_ui_pump_started = False
+        self._status_wake = threading.Event()
         self.tray_icon = None
         self.last_signaling_response = time.time()
         self.received_first_pong = False
@@ -1319,10 +1325,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                         self.saved_computers_dialog.attributes("-alpha", 1.0)
                         self.saved_computers_dialog.lift()
                         self.saved_computers_dialog.focus_force()
+                    self._sync_saved_status_ui_flags()
                 self.after(50, _show_reopen)
+                self._sync_saved_status_ui_flags()
+                self._wake_saved_status_workers()
                 return
             self.saved_computers_dialog.lift()
             self.saved_computers_dialog.focus_force()
+            self._sync_saved_status_ui_flags()
+            self._wake_saved_status_workers()
             return
             
         dialog = tk.Toplevel(self)
@@ -1460,6 +1471,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         def on_dialog_destroy():
             _unbind_mousewheel()
             dialog.withdraw()
+            self._status_fg_focus_group = None
+            self._saved_list_open_flag = False
+            try:
+                dialog.update_idletasks()
+            except Exception:
+                pass
+            self._sync_saved_status_ui_flags()
+            self._wake_saved_status_workers()
             
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
 
@@ -1651,6 +1670,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             
             def get_is_online(c):
                 known = getattr(self, "_status_online", {}) or {}
+                cid = self._canonical_saved_id(getattr(c, "comp_id", ""))
+                if cid and cid in known:
+                    return bool(known[cid])
                 if c.comp_id in known:
                     return bool(known[c.comp_id])
                 if c.comp_id in self.status_dots_widgets:
@@ -1783,9 +1805,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                         event.widget.config(text=f"{new_icon} {g_display.upper()}")
                         reorder_list()
                         self.save_group_states_only()
+                        self._sync_saved_status_ui_flags()
                         if just_expanded:
-                            # Status đã quét ngầm: online sẵn trên đầu. Worker 1s/máy bắt đầu từ nhóm vừa mở.
                             self._status_fg_focus_group = g
+                            self._burst_saved_group_status(g)
                         
                     header.bind("<Button-1>", toggle_group)
                     header.bind("<ButtonRelease-1>", on_drop)
@@ -1814,10 +1837,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
                     clean_id = card.comp_id
+                    canon_id = self._canonical_saved_id(clean_id)
                     known = getattr(self, "_status_online", {})
                     if clean_id in current_online:
                         is_online = current_online[clean_id]
                         self._status_scanned.add(clean_id)
+                        dot_color = "#00F5D4" if is_online else "#E05252"
+                    elif canon_id in current_online:
+                        is_online = current_online[canon_id]
+                        self._status_scanned.add(canon_id)
+                        dot_color = "#00F5D4" if is_online else "#E05252"
+                    elif canon_id in known:
+                        is_online = bool(known[canon_id])
+                        self._status_scanned.add(canon_id)
                         dot_color = "#00F5D4" if is_online else "#E05252"
                     elif clean_id in known:
                         is_online = bool(known[clean_id])
@@ -1932,7 +1964,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 dialog.attributes("-alpha", 1.0)
                 dialog.lift()
                 dialog.focus_force()
+            self._sync_saved_status_ui_flags()
         dialog.after(50, _show_initial)
+        self._sync_saved_status_ui_flags()
+        self._wake_saved_status_workers()
 
 
     def add_current_partner_to_saved(self):
@@ -3238,17 +3273,77 @@ Comment=Remote Desktop P2P AutoStart
 
 
     def _saved_list_is_open(self):
+        # Worker không gọi Tk — dùng cờ main thread cập nhật.
+        try:
+            if threading.current_thread() is not threading.main_thread():
+                return bool(getattr(self, "_saved_list_open_flag", False))
+        except Exception:
+            return bool(getattr(self, "_saved_list_open_flag", False))
+        return self._read_saved_list_open_tk()
+
+    def _read_saved_list_open_tk(self):
         dlg = getattr(self, "saved_computers_dialog", None)
         try:
             return bool(dlg and dlg.winfo_exists() and dlg.state() != "withdrawn")
         except Exception:
             return False
 
+    def _saved_collapsed_set(self):
+        try:
+            if threading.current_thread() is not threading.main_thread():
+                snap = getattr(self, "_saved_collapsed_snapshot", None)
+                if snap is not None:
+                    return set(snap)
+        except Exception:
+            pass
+        return set(getattr(self, "collapsed_groups", set()) or [])
+
+    def _sync_saved_status_ui_flags(self):
+        """Main thread: snapshot list mở/đóng và nhóm thu gọn cho worker."""
+        self._saved_list_open_flag = self._read_saved_list_open_tk()
+        self._saved_collapsed_snapshot = set(getattr(self, "collapsed_groups", set()) or [])
+
+    def _wake_saved_status_workers(self):
+        ev = getattr(self, "_status_wake", None)
+        if ev is not None:
+            ev.set()
+
+    def _drain_status_ui_q(self):
+        q = getattr(self, "_status_ui_q", None)
+        if q is None:
+            return
+        n = 0
+        while n < 80:
+            try:
+                cid, online = q.get_nowait()
+            except Exception:
+                break
+            n += 1
+            try:
+                self._apply_saved_computer_status(cid, online)
+            except Exception:
+                pass
+
+    def _pump_saved_status_ui(self):
+        self._sync_saved_status_ui_flags()
+        self._drain_status_ui_q()
+        try:
+            self._expire_stale_online_probes()
+        except Exception:
+            pass
+        try:
+            self.after(80, self._pump_saved_status_ui)
+        except Exception:
+            pass
+
     def _saved_id_is_expanded(self, clean_id):
         if not self._saved_list_is_open():
             return False
-        grp = (getattr(self, "_saved_id_groups", {}) or {}).get(clean_id, "")
-        return grp not in getattr(self, "collapsed_groups", set())
+        groups = getattr(self, "_saved_id_groups", {}) or {}
+        grp = groups.get(clean_id, "")
+        if not grp:
+            grp = groups.get(self._canonical_saved_id(clean_id), "")
+        return grp not in self._saved_collapsed_set()
 
     @staticmethod
     def _saved_group_sort_key(grp):
@@ -3285,7 +3380,7 @@ Comment=Remote Desktop P2P AutoStart
         all_ids = [cid for cid, _g, _n in rows]
         if not self._saved_list_is_open():
             return [], [], all_ids
-        collapsed = getattr(self, "collapsed_groups", set())
+        collapsed = self._saved_collapsed_set()
         by_grp = {}
         for cid, grp, name in rows:
             by_grp.setdefault(grp, []).append((cid, name))
@@ -3310,32 +3405,59 @@ Comment=Remote Desktop P2P AutoStart
             return
         self._status_bg_started = True
         self._ensure_status_query_worker()
+        if not getattr(self, "_status_ui_pump_started", False):
+            self._status_ui_pump_started = True
+            if getattr(self, "_status_ui_q", None) is None:
+                self._status_ui_q = queue.Queue()
+            self._pump_saved_status_ui()
 
     def query_computer_status(self, clean_id, priority=None):
         self._ensure_status_query_worker()
-        self._probe_saved_status(clean_id)
+        self._start_saved_status_probe(clean_id)
+
+    def _ids_in_saved_group(self, grp):
+        want = (grp or "").strip()
+        ids = []
+        seen = set()
+
+        def add(cid):
+            cid = str(cid or "").replace(" ", "")
+            if not cid:
+                return
+            key = self._canonical_saved_id(cid) or cid
+            if key in seen:
+                return
+            seen.add(key)
+            ids.append(cid)
+
+        try:
+            for cid, g, _n in self._list_saved_computers_meta():
+                if (g or "").strip() == want:
+                    add(cid)
+        except Exception:
+            pass
+        groups = getattr(self, "_saved_id_groups", {}) or {}
+        for cid, g in list(groups.items()):
+            if (g or "").strip() == want:
+                add(cid)
+        return ids
+
+    def _burst_saved_group_status(self, grp):
+        """Hỏi check_online cả nhóm ngay — không đợi worker / snapshot."""
+        self._ensure_status_query_worker()
+        for cid in self._ids_in_saved_group(grp):
+            self._start_saved_status_probe(cid)
 
     def _canonical_saved_id(self, cid):
         from utils.hwid import canonical_hwid
         return canonical_hwid(str(cid or "").replace(" ", ""))
 
     def _is_live_saved_session(self, cid):
-        """Máy mình hoặc đang có cửa sổ điều khiển — không đánh offline từ check_online."""
+        """Máy của chính mình luôn online. Viewer treo sau khi host tắt không được ghim xanh."""
         cid = self._canonical_saved_id(cid)
         if not cid:
             return False
-        if cid == self._canonical_saved_id(getattr(self, "my_id_clean", "") or ""):
-            return True
-        for v in list(getattr(self, "active_viewers", None) or []):
-            try:
-                proc = v.get("process")
-                if proc is not None and not proc.is_alive():
-                    continue
-            except Exception:
-                continue
-            if self._canonical_saved_id(v.get("partner_id")) == cid:
-                return True
-        return False
+        return cid == self._canonical_saved_id(getattr(self, "my_id_clean", "") or "")
 
     def _next_online_gen(self, cid):
         gens = getattr(self, "_online_gen", None)
@@ -3346,61 +3468,80 @@ Comment=Remote Desktop P2P AutoStart
         gens[cid] = n
         return n
 
-    def _probe_saved_status(self, cid):
+    def _clear_online_vote(self, cid):
+        self._online_expect.pop(cid, None)
+        self._online_got.pop(cid, None)
+        self._online_any.pop(cid, None)
+        deadlines = getattr(self, "_online_deadline", None)
+        if deadlines is not None:
+            deadlines.pop(cid, None)
+
+    def _start_saved_status_probe(self, cid):
+        """Gửi 1 check_online, không chờ — kết quả/timeout cập nhật sau."""
         cid = self._canonical_saved_id(cid)
         if not cid:
-            return
+            return None
         if self._is_live_saved_session(cid):
             self.update_saved_computer_status(cid, True)
-            return
+            return None
         sock = getattr(self, "primary_signaling_socket", None)
         if not sock:
-            return
+            return None
         lock = getattr(self, "_online_vote_lock", None)
         if lock is None:
-            return
-        with lock:
-            if cid in getattr(self, "_online_expect", {}):
-                return
-            gen = self._next_online_gen(cid)
+            return None
         try:
-            from utils.hwid import signaling_lookup_ids
-            aliases = signaling_lookup_ids(cid)
             with lock:
-                if self._online_gen.get(cid) != gen:
-                    return
-                self._online_expect[cid] = len(aliases) or 1
+                gen = self._next_online_gen(cid)
+                self._online_expect[cid] = 1
                 self._online_got[cid] = 0
                 self._online_any[cid] = False
+                if getattr(self, "_online_deadline", None) is None:
+                    self._online_deadline = {}
+                self._online_deadline[cid] = time.time() + 0.9
+            req = json.dumps({"action": "check_online", "target": cid})
+            with self.signaling_lock:
+                send_msg(sock, req.encode("utf-8"), APP_KEY)
+            return gen
+        except Exception:
+            if lock is not None:
+                with lock:
+                    self._clear_online_vote(cid)
             try:
-                self.after(2500, lambda c=cid, g=gen: self.check_and_default_offline(c, g))
+                self.update_saved_computer_status(cid, False)
             except Exception:
                 pass
-            for alias in aliases:
-                with lock:
-                    if self._online_gen.get(cid) != gen or cid not in self._online_expect:
-                        break
-                    if self._online_any.get(cid):
-                        break
-                req = json.dumps({"action": "check_online", "target": alias})
-                with self.signaling_lock:
-                    send_msg(sock, req.encode("utf-8"), APP_KEY)
-                time.sleep(0.02)
-        except Exception:
-            with lock:
-                if self._online_gen.get(cid) == gen:
-                    self._online_expect.pop(cid, None)
-                    self._online_got.pop(cid, None)
-                    self._online_any.pop(cid, None)
-            try:
-                self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
-            except Exception:
-                self.update_saved_computer_status(cid, False)
+            return None
+
+    def _expire_stale_online_probes(self):
+        lock = getattr(self, "_online_vote_lock", None)
+        deadlines = getattr(self, "_online_deadline", None)
+        if lock is None or not deadlines:
+            return
+        now = time.time()
+        expired = []
+        with lock:
+            for cid, due in list(deadlines.items()):
+                if now < due:
+                    continue
+                gen = getattr(self, "_online_gen", {}).get(cid)
+                if cid in getattr(self, "_online_expect", {}):
+                    expired.append((cid, gen))
+                else:
+                    deadlines.pop(cid, None)
+        for cid, gen in expired:
+            self.check_and_default_offline(cid, gen)
 
     def _pace_status_probe(self, started, gap):
         remain = gap - (time.time() - started)
-        if remain > 0:
+        if remain <= 0:
+            return
+        ev = getattr(self, "_status_wake", None)
+        if ev is None:
             time.sleep(remain)
+            return
+        ev.wait(timeout=remain)
+        ev.clear()
 
     def _ensure_status_query_worker(self):
         if getattr(self, "_status_query_worker_started", False):
@@ -3411,6 +3552,9 @@ Comment=Remote Desktop P2P AutoStart
         self._online_got = {}
         self._online_any = {}
         self._online_gen = {}
+        self._online_deadline = {}
+        if getattr(self, "_status_wake", None) is None:
+            self._status_wake = threading.Event()
         if not hasattr(self, "_status_offline_strikes"):
             self._status_offline_strikes = {}
         gap_closed = 2.0
@@ -3418,26 +3562,30 @@ Comment=Remote Desktop P2P AutoStart
         gap_collapsed_open = 5.0
 
         def fg_worker():
-            """Nhóm đang mở: 1s/máy, nhóm trên cùng trước. Không chặn luồng ngầm."""
+            """Bung nhóm: hỏi cả nhóm một lần. Bình thường: 1s/máy. Không chặn luồng ngầm."""
             while True:
                 try:
                     if getattr(self, "is_headless", False):
                         time.sleep(1.0)
                         continue
+                    focus = getattr(self, "_status_fg_focus_group", None)
+                    if focus is not None:
+                        self._status_fg_focus_group = None
+                        if self._saved_list_is_open():
+                            self._burst_saved_group_status(focus)
                     expanded, _collapsed, _all_ids = self._saved_status_partitions()
                     if not expanded:
                         time.sleep(0.2)
                         continue
-                    focus = getattr(self, "_status_fg_focus_group", None)
-                    if focus:
-                        self._status_fg_focus_group = None
                     for cid in expanded:
                         if getattr(self, "is_headless", False) or not self._saved_list_is_open():
+                            break
+                        if getattr(self, "_status_fg_focus_group", None) is not None:
                             break
                         if not self._saved_id_is_expanded(cid):
                             continue
                         started = time.time()
-                        self._probe_saved_status(cid)
+                        self._start_saved_status_probe(cid)
                         self._pace_status_probe(started, gap_expanded)
                 except Exception:
                     time.sleep(0.5)
@@ -3469,13 +3617,21 @@ Comment=Remote Desktop P2P AutoStart
                         if now_open and self._saved_id_is_expanded(cid):
                             continue
                         started = time.time()
-                        self._probe_saved_status(cid)
+                        self._start_saved_status_probe(cid)
                         self._pace_status_probe(started, gap)
                 except Exception:
                     time.sleep(0.5)
 
         threading.Thread(target=fg_worker, daemon=True, name="SavedStatusFg").start()
         threading.Thread(target=bg_worker, daemon=True, name="SavedStatusBg").start()
+        try:
+            if threading.current_thread() is threading.main_thread() and not getattr(self, "_status_ui_pump_started", False):
+                self._status_ui_pump_started = True
+                if getattr(self, "_status_ui_q", None) is None:
+                    self._status_ui_q = queue.Queue()
+                self._pump_saved_status_ui()
+        except Exception:
+            pass
 
     def _on_check_online_result(self, target, online):
         base = self._canonical_saved_id(target)
@@ -3494,13 +3650,13 @@ Comment=Remote Desktop P2P AutoStart
                 self._online_any[base] = True
                 apply_now = True
                 final = True
-            self._online_got[base] = self._online_got.get(base, 0) + 1
-            if self._online_got[base] >= self._online_expect.get(base, 1):
-                apply_now = True
-                final = bool(self._online_any.get(base))
-                self._online_expect.pop(base, None)
-                self._online_got.pop(base, None)
-                self._online_any.pop(base, None)
+                self._clear_online_vote(base)
+            else:
+                self._online_got[base] = self._online_got.get(base, 0) + 1
+                if self._online_got[base] >= self._online_expect.get(base, 1):
+                    apply_now = True
+                    final = bool(self._online_any.get(base))
+                    self._clear_online_vote(base)
         if apply_now:
             self.update_saved_computer_status(base, final)
 
@@ -3517,9 +3673,7 @@ Comment=Remote Desktop P2P AutoStart
                 if clean_id in self._online_expect:
                     still_waiting = True
                     any_on = bool(self._online_any.get(clean_id))
-                    self._online_expect.pop(clean_id, None)
-                    self._online_got.pop(clean_id, None)
-                    self._online_any.pop(clean_id, None)
+                    self._clear_online_vote(clean_id)
         if not still_waiting:
             return
         if any_on or self._is_live_saved_session(clean_id):
@@ -3529,32 +3683,41 @@ Comment=Remote Desktop P2P AutoStart
 
 
     def update_saved_computer_status(self, partner_id, is_online):
+        if threading.current_thread() is not threading.main_thread():
+            q = getattr(self, "_status_ui_q", None)
+            if q is not None:
+                try:
+                    q.put((partner_id, bool(is_online)))
+                    return
+                except Exception:
+                    pass
+        self._apply_saved_computer_status(partner_id, is_online)
+
+    def _apply_saved_computer_status(self, partner_id, is_online):
         from utils.hwid import canonical_hwid
         clean_id = canonical_hwid(partner_id)
         if not clean_id:
             return
         if self._is_live_saved_session(clean_id):
             is_online = True
-        strikes = getattr(self, "_status_offline_strikes", None)
-        if strikes is None:
-            self._status_offline_strikes = {}
-            strikes = self._status_offline_strikes
         known = getattr(self, "_status_online", None)
-        prev = known.get(clean_id) if known is not None else None
-        if is_online:
-            strikes[clean_id] = 0
-        else:
-            n = int(strikes.get(clean_id, 0) or 0) + 1
-            strikes[clean_id] = n
-            if prev is True and n < 2:
-                return
-        getattr(self, "_status_scanned", set()).add(clean_id)
+        prev = None
         if known is not None:
+            prev = known.get(clean_id)
+            if prev is None:
+                raw = str(partner_id or "").replace(" ", "")
+                prev = known.get(raw)
             known[clean_id] = bool(is_online)
+            raw = str(partner_id or "").replace(" ", "")
+            if raw and raw != clean_id:
+                known[raw] = bool(is_online)
+        getattr(self, "_status_scanned", set()).add(clean_id)
         status_changed = (prev is None) or (bool(prev) != bool(is_online))
-        if clean_id in self.status_dots_widgets:
-            widgets = self.status_dots_widgets[clean_id]
-            new_color = "#00F5D4" if is_online else "#E05252"
+        new_color = "#00F5D4" if is_online else "#E05252"
+        dots = getattr(self, "status_dots_widgets", None) or {}
+        for key, widgets in list(dots.items()):
+            if key != clean_id and self._canonical_saved_id(key) != clean_id:
+                continue
             for dot_widget in widgets:
                 try:
                     if dot_widget.winfo_exists() and dot_widget.cget("fg") != new_color:
