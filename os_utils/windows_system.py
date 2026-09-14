@@ -79,27 +79,16 @@ def uac_on_secure_desktop():
 
 
 def attach_thread_for_remote_input():
-    """Gắn thread input đúng desktop. UAC Win11: hộp Yes/No ở Default nếu PromptOnSecureDesktop=0;
-    OpenInputDesktop đôi khi báo winlogon → click không tới nút."""
+    """Fix UAC ok 2: bám OpenInputDesktop (desktop đang nhận chuột), không ép Default/Winlogon."""
     user32 = ctypes.windll.user32
-    want = None
-    try:
-        if uac_consent_running():
-            want = "winlogon" if prompt_on_secure_desktop_enabled() else "default"
-    except Exception:
-        want = None
-
     h_input = None
-    if want:
-        h_input = open_named_desktop_handle("Winlogon" if want == "winlogon" else "Default")
-    if not h_input:
-        for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
-            try:
-                h_input = user32.OpenInputDesktop(0, False, access_mask)
-                if h_input:
-                    break
-            except Exception:
-                pass
+    for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
+        try:
+            h_input = user32.OpenInputDesktop(0, False, access_mask)
+            if h_input:
+                break
+        except Exception:
+            pass
     if not h_input:
         thread_name = get_desktop_name()
         target_name = "Winlogon" if thread_name == "default" else "Default"
@@ -110,13 +99,6 @@ def attach_thread_for_remote_input():
         return False
     try:
         name_input = _desktop_name_from_handle(h_input)
-        if want and name_input and name_input != want:
-            user32.CloseDesktop(h_input)
-            h_input = open_named_desktop_handle("Winlogon" if want == "winlogon" else "Default")
-            if not h_input:
-                h_input = None
-                return False
-            name_input = _desktop_name_from_handle(h_input)
         name_thread = get_desktop_name()
         if name_input and name_input != name_thread:
             print(f"[Host Input] Desktop changed from {name_thread} to {name_input}. Switching input thread...")

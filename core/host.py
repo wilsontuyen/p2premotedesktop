@@ -298,8 +298,105 @@ def _consent_hwnds_on_desktop(desk_name):
                 pass
     return found
 
+
+def _hwnd_is_dwm_cloaked(hwnd):
+    try:
+        cloaked = ctypes.c_int(0)
+        # DWMWA_CLOAKED = 14
+        hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+            ctypes.c_void_p(hwnd), 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked)
+        )
+        return hr == 0 and int(cloaked.value) != 0
+    except Exception:
+        return False
+
+
+def _pick_uac_dialog_hwnds(hwnds):
+    """Chỉ hộp Yes/No thật. Bỏ HWND phụ/cloaked ở (0,0) — PrintWindow chúng làm nháy góc trái Win11."""
+    usable = []
+    for hwnd, w, h, pid, x, y in hwnds or ():
+        if not hwnd or w < 280 or h < 160:
+            continue
+        if _hwnd_is_dwm_cloaked(hwnd):
+            continue
+        # Ghost/tool window DWM hay đặt origin (0,0) lúc compose.
+        if int(x) <= 2 and int(y) <= 2 and w < 700 and h < 500:
+            continue
+        usable.append((hwnd, w, h, pid, x, y))
+    if not usable:
+        return []
+    usable.sort(key=lambda t: t[1] * t[2], reverse=True)
+    return usable[:1]
+
+
+def _bitblt_screen_rect_bgr(x, y, w, h):
+    """Chụp vùng màn hình đã vẽ — không PrintWindow (Win11 UAC nháy nếu RENDERFULLCONTENT mỗi frame)."""
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    w, h = int(w), int(h)
+    x, y = int(x), int(y)
+    if w < 8 or h < 8:
+        return None
+    hdc = user32.GetDC(0)
+    if not hdc:
+        return None
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    old = gdi32.SelectObject(memdc, hbmp)
+    try:
+        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, x, y, 0x00CC0020):
+            return None
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER)]
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = 0
+        buf = (ctypes.c_ubyte * (w * h * 4))()
+        bmi.bmiHeader.biHeight = -h
+        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+        top_down = True
+        if got == 0:
+            bmi.bmiHeader.biHeight = h
+            got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+            top_down = False
+        if got == 0:
+            return None
+        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        if not top_down:
+            img = np.flipud(img).copy()
+        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        if _frame_is_nearly_black(frame):
+            return None
+        return frame, w, h, (x, y)
+    finally:
+        gdi32.SelectObject(memdc, old)
+        gdi32.DeleteObject(hbmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(0, hdc)
+
+
 def grab_uac_dialog_bgr():
-    """Win11 DXGI lúc UAC = màn trắng. GDI + PrintWindow consent.exe (Default hoặc Winlogon)."""
+    """Win11 DXGI lúc UAC = màn trắng. GDI desktop; không PrintWindow consent (nháy góc trái)."""
     attach_thread_for_remote_input()
     on_wl = _consent_hwnds_on_desktop("Winlogon")
     on_def = _consent_hwnds_on_desktop("Default")
@@ -313,6 +410,8 @@ def grab_uac_dialog_bgr():
         hwnds = on_def or on_wl
         attach_thread_for_remote_input()
 
+    hwnds = _pick_uac_dialog_hwnds(hwnds)
+
     frame_bgr = None
     cap_w = cap_h = 0
     origin = (0, 0)
@@ -324,9 +423,18 @@ def grab_uac_dialog_bgr():
         except Exception:
             frame_bgr = None
 
+    # Desktop GDI đã có hộp thoại (PromptOnSecureDesktop=0): đừng dán thêm tile.
+    if (
+        frame_bgr is not None
+        and getattr(frame_bgr, "size", 0)
+        and not _frame_is_nearly_black(frame_bgr)
+        and not _frame_is_nearly_white(frame_bgr)
+    ):
+        return frame_bgr, cap_w, cap_h, origin
+
     overlays = []
     for hwnd, w, h, _pid, x, y in hwnds:
-        cap = _capture_hwnd_bgr(hwnd, w, h)
+        cap = _bitblt_screen_rect_bgr(x, y, w, h)
         if cap is None:
             continue
         overlays.append((cap[0], x, y, w, h))
@@ -1234,6 +1342,7 @@ def _fm_host_send(c, payload, pwd):
 
 class HostMixin:
     def ensure_input_thread_desktop(self, force=False):
+        """Gắn thread input vào desktop đang nhận chuột (hộp UAC Yes/No)."""
         if getattr(self, 'is_headless', False) is False and sys.platform != "win32":
             return
             
@@ -1850,12 +1959,26 @@ class HostMixin:
                         _last_hb = time.time()
                     except Exception:
                         pass
+                try:
+                    self._sync_privacy_with_uac()
+                except Exception:
+                    pass
                 # Early check for desktop status
                 needs_switch, is_blocked = check_desktop_change()
+                # Hộp UAC Yes/No: không đứng capture (switching_desktop) — vẫn GDI + SendInput.
+                if uac_consent_running():
+                    is_blocked = False
+                    try:
+                        attach_thread_for_remote_input()
+                    except Exception:
+                        pass
                 # Sign-out / logon: ghim Winlogon khi UI khóa; khi đã vào Default thì phải rời ra.
                 if _should_capture_logon_ui():
                     if get_desktop_name() != "winlogon":
                         _pin_capture_to_winlogon_if_needed()
+                    is_blocked = False
+                    needs_switch = False
+                elif uac_consent_running():
                     is_blocked = False
                     needs_switch = False
                 elif get_desktop_name() == "winlogon":
@@ -2267,14 +2390,17 @@ class HostMixin:
                 import select
                 r, _, _ = select.select([conn], [], [], 0.2)
                 
-                if getattr(self, 'head_screen_cover_active', False):
+                try:
+                    self._sync_privacy_with_uac()
+                except Exception:
+                    pass
+                if getattr(self, 'head_screen_cover_active', False) and not uac_consent_running():
                     try:
-                        if uac_consent_running():
-                            self._apply_block_input(False)
-                        elif not self._apply_block_input(True):
+                        if not self._apply_block_input(True):
                             self._apply_block_input(False)
                             self._apply_block_input(True)
-                    except: pass
+                    except Exception:
+                        pass
                     
                 if not r:
                     continue
@@ -2771,6 +2897,11 @@ class HostMixin:
         HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
         
         def keyboard_hook_proc(nCode, wParam, lParam):
+            try:
+                if uac_consent_running():
+                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+            except Exception:
+                pass
             if nCode >= 0 and lParam:
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                 if not (kb.flags & KB_INJECTED):
@@ -2778,6 +2909,11 @@ class HostMixin:
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
             
         def mouse_hook_proc(nCode, wParam, lParam):
+            try:
+                if uac_consent_running():
+                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+            except Exception:
+                pass
             if nCode >= 0 and lParam:
                 ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
                 if not (ms.flags & MS_INJECTED):
@@ -2835,6 +2971,48 @@ class HostMixin:
     def stop_input_hooks(self):
         self.host_block_input_active = False
         print("[Host] Input hooks (KB/Mouse) Disabled.")
+
+    def _sync_privacy_with_uac(self):
+        """UAC Yes/No: BlockInput + hook privacy khóa cứng chuột/phím trên host — phải nhả."""
+        try:
+            uac = uac_consent_running()
+        except Exception:
+            uac = False
+        paused = getattr(self, "_uac_privacy_paused", False)
+        if uac and not paused:
+            self._uac_privacy_paused = True
+            try:
+                self._apply_block_input(False)
+            except Exception:
+                pass
+            try:
+                self.stop_input_hooks()
+            except Exception:
+                pass
+            hwnd = getattr(self, "_cover_hwnd", None)
+            if hwnd:
+                try:
+                    import win32gui, win32con
+                    win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                except Exception:
+                    pass
+            print("[Host] UAC prompt: unlocked host mouse/keyboard")
+        elif not uac and paused:
+            self._uac_privacy_paused = False
+            cover_on = bool(
+                getattr(self, "head_screen_cover_active", False)
+                or getattr(self, "screen_cover_running", False)
+            )
+            if cover_on:
+                try:
+                    self._apply_block_input(True)
+                except Exception:
+                    pass
+                if not getattr(self, "is_headless", False):
+                    try:
+                        self.start_input_hooks()
+                    except Exception:
+                        pass
 
     def toggle_screen_cover(self):
         if sys.platform != "win32":
@@ -3064,7 +3242,20 @@ class HostMixin:
                     if not getattr(self, 'screen_cover_running', False):
                         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
                         return 0
-                        
+
+                    # Cover UIAccess + TOPMOST mỗi tick đè hộp UAC → không bấm được Yes/No.
+                    try:
+                        uac_up = uac_consent_running()
+                    except Exception:
+                        uac_up = False
+                    if uac_up:
+                        try:
+                            self._sync_privacy_with_uac()
+                        except Exception:
+                            pass
+                        win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                        return 0
+
                     # Fade animation
                     self._fade_value += self._fade_dir
                     if self._fade_value >= 255:

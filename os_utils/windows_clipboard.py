@@ -152,13 +152,22 @@ class ClipboardEventListener:
                     self.manager.last_lbutton_time = now
                     on_self = _cursor_over_current_process()
                     if not was:
+                        prev_t = getattr(self.manager, "_prev_lbutton_time", 0.0)
+                        px, py = getattr(self.manager, "_prev_lbutton_pos", (0, 0))
+                        cx, cy = _cursor_xy()
+                        if (now - prev_t) <= (_double_click_ms() / 1000.0) + 0.05 and abs(cx - px) <= 6 and abs(cy - py) <= 6:
+                            self.manager.last_dblclick_time = now
+                        self.manager._prev_lbutton_time = now
+                        self.manager._prev_lbutton_pos = (cx, cy)
                         hit_menu = (not on_self) and _cursor_over_context_menu()
                         if hit_menu:
                             self.manager._lmb_hit_context_menu = True
+                            kind, _name = _capture_menu_item_at_cursor()
+                            self.manager._lmb_menu_item_kind = kind
+                            if kind != "not_paste":
+                                self.manager.note_paste_gesture()
                         elif not getattr(self.manager, "_lmb_hit_context_menu", False):
                             self.manager._lmb_hit_context_menu = False
-                        if hit_menu and now - getattr(self.manager, "last_rbutton_time", 0) < 8.0:
-                            self.manager.note_paste_gesture()
                     self.manager._lmb_held = True
                     if (not on_self) and getattr(self.manager, 'dummy_h_active', False):
                         self.manager.dummy_h_active = False
@@ -170,6 +179,7 @@ class ClipboardEventListener:
                 if self.manager:
                     self.manager.last_rbutton_time = time.time()
                     self.manager._lmb_hit_context_menu = False
+                    self.manager._lmb_menu_item_kind = ""
                     if getattr(self.manager, 'dummy_h_active', False):
                         self.manager.dummy_h_active = False
                         self.manager.setup_delayed_rendering()
@@ -877,6 +887,13 @@ _CLIPBOARD_PROBE_PROCS = _EXPLORER_CLIPBOARD_PROCS + (
     "applicationframehost.exe",
     "textinputhost.exe",
     "sihost.exe",
+    "taskmgr.exe",
+    "perfmon.exe",
+    "mmc.exe",
+    "procexp.exe",
+    "procexp64.exe",
+    "processhacker.exe",
+    "systemsettings.exe",
     "vmtoolsd.exe",
     "vboxtray.exe",
     "rdpclip.exe",
@@ -886,11 +903,14 @@ _CLIPBOARD_PROBE_PROCS = _EXPLORER_CLIPBOARD_PROCS + (
     "anydesk.exe",
 )
 
+_EXPLORER_FOLDER_CLASSES = (
+    "CabinetWClass",
+    "ExploreWClass",
+)
+
 _CONTEXT_MENU_CLASSES = (
     "#32768",
-    "XamlExplorerHostIslandWindow",
     "Microsoft.UI.Content.PopupWindowSiteBridge",
-    "Microsoft.UI.Content.DesktopChildSiteBridge",
 )
 
 _CONTEXT_MENU_HIT_CLASSES = frozenset((
@@ -974,6 +994,166 @@ def _cursor_over_context_menu():
         return False
 
 
+def _cursor_point():
+    pt = wintypes.POINT()
+    if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+        return None
+    return pt
+
+
+def _context_menu_root_hwnd(hwnd):
+    """Cửa sổ menu ngoài cùng chứa hwnd (classic #32768 hoặc flyout XAML)."""
+    if not hwnd or not _hwnd_is_context_menu(hwnd):
+        return None
+    user32 = ctypes.windll.user32
+    best = hwnd
+    cur = hwnd
+    for _ in range(8):
+        try:
+            user32.GetAncestor.restype = wintypes.HWND
+            nxt = user32.GetAncestor(ctypes.c_void_p(cur), 1)
+            if not nxt or nxt == cur:
+                user32.GetWindow.restype = wintypes.HWND
+                nxt = user32.GetWindow(ctypes.c_void_p(cur), 4)
+            if not nxt or nxt == cur:
+                break
+            if _hwnd_is_context_menu(nxt):
+                best = nxt
+            cur = nxt
+        except Exception:
+            break
+    return best
+
+
+def _win32_menu_text_at_point(pt):
+    """Tên mục menu cổ điển (#32768) — gọi được từ mouse hook, không dùng UIA."""
+    user32 = ctypes.windll.user32
+    try:
+        user32.WindowFromPoint.restype = wintypes.HWND
+        hwnd = user32.WindowFromPoint(pt)
+        if not hwnd:
+            return ""
+        cur = hwnd
+        hwnd_menu = None
+        for _ in range(8):
+            if _hwnd_class_name(cur) == "#32768":
+                hwnd_menu = cur
+                break
+            user32.GetAncestor.restype = wintypes.HWND
+            nxt = user32.GetAncestor(ctypes.c_void_p(cur), 1)
+            if not nxt or nxt == cur:
+                break
+            cur = nxt
+        if not hwnd_menu:
+            return ""
+        MN_GETHMENU = 0x01E1
+        MF_BYPOSITION = 0x0400
+        hmenu = user32.SendMessageW(ctypes.c_void_p(hwnd_menu), MN_GETHMENU, 0, 0)
+        if not hmenu:
+            return ""
+
+        user32.MenuItemFromPoint.argtypes = [wintypes.HWND, wintypes.HMENU, wintypes.POINT]
+        user32.MenuItemFromPoint.restype = ctypes.c_int
+        idx = user32.MenuItemFromPoint(hwnd_menu, hmenu, pt)
+        if idx < 0:
+            return ""
+        buf = ctypes.create_unicode_buffer(512)
+        user32.GetMenuStringW(ctypes.c_void_p(hmenu), idx, buf, 512, MF_BYPOSITION)
+        return (buf.value or "").strip()
+    except Exception:
+        return ""
+
+
+def _xaml_click_is_show_more_strip(pt, menu_hwnd):
+    """Win11 compact menu: Show more nằm dải đáy; Paste là icon/mục phía trên."""
+    if not pt or not menu_hwnd:
+        return False
+    if _hwnd_class_name(menu_hwnd) == "#32768":
+        return False
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        ]
+
+    rc = RECT()
+    if not user32.GetWindowRect(ctypes.c_void_p(menu_hwnd), ctypes.byref(rc)):
+        return False
+    if not (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom):
+        return False
+    dpi = 96
+    try:
+        dpi = int(user32.GetDpiForWindow(ctypes.c_void_p(menu_hwnd)) or 96)
+    except Exception:
+        dpi = 96
+    band = int(40 * dpi / 96.0)
+    height = int(rc.bottom - rc.top)
+    if height < 140:
+        return False
+    return pt.y >= rc.bottom - band
+
+
+_PASTE_MENU_TOKENS = (
+    "paste", "dán", "einfügen", "coller", "incolla", "pegar",
+    "вставить", "붙여넣기", "貼り付け", "粘贴", "貼上",
+)
+_NOT_PASTE_MENU_TOKENS = (
+    "show more", "more options", "hiển thị thêm", "thêm tùy chọn",
+    "weitere optionen", "plus d'options", "más opciones", "altre opzioni",
+    "その他のオプション", "더 많은 옵션", "дополнительн",
+    "显示更多", "顯示更多", "showmoreoptions", "moreoptions",
+    "properties", "thuộc tính", "eigenschaften", "propriétés", "proprietà",
+    "delete", "xóa", "cut", "cắt", "copy", "sao chép",
+    "rename", "đổi tên", "share", "chia sẻ", "open", "mở",
+    "pin", "ghim", "format", "định dạng", "eject", "đẩy ra",
+    "new", "mới", "refresh", "làm mới",
+)
+
+
+def _classify_context_menu_item(name):
+    """'paste' | 'not_paste' | 'unknown'."""
+    raw = (name or "").replace("&", "").replace("…", "").replace("...", "")
+    n = " ".join(raw.strip().lower().split())
+    if not n:
+        return "unknown"
+    compact = n.replace(" ", "").replace("+", "")
+    if "ctrlv" in compact:
+        return "paste"
+    for tok in _NOT_PASTE_MENU_TOKENS:
+        if tok in n or tok.replace(" ", "") in compact:
+            return "not_paste"
+    first = n.split("\t", 1)[0].strip()
+    for tok in _PASTE_MENU_TOKENS:
+        if first == tok or first.startswith(tok + " ") or tok in first.split():
+            return "paste"
+    return "unknown"
+
+
+def _capture_menu_item_at_cursor():
+    """Phân loại mục lúc click. Không dùng UIA (mouse hook hay fail)."""
+    user32 = ctypes.windll.user32
+    pt = _cursor_point()
+    if not pt:
+        return "unknown", ""
+    user32.WindowFromPoint.restype = wintypes.HWND
+    hwnd = user32.WindowFromPoint(pt)
+    root = _context_menu_root_hwnd(hwnd)
+    text = _win32_menu_text_at_point(pt)
+    kind = _classify_context_menu_item(text)
+    if kind == "unknown" and _xaml_click_is_show_more_strip(pt, root):
+        kind = "not_paste"
+        text = text or "[show-more-strip]"
+    elif kind == "unknown":
+        kind = "paste"
+    try:
+        log_debug(f"[menu-item] name={text!r} kind={kind}")
+    except Exception:
+        pass
+    return kind, text
+
+
 def _is_windows_11():
     try:
         v = sys.getwindowsversion()
@@ -1044,7 +1224,7 @@ def _is_explorer_clipboard_client():
 
 
 def _cursor_in_explorer_command_bar():
-    """Nút Paste trên thanh lệnh Win11 nằm gần đỉnh cửa sổ Explorer — khác click chọn thư mục."""
+    """Nút Paste trên thanh lệnh Win11 — chỉ cửa sổ thư mục, không gồm taskbar (cũng là explorer.exe)."""
     user32 = ctypes.windll.user32
 
     class POINT(ctypes.Structure):
@@ -1068,6 +1248,8 @@ def _cursor_in_explorer_command_bar():
         root = user32.GetAncestor(hwnd, 2) or hwnd  # GA_ROOT
     except Exception:
         root = hwnd
+    if _hwnd_class_name(root) not in _EXPLORER_FOLDER_CLASSES:
+        return False
     if _hwnd_process_name(root) not in _EXPLORER_CLIPBOARD_PROCS:
         return False
     rc = RECT()
@@ -1401,16 +1583,61 @@ def _offer_probe_hdrop(pending_files=None):
     return _offer_empty_hdrop()
 
 
-def _context_menu_open():
-    """Classic #32768 hoặc menu XAML Win11 đang hiện."""
+def _hwnd_looks_like_popup_menu(hwnd):
+    """Top-level popup menu (classic hoặc flyout Win11), không phải cửa sổ Explorer."""
     user32 = ctypes.windll.user32
-    for cls in _CONTEXT_MENU_CLASSES:
-        try:
-            hwnd = user32.FindWindowW(cls, None)
-            if hwnd and user32.IsWindowVisible(hwnd):
-                return True
-        except Exception:
-            pass
+    try:
+        if not hwnd or not user32.IsWindowVisible(hwnd):
+            return False
+    except Exception:
+        return False
+    cls = _hwnd_class_name(hwnd)
+    if cls in _CONTEXT_MENU_CLASSES:
+        return True
+    if cls not in (
+        "XamlExplorerHostIslandWindow",
+        "Microsoft.UI.Content.DesktopChildSiteBridge",
+        "Windows.UI.Composition.DesktopWindowContentBridge",
+    ):
+        return False
+    try:
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+            ]
+        rc = RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rc)):
+            return False
+        w, h = rc.right - rc.left, rc.bottom - rc.top
+        style = int(user32.GetWindowLongW(ctypes.c_void_p(hwnd), -16) or 0)
+        ws_popup = bool(style & 0x80000000)
+        return ws_popup and 40 < h < 900 and 80 < w < 720
+    except Exception:
+        return False
+
+
+_WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
+def _context_menu_open():
+    """Menu chuột phải đang hiện: #32768 / popup Win11 (EnumWindows, không FindWindow ẩn)."""
+    user32 = ctypes.windll.user32
+    found = ctypes.c_int(0)
+
+    def _enum(hwnd, _lparam):
+        if _hwnd_looks_like_popup_menu(hwnd):
+            found.value = 1
+            return 0
+        return 1
+
+    try:
+        cb = _WNDENUMPROC(_enum)
+        user32.EnumWindows(cb, 0)
+        if found.value:
+            return True
+    except Exception:
+        pass
     try:
         from ctypes import wintypes
 
@@ -1446,7 +1673,23 @@ def _context_menu_open():
     return False
 
 
-def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl_v=0.0, expect_repaste=False, lmb_on_menu=False):
+def _double_click_ms():
+    try:
+        return int(ctypes.windll.user32.GetDoubleClickTime() or 500)
+    except Exception:
+        return 500
+
+
+def _cursor_xy():
+    pt = wintypes.POINT()
+    try:
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+        return int(pt.x), int(pt.y)
+    except Exception:
+        return 0, 0
+
+
+def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl_v=0.0, expect_repaste=False, lmb_on_menu=False, menu_item_kind="", last_dblclick=0.0):
     """
     WM_RENDERFORMAT: 'MENU' / 'BACKGROUND' = chỉ trả dummy HDROP.
     False = Paste thật (Ctrl+V / click Paste trên menu / nút Paste thanh lệnh).
@@ -1479,43 +1722,50 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     menu_visible = _context_menu_open()
     is_ctrl_v = (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000)
     is_shift_ins = (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000)
+    recent_ctrl_v = bool(last_ctrl_v and (t_now - last_ctrl_v) < 2.0)
+    # Double-click (mở file trong Explorer) không bao giờ là Paste. Ô lệnh Win11 nằm
+    # sát hàng file đầu tiên nên double-click dễ bị nhận nhầm là bấm nút Paste.
+    recent_dblclick = bool(last_dblclick and (t_now - last_dblclick) < 0.7)
 
-    # Chuột phải đang giữ / vừa mở menu: Explorer GetData để vẽ mục Paste — chưa phải Paste.
+    # Chuột phải đang giữ: Explorer GetData để vẽ mục Paste — chưa phải Paste.
     if rmb_down:
         log_debug("[check_is_menu_query] MENU: RMB dang giu")
         return "MENU"
+    if lmb_on_menu and menu_item_kind == "not_paste":
+        log_debug("[check_is_menu_query] MENU: click khong phai Paste (Show more / muc khac)")
+        return "MENU"
 
-    kb_paste = bool(
-        is_ctrl_v
-        or is_shift_ins
-        or (
-            last_ctrl_v >= meta_arrival_time
-            and last_ctrl_v > last_rbutton
-            and t_now - last_ctrl_v < 0.6
-        )
-    )
-    # Click Paste: LMB trên chính menu. Click ra ngoài để đóng menu không phải Paste.
-    clicked_paste_item = bool(
-        lmb_on_menu
-        and last_rbutton >= meta_arrival_time
-        and last_lbutton > last_rbutton + 0.08
-        and time_since_lbutton < 3.0
-        and (last_lbutton - last_rbutton) < 3.0
-    )
-    cmd_bar_paste = bool(
-        _is_windows_11() and lmb_down and _cursor_in_explorer_command_bar()
-        and time_since_rbutton > 0.2
-    )
-
-    if kb_paste and last_ctrl_v >= last_rbutton:
+    if is_ctrl_v or is_shift_ins or recent_ctrl_v:
         log_debug("[check_is_menu_query] Paste: phim Ctrl+V / Shift+Ins")
         return False
-    if clicked_paste_item:
-        log_debug("[check_is_menu_query] Paste: click item tren menu")
+
+    clicked_paste_item = bool(
+        lmb_on_menu
+        and menu_item_kind != "not_paste"
+        and time_since_lbutton < 3.0
+    )
+    rmb_then_lmb = bool(
+        (last_lbutton or 0) > (last_rbutton or 0) > 0
+        and time_since_lbutton < 3.0
+        and time_since_rbutton < 12.0
+        and menu_item_kind != "not_paste"
+    )
+    cmd_bar_paste = bool(
+        (not lmb_on_menu)
+        and _is_windows_11() and lmb_down and _cursor_in_explorer_command_bar()
+        and time_since_rbutton > 0.2
+        and not recent_dblclick
+    )
+
+    if clicked_paste_item or rmb_then_lmb:
+        log_debug("[check_is_menu_query] Paste: click muc Paste tren menu")
         return False
     if cmd_bar_paste:
         log_debug("[check_is_menu_query] Paste: Win11 command-bar")
         return False
+    if menu_visible:
+        log_debug("[check_is_menu_query] MENU: context menu dang mo (chua click Paste)")
+        return "MENU"
 
     try:
         import win32gui
@@ -1527,10 +1777,6 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
                 return "BACKGROUND"
     except Exception:
         pass
-
-    if menu_visible:
-        log_debug("[check_is_menu_query] MENU: context menu dang mo (chua click Paste)")
-        return "MENU"
 
     if _is_explorer_clipboard_client():
         log_debug("[check_is_menu_query] BACKGROUND: Explorer probe (khong phai Paste)")
@@ -1556,10 +1802,14 @@ class ClipboardSyncManager:
         self.last_lbutton_time = 0
         self.last_ctrl_v_time = 0
         self._lmb_hit_context_menu = False
+        self._lmb_menu_item_kind = ""
         self._paste_gesture_id = 0
         self._consumed_paste_gesture_id = 0
         self._paste_gesture_inc_at = 0.0
         self._lmb_held = False
+        self._prev_lbutton_time = 0.0
+        self._prev_lbutton_pos = (0, 0)
+        self.last_dblclick_time = 0.0
         if ENABLE_CLIPBOARD_SYNC:
             self.listener = ClipboardEventListener(self.on_clipboard_changed, self)
         else:
@@ -2981,6 +3231,8 @@ class ClipboardSyncManager:
             last_l, last_r, meta_time, last_ctrl_v,
             expect_repaste=time.time() < getattr(self, "_expect_repaste_until", 0),
             lmb_on_menu=bool(getattr(self, "_lmb_hit_context_menu", False)),
+            menu_item_kind=getattr(self, "_lmb_menu_item_kind", "") or "",
+            last_dblclick=getattr(self, "last_dblclick_time", 0.0),
         )
         if is_menu == "MENU":
             log_debug("[render_format] Phát hiện truy vấn menu. Cung cấp dummy HDROP và chờ user dán...")
@@ -4267,6 +4519,7 @@ def run_clipboard_agent_mode():
     _agent_last_rbutton_time = 0.0
     _agent_last_ctrl_v_time = 0.0
     _agent_lmb_hit_context_menu = False
+    _agent_lmb_menu_item_kind = ""
     _agent_meta_arrival_time = 0.0
     _agent_dummy_h_active = False
     _agent_cached_explorer_path = None
@@ -4296,6 +4549,9 @@ def run_clipboard_agent_mode():
     _agent_consumed_gesture_id = 0
     _agent_gesture_inc_at = 0.0
     _agent_lmb_held = False
+    _agent_prev_lbutton_time = 0.0
+    _agent_prev_lbutton_pos = (0, 0)
+    _agent_last_dblclick_time = 0.0
 
     def _note_paste_gesture():
         """Ctrl+V / click Paste — coalesced 80ms để hook+poll không đếm 2 lần."""
@@ -4305,6 +4561,26 @@ def run_clipboard_agent_mode():
             return
         _agent_gesture_inc_at = now
         _agent_paste_gesture_id += 1
+
+    def _register_lmb_down():
+        """Ghi nhận 1 cú nhấn chuột trái; phát hiện double-click (mở file, KHÔNG phải Paste).
+
+        Poll 50ms và low-level hook có thể cùng báo 1 cú nhấn nên gộp trong 60ms để
+        không nhầm 1 click thành double-click.
+        """
+        nonlocal _agent_prev_lbutton_time, _agent_prev_lbutton_pos, _agent_last_dblclick_time
+        nonlocal _agent_last_lbutton_time
+        now = time.time()
+        if now - _agent_prev_lbutton_time < 0.06:
+            _agent_last_lbutton_time = now
+            return
+        cx, cy = _cursor_xy()
+        px, py = _agent_prev_lbutton_pos
+        if (now - _agent_prev_lbutton_time) <= (_double_click_ms() / 1000.0) + 0.05 and abs(cx - px) <= 6 and abs(cy - py) <= 6:
+            _agent_last_dblclick_time = now
+        _agent_prev_lbutton_time = now
+        _agent_prev_lbutton_pos = (cx, cy)
+        _agent_last_lbutton_time = now
 
     def _paths_are_probe_or_xfer(files):
         dirs = []
@@ -4426,7 +4702,7 @@ def run_clipboard_agent_mode():
     def _agent_mouse_poll_loop():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
-        nonlocal _agent_lmb_hit_context_menu
+        nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -4434,12 +4710,15 @@ def run_clipboard_agent_mode():
                     now = time.time()
                     on_self = _cursor_over_current_process()
                     if not _agent_lmb_held:
-                        _agent_last_lbutton_time = now
+                        _register_lmb_down()
                         hit_menu = (not on_self) and _cursor_over_context_menu()
                         if hit_menu:
                             _agent_lmb_hit_context_menu = True
-                        if hit_menu and now - _agent_last_rbutton_time < 8.0:
-                            _note_paste_gesture()
+                            kind, name = _capture_menu_item_at_cursor()
+                            _agent_lmb_menu_item_kind = kind
+                            agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
+                            if kind != "not_paste":
+                                _note_paste_gesture()
                     else:
                         _agent_last_lbutton_time = now
                     _agent_lmb_held = True
@@ -4451,6 +4730,7 @@ def run_clipboard_agent_mode():
                 if user32.GetAsyncKeyState(0x02) & 0x8000:
                     _agent_last_rbutton_time = time.time()
                     _agent_lmb_hit_context_menu = False
+                    _agent_lmb_menu_item_kind = ""
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -4901,6 +5181,8 @@ def run_clipboard_agent_mode():
                 _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_last_ctrl_v_time,
                 expect_repaste=time.time() < _agent_expect_repaste_until,
                 lmb_on_menu=_agent_lmb_hit_context_menu,
+                menu_item_kind=_agent_lmb_menu_item_kind,
+                last_dblclick=_agent_last_dblclick_time,
             )
             if is_menu == "MENU":
                 agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Dummy HDROP, chờ user dán...")
@@ -4927,6 +5209,7 @@ def run_clipboard_agent_mode():
                 new_kb = _agent_last_ctrl_v_time > _agent_xfer_cancel_at + 0.15
                 new_menu = (
                     _agent_lmb_hit_context_menu
+                    and _agent_lmb_menu_item_kind == "paste"
                     and _agent_last_lbutton_time > _agent_xfer_cancel_at + 0.15
                     and _agent_last_rbutton_time > _agent_xfer_cancel_at
                     and _agent_last_lbutton_time > _agent_last_rbutton_time
@@ -5102,12 +5385,16 @@ def run_clipboard_agent_mode():
 
         def _stamp_lbutton():
             nonlocal _agent_last_lbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
-            _agent_last_lbutton_time = time.time()
+            nonlocal _agent_lmb_menu_item_kind
+            _register_lmb_down()
             if _cursor_over_current_process():
                 return
             if _cursor_over_context_menu():
                 _agent_lmb_hit_context_menu = True
-                if _agent_last_lbutton_time - _agent_last_rbutton_time < 8.0:
+                kind, name = _capture_menu_item_at_cursor()
+                _agent_lmb_menu_item_kind = kind
+                agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
+                if kind != "not_paste":
                     _note_paste_gesture()
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
@@ -5117,8 +5404,10 @@ def run_clipboard_agent_mode():
 
         def _stamp_rbutton():
             nonlocal _agent_last_rbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
+            nonlocal _agent_lmb_menu_item_kind
             _agent_last_rbutton_time = time.time()
             _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = ""
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(

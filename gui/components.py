@@ -266,16 +266,21 @@ class ClassicCopyDialog(tk.Toplevel):
         
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
 
-        w, h = 520, 420
+        # Chiều cao theo nội dung (DPI 125%/150% làm 520x420 cắt mất nút Hủy).
         self.update_idletasks()
-        ws = self.winfo_screenwidth()
-        hs = self.winfo_screenheight()
+        w = max(int(self.winfo_reqwidth() or 0), 520)
+        h = max(int(self.winfo_reqheight() or 0) + 8, 360)
+        ws = int(self.winfo_screenwidth() or w)
+        hs = int(self.winfo_screenheight() or h)
+        w = min(w, max(400, ws - 40))
+        h = min(h, max(320, hs - 80))
         x = max(0, (ws - w) // 2)
         y = max(0, (hs - h) // 2)
+        geo = "%dx%d+%d+%d" % (w, h, x, y)
         try:
-            self.tk.call("wm", "geometry", self._w, "520x420+%d+%d" % (x, y))
+            self.tk.call("wm", "geometry", self._w, geo)
         except Exception:
-            self.geometry("520x420+%d+%d" % (x, y))
+            self.geometry(geo)
         self.deiconify()
         self.lift()
         self.focus_force()
@@ -316,19 +321,21 @@ class ProgressDialog(tk.Toplevel):
             self.resizable(False, False)
         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
 
-        title_bg = "#F3F3F3"
-        self.title_bar = tk.Frame(self, bg=title_bg, height=28)
-        self.title_bar.pack(fill=tk.X, side=tk.TOP)
-        self.title_bar.pack_propagate(False)
-        self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
-        self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
-
-        # Cho phép kéo thả hộp thoại bằng chuột trên thanh tiêu đề
         self._drag_offset_x = 0
         self._drag_offset_y = 0
-        for widget in (self.title_bar, self.title_lbl):
-            widget.bind("<ButtonPress-1>", self._start_drag)
-            widget.bind("<B1-Motion>", self._do_drag)
+        if self._embed:
+            title_bg = "#F3F3F3"
+            self.title_bar = tk.Frame(self, bg=title_bg, height=28)
+            self.title_bar.pack(fill=tk.X, side=tk.TOP)
+            self.title_bar.pack_propagate(False)
+            self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
+            self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
+            for widget in (self.title_bar, self.title_lbl):
+                widget.bind("<ButtonPress-1>", self._start_drag)
+                widget.bind("<B1-Motion>", self._do_drag)
+        else:
+            self.title_bar = None
+            self.title_lbl = None
 
         self.attributes("-topmost", True)
         self.total_size = max(0, int(total_size or 0))
@@ -347,28 +354,37 @@ class ProgressDialog(tk.Toplevel):
         self.job_id = job_id
         
         top_frame = tk.Frame(self, bg="#FFFFFF")
-        top_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        top_frame.pack(fill=tk.X, padx=12, pady=(6, 2))
         
-        display_name = self._short_copy_label(self.filename)
+        display_name = self._short_copy_label(self.filename, max_len=32)
 
-        action_row = tk.Frame(top_frame, bg="#FFFFFF")
-        action_row.pack(fill=tk.X)
-        self.lbl_percent = tk.Label(action_row, text="0%", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="e")
-        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0), pady=(14, 0))
-        self.lbl_action = tk.Label(action_row, text=_('Sao chép tệp "{name}"').format(name=display_name), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
-        self.lbl_action.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=(0, 14))
+        self.lbl_action = tk.Label(
+            top_frame,
+            text=_('Sao chép tệp "{name}"').format(name=display_name),
+            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF",
+            anchor="w"
+        )
+        self.lbl_action.pack(fill=tk.X)
+
+        dest_row = tk.Frame(top_frame, bg="#FFFFFF")
+        dest_row.pack(fill=tk.X, pady=(2, 0))
+        self.lbl_percent = tk.Label(
+            dest_row, text="0%", font=(_DIALOG_FONT, 16, "bold"),
+            fg="#0066CC", bg="#FFFFFF", anchor="e"
+        )
+        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
 
         dest_text = self._format_dest_dir(dest_dir)
-        extra_h = 0
         if dest_text:
             self.lbl_dest = tk.Label(
-                top_frame,
+                dest_row,
                 text=_("Thư mục đích") + ": " + dest_text,
                 font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF",
-                anchor="w", justify="left", wraplength=360
+                anchor="w", justify="left", wraplength=300
             )
-            self.lbl_dest.pack(fill=tk.X, pady=(2, 0))
-            extra_h = 22
+            self.lbl_dest.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        else:
+            self.lbl_dest = None
             
         self.lbl_stats1 = tk.Label(
             top_frame,
@@ -377,12 +393,12 @@ class ProgressDialog(tk.Toplevel):
             ),
             font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
         )
-        self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
+        self.lbl_stats1.pack(fill=tk.X, pady=(2, 2))
         
         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
         self.prog1.pack(fill=tk.X)
         
-        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=45)
+        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=34)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
         bottom_frame.pack_propagate(False)
         
@@ -395,18 +411,16 @@ class ProgressDialog(tk.Toplevel):
                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
             )
-            btn_cancel.pack(side=tk.RIGHT, padx=15, pady=10)
+            btn_cancel.pack(side=tk.RIGHT, padx=12, pady=4)
             def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
             def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
             btn_cancel.bind("<Enter>", btn_enter)
             btn_cancel.bind("<Leave>", btn_leave)
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
-            dialog_h = 210 + extra_h
-        else:
-            dialog_h = 165 + extra_h
             
         self.update_idletasks()
         dialog_w = 400
+        dialog_h = max(int(self.winfo_reqheight() or 0), 1)
         
         if self._embed:
             try:
@@ -523,10 +537,14 @@ class ProgressDialog(tk.Toplevel):
             return None
 
     def _place_on_screen(self, dialog_w, dialog_h):
-        self.geometry(f"{dialog_w}x{dialog_h}")
+        geo = "%dx%d" % (int(dialog_w), int(dialog_h))
+        try:
+            self.tk.call("wm", "geometry", self._w, geo)
+        except Exception:
+            self.geometry(geo)
         self.update_idletasks()
-        my_w = max(self.winfo_width(), dialog_w)
-        my_h = max(self.winfo_height(), dialog_h)
+        my_w = int(dialog_w)
+        my_h = int(dialog_h)
         # Clipboard: căn giữa cửa sổ client (owner), không dùng client-area pygame/host view.
         bounds = None
         if not self._embed:
@@ -551,7 +569,7 @@ class ProgressDialog(tk.Toplevel):
         else:
             x = (self.winfo_screenwidth() - my_w) // 2
             y = (self.winfo_screenheight() - my_h) // 2
-        y += int(getattr(self, "stack_index", 0) or 0) * (my_h + 14)
+        y += int(getattr(self, "stack_index", 0) or 0) * (my_h + 8)
         self._move_to_screen(x, y)
 
     def trigger_cancel(self):
@@ -785,7 +803,11 @@ class ProgressDialog(tk.Toplevel):
                 try:
                     self.lbl_percent.config(text=f"{percent}%")
                     title = status_text if status_text else self._title_text
-                    self.title_lbl.config(text=f"{title}  —  {percent}%")
+                    full_title = f"{title}  —  {percent}%"
+                    if self.title_lbl is not None:
+                        self.title_lbl.config(text=full_title)
+                    else:
+                        self.title(full_title)
                 except Exception:
                     pass
 

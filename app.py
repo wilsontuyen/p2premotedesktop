@@ -1648,6 +1648,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if not cards and not headers: return
             
             def get_is_online(c):
+                known = getattr(self, "_status_online", {}) or {}
+                if c.comp_id in known:
+                    return bool(known[c.comp_id])
                 if c.comp_id in self.status_dots_widgets:
                     widgets = self.status_dots_widgets[c.comp_id]
                     if widgets and widgets[0].winfo_exists():
@@ -1779,9 +1782,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                         reorder_list()
                         self.save_group_states_only()
                         if just_expanded:
-                            scanned = getattr(self, "_status_scanned", set())
                             for cid, gg in getattr(self, "_saved_id_groups", {}).items():
-                                if gg == g and cid not in scanned:
+                                if gg == g:
                                     self.query_computer_status(cid, priority=True)
                         
                     header.bind("<Button-1>", toggle_group)
@@ -3289,7 +3291,14 @@ Comment=Remote Desktop P2P AutoStart
             self._enqueue_idle_saved_status()
             self.after(15000, _tick)
 
+        def _expanded_tick():
+            if getattr(self, "is_headless", False):
+                return
+            self._enqueue_expanded_saved_status()
+            self.after(2000, _expanded_tick)
+
         self.after(15000, _tick)
+        self.after(2000, _expanded_tick)
 
     def _enqueue_idle_saved_status(self):
         if getattr(self, "is_headless", False):
@@ -3305,6 +3314,29 @@ Comment=Remote Desktop P2P AutoStart
             grp = (comp.get("group") or "").strip()
             self._saved_id_groups[cid] = grp
             self.query_computer_status(cid, priority=False)
+
+    def _enqueue_expanded_saved_status(self):
+        """Nhóm đang mở trên danh sách: quét lại mỗi 2s (host reboot kịp hiện online)."""
+        if getattr(self, "is_headless", False) or not self._saved_list_is_open():
+            return
+        collapsed = getattr(self, "collapsed_groups", set())
+        groups = getattr(self, "_saved_id_groups", {}) or {}
+        if groups:
+            for cid, grp in list(groups.items()):
+                if grp not in collapsed:
+                    self.query_computer_status(cid, priority=True)
+            return
+        try:
+            computers = self.load_saved_computers()
+        except Exception:
+            return
+        for comp in computers:
+            cid = str(comp.get("id") or "").replace(" ", "")
+            if not cid:
+                continue
+            grp = (comp.get("group") or "").strip()
+            if grp not in collapsed:
+                self.query_computer_status(cid, priority=True)
 
     def query_computer_status(self, clean_id, priority=None):
         if clean_id == self.my_id_clean:
@@ -3460,23 +3492,21 @@ Comment=Remote Desktop P2P AutoStart
         clean_id = canonical_hwid(partner_id)
         getattr(self, "_status_scanned", set()).add(clean_id)
         known = getattr(self, "_status_online", None)
+        prev = known.get(clean_id) if known is not None else None
         if known is not None:
             known[clean_id] = bool(is_online)
+        status_changed = (prev is None) or (bool(prev) != bool(is_online))
         if clean_id in self.status_dots_widgets:
             widgets = self.status_dots_widgets[clean_id]
-            status_changed = False
+            new_color = "#00F5D4" if is_online else "#E05252"
             for dot_widget in widgets:
                 try:
-                    if dot_widget.winfo_exists():
-                        current_color = dot_widget.cget("fg")
-                        new_color = "#00F5D4" if is_online else "#E05252"
-                        if current_color != new_color:
-                            dot_widget.config(fg=new_color)
-                            status_changed = True
+                    if dot_widget.winfo_exists() and dot_widget.cget("fg") != new_color:
+                        dot_widget.config(fg=new_color)
                 except Exception:
                     pass
-            if status_changed and hasattr(self, '_reorder_saved_computers_func'):
-                self.after(50, self._reorder_saved_computers_func)
+        if status_changed and hasattr(self, '_reorder_saved_computers_func'):
+            self.after(50, self._reorder_saved_computers_func)
 
     def show_custom_info(self, title, message, parent=None, auto_close_sec=None):
         if getattr(self, 'is_headless', False):

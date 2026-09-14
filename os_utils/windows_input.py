@@ -271,6 +271,38 @@ def send_input_keyboard_event(key_name, pressed):
     except Exception as e:
         print(f"[SendInput] Keyboard injection failed: {e}")
 
+# Cached virtual-desktop metrics for mouse (multi-monitor)
+_cached_screen_w = 0
+_cached_screen_h = 0
+_cached_screen_x = 0
+_cached_screen_y = 0
+_cached_screen_time = 0
+
+def _mouse_abs_norm(x, y):
+    """Chuẩn hoá toạ độ màn hình ảo 0..65535 cho SendInput ABSOLUTE|VIRTUALDESK."""
+    global _cached_screen_w, _cached_screen_h, _cached_screen_x, _cached_screen_y, _cached_screen_time
+    now = time.monotonic() if hasattr(time, "monotonic") else time.time()
+    if now - _cached_screen_time > 2.0 or _cached_screen_w == 0:
+        user32 = ctypes.windll.user32
+        _cached_screen_x = user32.GetSystemMetrics(76)
+        _cached_screen_y = user32.GetSystemMetrics(77)
+        _cached_screen_w = user32.GetSystemMetrics(78)
+        _cached_screen_h = user32.GetSystemMetrics(79)
+        if _cached_screen_w <= 0 or _cached_screen_h <= 0:
+            _cached_screen_x = 0
+            _cached_screen_y = 0
+            _cached_screen_w = user32.GetSystemMetrics(0)
+            _cached_screen_h = user32.GetSystemMetrics(1)
+        _cached_screen_time = now
+    w, h = _cached_screen_w, _cached_screen_h
+    ox, oy = _cached_screen_x, _cached_screen_y
+    if w <= 1 or h <= 1:
+        return 0, 0
+    nx = int(((int(x) - ox) * 65535) / (w - 1))
+    ny = int(((int(y) - oy) * 65535) / (h - 1))
+    return max(0, min(65535, nx)), max(0, min(65535, ny))
+
+
 def send_input_mouse_click(button_name, pressed):
     try:
         flags = 0
@@ -285,12 +317,14 @@ def send_input_mouse_click(button_name, pressed):
             inp = INPUT()
             inp.type = INPUT_MOUSE
             inp.union.mi = MOUSEINPUT(0, 0, 0, flags, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            n = ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            return n
     except Exception as e:
         print(f"[SendInput] Mouse click injection failed: {e}")
+    return 0
 
 def send_input_mouse_click_at(x, y, button_name, pressed):
-    """Di chuyển tới (x,y) màn hình rồi click — UAC Win11 bỏ qua click nếu cursor không đứng trên nút."""
+    """Di chuyển rồi click — cùng cách Fix UAC dialog Win11 (e57ebbc)."""
     try:
         send_input_mouse_move(int(x), int(y))
         try:
@@ -312,44 +346,17 @@ def send_input_mouse_scroll(dx, dy):
     except Exception as e:
         print(f"[SendInput] Mouse scroll injection failed: {e}")
 
-# Cached virtual-desktop metrics for mouse (multi-monitor)
-_cached_screen_w = 0
-_cached_screen_h = 0
-_cached_screen_x = 0
-_cached_screen_y = 0
-_cached_screen_time = 0
-
 def send_input_mouse_move(x, y):
-    global _cached_screen_w, _cached_screen_h, _cached_screen_x, _cached_screen_y, _cached_screen_time
     try:
-        now = time.monotonic() if hasattr(time, 'monotonic') else time.time()
-        if now - _cached_screen_time > 2.0 or _cached_screen_w == 0:
-            user32 = ctypes.windll.user32
-            _cached_screen_x = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
-            _cached_screen_y = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
-            _cached_screen_w = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
-            _cached_screen_h = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
-            if _cached_screen_w <= 0 or _cached_screen_h <= 0:
-                _cached_screen_x = 0
-                _cached_screen_y = 0
-                _cached_screen_w = user32.GetSystemMetrics(0)
-                _cached_screen_h = user32.GetSystemMetrics(1)
-            _cached_screen_time = now
-        w, h = _cached_screen_w, _cached_screen_h
-        ox, oy = _cached_screen_x, _cached_screen_y
-        if w > 1 and h > 1:
-            normalized_x = int(((x - ox) * 65535) / (w - 1))
-            normalized_y = int(((y - oy) * 65535) / (h - 1))
-            normalized_x = max(0, min(65535, normalized_x))
-            normalized_y = max(0, min(65535, normalized_y))
-            inp = INPUT()
-            inp.type = INPUT_MOUSE
-            inp.union.mi = MOUSEINPUT(
-                normalized_x, normalized_y, 0,
-                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                0, None
-            )
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        nx, ny = _mouse_abs_norm(x, y)
+        inp = INPUT()
+        inp.type = INPUT_MOUSE
+        inp.union.mi = MOUSEINPUT(
+            nx, ny, 0,
+            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+            0, None
+        )
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Mouse move injection failed: {e}")
 
