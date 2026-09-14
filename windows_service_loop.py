@@ -495,7 +495,7 @@ def spawn_clipboard_agent(session_id):
             
             environment = win32profile.CreateEnvironmentBlock(h_token_dup, False)
             
-            creation_flags = win32process.CREATE_UNICODE_ENVIRONMENT | win32process.CREATE_NEW_CONSOLE
+            creation_flags = win32process.CREATE_UNICODE_ENVIRONMENT | win32process.CREATE_NO_WINDOW
 
             dwProcessId = create_process_robust(
                 h_token_dup,

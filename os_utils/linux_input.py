@@ -617,6 +617,11 @@ def send_input_mouse_click(button_name, pressed):
         print(f"[LinuxInput] Mouse click injection failed: {e}")
 
 
+def send_input_mouse_click_at(x, y, button_name, pressed):
+    send_input_mouse_move(x, y)
+    send_input_mouse_click(button_name, pressed)
+
+
 def send_input_mouse_scroll(dx, dy):
     """Inject a mouse scroll event."""
     try:

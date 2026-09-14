@@ -64,8 +64,9 @@ Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAg
 ; Wait 5 seconds for service to initialize and connect to signaling server
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 
-; Thêm option khởi chạy ứng dụng sau khi cài đặt
-Filename: "{app}\RemoteDesktopP2P.exe"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+; uiAccess=true: Inno (elevated) CreateProcess → 740, ShellExecuteEx → 8235.
+; Mở bằng cmd start dưới user gốc (cùng cơ chế shortcut Explorer).
+Filename: "{cmd}"; Parameters: "/c start """" ""{app}\RemoteDesktopP2P.exe"""; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser runhidden
 
 
 [UninstallRun]

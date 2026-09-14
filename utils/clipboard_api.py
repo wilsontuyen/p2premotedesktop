@@ -1,9 +1,14 @@
 import ctypes
 from ctypes import wintypes
+import threading
 import time
 import os
 import sys
 from utils.logger import log_debug
+
+_clip_read_lock = threading.Lock()
+_shellidlist_fmt = 0
+_filenamew_fmt = 0
 
 is_agent_process = "--clipboard-agent" in sys.argv or (sys.argv and "clipboard_agent" in sys.argv[0])
 
@@ -188,6 +193,32 @@ def is_own_clipboard_write():
     return seq != 0 and seq == _last_own_clip_seq
 
 
+def should_preserve_user_clipboard(our_hwnd=None):
+    """True khi clipboard đang chứa dữ liệu người dùng (file / ảnh / text) — không EmptyClipboard."""
+    if is_own_clipboard_write() or _clipboard_owned_by_sync_window():
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        owner = user32.GetClipboardOwner()
+        if our_hwnd and owner and int(owner) == int(our_hwnd):
+            return False
+        CF_BITMAP, CF_DIB, CF_DIBV5 = 2, 8, 17
+        if any(
+            user32.IsClipboardFormatAvailable(fmt)
+            for fmt in (CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP, 13, 1)
+        ):
+            return True
+        png = user32.RegisterClipboardFormatW("PNG")
+        if png and user32.IsClipboardFormatAvailable(png):
+            return True
+        # Cửa sổ khác giữ clipboard dù format lạ (OLE, custom).
+        if owner:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _clipboard_owned_by_sync_window():
     """True nếu clipboard đang do cửa sổ delayed-render của app sở hữu.
     Không được GetClipboardData trong trường hợp này — sẽ kích WM_RENDERFORMAT
@@ -204,44 +235,214 @@ def _clipboard_owned_by_sync_window():
         return False
 
 
-def get_clipboard_files(owner_hwnd=None):
-    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return []
-    if _clipboard_owned_by_sync_window():
-        return []
-    paths = []
-    
-    # 1. Mở Clipboard trước
-    hwnd_arg = owner_hwnd if owner_hwnd is not None else None
-    opened = False
-    for _ in range(30):
-        if fn_OpenClipboard(hwnd_arg):
-            opened = True
-            break
-        time.sleep(0.05)
-        
-    if not opened:
-        print("[Clipboard] Lỗi: Không thể mở clipboard (đang bị khóa).")
-        return []
+def _file_clipboard_formats():
+    global _shellidlist_fmt, _filenamew_fmt
+    if not _shellidlist_fmt:
+        try:
+            u32 = ctypes.windll.user32
+            _shellidlist_fmt = int(u32.RegisterClipboardFormatW("Shell IDList Array") or 0)
+            _filenamew_fmt = int(u32.RegisterClipboardFormatW("FileNameW") or 0)
+        except Exception:
+            pass
+    return _shellidlist_fmt, _filenamew_fmt
 
-    # 2. Dùng try...finally để đảm bảo chắc chắn CloseClipboard được gọi
+
+def clipboard_has_file_formats():
+    """True nếu clipboard đang có file — không OpenClipboard / GetData."""
+    if not fn_IsClipboardFormatAvailable:
+        return False
     try:
         if fn_IsClipboardFormatAvailable(CF_HDROP):
-            hGlobal = fn_GetClipboardData(CF_HDROP)
-            if hGlobal:
-                count = fn_DragQueryFileW(hGlobal, 0xFFFFFFFF, None, 0)
-                for i in range(count):
-                    length = fn_DragQueryFileW(hGlobal, i, None, 0)
-                    if length > 0:
-                        buffer = ctypes.create_unicode_buffer(length + 1)
-                        fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
-                        paths.append(buffer.value)
-    except Exception as e:
-        print(f"[Clipboard] Lỗi xử lý dữ liệu: {e}")
-    finally:
-        # CHỖ NÀY QUAN TRỌNG: Phải đóng dù có lỗi hay không
-        fn_CloseClipboard()
+            return True
+        sidl, fnw = _file_clipboard_formats()
+        if sidl and fn_IsClipboardFormatAvailable(sidl):
+            return True
+        if fnw and fn_IsClipboardFormatAvailable(fnw):
+            return True
+    except Exception:
+        pass
+    return False
 
-    return [os.path.abspath(p) for p in paths if os.path.exists(p)]
+
+def _clipboard_idle_for_read(timeout_s=0.18):
+    """Không OpenClipboard khi Explorer đang giữ clipboard (chuột xoay)."""
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetOpenClipboardWindow.restype = wintypes.HWND
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if not user32.GetOpenClipboardWindow():
+                return True
+            time.sleep(0.02)
+        return not user32.GetOpenClipboardWindow()
+    except Exception:
+        return True
+
+
+def _as_addr(p):
+    if not p:
+        return 0
+    return int(p) if not isinstance(p, int) else p
+
+
+def _paths_from_cida(hglobal):
+    """Parse CFSTR_SHELLIDLIST — không kích delayed CF_HDROP của Explorer."""
+    if not hglobal or not fn_GlobalLock:
+        return []
+    p = fn_GlobalLock(hglobal)
+    if not p:
+        return []
+    paths = []
+    combined = []
+    try:
+        base = _as_addr(p)
+        k32 = ctypes.windll.kernel32
+        k32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalSize.restype = ctypes.c_size_t
+        blob_size = int(k32.GlobalSize(hglobal) or 0)
+        if blob_size < 8:
+            return []
+        cidl = ctypes.c_uint.from_address(base).value
+        if cidl < 1 or cidl > 4096:
+            return []
+        n_off = cidl + 1
+        if 4 + 4 * n_off > blob_size:
+            return []
+        offsets = (ctypes.c_uint * n_off).from_address(base + 4)
+        sh = ctypes.windll.shell32
+        sh.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        sh.SHGetPathFromIDListW.restype = wintypes.BOOL
+        sh.ILCombine.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        sh.ILCombine.restype = ctypes.c_void_p
+        sh.ILFree.argtypes = [ctypes.c_void_p]
+        buf = ctypes.create_unicode_buffer(32768)
+
+        def _path_of(addr):
+            if not addr:
+                return None
+            if sh.SHGetPathFromIDListW(ctypes.c_void_p(addr), buf) and buf.value:
+                return buf.value
+            return None
+
+        folder = base + int(offsets[0])
+        if folder < base or folder >= base + blob_size:
+            return []
+        for i in range(1, cidl + 1):
+            rel = base + int(offsets[i])
+            if rel < base or rel >= base + blob_size:
+                continue
+            one = _path_of(rel)
+            if not one:
+                abs_pidl = sh.ILCombine(ctypes.c_void_p(folder), ctypes.c_void_p(rel))
+                if abs_pidl:
+                    combined.append(abs_pidl)
+                    one = _path_of(_as_addr(abs_pidl))
+            if one:
+                paths.append(one)
+        return paths
+    except Exception as e:
+        print(f"[Clipboard] Lỗi parse Shell IDList: {e}")
+        return paths
+    finally:
+        for pidl in combined:
+            try:
+                ctypes.windll.shell32.ILFree(ctypes.c_void_p(pidl))
+            except Exception:
+                pass
+        fn_GlobalUnlock(hglobal)
+
+
+def _paths_from_filenamew(hglobal):
+    if not hglobal or not fn_GlobalLock:
+        return []
+    p = fn_GlobalLock(hglobal)
+    if not p:
+        return []
+    try:
+        path = ctypes.wstring_at(p)
+        return [path] if path else []
+    except Exception:
+        return []
+    finally:
+        fn_GlobalUnlock(hglobal)
+
+
+def _usable_file_paths(paths):
+    out = []
+    for p in paths or []:
+        if not p:
+            continue
+        try:
+            ap = os.path.abspath(p)
+        except Exception:
+            continue
+        try:
+            if os.path.exists(ap):
+                out.append(ap)
+        except Exception:
+            continue
+    return out
+
+
+def get_clipboard_files(owner_hwnd=None, retries=1, allow_hdrop=True):
+    """Đọc danh sách file.
+
+    Client: Shell IDList (không GetClipboardData CF_HDROP — chuột Explorer xoay).
+    Host agent: HDROP (CIDA hay parse sai → không gửi được copy host→client).
+    """
+    if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard:
+        return []
+    if _clipboard_owned_by_sync_window():
+        return []
+
+    with _clip_read_lock:
+        _clipboard_idle_for_read()
+        opened = False
+        n = max(1, int(retries or 1))
+        for _ in range(n):
+            if fn_OpenClipboard(None):
+                opened = True
+                break
+            time.sleep(0.015)
+        if not opened:
+            return []
+        paths = []
+        try:
+            try:
+                ctypes.windll.ole32.CoInitialize(None)
+            except Exception:
+                pass
+            sidl, fnw = _file_clipboard_formats()
+            if sidl and fn_IsClipboardFormatAvailable(sidl):
+                h = fn_GetClipboardData(sidl)
+                if h:
+                    paths = _usable_file_paths(_paths_from_cida(h))
+            # FileNameW chỉ có 1 file — không đọc trước HDROP (mất copy nhiều file).
+            need_hdrop = allow_hdrop or len(paths) <= 1
+            if need_hdrop and fn_IsClipboardFormatAvailable(CF_HDROP):
+                hGlobal = fn_GetClipboardData(CF_HDROP)
+                if hGlobal:
+                    raw = []
+                    count = fn_DragQueryFileW(hGlobal, 0xFFFFFFFF, None, 0)
+                    for i in range(count):
+                        length = fn_DragQueryFileW(hGlobal, i, None, 0)
+                        if length > 0:
+                            buffer = ctypes.create_unicode_buffer(length + 1)
+                            fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
+                            raw.append(buffer.value)
+                    hdrop_paths = _usable_file_paths(raw)
+                    if len(hdrop_paths) > len(paths):
+                        paths = hdrop_paths
+            if not paths and fnw and fn_IsClipboardFormatAvailable(fnw):
+                h = fn_GetClipboardData(fnw)
+                if h:
+                    paths = _usable_file_paths(_paths_from_filenamew(h))
+        except Exception as e:
+            print(f"[Clipboard] Lỗi xử lý dữ liệu: {e}")
+        finally:
+            fn_CloseClipboard()
+
+    return paths
 
 def create_hdrop_data(file_paths):
     if not ENABLE_CLIPBOARD_SYNC or not fn_GlobalAlloc: return None
@@ -306,18 +507,18 @@ def set_clipboard_files(file_paths, owner_hwnd=None):
 
 def get_clipboard_text(owner_hwnd=None):
     if not ENABLE_CLIPBOARD_SYNC or not fn_OpenClipboard: return None
+    if clipboard_has_file_formats():
+        return None
     text = None
     try:
         if _clipboard_owned_by_sync_window():
             return None
-                
-        hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        for _ in range(30):
-            if fn_OpenClipboard(hwnd_arg):
+        for _ in range(2):
+            if fn_OpenClipboard(None):
                 opened = True
                 break
-            time.sleep(0.05)
+            time.sleep(0.015)
             
         if opened:
             try:

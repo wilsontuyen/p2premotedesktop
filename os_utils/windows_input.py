@@ -289,6 +289,19 @@ def send_input_mouse_click(button_name, pressed):
     except Exception as e:
         print(f"[SendInput] Mouse click injection failed: {e}")
 
+def send_input_mouse_click_at(x, y, button_name, pressed):
+    """Di chuyển tới (x,y) màn hình rồi click — UAC Win11 bỏ qua click nếu cursor không đứng trên nút."""
+    try:
+        send_input_mouse_move(int(x), int(y))
+        try:
+            ctypes.windll.user32.SetCursorPos(int(x), int(y))
+        except Exception:
+            pass
+        send_input_mouse_click(button_name, pressed)
+    except Exception as e:
+        print(f"[SendInput] Mouse click-at injection failed: {e}")
+        send_input_mouse_click(button_name, pressed)
+
 def send_input_mouse_scroll(dx, dy):
     try:
         if dy != 0:

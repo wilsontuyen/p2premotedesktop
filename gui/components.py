@@ -12,7 +12,7 @@ try:
 except ImportError:
     pass
 
-from gui.window_icon import install_toplevel_app_icon
+from gui.window_icon import install_toplevel_app_icon, set_dialog_app_icon, hide_tk_from_taskbar
 install_toplevel_app_icon()
 
 if getattr(sys, 'frozen', False):
@@ -65,7 +65,6 @@ class ClassicCopyDialog(tk.Toplevel):
     def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
         super().__init__(parent)
         self.withdraw()
-        self.title("Copy File")
         self.resizable(False, False)
         self.configure(bg="#FFFFFF")
         # Không dùng Toplevel.geometry (bị DPI scale) — layout 520x420 bị vỡ, không bấm được.
@@ -83,16 +82,18 @@ class ClassicCopyDialog(tk.Toplevel):
         self.has_multiple = has_multiple
         
         self.attributes("-topmost", True)
+        self.title(_("Sao chép tệp"))
         
         lbl_title = tk.Label(
-            self, text="There is already a file with the same name in this location.",
-            font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
+            self, text=_("Đã có tệp cùng tên trong thư mục này."),
+            font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT,
+            wraplength=460
         )
         lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
         
         lbl_sub = tk.Label(
-            self, text="Click the file you want to keep",
-            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
+            self, text=_("Bấm vào tệp bạn muốn giữ lại"),
+            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=460
         )
         lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
         
@@ -107,14 +108,17 @@ class ClassicCopyDialog(tk.Toplevel):
         def format_time(timestamp):
             try:
                 import datetime
+                from core.i18n import _current_lang
                 dt = datetime.datetime.fromtimestamp(timestamp)
-                return dt.strftime("%m/%d/%Y %I:%M %p")
+                if _current_lang == "en":
+                    return dt.strftime("%m/%d/%Y %I:%M %p")
+                return dt.strftime("%d/%m/%Y %H:%M")
             except:
-                return "Unknown"
+                return _("Không xác định")
                 
         def format_location_info(file_path):
             if not file_path:
-                return "Unknown location"
+                return _("Vị trí không xác định")
             parent_dir = os.path.dirname(file_path)
             parent_folder_name = os.path.basename(parent_dir)
             if not parent_folder_name:
@@ -175,10 +179,10 @@ class ClassicCopyDialog(tk.Toplevel):
         right_content1 = tk.Frame(link1, bg="#FFFFFF")
         right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title1 = tk.Label(right_content1, text=_("Sao chép và thay thế"), font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title1.pack(fill=tk.X)
         
-        lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc1 = tk.Label(right_content1, text=_("Thay thế tệp trong thư mục đích bằng tệp bạn đang sao chép:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=430, justify=tk.LEFT)
         lbl_desc1.pack(fill=tk.X, pady=(0, 5))
         
         info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
@@ -193,8 +197,8 @@ class ClassicCopyDialog(tk.Toplevel):
         
         tk.Label(info_text1, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=_("Kích thước: {size}").format(size=format_size(source_info.get("size", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=_("Ngày sửa đổi: {date}").format(date=format_time(source_info.get("mtime", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         
         setup_command_link(link1, "replace")
         
@@ -208,10 +212,10 @@ class ClassicCopyDialog(tk.Toplevel):
         right_content2 = tk.Frame(link2, bg="#FFFFFF")
         right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        lbl_title2 = tk.Label(right_content2, text="Don't copy", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+        lbl_title2 = tk.Label(right_content2, text=_("Không sao chép"), font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title2.pack(fill=tk.X)
         
-        lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        lbl_desc2 = tk.Label(right_content2, text=_("Không thay đổi tệp nào. Giữ nguyên tệp trong thư mục đích:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=430, justify=tk.LEFT)
         lbl_desc2.pack(fill=tk.X, pady=(0, 5))
         
         info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
@@ -226,8 +230,8 @@ class ClassicCopyDialog(tk.Toplevel):
         
         tk.Label(info_text2, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=_("Kích thước: {size}").format(size=format_size(dest_info.get("size", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text2, text=_("Ngày sửa đổi: {date}").format(date=format_time(dest_info.get("mtime", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         
         setup_command_link(link2, "skip")
         
@@ -241,13 +245,13 @@ class ClassicCopyDialog(tk.Toplevel):
         self.var_all = tk.BooleanVar()
         if has_multiple:
             chk = tk.Checkbutton(
-                bottom_bar, text="Do this for all conflicts", font=(_DIALOG_FONT, 9),
+                bottom_bar, text=_("Áp dụng cho mọi xung đột"), font=(_DIALOG_FONT, 9),
                 variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
             )
             chk.pack(side=tk.LEFT, padx=24, pady=10)
             
         btn_cancel = tk.Button(
-            bottom_bar, text="Cancel", font=(_DIALOG_FONT, 9), width=10,
+            bottom_bar, text=_("Hủy"), font=(_DIALOG_FONT, 9), width=10,
             bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
             command=self.on_cancel
         )
@@ -275,13 +279,18 @@ class ClassicCopyDialog(tk.Toplevel):
         self.deiconify()
         self.lift()
         self.focus_force()
+        try:
+            from gui.window_icon import set_dialog_app_icon
+            set_dialog_app_icon(self)
+        except Exception:
+            pass
         
     def on_cancel(self):
         self.choice = "cancel"
         self.destroy()
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False):
+    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False, stack_index=0, job_id=None):
         super().__init__(parent)
         self.parent_window = parent
         self.host_hwnd = host_hwnd
@@ -289,9 +298,22 @@ class ProgressDialog(tk.Toplevel):
         # embed/SetParent chỉ dùng File Manager (cùng toolkit). Clipboard không kẹp pygame.
         self.owner_hwnd = self._toplevel_hwnd(owner_hwnd)
         self._embed = bool(embed and host_hwnd and sys.platform == "win32")
+        parent_mapped = False
+        try:
+            parent_mapped = bool(parent and parent.winfo_exists() and parent.winfo_ismapped() and parent.state() != "withdrawn")
+        except Exception:
+            parent_mapped = False
+        self._helper_parent = not parent_mapped
         self.withdraw()
-        self.attributes("-alpha", 0.0)
-        self.overrideredirect(True)
+        if self._embed:
+            self.attributes("-alpha", 0.0)
+            self.overrideredirect(True)
+        else:
+            try:
+                self.title(title_text)
+            except Exception:
+                pass
+            self.resizable(False, False)
         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
 
         title_bg = "#F3F3F3"
@@ -309,7 +331,6 @@ class ProgressDialog(tk.Toplevel):
             widget.bind("<B1-Motion>", self._do_drag)
 
         self.attributes("-topmost", True)
-        self.lift()
         self.total_size = max(0, int(total_size or 0))
         self.filename = str(filename) if filename is not None else "Unknown"
         self._title_text = title_text
@@ -322,20 +343,20 @@ class ProgressDialog(tk.Toplevel):
         self.start_time = time.time()
         self.history = [(self.start_time, 0)]
         self.on_cancel = on_cancel
+        self.stack_index = max(0, int(stack_index or 0))
+        self.job_id = job_id
         
         top_frame = tk.Frame(self, bg="#FFFFFF")
         top_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
-        display_name = self.filename
-        if len(display_name) > 40:
-            display_name = display_name[:20] + "..." + display_name[-15:]
+        display_name = self._short_copy_label(self.filename)
 
         action_row = tk.Frame(top_frame, bg="#FFFFFF")
         action_row.pack(fill=tk.X)
-        self.lbl_action = tk.Label(action_row, text=_('Sao chép tệp "{name}"').format(name=display_name), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
-        self.lbl_action.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.lbl_percent = tk.Label(action_row, text="0%", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="e")
-        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
+        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0), pady=(14, 0))
+        self.lbl_action = tk.Label(action_row, text=_('Sao chép tệp "{name}"').format(name=display_name), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+        self.lbl_action.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=(0, 14))
 
         dest_text = self._format_dest_dir(dest_dir)
         extra_h = 0
@@ -412,11 +433,52 @@ class ProgressDialog(tk.Toplevel):
             self._place_on_screen(dialog_w, dialog_h)
 
         self.deiconify()
+        try:
+            if parent_mapped:
+                self.transient(parent)
+        except Exception:
+            pass
+        try:
+            self.state("normal")
+        except Exception:
+            pass
+        self.attributes("-topmost", True)
         self.lift()
         self.focus_force()
-        self.attributes("-alpha", 1.0)
+        try:
+            self.attributes("-alpha", 1.0)
+        except Exception:
+            pass
+        try:
+            if self._embed:
+                hide_tk_from_taskbar(self)
+            set_dialog_app_icon(self)
+        except Exception:
+            pass
         self.update()
         self._apply_owner()
+        try:
+            set_dialog_app_icon(self)
+        except Exception:
+            pass
+        try:
+            self.after(0, self._force_show)
+            self.after(80, self._force_show)
+        except Exception:
+            pass
+
+    def _force_show(self):
+        """Parent Tk withdrawn có thể nuốt deiconify lần đầu — hiện lại dialog tiến trình."""
+        try:
+            if not self.winfo_exists():
+                return
+            self.deiconify()
+            self.attributes("-alpha", 1.0)
+            self.attributes("-topmost", True)
+            self.lift()
+            set_dialog_app_icon(self)
+        except Exception:
+            pass
 
     def _toplevel_hwnd(self, hwnd):
         if not hwnd or sys.platform != "win32":
@@ -479,11 +541,17 @@ class ProgressDialog(tk.Toplevel):
                           p.winfo_rooty() + p.winfo_height())
         if bounds:
             left, top, right, bottom = bounds
+            # Parent helper ẩn ngoài màn hình → đừng đặt dialog theo nó.
+            if right <= 0 or bottom <= 0 or left < -500 or top < -500:
+                bounds = None
+        if bounds:
+            left, top, right, bottom = bounds
             x = left + max(0, (right - left - my_w) // 2)
             y = top + max(0, (bottom - top - my_h) // 2)
         else:
             x = (self.winfo_screenwidth() - my_w) // 2
             y = (self.winfo_screenheight() - my_h) // 2
+        y += int(getattr(self, "stack_index", 0) or 0) * (my_h + 14)
         self._move_to_screen(x, y)
 
     def trigger_cancel(self):
@@ -604,6 +672,25 @@ class ProgressDialog(tk.Toplevel):
         self._move_to_screen(x, y)
 
     @staticmethod
+    def _short_copy_label(name, max_len=42):
+        """Rút gọn tên file, giữ đuôi — không cắt đầu+đuôi (trông như dính 2 tên)."""
+        raw = str(name or "Unknown").replace("\\", "/")
+        extra = ""
+        marker = " và "
+        if marker in raw:
+            idx = raw.find(marker)
+            extra = raw[idx:]
+            raw = raw[:idx]
+        base = os.path.basename(raw) or raw
+        if len(base) + len(extra) <= max_len:
+            return base + extra
+        root, ext = os.path.splitext(base)
+        room = max_len - len(extra) - len(ext) - 3
+        if room < 6:
+            return (base + extra)[: max_len - 3] + "..."
+        return root[:room] + "..." + ext + extra
+
+    @staticmethod
     def _guess_copy_total(dest_dir, file_total):
         """Paste sang ổ khác thư mục tạm thì còn một lượt copy cùng tổng n file."""
         if not dest_dir or file_total <= 0:
@@ -618,25 +705,30 @@ class ProgressDialog(tk.Toplevel):
         return 0
 
     def _work_total(self):
-        return max(1, int(self.total_size) + int(self._copy_total))
+        """Mẫu số MB: dung lượng file thật — không cộng lượt copy nội bộ, không reset về 0."""
+        return max(1, int(self.total_size) or 1)
 
     def _work_done(self):
-        return min(self._work_total(), int(self._received) + int(self._copied))
+        recv = min(self._work_total(), max(0, int(self._received or 0)))
+        if self._phase in ("finalize", "done"):
+            return self._work_total()
+        return recv
 
     def begin_finalize(self, total_bytes=0):
         extra = max(0, int(total_bytes or 0))
         if extra and extra > self._copy_total:
             self._copy_total = extra
         self._phase = "finalize"
-        self._copied = 0
-        self._render_progress(status=_("Đang chuyển vào thư mục đích..."), force=True)
+        self._received = max(int(self._received or 0), int(self.total_size or 0))
+        self._title_text = _("Đang chuyển vào thư mục đích...")
+        self._render_progress(status=self._title_text, force=True)
 
     def add_finalize_bytes(self, n):
         try:
             self._copied += max(0, int(n or 0))
         except Exception:
             return
-        self._render_progress()
+        self._render_progress(status=self._title_text)
 
     def mark_complete(self):
         self._done = True
@@ -646,18 +738,38 @@ class ProgressDialog(tk.Toplevel):
         self._render_progress(force=True)
 
     def update_progress(self, sent_bytes, status=None):
+        if self._phase in ("finalize", "done"):
+            try:
+                self._received = max(int(self._received or 0), int(sent_bytes or 0))
+            except Exception:
+                pass
+            return
         try:
             self._received = max(0, int(sent_bytes or 0))
         except Exception:
             return
         self._render_progress(status=status)
 
+    def _bar_percent(self, done, work_total):
+        if self._done:
+            return 100
+        if work_total <= 0:
+            return 0
+        dl = int(done * 100 / work_total)
+        if self._phase != "finalize" or int(self._copy_total or 0) <= 0:
+            return max(0, min(99, dl))
+        if int(self._copied or 0) >= int(self._copy_total or 0):
+            return 100
+        return 99
+
     def _render_progress(self, status=None, force=False):
         now = time.time()
         if not force and (now - self._last_ui) < 0.05:
             return
         self._last_ui = now
-        status_text = status
+        if status:
+            self._title_text = status
+        status_text = self._title_text
 
         def _do_update():
             try:
@@ -667,8 +779,7 @@ class ProgressDialog(tk.Toplevel):
                     percent = 100
                     done = work_total
                 else:
-                    percent = int(done * 100 / work_total) if work_total else 0
-                    percent = max(0, min(99, percent))
+                    percent = self._bar_percent(done, work_total)
 
                 self.prog1["value"] = percent
                 try:

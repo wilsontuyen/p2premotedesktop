@@ -755,6 +755,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._saved_computers_mtime = None
         self._saved_list_reorder_job = None
         self._status_query_worker_started = False
+        self._status_scanned = set()
+        self._status_online = {}
+        self._saved_id_groups = {}
         self.tray_icon = None
         self.last_signaling_response = time.time()
         self.received_first_pong = False
@@ -785,6 +788,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if not self.is_headless:
                 self.deiconify()
                 self.after(250, self.maybe_show_disclaimer)
+                self.after(3000, self._start_saved_status_bg)
                 
         except Exception as e:
             import traceback
@@ -1714,6 +1718,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if query:
                 computers = [c for c in computers if query in c["name"].lower() or query in c["id"].replace(" ", "")]
 
+            if force:
+                self._status_scanned = set()
+                self._status_online = {}
+
             import json
             current_hash = json.dumps(computers, sort_keys=True)
             if not force and getattr(dialog, '_last_rendered_hash', None) == current_hash:
@@ -1724,7 +1732,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             current_online = {}
             for cid, widgets in self.status_dots_widgets.items():
                 if widgets and widgets[0].winfo_exists():
-                    current_online[cid] = (widgets[0].cget("fg") == "#00F5D4")
+                    try:
+                        fg = widgets[0].cget("fg")
+                    except Exception:
+                        continue
+                    if fg != "#8A8A9A":
+                        current_online[cid] = (fg == "#00F5D4")
 
             dialog._building_list = True
             ids_to_query = []
@@ -1732,6 +1745,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 for widget in scrollable_frame.winfo_children():
                     widget.destroy()
                 self.status_dots_widgets.clear()
+                self._saved_id_groups = {}
 
                 if not computers:
                     txt = _("Không tìm thấy máy tính phù hợp.") if query else _("Chưa có máy tính nào được lưu.\nBấm nút thêm bên dưới để tạo mới.")
@@ -1755,13 +1769,20 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     def toggle_group(event, g=grp):
                         if g in self.collapsed_groups:
                             self.collapsed_groups.remove(g)
+                            just_expanded = True
                         else:
                             self.collapsed_groups.add(g)
+                            just_expanded = False
                         new_icon = "▶" if g in self.collapsed_groups else "▼"
                         g_display = g if g else _("Chưa phân nhóm")
                         event.widget.config(text=f"{new_icon} {g_display.upper()}")
                         reorder_list()
                         self.save_group_states_only()
+                        if just_expanded:
+                            scanned = getattr(self, "_status_scanned", set())
+                            for cid, gg in getattr(self, "_saved_id_groups", {}).items():
+                                if gg == g and cid not in scanned:
+                                    self.query_computer_status(cid, priority=True)
                         
                     header.bind("<Button-1>", toggle_group)
                     header.bind("<ButtonRelease-1>", on_drop)
@@ -1790,8 +1811,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
                     clean_id = card.comp_id
-                    is_online = current_online.get(clean_id, False)
-                    dot_color = "#00F5D4" if is_online else "#8A8A9A"
+                    known = getattr(self, "_status_online", {})
+                    if clean_id in current_online:
+                        is_online = current_online[clean_id]
+                        self._status_scanned.add(clean_id)
+                        dot_color = "#00F5D4" if is_online else "#E05252"
+                    elif clean_id in known:
+                        is_online = bool(known[clean_id])
+                        self._status_scanned.add(clean_id)
+                        dot_color = "#00F5D4" if is_online else "#E05252"
+                    else:
+                        is_online = False
+                        dot_color = "#8A8A9A"
                     dot_lbl = tk.Label(info_frame, text="●", font=(APP_FONT_NAME, 13, "bold"), fg=dot_color, bg=self.card_color)
                     dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
 
@@ -1828,13 +1859,29 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     if clean_id not in self.status_dots_widgets:
                         self.status_dots_widgets[clean_id] = []
                     self.status_dots_widgets[clean_id].append(dot_lbl)
+                    self._saved_id_groups[clean_id] = card.comp_group
                     ids_to_query.append(clean_id)
             finally:
                 dialog._building_list = False
                 
             reorder_list()
+            collapsed = getattr(self, "collapsed_groups", set())
+            groups = getattr(self, "_saved_id_groups", {})
+            scanned = getattr(self, "_status_scanned", set())
+            hi_ids = []
+            lo_ids = []
             for cid in ids_to_query:
-                self.query_computer_status(cid)
+                if cid in scanned:
+                    continue
+                grp = groups.get(cid, "")
+                if grp not in collapsed:
+                    hi_ids.append(cid)
+                else:
+                    lo_ids.append(cid)
+            for cid in hi_ids:
+                self.query_computer_status(cid, priority=True)
+            for cid in lo_ids:
+                self.query_computer_status(cid, priority=False)
 
         # Bottom buttons panel
         bottom_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -1875,7 +1922,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             bottom_frame, text=E(_("🔄 Làm mới")), font=EMOJI_FONT_BOLD,
             fg=self.text_white, bg="#2ECC71", activebackground="#27AE60",
             relief=tk.FLAT, bd=0, pady=6, cursor="hand2",
-            command=lambda: [refresh_list(), start_refresh_cooldown()]
+            command=lambda: [refresh_list(force=True), start_refresh_cooldown()]
         )
         btn_refresh.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
@@ -1893,17 +1940,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         refresh_list()
 
         def auto_refresh_status():
-            if not dialog.winfo_exists(): return
-            ids = list(self.status_dots_widgets.keys())
-            def _pump(i=0):
-                if not dialog.winfo_exists():
-                    return
-                batch = ids[i:i + 8]
-                for clean_id in batch:
-                    self.query_computer_status(clean_id)
-                if i + 8 < len(ids):
-                    dialog.after(120, lambda: _pump(i + 8))
-            _pump(0)
+            if not dialog.winfo_exists():
+                return
+            collapsed = getattr(self, "collapsed_groups", set())
+            groups = getattr(self, "_saved_id_groups", {})
+            for clean_id in list(self.status_dots_widgets.keys()):
+                if groups.get(clean_id, "") in collapsed:
+                    self.query_computer_status(clean_id, priority=False)
             dialog.after(10000, auto_refresh_status)
 
         dialog.after(10000, auto_refresh_status)
@@ -2254,6 +2297,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 self._saved_computers_mtime = os.path.getmtime(computers_file)
             except Exception:
                 self._saved_computers_mtime = None
+            try:
+                self.after(0, self._enqueue_idle_saved_status)
+            except Exception:
+                pass
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
             if hasattr(self, 'show_custom_error'):
@@ -3217,54 +3264,147 @@ Comment=Remote Desktop P2P AutoStart
         self.wait_window(about)
 
 
-    def query_computer_status(self, clean_id):
+    def _saved_list_is_open(self):
+        dlg = getattr(self, "saved_computers_dialog", None)
+        try:
+            return bool(dlg and dlg.winfo_exists() and dlg.state() != "withdrawn")
+        except Exception:
+            return False
+
+    def _saved_id_is_expanded(self, clean_id):
+        if not self._saved_list_is_open():
+            return False
+        grp = (getattr(self, "_saved_id_groups", {}) or {}).get(clean_id, "")
+        return grp not in getattr(self, "collapsed_groups", set())
+
+    def _start_saved_status_bg(self):
+        if getattr(self, "is_headless", False) or getattr(self, "_status_bg_started", False):
+            return
+        self._status_bg_started = True
+        self._enqueue_idle_saved_status()
+
+        def _tick():
+            if getattr(self, "is_headless", False):
+                return
+            self._enqueue_idle_saved_status()
+            self.after(15000, _tick)
+
+        self.after(15000, _tick)
+
+    def _enqueue_idle_saved_status(self):
+        if getattr(self, "is_headless", False):
+            return
+        try:
+            computers = self.load_saved_computers()
+        except Exception:
+            return
+        for comp in computers:
+            cid = str(comp.get("id") or "").replace(" ", "")
+            if not cid:
+                continue
+            grp = (comp.get("group") or "").strip()
+            self._saved_id_groups[cid] = grp
+            self.query_computer_status(cid, priority=False)
+
+    def query_computer_status(self, clean_id, priority=None):
         if clean_id == self.my_id_clean:
             self.update_saved_computer_status(clean_id, True)
             return
 
+        if priority is None:
+            priority = self._saved_id_is_expanded(clean_id)
+
         self._ensure_status_query_worker()
         try:
-            self._status_query_q.put_nowait(clean_id)
+            with self._status_q_lock:
+                existing = self._status_queued.get(clean_id)
+                if existing is True:
+                    return
+                if existing is False and not priority:
+                    return
+                self._status_queued[clean_id] = bool(priority)
+            q = self._status_query_hi if priority else self._status_query_lo
+            q.put_nowait(clean_id)
         except Exception:
             pass
-        self.after(1800, lambda cid=clean_id: self.check_and_default_offline(cid))
 
     def _ensure_status_query_worker(self):
         if getattr(self, "_status_query_worker_started", False):
             return
         self._status_query_worker_started = True
         import queue
-        self._status_query_q = queue.Queue()
+        self._status_query_hi = queue.Queue()
+        self._status_query_lo = queue.Queue()
+        self._status_queued = {}
+        self._status_q_lock = threading.Lock()
+        self._status_hi_busy = False
         self._online_vote_lock = threading.Lock()
         self._online_expect = {}
         self._online_got = {}
         self._online_any = {}
+        expanded_gap = 0.1
+        collapsed_gap = 3.0
 
         def worker():
             while True:
+                cid = None
+                from_hi = False
                 try:
-                    cid = self._status_query_q.get()
+                    cid = self._status_query_hi.get_nowait()
+                    from_hi = True
+                except queue.Empty:
+                    if (not self._status_query_hi.empty()) or getattr(self, "_status_hi_busy", False):
+                        time.sleep(0.05)
+                        continue
+                    try:
+                        cid = self._status_query_lo.get(timeout=0.25)
+                    except queue.Empty:
+                        continue
                 except Exception:
                     continue
-                sock = getattr(self, "primary_signaling_socket", None)
-                if not sock:
-                    self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
-                    continue
+                with self._status_q_lock:
+                    marked = self._status_queued.get(cid)
+                    if marked is True and not from_hi:
+                        continue
+                    if marked is None:
+                        continue
+                    self._status_queued.pop(cid, None)
+                if from_hi:
+                    self._status_hi_busy = True
                 try:
-                    from utils.hwid import signaling_lookup_ids
-                    aliases = signaling_lookup_ids(cid)
-                    with self._online_vote_lock:
-                        self._online_expect[cid] = len(aliases)
-                        self._online_got[cid] = 0
-                        self._online_any[cid] = False
-                    for alias in aliases:
-                        req = json.dumps({"action": "check_online", "target": alias})
-                        with self.signaling_lock:
-                            send_msg(sock, req.encode("utf-8"), APP_KEY)
-                        time.sleep(0.02)
-                except Exception:
-                    self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
-                time.sleep(0.025)
+                    started = time.time()
+                    self.after(1800, lambda c=cid: self.check_and_default_offline(c))
+                    sock = getattr(self, "primary_signaling_socket", None)
+                    if not sock:
+                        self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
+                    else:
+                        try:
+                            from utils.hwid import signaling_lookup_ids
+                            aliases = signaling_lookup_ids(cid)
+                            with self._online_vote_lock:
+                                self._online_expect[cid] = len(aliases)
+                                self._online_got[cid] = 0
+                                self._online_any[cid] = False
+                            for alias in aliases:
+                                req = json.dumps({"action": "check_online", "target": alias})
+                                with self.signaling_lock:
+                                    send_msg(sock, req.encode("utf-8"), APP_KEY)
+                                time.sleep(0.02)
+                        except Exception:
+                            self.after(0, lambda c=cid: self.update_saved_computer_status(c, False))
+                    gap = expanded_gap if from_hi else collapsed_gap
+                    remain = gap - (time.time() - started)
+                    while remain > 0:
+                        if not from_hi and (
+                            not self._status_query_hi.empty() or getattr(self, "_status_hi_busy", False)
+                        ):
+                            break
+                        step = 0.05 if not from_hi else remain
+                        time.sleep(min(step, remain))
+                        remain = gap - (time.time() - started)
+                finally:
+                    if from_hi:
+                        self._status_hi_busy = False
 
         threading.Thread(target=worker, daemon=True, name="StatusQueryWorker").start()
 
@@ -3298,6 +3438,10 @@ Comment=Remote Desktop P2P AutoStart
 
 
     def check_and_default_offline(self, clean_id):
+        known = getattr(self, "_status_online", None)
+        if known is not None and not known.get(clean_id):
+            known[clean_id] = False
+        getattr(self, "_status_scanned", set()).add(clean_id)
         if clean_id in self.status_dots_widgets:
             widgets = self.status_dots_widgets[clean_id]
             for dot_widget in widgets:
@@ -3306,6 +3450,7 @@ Comment=Remote Desktop P2P AutoStart
                         dot_widget.config(fg="#E05252")  # Đỏ (Offline)
                 except Exception:
                     pass
+            getattr(self, "_status_scanned", set()).add(clean_id)
             if hasattr(self, '_reorder_saved_computers_func'):
                 self.after(50, self._reorder_saved_computers_func)
 
@@ -3313,6 +3458,10 @@ Comment=Remote Desktop P2P AutoStart
     def update_saved_computer_status(self, partner_id, is_online):
         from utils.hwid import canonical_hwid
         clean_id = canonical_hwid(partner_id)
+        getattr(self, "_status_scanned", set()).add(clean_id)
+        known = getattr(self, "_status_online", None)
+        if known is not None:
+            known[clean_id] = bool(is_online)
         if clean_id in self.status_dots_widgets:
             widgets = self.status_dots_widgets[clean_id]
             status_changed = False

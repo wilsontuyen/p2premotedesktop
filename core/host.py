@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from utils.logger import log_debug, log_activity, log_file_transfer
 from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
-from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
+from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_click_at, send_input_mouse_move, send_input_mouse_scroll
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
 
 if getattr(sys, 'frozen', False):
@@ -2319,8 +2319,12 @@ class HostMixin:
             self.ensure_input_thread_desktop(force=True)
             button_name = event.get('button')
             pressed = event.get('pressed')
-            # Primary simulation using standard SendInput API
-            send_input_mouse_click(button_name, pressed)
+            x, y = event.get('x'), event.get('y')
+            ox, oy = getattr(self, "_capture_origin", (0, 0))
+            if x is not None and y is not None:
+                send_input_mouse_click_at(int(x) + int(ox), int(y) + int(oy), button_name, pressed)
+            else:
+                send_input_mouse_click(button_name, pressed)
             try:
                 if pressed and clipboard_sync_manager:
                     if button_name == 'right':

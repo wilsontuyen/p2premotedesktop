@@ -196,34 +196,27 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             top.attributes('-alpha', 0.0)
         else:
             top.withdraw()
+        try:
+            from gui.window_icon import set_dialog_app_icon
+            set_dialog_app_icon(top)
+        except Exception:
+            pass
 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
-        if hwnd and sys.platform == "win32":
+        embed_hwnd = hwnd if (hwnd and sys.platform == "win32") else None
+        embed_pos = [None, None, 900, 600]
+        if embed_hwnd:
             import ctypes
             from ctypes import wintypes
             rect = wintypes.RECT()
-            ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
+            ctypes.windll.user32.GetClientRect(embed_hwnd, ctypes.byref(rect))
             py_w = rect.right - rect.left
             py_h = rect.bottom - rect.top
-
-            # Try to get screen coordinates of the Pygame window
-            pt = wintypes.POINT(0, 0)
-            ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
-
-            top.update_idletasks()
-            tk_hwnd = int(top.frame(), 16)
-            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-            except: pass
-            style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-            style = (style | 0x40000000) & ~0x80000000
-            ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-            ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
             x = max(0, (py_w - 900) // 2)
             y = max(0, (py_h - 600) // 2)
+            embed_pos[:] = [x, y, 900, 600]
             top.geometry("900x600")
-            top.update_idletasks()
-            ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
         else:
             top.update_idletasks()
             sw = top.winfo_screenwidth()
@@ -231,10 +224,6 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
 
         top.attributes('-topmost', True)
-        if sys.platform == "win32":
-            top.attributes('-alpha', 1.0)
-        else:
-            top.deiconify()
         top.configure(bg="#E5E5E5")
 
         left_frame = tk.Frame(top, bg="#E5E5E5")
@@ -1415,7 +1404,16 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 is_cancelled = False
             state = UploadState()
 
-            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd, embed=True, dest_dir=target_dir)
+            def _cancel_upload():
+                state.is_cancelled = True
+                try:
+                    from core.clipboard_agent import clipboard_sync_manager as cm
+                    if cm:
+                        cm.cancel_active_transfer(remote_triggered=False)
+                except Exception:
+                    pass
+
+            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=_cancel_upload, host_hwnd=hwnd, embed=True, dest_dir=target_dir)
             dialog.update_progress(0)
             
             active_upload_dialog.clear()
@@ -1508,8 +1506,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                         break
                                     time.sleep(0.05)
 
-                        send_fn({"type": "file_end"})
-                        time.sleep(0.1) 
+                        if not st.is_cancelled:
+                            send_fn({"type": "file_end"})
+                            time.sleep(0.1) 
 
                     if not st.is_cancelled:
                         # Gửi batch_end để báo host đã gửi xong
@@ -1641,7 +1640,41 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         refresh_local()
         request_remote_dir(remote_entry.get())
 
-        top.focus_force()
+        def _reveal_fm():
+            top.update_idletasks()
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    tk_hwnd = int(top.frame(), 16)
+                    if embed_hwnd:
+                        try:
+                            ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                        except Exception:
+                            pass
+                        style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+                        style = (style | 0x40000000) & ~0x80000000  # WS_CHILD, not WS_POPUP
+                        ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+                        ctypes.windll.user32.SetParent(tk_hwnd, int(embed_hwnd))
+                        x, y, w, h = embed_pos
+                        ctypes.windll.user32.SetWindowPos(
+                            tk_hwnd, 0, int(x), int(y), int(w), int(h), 0x0004 | 0x0040
+                        )
+                    top.update_idletasks()
+                    top.attributes("-alpha", 1.0)
+                except Exception:
+                    try:
+                        top.attributes("-alpha", 1.0)
+                    except Exception:
+                        pass
+            else:
+                top.deiconify()
+            try:
+                top.lift()
+                top.focus_force()
+            except Exception:
+                pass
+
+        _reveal_fm()
         local_entry.focus()
         top.mainloop()
     except Exception as ex:

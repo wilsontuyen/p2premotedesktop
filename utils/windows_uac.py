@@ -49,6 +49,11 @@ def apply_remote_uac_desktop_policy():
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, access)
             winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
             winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+            # Cho phép exe đã ký (không chỉ Program Files) nhận UIAccess — bấm Yes/No UAC.
+            try:
+                winreg.SetValueEx(key, "EnableSecureUIAPaths", 0, winreg.REG_DWORD, 0)
+            except Exception:
+                pass
             winreg.CloseKey(key)
             prompt_on_secure_desktop_enabled._c = (0.0, False)
             return True, None

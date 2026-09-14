@@ -506,19 +506,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
             import tkinter as tk
             hidden_root = tk.Tk()
-            hidden_root.attributes('-alpha', 0.0)
+            hidden_root.withdraw()
             try:
-                icon_path = os.path.join(app_dir, "app_icon.png")
-                if os.path.exists(icon_path):
-                    try:
-                        hidden_icon = tk.PhotoImage(file=icon_path)
-                    except Exception:
-                        hidden_icon = ImageTk.PhotoImage(Image.open(icon_path))
-                    hidden_root.iconphoto(True, hidden_icon)
-                    hidden_root._hidden_icon_ref = hidden_icon
+                hidden_root.attributes("-alpha", 0.0)
+                hidden_root.wm_attributes("-toolwindow", True)
             except Exception:
                 pass
-            hidden_root.withdraw()
+            try:
+                from gui.window_icon import hide_tk_from_taskbar, set_dialog_app_icon
+                hide_tk_from_taskbar(hidden_root)
+                set_dialog_app_icon(hidden_root)
+            except Exception:
+                pass
             ensure_session_socket_blocking(sock)
             if clipboard_sync_manager:
                 clipboard_sync_manager.register_app(hidden_root)
@@ -831,8 +830,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     try:
                                         if fm.fm_top.winfo_exists():
                                             def restore_fm():
-                                                fm.fm_top.deiconify()
-                                                fm.fm_top.focus_force()
+                                                try:
+                                                    fm.fm_top.deiconify()
+                                                    fm.fm_top.attributes("-alpha", 1.0)
+                                                except Exception:
+                                                    pass
+                                                try:
+                                                    fm.fm_top.lift()
+                                                    fm.fm_top.focus_force()
+                                                except Exception:
+                                                    pass
                                             fm.fm_top.after(0, restore_fm)
                                             continue
                                     except: pass
