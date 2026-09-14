@@ -37,7 +37,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from utils.logger import log_debug, log_activity, log_file_transfer
 from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_click_at, send_input_mouse_move, send_input_mouse_scroll
-from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
+from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, CLIPBOARD_PKT_TYPES
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
@@ -2413,7 +2413,7 @@ class HostMixin:
                 try:
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
-                    if evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack", "clipboard_text", "clipboard_image", "clear_clipboard"):
+                    if evt_type in CLIPBOARD_PKT_TYPES:
                         if clipboard_sync_manager:
                             clipboard_sync_manager.enqueue_packet(event)
                     else:

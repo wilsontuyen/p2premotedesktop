@@ -26,6 +26,13 @@ import base64
 from utils.logger import log_debug
 from core.i18n import _
 from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
+CLIPBOARD_PKT_TYPES = (
+    "batch_start", "file_start", "file_chunk", "file_end", "batch_end",
+    "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack",
+    "clipboard_text", "clipboard_image", "clear_clipboard",
+    "resume_query", "resume_state",
+)
+
 from utils.clipboard_api import (
     ENABLE_CLIPBOARD_SYNC, 
     set_clipboard_dword_format, 
@@ -633,31 +640,78 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
     return moved, bool(moved) and all_in_dest
 
 
-def _paths_match_expected_sizes(paths, meta_files):
-    """False nếu thiếu file hoặc size không khớp metadata — tránh dán PE dở (mất icon)."""
-    if not paths or not meta_files:
+def _collect_actual_file_sizes(paths):
+    """Map relative posix path → size. Folder paste: paths là thư mục top-level, không phải từng file."""
+    actual = {}
+    for p in paths:
+        if not p or not os.path.exists(p):
+            return None
+        if os.path.isfile(p):
+            try:
+                actual[os.path.basename(p).replace("\\", "/")] = os.path.getsize(p)
+            except Exception:
+                return None
+            continue
+        if not os.path.isdir(p):
+            return None
+        root_parent = os.path.dirname(os.path.abspath(p))
+        for dirpath, _dirs, files in os.walk(p):
+            for fn in files:
+                full = os.path.join(dirpath, fn)
+                rel = os.path.relpath(full, root_parent).replace("\\", "/")
+                try:
+                    actual[rel] = os.path.getsize(full)
+                except Exception:
+                    return None
+    return actual
+
+
+def _paths_match_expected_sizes(paths, meta_files, detail=None):
+    """False nếu thiếu file hoặc size không khớp metadata — tránh dán PE dở (mất icon).
+
+    So khớp theo đường dẫn tương đối (thư mục/file), không chỉ basename — tránh
+    trùng tên trong thư mục con và paste cả folder (paths là dir, không phải file).
+    Nếu `detail` là list, append lý do thất bại.
+    """
+    def _fail(msg):
+        if isinstance(detail, list):
+            detail.append(msg)
         return False
-    by_base = {}
+
+    if not paths or not meta_files:
+        return _fail("thieu paths hoac metadata")
+    expected = {}
     for f in meta_files:
-        name = str(f.get("name") or "").replace("\\", "/").split("/")[-1]
+        if not isinstance(f, dict):
+            continue
+        name = str(f.get("name") or "").replace("\\", "/")
         if not name:
             continue
         try:
-            by_base[name.lower()] = int(f.get("size") or 0)
+            expected[name] = int(f.get("size") or 0)
         except Exception:
-            return False
-    for p in paths:
-        if not p or not os.path.isfile(p):
-            return False
-        base = os.path.basename(p).lower()
-        exp = by_base.get(base)
-        if exp is None:
-            return False
-        try:
-            if os.path.getsize(p) != exp:
-                return False
-        except Exception:
-            return False
+            return _fail("metadata size khong hop le: %s" % (f.get("name"),))
+    if not expected:
+        return _fail("metadata khong co file")
+    try:
+        actual = _collect_actual_file_sizes(paths)
+    except Exception as e:
+        return _fail("khong doc duoc file da tai: %s" % e)
+    if actual is None:
+        return _fail("thieu file/thu muc tren disk (paths=%s)" % ([os.path.basename(p) for p in paths[:8]],))
+    actual_l = {k.lower(): (k, v) for k, v in actual.items()}
+    for name, size in expected.items():
+        hit = actual_l.get(name.lower())
+        if hit is None:
+            base = name.split("/")[-1].lower()
+            hits = [v for k, v in actual_l.items() if k.split("/")[-1] == base]
+            if len(hits) == 1:
+                hit = hits[0]
+            else:
+                return _fail("thieu %s (expected %s bytes)" % (name, size))
+        got = hit[1]
+        if got != size:
+            return _fail("%s size %s != expected %s" % (name, got, size))
     return True
 
 
@@ -1893,8 +1947,12 @@ class ClipboardSyncManager:
         self._send_worker_started = False
         self._send_worker_boot_lock = threading.Lock()
         self._send_run_lock = threading.Lock()
+        self._xfer_need_resync = False
+        self._resume_waiters = {}
+        self._xfer_sock_gen = 0
         self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
         self.cacher_thread.start()
+        threading.Thread(target=self._xfer_watchdog_loop, daemon=True, name="ClipXferWatch").start()
         
         # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
         self._pipe_handle = None
@@ -2345,6 +2403,17 @@ class ClipboardSyncManager:
                     if dlg:
                         try: dlg.update_progress(sent_bytes)
                         except: pass
+                elif action == "status":
+                    if isinstance(args, (tuple, list)):
+                        status, job_id = args[0], (args[1] if len(args) > 1 else None)
+                    else:
+                        status, job_id = args, None
+                    dlg = self._dialog_by_job(job_id)
+                    if dlg:
+                        try:
+                            dlg.update_progress(getattr(dlg, "_received", 0), status=status)
+                        except Exception:
+                            pass
                 elif action == "destroy":
                     job_id = args
                     def _do_destroy(j=job_id):
@@ -2384,6 +2453,7 @@ class ClipboardSyncManager:
         with self.lock:
             self.active_sockets.add(sock)
             self.sock = sock
+            self._xfer_sock_gen = getattr(self, "_xfer_sock_gen", 0) + 1
 
     def _forward_clipboard_text(self, text):
         """Gửi text clipboard sang viewer. Cùng nội dung copy lần 2 vẫn gửi (theo sequence)."""
@@ -2466,7 +2536,9 @@ class ClipboardSyncManager:
             self.gui_queue.put(("update", (sent_bytes, job_id)))
             times[key] = current_time
 
-    def close_dialog(self, job_id=None):
+    def close_dialog(self, job_id=None, reason=None):
+        if reason:
+            print(f"[Clipboard] Dong dialog job_id={job_id} ly_do={reason}")
         if job_id is None:
             self._recv_dialog_open = False
         self.gui_queue.put(("destroy", job_id))
@@ -2662,13 +2734,150 @@ class ClipboardSyncManager:
             dests, [], extra_paths=extra, staging_xids=abort_xids, wipe_all_staging=False
         )
 
+    def _live_xfer_sock(self):
+        sock = getattr(self, "sock", None)
+        if sock is not None:
+            return sock
+        try:
+            socks = list(self.active_sockets or [])
+            if socks:
+                return socks[0]
+        except Exception:
+            pass
+        return None
+
+    def _xfer_dialog_status(self, my_id, status):
+        jobs = getattr(self, "_xfer_jobs", None) or {}
+        job = jobs.get(my_id)
+        try:
+            pid = int((job or {}).get("paste_id") or getattr(self, "_clipboard_paste_id", 0) or 0)
+        except Exception:
+            pid = 0
+        try:
+            self.gui_queue.put(("status", (status, pid or my_id)))
+        except Exception:
+            pass
+
+    def _xfer_watchdog_loop(self):
+        """Khi không nhận chunk > 3s (mạng đứt), đổi tiêu đề dialog sang đang thử lại."""
+        while True:
+            time.sleep(1.0)
+            try:
+                jobs = getattr(self, "_xfer_jobs", None) or {}
+                now = time.time()
+                for xid, job in list(jobs.items()):
+                    rec = int(job.get("received") or 0)
+                    total = int(job.get("total") or 0)
+                    if total and rec >= total:
+                        continue
+                    last = float(job.get("last_chunk_at") or 0)
+                    if not last:
+                        continue
+                    waiting = (now - last) > 3.0
+                    if waiting and not job.get("retry_ui"):
+                        job["retry_ui"] = True
+                        self._xfer_dialog_status(xid, _("Đang thử kết nối lại, tiếp tục tải..."))
+                    elif (not waiting) and job.get("retry_ui"):
+                        job["retry_ui"] = False
+                        self._xfer_dialog_status(xid, _("Đang tải file về..."))
+            except Exception:
+                pass
+
     def _send_file_msg(self, sock, data_bytes, my_id):
-        """Gửi gói file bằng sendall (cùng lock với chuột). Không select-wait — host không recv thì select giữ lock → treo chuột viewer."""
+        """Gửi gói file; nếu mạng đứt thì chờ socket mới rồi gửi lại cùng gói (chunk có offset nên an toàn)."""
         if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
             return False
-        if not send_msg(sock, data_bytes):
-            return False
-        return not self._send_should_stop(my_id)
+        waiting = False
+        last_log = 0.0
+        sock_gen = getattr(self, "_xfer_sock_gen", 0)
+        while True:
+            if self._send_should_stop(my_id):
+                return False
+            live = self._live_xfer_sock() or sock
+            if live:
+                if send_msg(live, data_bytes):
+                    if waiting or getattr(self, "_xfer_sock_gen", 0) != sock_gen:
+                        self._xfer_need_resync = True
+                        if waiting:
+                            print("[FileTransfer] Resume gui sau khi ket noi lai.")
+                    return True
+            now = time.time()
+            if not waiting:
+                waiting = True
+                print("[FileTransfer] Mat ket noi luc gui — cho reconnect de resume...")
+            elif now - last_log > 5.0:
+                last_log = now
+                print("[FileTransfer] Van cho ket noi lai de resume...")
+            time.sleep(0.35)
+
+    def _query_resume_state(self, my_id, paste_id, timeout=8.0):
+        """Hỏi máy nhận đã ghi bao nhiêu byte từng file — để seek tiếp, không gửi lại từ đầu."""
+        ev = threading.Event()
+        box = {"state": {}}
+        waiters = getattr(self, "_resume_waiters", None)
+        if waiters is None:
+            self._resume_waiters = {}
+            waiters = self._resume_waiters
+        waiters[my_id] = (ev, box)
+        pkt = json.dumps({
+            "type": "resume_query",
+            "xfer_id": my_id,
+            "paste_id": paste_id,
+        }).encode("utf-8")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._send_should_stop(my_id):
+                break
+            live = self._live_xfer_sock()
+            if live:
+                try:
+                    send_msg(live, pkt)
+                except Exception:
+                    pass
+                if ev.wait(1.2):
+                    break
+            else:
+                time.sleep(0.3)
+        waiters.pop(my_id, None)
+        return box.get("state") or {}
+
+    def _resume_snapshot(self, xid):
+        files = {}
+        for t in (getattr(self, "incoming_transfers", None) or {}).values():
+            if t.get("xfer_id") != xid:
+                continue
+            name = t.get("name")
+            written = int(t.get("written") or 0)
+            handle = t.get("handle")
+            if handle is not None:
+                try:
+                    handle.flush()
+                    written = int(handle.tell())
+                    t["written"] = written
+                except Exception:
+                    pass
+            if name:
+                files[str(name).replace("\\", "/")] = written
+        job = (getattr(self, "_xfer_jobs", None) or {}).get(xid)
+        if job:
+            stg = _xfer_staging_dir(job.get("save_dir") or HEADLESS_TRANSFER_DIR, xid)
+            if os.path.isdir(stg):
+                for root, _dirs, fnames in os.walk(stg):
+                    for fn in fnames:
+                        full = os.path.join(root, fn)
+                        rel = os.path.relpath(full, stg).replace("\\", "/")
+                        try:
+                            sz = os.path.getsize(full)
+                        except Exception:
+                            continue
+                        files[rel] = max(int(files.get(rel) or 0), int(sz))
+        return {
+            "type": "resume_state",
+            "xfer_id": xid,
+            "has_job": job is not None,
+            "files": files,
+            "received": int((job or {}).get("received") or 0),
+        }
 
     def _maybe_send_cancel_ack(self):
         """Báo máy gửi dừng vòng chunk; máy nhận vẫn recv/drain socket."""
@@ -2760,7 +2969,7 @@ class ClipboardSyncManager:
                     self._send_progress_signal("CANCEL", str(int(cur)))
             except Exception:
                 pass
-        self.close_dialog(job_id=None if all_jobs else cur)
+        self.close_dialog(job_id=None if all_jobs else cur, reason="cancel_active_transfer")
         if not all_jobs and (getattr(self, "_xfer_jobs", None) or getattr(self, "_active_send_ids", None)):
             return
         
@@ -2810,9 +3019,7 @@ class ClipboardSyncManager:
                 self.active_dialog.on_cancel = None
             except:
                 pass
-        self.close_dialog()
-            
-        # 5. Cập nhật trạng thái hiển thị
+        self.close_dialog(reason="huy truyen tai")
         if self.app:
             try:
                 if hasattr(self.app, 'update_status'):
@@ -3381,7 +3588,7 @@ class ClipboardSyncManager:
                                             res = fn_SetClipboardData(15, empty_hdrop)
                                             if not res: fn_GlobalFree(empty_hdrop)
                                         self.pending_remote_files = []
-                                        self.close_dialog()
+                                        self.close_dialog(reason="overwrite cancel")
                                         if self.app and getattr(self.app, 'is_headless', False):
                                             self._send_progress_signal("CANCEL", "")
                                             self._close_transfer_pipe()
@@ -3399,7 +3606,7 @@ class ClipboardSyncManager:
                             res = fn_SetClipboardData(15, empty_hdrop)
                             if not res: fn_GlobalFree(empty_hdrop)
                         self.pending_remote_files = []
-                        self.close_dialog()
+                        self.close_dialog(reason="khong co file de tai")
                         if self.app and getattr(self.app, 'is_headless', False):
                             self._send_progress_signal("CANCEL", "")
                             self._close_transfer_pipe()
@@ -3416,22 +3623,32 @@ class ClipboardSyncManager:
                     # Yêu cầu truyền file thực tế từ đối tác
                     self.request_pending_files(files_to_download)
             
-                    # Chờ nhận xong file (non-blocking message pump, không lồng RENDERFORMAT)
+                    # Chờ nhận xong file (không cắt 600s — folder lớn / file >4GB có thể tải lâu hơn).
                     succeeded = False
-                    start_time = time.time()
-                    while time.time() - start_time < 600.0:
+                    wait_start = time.time()
+                    last_hb = wait_start
+                    while True:
                         if not getattr(self, "_allow_file_xfer", False) or getattr(self, "_receive_cancelled", False):
+                            print("[Clipboard] Dung cho tai file: Huy / allow_xfer=False.")
                             break
                         if self.transfer_done_event.is_set():
                             if not getattr(self, '_receive_cancelled', False):
                                 succeeded = True
                             break
+                        now = time.time()
+                        if now - last_hb >= 60.0:
+                            last_hb = now
+                            rec = int(getattr(self, "batch_received", 0) or 0)
+                            tot = int(getattr(self, "batch_total_size", 0) or 0)
+                            print(f"[Clipboard] Dang cho tai xong ({rec}/{tot} bytes, {int(now - wait_start)}s) — dialog van mo.")
                         if not _pump_messages_except_clipboard_render():
                             time.sleep(0.01)
                     
                     if succeeded and self.batch_paths:
                         meta = list(getattr(self, "_reoffer_files", None) or self.pending_remote_files or [])
-                        if not _paths_match_expected_sizes(self.batch_paths, meta):
+                        why = []
+                        if not _paths_match_expected_sizes(self.batch_paths, meta, detail=why):
+                            print("[Clipboard] File chua du dung luong / thieu metadata — khong dan. " + "; ".join(why))
                             log_debug("[render_format] File chưa đủ dung lượng / thiếu metadata — không dán.")
                             succeeded = False
                     if succeeded and self.batch_paths:
@@ -3510,9 +3727,10 @@ class ClipboardSyncManager:
                                     log_debug("[render_format] Không tạo được hGlobal, hủy render.")
                                     self.pending_remote_files = []
                             self.complete_dialog()
-                            self.close_dialog()
+                            self.close_dialog(reason="render_format xong")
                     if not succeeded:
-                        log_debug(f"[render_format] Tải file thất bại hoặc hết thời gian chờ. succeeded={succeeded}")
+                        print(f"[Clipboard] Dong dialog paste: that bai/huy succeeded={succeeded} allow={getattr(self, '_allow_file_xfer', None)} cancelled={getattr(self, '_receive_cancelled', None)}")
+                        log_debug(f"[render_format] Tải file thất bại. succeeded={succeeded}")
                         reoffer = list(getattr(self, "_reoffer_files", None) or self.pending_remote_files or [])
                         # Trong WM_RENDERFORMAT không được SetClipboardData(NULL): Explorer
                         # vẫn dán xong và tạo file ma (vd. .exe installer với icon lá chắn).
@@ -3529,7 +3747,7 @@ class ClipboardSyncManager:
                             self._rearm_delayed_after_render = True
                             self._suppress_render_until = time.time() + 0.3
                             self._expect_repaste_until = time.time() + 60.0
-                        self.close_dialog()
+                        self.close_dialog(reason="render_format that bai/huy")
                         if self.app and getattr(self.app, 'is_headless', False):
                             self._send_progress_signal("CANCEL", "")
                             self._close_transfer_pipe()
@@ -3559,7 +3777,7 @@ class ClipboardSyncManager:
                 self.ignore_destroy_clipboard = True
                 res = fn_SetClipboardData(15, empty_hdrop)
                 if not res: fn_GlobalFree(empty_hdrop)
-            self.close_dialog()
+            self.close_dialog(reason="render_format exception")
             if self.app and getattr(self.app, 'is_headless', False):
                 self._send_progress_signal("CANCEL", "")
                 self._close_transfer_pipe()
@@ -3617,9 +3835,23 @@ class ClipboardSyncManager:
                 except Exception:
                     pass
                 continue
-            sock = getattr(self, "sock", None)
+            sock = self._live_xfer_sock()
             if not sock:
-                print("[FileTransfer] Bo hang doi — khong co socket.")
+                for _ in range(240):
+                    if tok and tok in (getattr(self, "_cancelled_paste_ids", None) or set()):
+                        break
+                    if self._send_should_stop(my_id):
+                        break
+                    sock = self._live_xfer_sock()
+                    if sock:
+                        break
+                    time.sleep(0.25)
+            if not sock:
+                print("[FileTransfer] Bo hang doi — khong co socket sau khi cho reconnect.")
+                try:
+                    getattr(self, "_active_send_ids", set()).discard(my_id)
+                except Exception:
+                    pass
                 continue
             print(f"[FileTransfer] Bat dau gui (hang doi) paste_id={tok} xfer_id={my_id}")
             try:
@@ -3676,6 +3908,7 @@ class ClipboardSyncManager:
                 "display_name": display_name,
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
+            self._xfer_need_resync = False
             if not self._send_file_msg(sock, start_pkt, my_id):
                 print("[FileTransfer] Huy truoc/luc batch_start — dung gui.")
                 return
@@ -3683,6 +3916,25 @@ class ClipboardSyncManager:
             
             total_sent = 0
             batch_start_time = time.time()
+
+            def _lookup_resume_offset(state, name, size):
+                fmap = (state or {}).get("files") or {}
+                key = str(name or "").replace("\\", "/")
+                val = fmap.get(key)
+                if val is None:
+                    val = fmap.get(name)
+                if val is None:
+                    val = fmap.get(os.path.basename(key))
+                try:
+                    already = int(val or 0)
+                except Exception:
+                    already = 0
+                try:
+                    size = int(size or 0)
+                except Exception:
+                    size = 0
+                return max(0, min(already, size)) if size else max(0, already)
+
             for f in files:
                 if self._send_should_stop(my_id):
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
@@ -3695,22 +3947,22 @@ class ClipboardSyncManager:
                 if not os.path.exists(filepath):
                     log_debug(f"[_process_send_requests] File không tồn tại: {filepath}")
                     continue
-                    
                 if self._send_should_stop(my_id):
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
                     break
                 f_start_pkt = json.dumps(self._attach_xfer_id({
-                    "type": "file_start", "name": filename, "size": file_size
+                    "type": "file_start", "name": filename, "size": file_size, "offset": 0
                 }, my_id, paste_id)).encode('utf-8')
                 if not self._send_file_msg(sock, f_start_pkt, my_id):
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
                     break
                 log_debug(f"[_process_send_requests] Đã gửi file_start cho {filename}, size={file_size}")
-                
+                file_sent_bytes = 0
                 try:
-                    lan = is_lan_socket(sock)
+                    live = self._live_xfer_sock() or sock
+                    lan = is_lan_socket(live)
                     if lan:
-                        tune_socket_for_lan_bulk(sock)
+                        tune_socket_for_lan_bulk(live)
                     chunk_size = 64 * 1024
                     file_sent_bytes = 0
                     file_start_time = time.time()
@@ -3720,6 +3972,32 @@ class ClipboardSyncManager:
                             if self._send_should_stop(my_id):
                                 print("[FileTransfer] Huy — dung doc file phia client.")
                                 break
+
+                            if getattr(self, "_xfer_need_resync", False):
+                                self._xfer_need_resync = False
+                                state = self._query_resume_state(my_id, paste_id, timeout=6.0)
+                                if not state.get("has_job"):
+                                    print("[FileTransfer] May nhan mat job — gui lai batch_start.")
+                                    if not self._send_file_msg(sock, start_pkt, my_id):
+                                        break
+                                already = _lookup_resume_offset(state, filename, file_size)
+                                print(f"[FileTransfer] Resume {filename} offset {file_sent_bytes} -> {already}")
+                                try:
+                                    fh.seek(already)
+                                except Exception:
+                                    fh.seek(0)
+                                    already = 0
+                                file_sent_bytes = already
+                                live = self._live_xfer_sock() or sock
+                                lan = is_lan_socket(live)
+                                if lan:
+                                    tune_socket_for_lan_bulk(live)
+                                resume_start = json.dumps(self._attach_xfer_id({
+                                    "type": "file_start", "name": filename, "size": file_size, "offset": already
+                                }, my_id, paste_id)).encode('utf-8')
+                                if not self._send_file_msg(sock, resume_start, my_id):
+                                    break
+                                continue
                             
                             if not lan:
                                 elapsed_total = time.time() - batch_start_time
@@ -3737,9 +4015,10 @@ class ClipboardSyncManager:
                                 print("[FileTransfer] Huy sau read — khong encode/gui chunk tiep.")
                                 break
                                 
+                            chunk_offset = file_sent_bytes
                             b64 = base64.b64encode(chunk_data).decode('utf-8')
                             if not self._send_file_msg(sock, json.dumps(self._attach_xfer_id({
-                                "type": "file_chunk", "name": filename, "data": b64
+                                "type": "file_chunk", "name": filename, "data": b64, "offset": chunk_offset
                             }, my_id, paste_id)).encode('utf-8'), my_id):
                                 print("[FileTransfer] Huy luc gui — dong file, ngung doc.")
                                 break
@@ -3761,22 +4040,35 @@ class ClipboardSyncManager:
                                             break
                                         time.sleep(0.05)
                                     
-                    log_debug(f"[_process_send_requests] Đã gửi xong dữ liệu cho {filename}")
+                    log_debug(f"[_process_send_requests] Đã gửi xong dữ liệu cho {filename} ({file_sent_bytes}/{file_size})")
                 except Exception as e:
                     print(f"[FileTransfer] Lỗi khi gửi file {filename}: {e}")
                     log_debug(f"[_process_send_requests] Lỗi khi gửi file {filename}: {e}")
                     
+                if self._send_should_stop(my_id):
+                    break
+                if file_sent_bytes < int(file_size or 0):
+                    print(f"[FileTransfer] {filename} chua du ({file_sent_bytes}/{file_size}) — khong gui file_end.")
+                    self._xfer_need_resync = True
+                    break
+                if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({
+                    "type": "file_end", "name": filename
+                }, my_id, paste_id)).encode('utf-8'), my_id):
+                    log_debug(f"[_process_send_requests] Đã gửi file_end cho {filename}")
+                else:
+                    print(f"[FileTransfer] {filename} gui file_end that bai.")
+                    break
+            else:
+                # for-loop hết file (không break) — chỉ lúc này mới batch_end.
                 if not self._send_should_stop(my_id):
-                    if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({
-                        "type": "file_end", "name": filename
-                    }, my_id, paste_id)).encode('utf-8'), my_id):
-                        log_debug(f"[_process_send_requests] Đã gửi file_end cho {filename}")
-                
-            if not self._send_should_stop(my_id):
-                if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({"type": "batch_end"}, my_id, paste_id)).encode('utf-8'), my_id):
-                    log_debug(f"[_process_send_requests] Đã gửi batch_end.")
-                try: log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thành công"))
-                except: pass
+                    if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({"type": "batch_end"}, my_id, paste_id)).encode('utf-8'), my_id):
+                        log_debug(f"[_process_send_requests] Đã gửi batch_end.")
+                    try: log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thành công"))
+                    except: pass
+                else:
+                    print("[FileTransfer] Huy — khong gui batch_end.")
+            if self._send_should_stop(my_id):
+                print("[FileTransfer] Gui dung giua chung — khong gui batch_end.")
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -3785,10 +4077,6 @@ class ClipboardSyncManager:
             try:
                 log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thất bại"))
             except: pass
-            try:
-                send_msg(sock, json.dumps({"type": "cancel_transfer", "paste_id": paste_id}).encode('utf-8'))
-            except:
-                pass
         finally:
             try:
                 getattr(self, "_active_send_ids", set()).discard(my_id)
@@ -3949,6 +4237,28 @@ class ClipboardSyncManager:
             pid = self._coerce_paste_id(packet.get("paste_id")) if "paste_id" in packet else None
             self.cancel_active_transfer(remote_triggered=True, paste_id=pid, all_jobs=pid is None)
             return
+
+        elif ptype == "resume_query":
+            xid = packet.get("xfer_id")
+            snap = self._resume_snapshot(xid)
+            live = self._live_xfer_sock()
+            if live:
+                try:
+                    send_msg(live, json.dumps(snap).encode("utf-8"))
+                    print(f"[FileTransfer] resume_state xfer_id={xid} files={list((snap.get('files') or {}).keys())[:8]}")
+                except Exception as e:
+                    print(f"[FileTransfer] Gui resume_state loi: {e}")
+            return
+
+        elif ptype == "resume_state":
+            xid = packet.get("xfer_id")
+            waiters = getattr(self, "_resume_waiters", None) or {}
+            pair = waiters.get(xid)
+            if pair:
+                ev, box = pair
+                box["state"] = packet
+                ev.set()
+            return
             
         elif ptype == "clipboard_text":
             text = packet.get("text", "")
@@ -4001,6 +4311,20 @@ class ClipboardSyncManager:
             if xid is not None and xid in (getattr(self, "_aborted_xfer_ids", None) or set()):
                 log_debug(f"[batch_start] Bo xfer da huy {xid}")
                 return
+            jobs = getattr(self, "_xfer_jobs", None)
+            if jobs is None:
+                self._xfer_jobs = {}
+                jobs = self._xfer_jobs
+            existing = jobs.get(xid) if xid is not None else None
+            if existing:
+                existing["last_chunk_at"] = time.time()
+                existing["retry_ui"] = False
+                log_debug(f"[batch_start] Giu job cu de resume xfer_id={xid} received={existing.get('received')}")
+                self.transfer_in_progress = True
+                self._receive_cancelled = False
+                if xid is not None:
+                    self._recv_xfer_id = xid
+                return
             paste_id = packet.get("paste_id")
             try:
                 paste_id = int(paste_id) if paste_id is not None else int(getattr(self, "_clipboard_paste_id", 0) or 0)
@@ -4016,14 +4340,12 @@ class ClipboardSyncManager:
                 "paths": [],
                 "display_name": display_name,
                 "last_progress": 0.0,
+                "last_chunk_at": time.time(),
+                "retry_ui": False,
                 "expected_files": list((getattr(self, "_xfer_expected_files", None) or {}).get(paste_id) or []),
                 "save_dir": getattr(self, "target_save_dir", None) or HEADLESS_TRANSFER_DIR,
                 "paste_dest": getattr(self, "_paste_dest_dir", None),
             }
-            jobs = getattr(self, "_xfer_jobs", None)
-            if jobs is None:
-                self._xfer_jobs = {}
-                jobs = self._xfer_jobs
             jobs[xid] = job
             self.batch_total_size = total_size
             self.batch_received = 0
@@ -4063,6 +4385,11 @@ class ClipboardSyncManager:
             if not save_dir:
                 save_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
             key = _incoming_key(xid, filename)
+            resume_from = packet.get("offset")
+            try:
+                resume_from = int(resume_from) if resume_from is not None else 0
+            except Exception:
+                resume_from = 0
             existing = self.incoming_transfers.get(key)
             if (
                 existing
@@ -4070,12 +4397,20 @@ class ClipboardSyncManager:
                 and xid is not None
                 and existing.get("xfer_id") == xid
             ):
-                log_debug(f"[file_start] Bỏ file_start trùng (tránh cắt file) xfer_id={xid} {filename}")
+                if resume_from > 0:
+                    try:
+                        existing["handle"].seek(resume_from)
+                        existing["written"] = resume_from
+                    except Exception:
+                        pass
+                    log_debug(f"[file_start] Resume handle {filename} offset={resume_from}")
+                else:
+                    log_debug(f"[file_start] Bỏ file_start trùng (tránh cắt file) xfer_id={xid} {filename}")
                 return
             save_dir = _xfer_staging_dir(save_dir, xid)
             
             target_path = os.path.join(save_dir, filename)
-            log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path}")
+            log_debug(f"[file_start] Bắt đầu nhận file: {filename}, target_path={target_path} offset={resume_from}")
 
             try:
                 dirname = os.path.dirname(target_path)
@@ -4090,7 +4425,21 @@ class ClipboardSyncManager:
                         old["handle"].close()
                     except Exception:
                         pass
-                fh = open(target_path, "wb")
+                exists = os.path.exists(target_path)
+                mode = "r+b" if (resume_from > 0 and exists) else "wb"
+                fh = open(target_path, mode)
+                written = 0
+                if resume_from > 0:
+                    try:
+                        actual = os.path.getsize(target_path) if exists else 0
+                    except Exception:
+                        actual = 0
+                    written = min(resume_from, actual)
+                    try:
+                        fh.seek(written)
+                    except Exception:
+                        fh.seek(0)
+                        written = 0
                 expected = packet.get("size")
                 try:
                     expected = int(expected) if expected is not None else None
@@ -4103,7 +4452,7 @@ class ClipboardSyncManager:
                     "pending": False,
                     "xfer_id": xid,
                     "expected_size": expected,
-                    "written": 0,
+                    "written": written,
                     "name": filename,
                 }
                 try:
@@ -4128,24 +4477,38 @@ class ClipboardSyncManager:
                 chunk_bytes = base64.b64decode(packet.get("data", ""))
                 expected = transfer.get("expected_size")
                 written = int(transfer.get("written") or 0)
-                if expected is not None and written >= expected:
+                chunk_offset = packet.get("offset")
+                try:
+                    chunk_offset = int(chunk_offset) if chunk_offset is not None else None
+                except Exception:
+                    chunk_offset = None
+                start = written if chunk_offset is None else max(0, chunk_offset)
+                if expected is not None and start >= expected:
                     return
-                if expected is not None and written + len(chunk_bytes) > expected:
-                    chunk_bytes = chunk_bytes[: max(0, expected - written)]
+                if expected is not None and start + len(chunk_bytes) > expected:
+                    chunk_bytes = chunk_bytes[: max(0, expected - start)]
                 if not chunk_bytes:
                     return
 
                 if transfer.get("handle") is not None:
+                    if chunk_offset is not None:
+                        try:
+                            transfer["handle"].seek(start)
+                        except Exception:
+                            pass
                     transfer["handle"].write(chunk_bytes)
-                    transfer["written"] = written + len(chunk_bytes)
+                    new_written = start + len(chunk_bytes)
+                    delta = max(0, new_written - written)
+                    transfer["written"] = max(written, new_written)
                     job = (getattr(self, "_xfer_jobs", None) or {}).get(xid)
                     if job is None:
-                        self.batch_received += len(chunk_bytes)
+                        self.batch_received += delta
                         rec = self.batch_received
                         total = getattr(self, "batch_total_size", 0)
                         paste_id = int(getattr(self, "_clipboard_paste_id", 0) or 0)
                     else:
-                        job["received"] = int(job.get("received") or 0) + len(chunk_bytes)
+                        job["received"] = int(job.get("received") or 0) + delta
+                        job["last_chunk_at"] = time.time()
                         rec = job["received"]
                         total = job.get("total") or 0
                         paste_id = int(job.get("paste_id") or 0)
@@ -4196,6 +4559,7 @@ class ClipboardSyncManager:
                         except Exception:
                             actual = -1
                         if actual != expected:
+                            print(f"[FileTransfer] Sai kich thuoc {filename}: {actual} != {expected}, xoa file.")
                             log_debug(f"[file_end] Sai kích thước {filename}: {actual} != {expected}, xóa file.")
                             try:
                                 if path and os.path.exists(path):
@@ -4226,14 +4590,14 @@ class ClipboardSyncManager:
             aborted = getattr(self, "_aborted_xfer_ids", None) or set()
             if (xid is not None and xid in aborted) or (paste_id and paste_id in (getattr(self, "_cancelled_paste_ids", None) or set())):
                 log_debug("[batch_end] Đã hủy — bỏ qua FILES.")
-                self.close_dialog(job_id=paste_id or xid)
+                self.close_dialog(job_id=paste_id or xid, reason="batch_end da huy")
                 jobs.pop(xid, None)
                 if not jobs:
                     self.transfer_done_event.set()
                     self.transfer_in_progress = False
                 return
             ok_paths = list((job or {}).get("paths") or getattr(self, "batch_paths", None) or [])
-            self.close_dialog(job_id=paste_id or xid)
+            self.close_dialog(job_id=paste_id or xid, reason="batch_end xong")
             if not jobs or len(jobs) <= 1:
                 self.transfer_done_event.set()
             try:
@@ -4254,7 +4618,9 @@ class ClipboardSyncManager:
                 pass
             if self.app and getattr(self.app, 'is_headless', False):
                 meta = list((job or {}).get("expected_files") or [])
-                if meta and not _paths_match_expected_sizes(ok_paths, meta):
+                why = []
+                if meta and not _paths_match_expected_sizes(ok_paths, meta, detail=why):
+                    print("[FileTransfer] batch_end: size khong khop snapshot paste, khong gui FILES. " + "; ".join(why))
                     log_debug("[batch_end] HEADLESS: size không khớp snapshot paste, không gửi FILES.")
                     ok_paths = []
                 dest = (job or {}).get("paste_dest") or getattr(self, "_paste_dest_dir", None)
@@ -4986,22 +5352,35 @@ def run_clipboard_agent_mode():
                 gui_queue.put(("cancel", pid))
                 return
 
-            deadline = time.time() + 600.0
-            while time.time() < deadline:
-                if not job.get("allow"):
-                    agent_print("[ClipboardAgent] Huy luc cho file (nen).")
-                    break
-                if job["event"].wait(0.2):
-                    break
-            if job.get("allow") and job["event"].is_set() and not job.get("paths"):
+            wait_start = time.time()
+            last_hb = wait_start
+            while job.get("allow") and not job["event"].is_set():
+                job["event"].wait(0.5)
+                now = time.time()
+                if now - last_hb >= 60.0:
+                    last_hb = now
+                    nbytes = int(job.get("last_progress_bytes") or 0)
+                    agent_print(
+                        f"[ClipboardAgent] Dang cho FILES paste_id={pid} received={nbytes} "
+                        f"({int(now - wait_start)}s) — dialog van mo."
+                    )
+            if not job.get("allow"):
+                agent_print("[ClipboardAgent] Huy luc cho file (nguoi dung / CANCEL).")
+                leftover = list(job.get("paths") or [])
+                _agent_cleanup_partial(leftover)
+                gui_queue.put(("cancel", pid))
+                return
+            if job.get("event").is_set() and not job.get("paths"):
                 agent_print("[ClipboardAgent] Paste khong tai file (skip / khong con file).")
                 gui_queue.put(("end", pid))
                 return
-            if job.get("allow") and job["event"].is_set() and job.get("paths"):
+            if job.get("event").is_set() and job.get("paths"):
                 final_paths = list(job["paths"])
-                meta_files = list((info.get("files") if info else None) or [])
-                if not _paths_match_expected_sizes(final_paths, meta_files):
-                    agent_print("[ClipboardAgent] File chưa đủ dung lượng — không chuyển.")
+                meta_files = list(job.get("requested_files") or (info.get("files") if info else None) or [])
+                why = []
+                if not _paths_match_expected_sizes(final_paths, meta_files, detail=why):
+                    agent_print("[ClipboardAgent] File chưa đủ dung lượng — không chuyển. " + "; ".join(why))
+                    _agent_cleanup_partial(final_paths)
                     gui_queue.put(("cancel", pid))
                 else:
                     skip = set(job.get("conflict_skip") or [])
@@ -5061,13 +5440,23 @@ def run_clipboard_agent_mode():
                     gui_queue.put(("end", pid))
                     agent_print("[ClipboardAgent] Da chuyen file xong (sau khi thoat RENDERFORMAT).")
             else:
+                agent_print(
+                    f"[ClipboardAgent] Cho FILES ket thuc bat thuong "
+                    f"event={job['event'].is_set()} allow={job.get('allow')} "
+                    f"n_paths={len(job.get('paths') or [])}."
+                )
                 leftover = list(job.get("paths") or [])
                 _agent_cleanup_partial(leftover)
                 gui_queue.put(("cancel", pid))
+                _send_cancel_to_host(pid)
         except Exception as e:
             agent_print(f"[ClipboardAgent] Loi hoan tat paste nen: {e}")
             _agent_cleanup_partial(list(job.get("paths") or []))
             gui_queue.put(("cancel", pid))
+            try:
+                _send_cancel_to_host(pid)
+            except Exception:
+                pass
         finally:
             _agent_jobs.pop(pid, None)
             if not _agent_jobs:
@@ -5248,6 +5637,9 @@ def run_clipboard_agent_mode():
                     "conflict_event": threading.Event(),
                     "conflict_choice": "replace",
                     "conflict_skip": set(),
+                    "requested_files": [],
+                    "last_progress_bytes": 0,
+                    "last_progress_at": time.time(),
                 }
                 _agent_jobs[paste_id] = job
                 gui_queue.put(("conflict_check", (
@@ -5625,12 +6017,21 @@ def run_clipboard_agent_mode():
                         for cand in _agent_jobs.values():
                             if not cand.get("accept"):
                                 continue
+                            meta = ((cand.get("requested_files") or None) or (cand.get("info") or {}).get("files") or [])
                             exp = [
                                 os.path.basename(str(f.get("name") or "").replace("\\", "/")).lower()
-                                for f in ((cand.get("info") or {}).get("files") or [])
+                                for f in meta
                                 if isinstance(f, dict)
                             ]
-                            if exp and got and set(got) <= set(exp):
+                            exp_top = {
+                                str(f.get("name") or "").replace("\\", "/").split("/")[0].lower()
+                                for f in meta
+                                if isinstance(f, dict) and f.get("name")
+                            }
+                            if got and (
+                                (exp and set(got) <= set(exp))
+                                or (exp_top and set(got) <= exp_top)
+                            ):
                                 job = cand
                                 break
                     if job is None or not job.get("accept"):
@@ -5654,6 +6055,13 @@ def run_clipboard_agent_mode():
                     if dlg:
                         try: dlg.update_progress(nbytes)
                         except: pass
+                    job = _agent_jobs.get(pid) if pid is not None else None
+                    if job is not None:
+                        job["last_progress_at"] = time.time()
+                        try:
+                            job["last_progress_bytes"] = int(nbytes or 0)
+                        except Exception:
+                            pass
                 elif action == "finalize_start":
                     if isinstance(val, (tuple, list)):
                         n, pid = (val[0] if val else 0), (val[1] if len(val) > 1 else None)
@@ -5723,6 +6131,7 @@ def run_clipboard_agent_mode():
                         sz = total_size if size is None else size
                         if not req:
                             return False
+                        job["requested_files"] = [dict(f) if isinstance(f, dict) else f for f in req]
                         _open_paste_progress_dialog(
                             paste_id,
                             display_name,

@@ -19,7 +19,7 @@ from PIL import ImageTk
 from gui.components import ProgressDialog
 from utils.clipboard_api import get_clipboard_text
 import socket
-from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
+from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, CLIPBOARD_PKT_TYPES
 
 from core.i18n import _
 from utils.logger import log_debug, log_activity
@@ -127,7 +127,7 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "screen_cover_state":
                         globals()['viewer_cover_state'] = bool(event.get("active"))
                         continue
-                    elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end", "batch_end", "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack", "clipboard_text", "clipboard_image", "clear_clipboard"):
+                    elif evt_type in CLIPBOARD_PKT_TYPES:
                         if clipboard_sync_manager:
                             clipboard_sync_manager.handle_received_packet(event)
                         continue
