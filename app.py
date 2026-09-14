@@ -757,6 +757,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         self._status_query_worker_started = False
         self._status_scanned = set()
         self._status_online = {}
+        self._status_offline_strikes = {}
         self._saved_id_groups = {}
         self._status_fg_focus_group = None
         self.tray_icon = None
@@ -1725,6 +1726,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if force:
                 self._status_scanned = set()
                 self._status_online = {}
+                self._status_offline_strikes = {}
 
             import json
             current_hash = json.dumps(computers, sort_keys=True)
@@ -3310,46 +3312,83 @@ Comment=Remote Desktop P2P AutoStart
         self._ensure_status_query_worker()
 
     def query_computer_status(self, clean_id, priority=None):
-        if clean_id == getattr(self, "my_id_clean", None):
-            self.update_saved_computer_status(clean_id, True)
-            return
         self._ensure_status_query_worker()
         self._probe_saved_status(clean_id)
 
+    def _canonical_saved_id(self, cid):
+        from utils.hwid import canonical_hwid
+        return canonical_hwid(str(cid or "").replace(" ", ""))
+
+    def _is_live_saved_session(self, cid):
+        """Máy mình hoặc đang có cửa sổ điều khiển — không đánh offline từ check_online."""
+        cid = self._canonical_saved_id(cid)
+        if not cid:
+            return False
+        if cid == self._canonical_saved_id(getattr(self, "my_id_clean", "") or ""):
+            return True
+        for v in list(getattr(self, "active_viewers", None) or []):
+            try:
+                proc = v.get("process")
+                if proc is not None and not proc.is_alive():
+                    continue
+            except Exception:
+                continue
+            if self._canonical_saved_id(v.get("partner_id")) == cid:
+                return True
+        return False
+
+    def _next_online_gen(self, cid):
+        gens = getattr(self, "_online_gen", None)
+        if gens is None:
+            self._online_gen = {}
+            gens = self._online_gen
+        n = int(gens.get(cid, 0) or 0) + 1
+        gens[cid] = n
+        return n
+
     def _probe_saved_status(self, cid):
+        cid = self._canonical_saved_id(cid)
         if not cid:
             return
-        if cid == getattr(self, "my_id_clean", None):
+        if self._is_live_saved_session(cid):
             self.update_saved_computer_status(cid, True)
             return
         sock = getattr(self, "primary_signaling_socket", None)
         if not sock:
             return
         lock = getattr(self, "_online_vote_lock", None)
-        if lock is not None:
-            with lock:
-                if cid in getattr(self, "_online_expect", {}):
-                    return
+        if lock is None:
+            return
+        with lock:
+            if cid in getattr(self, "_online_expect", {}):
+                return
+            gen = self._next_online_gen(cid)
         try:
             from utils.hwid import signaling_lookup_ids
             aliases = signaling_lookup_ids(cid)
-            if lock is not None:
-                with lock:
-                    self._online_expect[cid] = len(aliases)
-                    self._online_got[cid] = 0
-                    self._online_any[cid] = False
+            with lock:
+                if self._online_gen.get(cid) != gen:
+                    return
+                self._online_expect[cid] = len(aliases) or 1
+                self._online_got[cid] = 0
+                self._online_any[cid] = False
             try:
-                self.after(1800, lambda c=cid: self.check_and_default_offline(c))
+                self.after(2500, lambda c=cid, g=gen: self.check_and_default_offline(c, g))
             except Exception:
                 pass
             for alias in aliases:
+                with lock:
+                    if self._online_gen.get(cid) != gen or cid not in self._online_expect:
+                        break
+                    if self._online_any.get(cid):
+                        break
                 req = json.dumps({"action": "check_online", "target": alias})
                 with self.signaling_lock:
                     send_msg(sock, req.encode("utf-8"), APP_KEY)
                 time.sleep(0.02)
         except Exception:
-            if lock is not None:
-                with lock:
+            with lock:
+                if self._online_gen.get(cid) == gen:
                     self._online_expect.pop(cid, None)
                     self._online_got.pop(cid, None)
                     self._online_any.pop(cid, None)
@@ -3371,6 +3410,9 @@ Comment=Remote Desktop P2P AutoStart
         self._online_expect = {}
         self._online_got = {}
         self._online_any = {}
+        self._online_gen = {}
+        if not hasattr(self, "_status_offline_strikes"):
+            self._status_offline_strikes = {}
         gap_closed = 2.0
         gap_expanded = 1.0
         gap_collapsed_open = 5.0
@@ -3436,73 +3478,77 @@ Comment=Remote Desktop P2P AutoStart
         threading.Thread(target=bg_worker, daemon=True, name="SavedStatusBg").start()
 
     def _on_check_online_result(self, target, online):
-        from utils.hwid import canonical_hwid
-        base = canonical_hwid(target)
+        base = self._canonical_saved_id(target)
+        if not base:
+            return
         lock = getattr(self, "_online_vote_lock", None)
         if lock is None or not hasattr(self, "_online_expect"):
             self.update_saved_computer_status(base, online)
             return
+        apply_now = False
+        final = False
         with lock:
             if base not in self._online_expect:
+                return
+            if online:
+                self._online_any[base] = True
                 apply_now = True
-                final = online
-            else:
-                apply_now = False
-                final = False
-                if online:
-                    self._online_any[base] = True
-                    apply_now = True
-                    final = True
-                self._online_got[base] = self._online_got.get(base, 0) + 1
-                if self._online_got[base] >= self._online_expect.get(base, 1):
-                    apply_now = True
-                    final = bool(self._online_any.get(base))
-                    self._online_expect.pop(base, None)
-                    self._online_got.pop(base, None)
-                    self._online_any.pop(base, None)
+                final = True
+            self._online_got[base] = self._online_got.get(base, 0) + 1
+            if self._online_got[base] >= self._online_expect.get(base, 1):
+                apply_now = True
+                final = bool(self._online_any.get(base))
+                self._online_expect.pop(base, None)
+                self._online_got.pop(base, None)
+                self._online_any.pop(base, None)
         if apply_now:
             self.update_saved_computer_status(base, final)
 
 
-    def check_and_default_offline(self, clean_id):
+    def check_and_default_offline(self, clean_id, gen=None):
+        clean_id = self._canonical_saved_id(clean_id)
         lock = getattr(self, "_online_vote_lock", None)
         still_waiting = False
         any_on = False
         if lock is not None and hasattr(self, "_online_expect"):
             with lock:
+                if gen is not None and getattr(self, "_online_gen", {}).get(clean_id) != gen:
+                    return
                 if clean_id in self._online_expect:
                     still_waiting = True
                     any_on = bool(self._online_any.get(clean_id))
                     self._online_expect.pop(clean_id, None)
                     self._online_got.pop(clean_id, None)
                     self._online_any.pop(clean_id, None)
-        if still_waiting:
-            if not any_on:
-                self.update_saved_computer_status(clean_id, False)
+        if not still_waiting:
             return
-        known = getattr(self, "_status_online", None)
-        if known is not None and not known.get(clean_id):
-            known[clean_id] = False
-        getattr(self, "_status_scanned", set()).add(clean_id)
-        if clean_id in self.status_dots_widgets:
-            widgets = self.status_dots_widgets[clean_id]
-            for dot_widget in widgets:
-                try:
-                    if dot_widget.winfo_exists() and dot_widget.cget("fg") == "#8A8A9A":
-                        dot_widget.config(fg="#E05252")  # Đỏ (Offline)
-                except Exception:
-                    pass
-            getattr(self, "_status_scanned", set()).add(clean_id)
-            if hasattr(self, '_reorder_saved_computers_func'):
-                self.after(50, self._reorder_saved_computers_func)
+        if any_on or self._is_live_saved_session(clean_id):
+            self.update_saved_computer_status(clean_id, True)
+            return
+        self.update_saved_computer_status(clean_id, False)
 
 
     def update_saved_computer_status(self, partner_id, is_online):
         from utils.hwid import canonical_hwid
         clean_id = canonical_hwid(partner_id)
-        getattr(self, "_status_scanned", set()).add(clean_id)
+        if not clean_id:
+            return
+        if self._is_live_saved_session(clean_id):
+            is_online = True
+        strikes = getattr(self, "_status_offline_strikes", None)
+        if strikes is None:
+            self._status_offline_strikes = {}
+            strikes = self._status_offline_strikes
         known = getattr(self, "_status_online", None)
         prev = known.get(clean_id) if known is not None else None
+        if is_online:
+            strikes[clean_id] = 0
+        else:
+            n = int(strikes.get(clean_id, 0) or 0) + 1
+            strikes[clean_id] = n
+            if prev is True and n < 2:
+                return
+        getattr(self, "_status_scanned", set()).add(clean_id)
         if known is not None:
             known[clean_id] = bool(is_online)
         status_changed = (prev is None) or (bool(prev) != bool(is_online))
