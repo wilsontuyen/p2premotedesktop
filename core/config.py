@@ -36,3 +36,14 @@ except Exception as e:
     print(f"[Config] Error reading server.ini: {e}")
 
 ENABLE_CLIPBOARD_SYNC = True
+
+
+def is_host_only_mode():
+    """Incoming-only Host UI (TeamViewer Host style)."""
+    if "--host" in sys.argv or "--host-only" in sys.argv:
+        return True
+    try:
+        name = os.path.basename(sys.executable if getattr(sys, "frozen", False) else sys.argv[0]).lower()
+        return ("host" in name) and ("service" not in name)
+    except Exception:
+        return False

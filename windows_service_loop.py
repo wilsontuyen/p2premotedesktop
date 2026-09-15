@@ -42,6 +42,7 @@ def _broker_mode_enabled():
 
 BROKER_MODE = _broker_mode_enabled()
 broker_pid = None
+_broker_thread = None
 BROKER_IPC_PORT = 12400
 
 def notify_broker_power_event(kind="shutdown"):
@@ -319,35 +320,81 @@ def find_winlogon_pid(session_id):
         log(f"Lỗi liệt kê các tiến trình: {e}")
     return None
 
+def _is_host_service():
+    """True when this loop is the Host product (not the full RemoteDesktopP2P agent)."""
+    if "--host" in sys.argv or "--host-service" in sys.argv:
+        return True
+    try:
+        exe = os.path.basename(sys.executable).lower()
+        if "host" in exe:
+            return True
+    except Exception:
+        pass
+    try:
+        # Marker file in Host install dir — do not infer from Host.exe sitting in the source repo.
+        if os.path.exists(os.path.join(app_dir, "host.mode")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+HOST_PRODUCT = _is_host_service()
+
+
 def get_executable_to_run():
-    # Prefer compiled standalone Nuitka binary
-    candidates = [
-        os.path.join(app_dir, "dist_nuitka", "app.dist", "RemoteDesktopP2P.exe"),
-        os.path.join(app_dir, "dist", "RemoteDesktopP2P.exe"),
-        os.path.join(app_dir, "dist_standalone", "app.dist", "RemoteDesktopP2P.exe"),
-        os.path.join(app_dir, "dist", "RemoteDesktopP2P", "RemoteDesktopP2P.exe"),
-        os.path.join(app_dir, "dist", "app.exe"),
-        os.path.join(app_dir, "RemoteDesktopP2P.exe"),
-        os.path.join(app_dir, "app.exe"),
-    ]
+    extra = " --host" if HOST_PRODUCT else ""
+    if HOST_PRODUCT:
+        candidates = [
+            os.path.join(app_dir, "RemoteDesktopHost.exe"),
+            os.path.join(app_dir, "dist_nuitka_host", "app.dist", "RemoteDesktopHost.exe"),
+        ]
+        log("Chế độ Host: tìm RemoteDesktopHost.exe để spawn broker/Winlogon worker.")
+    else:
+        candidates = [
+            os.path.join(app_dir, "dist_nuitka", "app.dist", "RemoteDesktopP2P.exe"),
+            os.path.join(app_dir, "dist", "RemoteDesktopP2P.exe"),
+            os.path.join(app_dir, "dist_standalone", "app.dist", "RemoteDesktopP2P.exe"),
+            os.path.join(app_dir, "dist", "RemoteDesktopP2P", "RemoteDesktopP2P.exe"),
+            os.path.join(app_dir, "dist", "app.exe"),
+            os.path.join(app_dir, "RemoteDesktopP2P.exe"),
+            os.path.join(app_dir, "app.exe"),
+        ]
     for c in candidates:
         if os.path.exists(c):
             log(f"Đã tìm thấy file thực thi biên dịch của Agent: {c}")
-            return c, f'"{c}" --headless'
+            return c, f'"{c}" --headless{extra}'
 
-    # Fallback to source
     python_exe = os.path.join(app_dir, ".venv", "Scripts", "python.exe")
     app_py = os.path.join(app_dir, "app.py")
     if os.path.exists(python_exe) and os.path.exists(app_py):
         log(f"Sử dụng nguồn Python dự phòng để chạy Agent bằng: {python_exe}")
-        return python_exe, f'"{python_exe}" "{app_py}" --headless'
+        return python_exe, f'"{python_exe}" "{app_py}" --headless{extra}'
 
     log("Lỗi: Không tìm thấy file thực thi hoặc file nguồn app.py!")
     return None, None
 
 def ensure_broker_running():
-    """Giu 1 tien trinh broker song trong Session 0 (bat tu qua doi session)."""
-    global broker_pid
+    """Giu broker Session 0. Host: chay trong cung process Service (bot 1 process)."""
+    global broker_pid, _broker_thread
+    if HOST_PRODUCT:
+        if _broker_thread and _broker_thread.is_alive():
+            broker_pid = os.getpid()
+            return
+        def _run():
+            try:
+                log("Host: khoi dong broker trong process Service...")
+                import core.broker
+                core.broker.run_broker()
+            except Exception as e:
+                log(f"Host in-process broker loi: {e}\n{traceback.format_exc()}")
+
+        _broker_thread = threading.Thread(target=_run, daemon=True, name="HostInProcessBroker")
+        _broker_thread.start()
+        broker_pid = os.getpid()
+        log(f"Host broker thread da start (cung PID Service {broker_pid}).")
+        return
+
     if broker_pid and is_process_alive(broker_pid):
         return
     exe_path, cmd_line = get_executable_to_run()
@@ -369,6 +416,48 @@ def ensure_broker_running():
         log(f"Broker (Session 0) da khoi chay voi PID {broker_pid}")
     except Exception as e:
         log(f"Khoi chay Broker that bai: {e}")
+
+
+def cleanup_stale_agent_processes():
+    """Host: chi kill broker/worker/clipboard — giu GUI ID/password. Full app: taskkill nhu cu."""
+    try:
+        import subprocess
+        if not HOST_PRODUCT:
+            subprocess.run(
+                "taskkill /F /IM RemoteDesktopP2P.exe",
+                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            log("Đã dọn dẹp các tiến trình RemoteDesktopP2P.exe còn sót lại.")
+            return
+        try:
+            import psutil
+        except Exception:
+            # Fallback: van taskkill (co the dong GUI) neu thieu psutil.
+            subprocess.run(
+                "taskkill /F /IM RemoteDesktopHost.exe",
+                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            log("Host cleanup fallback taskkill RemoteDesktopHost.exe")
+            return
+        helper_flags = ("--broker", "--capture-worker", "--clipboard-agent", "--headless")
+        killed = 0
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if name != "remotedesktophost.exe":
+                    continue
+                cmd = proc.info.get("cmdline") or []
+                joined = " ".join(str(x) for x in cmd).lower()
+                if not any(f in joined for f in helper_flags):
+                    continue  # Host GUI
+                terminate_process_with_pid(proc.info["pid"])
+                killed += 1
+            except Exception:
+                continue
+        log(f"Host: da don {killed} process helper (giu GUI).")
+    except Exception as e:
+        log(f"Lỗi khi dọn dẹp tiến trình lúc khởi động: {e}")
+
 
 def spawn_agent(session_id, is_logged_in, is_screen_locked, force_winlogon=False):
     exe_path, cmd_line = get_executable_to_run()
@@ -789,17 +878,13 @@ def is_process_alive(pid):
 
 def main():
     enable_all_privileges()
-    log("Vòng lặp service Easy Remote Desktop Agent bắt đầu chạy.")
+    product = "Host Agent" if HOST_PRODUCT else "Agent"
+    log(f"Vòng lặp service Easy Remote Desktop {product} bắt đầu chạy. HOST_PRODUCT={HOST_PRODUCT}")
     install_power_event_handler()
     configure_uac_registry()
     
-    # Clean up any lingering agent processes
-    try:
-        import subprocess
-        subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        log("Đã dọn dẹp các tiến trình RemoteDesktopP2P.exe còn sót lại.")
-    except Exception as e:
-        log(f"Lỗi khi dọn dẹp tiến trình lúc khởi động: {e}")
+    # Clean up lingering helper processes (Host keeps GUI alive).
+    cleanup_stale_agent_processes()
 
     # Start Service Events Listener thread
     import threading

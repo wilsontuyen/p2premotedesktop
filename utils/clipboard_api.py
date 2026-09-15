@@ -557,10 +557,13 @@ def set_clipboard_text(text, owner_hwnd=None):
         
         hwnd_arg = owner_hwnd if owner_hwnd is not None else None
         opened = False
-        for _ in range(30):
+        for attempt in range(30):
             if fn_OpenClipboard(hwnd_arg):
                 opened = True
                 break
+            # HWND thuộc thread khác (Tk winfo_id từ ClipPkt) luôn fail — thử OpenClipboard(NULL).
+            if hwnd_arg is not None and attempt == 2:
+                hwnd_arg = None
             time.sleep(0.05)
             
         if opened:

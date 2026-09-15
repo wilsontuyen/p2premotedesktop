@@ -246,6 +246,7 @@ class ClipboardEventListener:
         WM_RENDERFORMAT = 0x0305
         WM_DESTROYCLIPBOARD = 0x0307
         WM_SETUP_DELAYED_RENDERING = 0x0400 + 101
+        WM_SET_CLIP_TEXT = 0x0400 + 102
         
         if msg == WM_CLIPBOARDUPDATE:
             log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
@@ -266,6 +267,20 @@ class ClipboardEventListener:
             log_debug(f"[WndProc] Nhận WM_SETUP_DELAYED_RENDERING. Đang tiến hành thiết lập delayed rendering...")
             if self.manager:
                 self.manager._execute_setup_delayed_rendering()
+            return 0
+        elif msg == WM_SET_CLIP_TEXT:
+            text = getattr(self.manager, "_pending_set_text", None) if self.manager else None
+            if self.manager:
+                self.manager._pending_set_text = None
+            try:
+                if text is not None:
+                    ok = set_clipboard_text(text, hwnd)
+                    if not ok:
+                        ok = set_clipboard_text(text, None)
+                    log_debug(f"[WndProc] WM_SET_CLIP_TEXT ok={ok} n={len(text)}")
+            finally:
+                if self.manager:
+                    self.manager.ignore_destroy_clipboard = False
             return 0
             
         try:
@@ -1976,6 +1991,7 @@ class ClipboardSyncManager:
         self.meta_arrival_time = 0
         self.last_sent_text = ""
         self.last_received_text = ""
+        self._pending_set_text = None
         self._down_pipe_q = queue.Queue()
         self._down_pipe_started = False
         self._delayed_setup_tries = 0
@@ -4529,18 +4545,11 @@ class ClipboardSyncManager:
             log_debug(f"[handle_received_packet] Nhận clipboard_text: {text[:50]}...")
             print(f"[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
             self.last_received_text = text
-            self.ignore_destroy_clipboard = True
-            try:
-                owner_hwnd = getattr(self, 'cached_app_hwnd', None)
-                
-                if self.app and getattr(self.app, 'is_headless', False):
-                    # Gửi text qua Named Pipe cho Clipboard Agent
-                    threading.Thread(target=self._send_to_pipe, args=("TEXT", text), daemon=True).start()
-                    log_debug("[handle_received_packet] HEADLESS: Đang gửi text qua Named Pipe cho Clipboard Agent.")
-                else:
-                    set_clipboard_text(text, owner_hwnd)
-            finally:
-                self.ignore_destroy_clipboard = False
+            if self.app and getattr(self.app, 'is_headless', False):
+                threading.Thread(target=self._send_to_pipe, args=("TEXT", text), daemon=True).start()
+                log_debug("[handle_received_packet] HEADLESS: Đang gửi text qua Named Pipe cho Clipboard Agent.")
+            else:
+                self._apply_remote_clipboard_text(text)
             return
             
         elif ptype == "files_copied_meta":
@@ -4841,6 +4850,35 @@ class ClipboardSyncManager:
             ).start()
             return
 
+    def _apply_remote_clipboard_text(self, text):
+        """Ghi CF_UNICODETEXT trên thread của clipboard listener.
+
+        ClipPkt gọi OpenClipboard(Tk hwnd) từ thread khác → fail, clipboard trống,
+        Ctrl+V trên Host chỉ ding một tiếng.
+        """
+        self.pending_remote_files = []
+        self._reoffer_files = None
+        self.dummy_h_active = False
+        self._allow_delayed = False
+        hwnd = getattr(self.listener, "hwnd", None) if self.listener else None
+        if hwnd:
+            self._pending_set_text = text
+            self.ignore_destroy_clipboard = True
+            try:
+                ctypes.windll.user32.SendMessageW(
+                    ctypes.c_void_p(hwnd), 0x0400 + 102, 0, 0
+                )
+                log_debug("[_apply_remote_clipboard_text] SendMessage WM_SET_CLIP_TEXT xong")
+                return
+            except Exception as e:
+                log_debug(f"[_apply_remote_clipboard_text] SendMessage: {e}")
+            self.ignore_destroy_clipboard = False
+        self.ignore_destroy_clipboard = True
+        try:
+            ok = set_clipboard_text(text, None)
+            log_debug(f"[_apply_remote_clipboard_text] fallback set_clipboard_text={ok}")
+        finally:
+            self.ignore_destroy_clipboard = False
 
 
 if is_clipboard_agent or is_gui_agent:

@@ -194,7 +194,14 @@ def client_quick_link_probe(sock, password, status_cb=None):
         pass
     return net_class, ping, bandwidth
 from network.upnp import attempt_upnp_forward
-from core.viewer import run_client_viewer_loop
+try:
+    from host_build_flag import HOST_ONLY_BUILD
+except Exception:
+    HOST_ONLY_BUILD = False
+if HOST_ONLY_BUILD:
+    run_client_viewer_loop = None
+else:
+    from core.viewer import run_client_viewer_loop
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
@@ -1043,6 +1050,8 @@ class NetworkMixin:
 
 
     def click_connect(self):
+        if getattr(self, "is_host_only", False):
+            return
         partner_id = self.partner_id_var.get().strip().replace(" ", "")
         partner_pass = self.partner_pass_var.get().strip()
         
@@ -1506,6 +1515,12 @@ class NetworkMixin:
                 socket_passwords.pop(sock, None)
             
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release=""):
+        if getattr(self, "is_host_only", False) or HOST_ONLY_BUILD or run_client_viewer_loop is None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()

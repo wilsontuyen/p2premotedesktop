@@ -17,6 +17,10 @@ def E(text):
     return text
 
 def setup_linux_ui(self):
+    if getattr(self, "is_host_only", False):
+        from gui.host_ui import setup_host_ui
+        setup_host_ui(self)
+        return
     APP_FONT_NAME = "Segoe UI" if sys.platform == "win32" else "Helvetica"
     EMOJI_FONT_10 = (APP_FONT_NAME, 10)
     EMOJI_FONT_BOLD = (APP_FONT_NAME, 9, "bold")

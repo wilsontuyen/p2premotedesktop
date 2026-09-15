@@ -751,11 +751,11 @@ def set_windows_graphics_effects(enabled=True):
 
 _MAX_SEND_EDGE_LAN = 4096
 _MAX_SEND_EDGE_WAN = 2560
-_MAX_SEND_EDGE_LEGACY = 1920
+_MAX_SEND_EDGE_LEGACY = 2560
 
 
 def _is_legacy_windows_host():
-    """Windows 7/Vista: không có DXGI Desktop Duplication; JPEG 4:4:4 cũng quá nặng."""
+    """Windows 7/Vista: không có DXGI Desktop Duplication (dùng GDI)."""
     if sys.platform != "win32":
         return False
     try:
@@ -2160,10 +2160,23 @@ class HostMixin:
 
                             net_class = client_state.get("net_class", "medium")
                             q_mode = getattr(self, 'client_quality_mode', 'quality')
+
                             if _legacy_host:
-                                q_mode = "speed"
-                            
-                            if q_mode == "quality":
+                                # Win7/GDI: không ép speed (trước đây JPEG 55 + scale 0.7 → chữ vỡ).
+                                # Tôn trọng mode client; CPU yếu hơn nên FPS thấp hơn Win10.
+                                if q_mode == "quality" or net_class == "high":
+                                    base_quality = 90
+                                    fps_limit = 15
+                                    res_scale = -1.0
+                                elif net_class == "low":
+                                    base_quality = 72
+                                    fps_limit = 10
+                                    res_scale = 0.9
+                                else:
+                                    base_quality = 85
+                                    fps_limit = 12
+                                    res_scale = 1.0
+                            elif q_mode == "quality":
                                 base_quality = 96
                                 fps_limit = 25
                                 res_scale = -1.0
@@ -2171,10 +2184,10 @@ class HostMixin:
                                 base_quality = 98
                                 fps_limit = 60
                                 res_scale = -1.0
-                            elif net_class == "low" or _legacy_host:
-                                base_quality = 55 if _legacy_host else 40
-                                fps_limit = 10 if _legacy_host else 12
-                                res_scale = 0.7 if _legacy_host else 0.6
+                            elif net_class == "low":
+                                base_quality = 40
+                                fps_limit = 12
+                                res_scale = 0.6
                             else:
                                 base_quality = 75
                                 fps_limit = 30
@@ -2187,8 +2200,10 @@ class HostMixin:
                             if "start_time" not in client_state:
                                 client_state["start_time"] = time.time()
                                 
-                            if (not _legacy_host) and time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
-                                quality = min(98, quality + 10)
+                            if time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
+                                # 5s đầu: ưu tiên nét (cả Win7) để UI/chữ đọc được ngay.
+                                boost = 6 if _legacy_host else 10
+                                quality = min(98 if not _legacy_host else 92, quality + boost)
                                 if dyn_scale >= 0:
                                     dyn_scale = min(1.0, dyn_scale + 0.1)
                                 client_state["dyn_quality"] = quality
@@ -2281,7 +2296,9 @@ class HostMixin:
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
                             if (not _legacy_host) and hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_OPTIMIZE), 1])
-                            if (not _legacy_host) and quality >= 88 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
+                            # 4:4:4 giữ sắc độ chữ (Win7 trước đây tắt → chữ bị lem/block).
+                            _jpeg_444_min = 80 if _legacy_host else 88
+                            if quality >= _jpeg_444_min and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
                             if not result:
@@ -2302,22 +2319,25 @@ class HostMixin:
                             ema = client_state["send_ema"]
                             
                             if q_mode == "quality":
-                                quality = max(94, min(98, int(quality)))
+                                floor_q = 88 if _legacy_host else 94
+                                ceil_q = 92 if _legacy_host else 98
+                                quality = max(floor_q, min(ceil_q, int(quality)))
                                 if ema > 0.45:
                                     sleep_time = min(0.12, sleep_time + 0.02)
                                 elif ema < 0.20:
-                                    sleep_time = max(1.0 / 30, sleep_time - 0.005)
+                                    sleep_time = max(1.0 / (15 if _legacy_host else 30), sleep_time - 0.005)
                                 dyn_scale = -1.0
                             elif ema > 0.35:
                                 # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
-                                quality = max(max(35, base_quality - 20), quality - 5)
+                                floor_drop = 55 if _legacy_host else max(35, base_quality - 20)
+                                quality = max(floor_drop, quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
                                 if ema > 0.6 and dyn_scale >= 0:
                                     dyn_scale = max(max(0.5, res_scale if res_scale > 0 else 0.5), dyn_scale - 0.05)
                             elif ema < 0.20:
                                 # Mạng tốt: Tăng dần chất lượng và scale
-                                quality = min(98, quality + 1)
-                                sleep_time = max(1.0 / 60, sleep_time - 0.005)
+                                quality = min(92 if _legacy_host else 98, quality + 1)
+                                sleep_time = max(1.0 / (15 if _legacy_host else 60), sleep_time - 0.005)
                                 if res_scale < 0:
                                     dyn_scale = -1.0  # Phục hồi về full resolution mode
                                 elif dyn_scale >= 0:

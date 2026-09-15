@@ -141,7 +141,14 @@ import sys
 
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
 from core.host import encrypt_text, decrypt_text
-from core.viewer import run_client_viewer_loop
+try:
+    from host_build_flag import HOST_ONLY_BUILD
+except Exception:
+    HOST_ONLY_BUILD = False
+if HOST_ONLY_BUILD:
+    run_client_viewer_loop = None
+else:
+    from core.viewer import run_client_viewer_loop
 
 # Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
 _orig_toplevel_geometry = tk.Toplevel.geometry
@@ -175,7 +182,10 @@ from gui.window_icon import install_toplevel_app_icon, set_dialog_app_icon
 install_toplevel_app_icon()
 
 
-import pygame
+if HOST_ONLY_BUILD:
+    pygame = None
+else:
+    import pygame
 import sys
 import os
 import traceback
@@ -350,6 +360,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         # mang phia viewer; thay vao do noi toi broker qua IPC noi bo.
         self.is_capture_worker = "--capture-worker" in sys.argv
         self.is_headless = ("--headless" in sys.argv) or self.is_capture_worker
+        self.is_host_only = is_host_only_mode()
         
         # Tạm ẩn cửa sổ trắng trong lúc khởi tạo giao diện
         self.withdraw()
@@ -372,7 +383,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     pass
             builtins.print = unbuffered_print
             
-            print(f"\n--- App started in {'headless' if self.is_headless else 'GUI'} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+            mode_name = "headless" if self.is_headless else ("host" if self.is_host_only else "GUI")
+            print(f"\n--- App started in {mode_name} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
             
             # Run diagnostics check for both GUI and Headless clients
             try:
@@ -447,8 +459,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     def _diag_schtask():
                         try:
                             import subprocess
-                            res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
-                            print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+                            tasks = ["EasyRemoteDesktopHostAgent"] if getattr(self, "is_host_only", False) else ["EasyRemoteDesktopAgent"]
+                            for tn in tasks:
+                                res = subprocess.run(f'schtasks /query /tn "{tn}" /fo list', shell=True, capture_output=True, text=True)
+                                print(f"[Diagnostics] Scheduled Task {tn}:\n{res.stdout if res.returncode == 0 else res.stderr}")
                         except Exception as te:
                             print(f"[Diagnostics] Failed to query scheduled task: {te}")
                     threading.Thread(target=_diag_schtask, name="DiagSchtask", daemon=True).start()
@@ -520,7 +534,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             clipboard_sync_manager.register_app(self)
         
         # Window attributes
-        title_text = "Easy Remote Desktop"
+        title_text = "Easy Remote Desktop Host" if getattr(self, "is_host_only", False) else "Easy Remote Desktop"
         try:
             is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
             try:
@@ -690,6 +704,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                 if "/opt/p2p_remote" in exe_path_abs:
                     self.is_service_active = True
             elif sys.platform == "win32":
+                if getattr(self, "is_host_only", False):
+                    self.ensure_host_background_agent()
                 self.is_service_active = self.check_if_service_active()
                 print(f"[Host GUI] Background host running: {self.is_service_active}")
 
@@ -796,7 +812,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             if not self.is_headless:
                 self.deiconify()
                 self.after(250, self.maybe_show_disclaimer)
-                self.after(1000, self._start_saved_status_bg)
+                if not getattr(self, "is_host_only", False):
+                    self.after(1000, self._start_saved_status_bg)
                 
         except Exception as e:
             import traceback
@@ -1031,6 +1048,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         
     # Auto formatting spaces inside ID: "123 456 789 012"
     def format_partner_id(self, *args):
+        if getattr(self, "is_host_only", False):
+            return
         # Defer formatting to after the current key event is fully processed
         # This prevents cursor position conflicts when typing rapidly
         if hasattr(self, '_format_after_id') and self._format_after_id:
@@ -1158,8 +1177,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
             pass
 
         scale = self.winfo_fpixels('1i') / 96.0
-        min_w = int(680 * scale)
-        min_h = int(445 * scale) # Chiều cao vừa khít, không để lại khoảng trống thừa
+        if getattr(self, "is_host_only", False):
+            min_w = int(380 * scale)
+            min_h = int(500 * scale)
+        else:
+            min_w = int(680 * scale)
+            min_h = int(445 * scale) # Chiều cao vừa khít, không để lại khoảng trống thừa
         default_geometry = f"{min_w}x{min_h}"
         self.minsize(min_w, min_h)
         if os.path.exists(self.config_file):
@@ -2730,14 +2753,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
 
+    def _startup_run_key_name(self):
+        return "RemoteDesktopHost" if getattr(self, "is_host_only", False) else "RemoteDesktopP2P"
+
     def is_startup_enabled(self):
         if sys.platform != "win32":
             import os
-            autostart_path = os.path.expanduser("~/.config/autostart/RemoteDesktopP2P.desktop")
+            desktop_name = "RemoteDesktopHost.desktop" if getattr(self, "is_host_only", False) else "RemoteDesktopP2P.desktop"
+            autostart_path = os.path.expanduser(f"~/.config/autostart/{desktop_name}")
             return os.path.exists(autostart_path)
         import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        key_name = "RemoteDesktopP2P"
+        key_name = self._startup_run_key_name()
         approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
@@ -2774,7 +2801,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
 
         if sys.platform != "win32":
             autostart_dir = os.path.expanduser("~/.config/autostart")
-            autostart_path = os.path.join(autostart_dir, "RemoteDesktopP2P.desktop")
+            desktop_name = "RemoteDesktopHost.desktop" if getattr(self, "is_host_only", False) else "RemoteDesktopP2P.desktop"
+            autostart_path = os.path.join(autostart_dir, desktop_name)
             if enabled:
                 try:
                     os.makedirs(autostart_dir, exist_ok=True)
@@ -2783,13 +2811,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
                     else:
                         exe_path = f'{sys.executable} "{os.path.abspath(sys.argv[0])}"'
                     
+                    app_name = "Easy Remote Desktop Host" if getattr(self, "is_host_only", False) else "Easy Remote Desktop"
                     desktop_entry = f"""[Desktop Entry]
 Type=Application
 Exec={exe_path}
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
-Name=Easy Remote Desktop
+Name={app_name}
 Comment=Remote Desktop P2P AutoStart
 """
                     with open(autostart_path, "w") as f:
@@ -2813,7 +2842,7 @@ Comment=Remote Desktop P2P AutoStart
 
         import winreg
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        key_name = "RemoteDesktopP2P"
+        key_name = self._startup_run_key_name()
         approved_key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
         
         if getattr(sys, 'frozen', False):
@@ -2836,7 +2865,14 @@ Comment=Remote Desktop P2P AutoStart
                 except Exception as e:
                     print(f"[Startup] Warning: Could not set StartupApproved: {e}")
                 print(f"[Startup] Enabled run on startup: {exe_path}")
-                self.show_custom_info(_("Thành công"), _("Đã bật tính năng chạy khi mở máy thành công!"))
+                if getattr(self, "is_host_only", False):
+                    self.ensure_host_background_agent()
+                    self.show_custom_info(
+                        _("Thành công"),
+                        _("Đã bật chạy khi mở máy.\nDịch vụ nền vẫn luôn chạy để điều khiển màn hình khóa / đăng nhập."),
+                    )
+                else:
+                    self.show_custom_info(_("Thành công"), _("Đã bật tính năng chạy khi mở máy thành công!"))
             else:
                 try:
                     winreg.DeleteValue(key, key_name)
@@ -3220,7 +3256,7 @@ Comment=Remote Desktop P2P AutoStart
         about.grab_set()
         
         # Thiết kế giao diện premium cho dialog About
-        title_label = tk.Label(about, text="Easy Remote Desktop", font=("Inter", 13, "bold"), fg=self.text_white, bg=self.bg_color)
+        title_label = tk.Label(about, text="Easy Remote Desktop Host" if getattr(self, "is_host_only", False) else "Easy Remote Desktop", font=("Inter", 13, "bold"), fg=self.text_white, bg=self.bg_color)
         title_label.pack(pady=(15, 2))
         
         ai_label = tk.Label(about, text=_("AI Pro Version"), font=("Inter", 9, "bold"), fg=self.btn_color, bg=self.bg_color)
@@ -3401,7 +3437,7 @@ Comment=Remote Desktop P2P AutoStart
         return expanded, collapsed_ids, all_ids
 
     def _start_saved_status_bg(self):
-        if getattr(self, "is_headless", False) or getattr(self, "_status_bg_started", False):
+        if getattr(self, "is_headless", False) or getattr(self, "is_host_only", False) or getattr(self, "_status_bg_started", False):
             return
         self._status_bg_started = True
         self._ensure_status_query_worker()
@@ -4056,9 +4092,9 @@ Comment=Remote Desktop P2P AutoStart
                     if pid == my_pid:
                         continue
                     name = (proc.info.get('name') or '').lower()
-                    if name == "remotedesktopservice.exe":
+                    if name in ("remotedesktopservice.exe", "remotedesktophostservice.exe"):
                         return True
-                    if name == "remotedesktopp2p.exe":
+                    if name in ("remotedesktopp2p.exe", "remotedesktophost.exe"):
                         cmd = proc.info.get('cmdline') or []
                         joined = " ".join(str(x) for x in cmd).lower()
                         if "--capture-worker" in joined:
@@ -4069,6 +4105,45 @@ Comment=Remote Desktop P2P AutoStart
                     continue
         except Exception:
             pass
+        return False
+
+    def ensure_host_background_agent(self):
+        """Ensure SYSTEM Host service is registered/running (Winlogon / login screen capture)."""
+        if sys.platform != "win32" or not getattr(self, "is_host_only", False):
+            return False
+        if self.check_if_service_active():
+            return True
+        try:
+            import subprocess
+            service_exe = os.path.join(app_dir, "RemoteDesktopHostService.exe")
+            if not os.path.exists(service_exe):
+                print("[Host] RemoteDesktopHostService.exe missing — login-screen capture unavailable.")
+                return False
+            task = "EasyRemoteDesktopHostAgent"
+            # Quoted path required when install dir has spaces (Program Files).
+            tr = f'"{service_exe}"'
+            create = [
+                "schtasks.exe", "/create", "/tn", task,
+                "/tr", tr, "/sc", "onstart",
+                "/ru", "NT AUTHORITY\\SYSTEM", "/rl", "highest", "/f",
+            ]
+            run = ["schtasks.exe", "/run", "/tn", task]
+            for args in (create, run):
+                try:
+                    r = subprocess.run(args, capture_output=True, text=True, timeout=20)
+                    if r.returncode != 0:
+                        err = (r.stderr or r.stdout or "").strip()
+                        print(f"[Host] {' '.join(args[:3])}... rc={r.returncode} {err[:200]}")
+                except Exception as e:
+                    print(f"[Host] Background agent cmd failed: {e}")
+            for _ in range(20):
+                if self.check_if_service_active():
+                    print("[Host] Background agent is running (login/lock screen capture ready).")
+                    return True
+                time.sleep(0.25)
+            print("[Host] Background agent not detected yet — reinstall Host or run as admin once.")
+        except Exception as e:
+            print(f"[Host] ensure_host_background_agent: {e}")
         return False
 
     def _poll_signaling_status(self):
@@ -4162,6 +4237,12 @@ Comment=Remote Desktop P2P AutoStart
         # Lưu tọa độ hiện tại trước khi ẩn cửa sổ
         self.save_window_position()
         
+        # Host: luôn thu nhỏ xuống tray — service SYSTEM vẫn bắt màn hình đăng nhập.
+        if getattr(self, "is_host_only", False):
+            self.withdraw()
+            print("[Tray] Host minimized to system tray.")
+            return
+
         # Nếu tùy chọn "Chạy khi mở máy" được bật thì thu nhỏ xuống system tray
         if getattr(self, 'startup_var', None) and self.startup_var.get():
             self.withdraw()
@@ -4200,7 +4281,8 @@ Comment=Remote Desktop P2P AutoStart
                 item(_('Thoát (Exit)'), self.exit_from_tray)
             )
             
-            self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, "Easy Remote Desktop", menu)
+            tray_title = "Easy Remote Desktop Host" if getattr(self, "is_host_only", False) else "Easy Remote Desktop"
+            self.tray_icon = pystray.Icon("EasyRemoteDesktop", image, tray_title, menu)
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             print("[Tray] System tray icon started successfully.")
         except Exception as e:
@@ -4534,7 +4616,9 @@ if __name__ == '__main__':
                         visible = False
                         try:
                             user32 = ctypes.windll.user32
-                            hwnd = user32.FindWindowW(None, "Easy Remote Desktop")
+                            hwnd = user32.FindWindowW(None, "Easy Remote Desktop Host")
+                            if not hwnd:
+                                hwnd = user32.FindWindowW(None, "Easy Remote Desktop")
                             if hwnd:
                                 user32.ShowWindow(hwnd, 9)
                                 user32.ShowWindow(hwnd, 5)
