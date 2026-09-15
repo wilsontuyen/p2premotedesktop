@@ -174,14 +174,7 @@ def setup_host_ui(self):
         self, text=_("P2P REMOTE HOST"),
         font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color,
     )
-    header.pack(pady=(15, 4))
-
-    subheader = tk.Label(
-        self, text=_("Nhận điều khiển từ xa — chạy nền, kể cả màn hình khóa / đăng nhập Windows"),
-        font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.bg_color,
-        wraplength=340, justify=tk.CENTER,
-    )
-    subheader.pack(pady=(0, 12))
+    header.pack(pady=(15, 12))
 
     panel = tk.Frame(self, bg=self.card_color, bd=0, relief=tk.FLAT)
     self._left_panel = panel
@@ -282,17 +275,7 @@ def setup_host_ui(self):
         bd=0,
         anchor=tk.W,
     )
-    startup_chk.pack(anchor=tk.W, padx=16, pady=(0, 4))
-    tk.Label(
-        panel,
-        text=_("Dịch vụ nền luôn chạy — có thể điều khiển màn hình khóa và đăng nhập Windows."),
-        font=(APP_FONT_NAME, 8),
-        fg="#8A8A9A",
-        bg=self.card_color,
-        wraplength=320,
-        justify=tk.LEFT,
-        anchor=tk.W,
-    ).pack(anchor=tk.W, padx=16, pady=(0, 10))
+    startup_chk.pack(anchor=tk.W, padx=16, pady=(0, 12))
 
     # Stubs only — real Tk Entry/Button steal OLE clipboard and break remote paste.
     class _HostUiStub:
