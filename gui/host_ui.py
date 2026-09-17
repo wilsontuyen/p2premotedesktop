@@ -170,6 +170,15 @@ def setup_host_ui(self):
     menubar.add_cascade(label=_("Help"), menu=help_menu)
     self.config(menu=menubar)
 
+    status_bar = tk.Frame(self, bg=self.entry_bg, height=28)
+    status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+    status_bar.pack_propagate(False)
+    self.lbl_status = tk.Label(
+        status_bar, textvariable=self.status_var,
+        font=(APP_FONT_NAME, 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W,
+    )
+    self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
+
     header = tk.Label(
         self, text=_("P2P REMOTE HOST"),
         font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color,
@@ -178,7 +187,7 @@ def setup_host_ui(self):
 
     panel = tk.Frame(self, bg=self.card_color, bd=0, relief=tk.FLAT)
     self._left_panel = panel
-    panel.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 8))
+    panel.pack(fill=tk.X, expand=False, padx=18, pady=(0, 6))
 
     lbl_allow = tk.Label(
         panel, text=_("CHO PHÉP ĐIỀU KHIỂN"),
@@ -275,7 +284,7 @@ def setup_host_ui(self):
         bd=0,
         anchor=tk.W,
     )
-    startup_chk.pack(anchor=tk.W, padx=16, pady=(0, 12))
+    startup_chk.pack(anchor=tk.W, padx=16, pady=(0, 8))
 
     # Stubs only — real Tk Entry/Button steal OLE clipboard and break remote paste.
     class _HostUiStub:
@@ -296,14 +305,6 @@ def setup_host_ui(self):
     self.connect_btn = _stub
     self.add_partner_btn = _stub
     self._right_panel = None
-
-    status_bar = tk.Frame(self, bg=self.entry_bg, height=25)
-    status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-    self.lbl_status = tk.Label(
-        status_bar, textvariable=self.status_var,
-        font=(APP_FONT_NAME, 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W,
-    )
-    self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
 
     if not self.is_headless:
         self.setup_tray_icon()

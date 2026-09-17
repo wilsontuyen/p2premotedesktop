@@ -49,16 +49,7 @@ def main():
         except: pass
 
     log("=== STARTING BUILD AND DEPLOYMENT ===")
-
-    # 1. Stop Scheduled Task
-    log("Stopping scheduled task 'EasyRemoteDesktopAgent'...")
-    subprocess.run("schtasks /end /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    # 2. Terminate running instances to release file locks
-    log("Terminating any running instances of agent and service...")
-    subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
+    # Không tắt app/service đang chạy — build ra dist riêng, không đụng process đang mở.
 
     # Metadata for Anti-Virus (Reduces False Positives)
     company_name = "P2P Remote Desktop"
@@ -125,29 +116,13 @@ def main():
             log(f"Failed to rename app.exe: {e}")
             return
             
-    # Copy Nuitka Service standalone files into app.dist (merging them)
-    service_dist_dir = os.path.join(workspace_dir, "dist_nuitka_service", "windows_service_loop.dist")
-    if os.path.exists(service_dist_dir):
-        log("Merging RemoteDesktopService standalone files into app.dist...")
-        for item in os.listdir(service_dist_dir):
-            s = os.path.join(service_dist_dir, item)
-            d = os.path.join(app_dist_dir, item)
-            if item.lower() == "windows_service_loop.exe":
-                d = os.path.join(app_dist_dir, "RemoteDesktopService.exe")
-            try:
-                if os.path.isdir(s):
-                    if os.path.exists(d):
-                        shutil.rmtree(d)
-                    shutil.copytree(s, d)
-                else:
-                    shutil.copy2(s, d)
-            except Exception as e:
-                log(f"Warning: Failed to merge service file {item}: {e}")
-    else:
+    # Chỉ lấy service exe + file runtime còn thiếu — không đè cả cây standalone (tránh phình / ghi đè DLL).
+    if not merge_full_service(app_dist_dir):
         log("ERROR: Compiled RemoteDesktopService standalone directory not found!")
         return
 
     shorten_openblas_dll(app_dist_dir)
+    log_dist_size(app_dist_dir, "Full app.dist")
 
     # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
     files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt"]
@@ -196,7 +171,9 @@ def main():
                 log("WARNING: Inno Setup build failed.")
             else:
                 log("Successfully built setup.exe using Inno Setup.")
-                try_authenticode_sign(os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe"))
+                installer_path = os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe")
+                try_authenticode_sign(installer_path)
+                log_file_size(installer_path, "Full installer")
         else:
             log("WARNING: installer.iss not found. Skipping installer build.")
     else:
@@ -207,7 +184,9 @@ def main():
                 log("WARNING: Inno Setup build failed.")
             else:
                 log("Successfully built setup.exe using Inno Setup.")
-                try_authenticode_sign(os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe"))
+                installer_path = os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe")
+                try_authenticode_sign(installer_path)
+                log_file_size(installer_path, "Full installer")
         except Exception:
             log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
 
@@ -229,6 +208,61 @@ def main():
         log(f"Failed to show popup: {e}")
 
     log("=== BUILD AND DEPLOYMENT FINISHED ===")
+    log("Note: Host installer is separate (build_host.py → EasyRemoteDesktopHost_Installer.exe); not packed into full installer.")
+
+
+def merge_full_service(app_dist_dir):
+    """Ghép RemoteDesktopService.exe + deps thiếu vào app.dist (giống slim merge của Host)."""
+    service_dist_dir = os.path.join(workspace_dir, "dist_nuitka_service", "windows_service_loop.dist")
+    if not os.path.exists(service_dist_dir):
+        return False
+    svc_src = os.path.join(service_dist_dir, "windows_service_loop.exe")
+    svc_dst = os.path.join(app_dist_dir, "RemoteDesktopService.exe")
+    if not os.path.exists(svc_src):
+        log("ERROR: windows_service_loop.exe missing in service dist.")
+        return False
+    log("Merging RemoteDesktopService.exe (slim — only missing runtime files)...")
+    shutil.copy2(svc_src, svc_dst)
+    for item in os.listdir(service_dist_dir):
+        if item.lower() == "windows_service_loop.exe":
+            continue
+        s = os.path.join(service_dist_dir, item)
+        d = os.path.join(app_dist_dir, item)
+        if os.path.exists(d):
+            continue
+        try:
+            if os.path.isdir(s):
+                shutil.copytree(s, d)
+            else:
+                shutil.copy2(s, d)
+        except Exception as e:
+            log(f"Warning: Failed to merge service file {item}: {e}")
+    try_authenticode_sign(svc_dst)
+    log("Added RemoteDesktopService.exe")
+    return True
+
+
+def log_dist_size(app_dist_dir, label):
+    try:
+        total = 0
+        for root, _dirs, files in os.walk(app_dist_dir):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except Exception:
+                    pass
+        log(f"{label}: {total / (1024 * 1024):.1f} MB")
+    except Exception as e:
+        log(f"Could not measure {label}: {e}")
+
+
+def log_file_size(path, label):
+    try:
+        if os.path.exists(path):
+            log(f"{label}: {os.path.getsize(path) / (1024 * 1024):.1f} MB ({path})")
+    except Exception as e:
+        log(f"Could not measure {label}: {e}")
+
 
 def shorten_openblas_dll(app_dist_dir):
     """Đổi tên DLL OpenBLAS do NumPy đóng gói (tên hash dài) thành libopenblas.dll và vá import trong .pyd."""

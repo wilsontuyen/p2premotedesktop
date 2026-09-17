@@ -162,19 +162,7 @@ def main():
             pass
 
     log("=== STARTING SLIM HOST BUILD (GUI + SYSTEM service, no viewer/pygame) ===")
-    subprocess.run(
-        'schtasks /end /tn "EasyRemoteDesktopHostAgent"',
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        "taskkill /F /IM RemoteDesktopHostService.exe",
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        "taskkill /F /IM RemoteDesktopHost.exe",
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1)
+    # Không tắt Host đang chạy — build ra dist riêng.
 
     company_name = "P2P Remote Desktop"
     version_string = "1.0.0.0"
