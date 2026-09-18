@@ -1,0 +1,1 @@
+def _handle_paste_conflict_query(self, packet):

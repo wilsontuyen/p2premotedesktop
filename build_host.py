@@ -29,7 +29,7 @@ def remove_host_flag():
 
 
 def strip_host_unused(app_dist_dir):
-    """Drop outgoing-viewer / ffmpeg bulk Host never needs."""
+    """Drop outgoing-viewer / ffmpeg / Mac-Linux-Android client bulk Host never needs."""
     removed = []
     for pattern in (
         os.path.join(app_dist_dir, "cv2", "opencv_videoio_ffmpeg*.dll"),
@@ -56,21 +56,34 @@ def strip_host_unused(app_dist_dir):
                 removed.append(name)
             except Exception:
                 pass
-    viewer_bits = (
+    # Outbound viewer + Mac/Linux UI/os_utils — Host is Windows incoming-only.
+    drop_files = [
         os.path.join(app_dist_dir, "core", "viewer.py"),
         os.path.join(app_dist_dir, "core", "viewer.pyc"),
-    )
-    for path in viewer_bits:
+        os.path.join(app_dist_dir, "gui", "mac_ui.py"),
+        os.path.join(app_dist_dir, "gui", "mac_ui.pyc"),
+        os.path.join(app_dist_dir, "gui", "linux_ui.py"),
+        os.path.join(app_dist_dir, "gui", "linux_ui.pyc"),
+        os.path.join(app_dist_dir, "utils", "file_manager.py"),
+        os.path.join(app_dist_dir, "utils", "file_manager.pyc"),
+        os.path.join(app_dist_dir, "utils", "keyboard_map.py"),
+        os.path.join(app_dist_dir, "utils", "keyboard_map.pyc"),
+    ]
+    for os_name in ("mac", "linux"):
+        for kind in ("clipboard", "input", "system", "ui"):
+            drop_files.append(os.path.join(app_dist_dir, "os_utils", f"{os_name}_{kind}.py"))
+            drop_files.append(os.path.join(app_dist_dir, "os_utils", f"{os_name}_{kind}.pyc"))
+    for path in drop_files:
         if os.path.exists(path):
             try:
                 os.remove(path)
-                removed.append(os.path.basename(path))
+                removed.append(os.path.relpath(path, app_dist_dir))
             except Exception:
                 pass
     if removed:
         log("Stripped unused Host files: " + ", ".join(removed))
     else:
-        log("No unused pygame/ffmpeg files to strip.")
+        log("No unused pygame/ffmpeg/mac-linux files to strip.")
 
 
 def compile_host_installer():
@@ -209,6 +222,15 @@ def main():
         "os_utils.linux_system",
         "os_utils.mac_ui",
         "os_utils.linux_ui",
+        # Host does not connect outbound to Mac/Linux/Android remotes
+        "AppKit",
+        "Foundation",
+        "Quartz",
+        "Cocoa",
+        "gi",
+        "gi.repository",
+        "Xlib",
+        "pyatspi",
     ])
 
     write_host_flag()

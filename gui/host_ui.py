@@ -5,8 +5,7 @@ from gui.components import ToolTip
 
 
 def E(text):
-    if sys.platform == "darwin":
-        return text
+    # Host build is Windows-only; keep Win7/8 emoji fallbacks.
     import platform
     if sys.platform != "win32" or platform.release() in ["7", "8", "8.1"]:
         mapping = {
@@ -127,12 +126,6 @@ def setup_host_ui(self):
         label=_("Cài đặt máy chủ..."),
         command=self.show_server_settings_dialog,
     )
-    if sys.platform == "darwin":
-        options_menu.add_separator()
-        options_menu.add_command(
-            label=_("Sửa lỗi quyền macOS..."),
-            command=self.fix_mac_permissions,
-        )
     options_menu.add_separator()
 
     lang_menu = tk.Menu(options_menu, tearoff=0)

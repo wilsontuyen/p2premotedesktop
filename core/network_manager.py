@@ -209,6 +209,10 @@ else:
     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class NetworkMixin:
+    def _is_host_only_app(self):
+        """Host build / host.mode: incoming sessions only — no outbound viewer."""
+        return bool(getattr(self, "is_host_only", False) or HOST_ONLY_BUILD)
+
     def add_firewall_rule_for_app(self):
         try:
             import sys, os, subprocess
@@ -294,24 +298,26 @@ class NetworkMixin:
         import platform
         
         comp_name = platform.node()
-        try:
-            import os, sys
-            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
-            if hasattr(sys, 'getandroidapilevel'):
-                is_android = True
-            if is_android:
-                serial = ""
-                try:
-                    with open("/sys/block/mmcblk0/device/serial", "r") as f:
-                        serial = f.read().strip()
-                        if serial.startswith("0x"):
-                            serial = serial[2:]
-                except Exception:
-                    pass
-                if serial:
-                    comp_name = f"MC-Android {serial}"
-        except Exception:
-            pass
+        # Host Windows build does not advertise as Android.
+        if not self._is_host_only_app():
+            try:
+                import os, sys
+                is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+                if hasattr(sys, 'getandroidapilevel'):
+                    is_android = True
+                if is_android:
+                    serial = ""
+                    try:
+                        with open("/sys/block/mmcblk0/device/serial", "r") as f:
+                            serial = f.read().strip()
+                            if serial.startswith("0x"):
+                                serial = serial[2:]
+                    except Exception:
+                        pass
+                    if serial:
+                        comp_name = f"MC-Android {serial}"
+            except Exception:
+                pass
 
         while getattr(self, 'running_server', True):
             if not self.is_headless and getattr(self, "is_service_active", False):
@@ -415,6 +421,8 @@ class NetworkMixin:
 
     def show_lan_computers_dialog(self):
         """Hiển thị dialog danh sách các máy tính phát hiện được trong mạng LAN."""
+        if self._is_host_only_app():
+            return
         if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
             self.lan_computers_dialog.lift()
             self.lan_computers_dialog.focus_force()
@@ -637,6 +645,8 @@ class NetworkMixin:
 
     def _connect_lan_direct(self, hwid, peer_info, password):
         """Kết nối TCP trực tiếp tới máy trong LAN (không qua Signaling Server)."""
+        if self._is_host_only_app():
+            return
         import platform
         ip = peer_info["local_ip"]
         port = peer_info["port"]
@@ -1050,7 +1060,7 @@ class NetworkMixin:
 
 
     def click_connect(self):
-        if getattr(self, "is_host_only", False):
+        if self._is_host_only_app():
             return
         partner_id = self.partner_id_var.get().strip().replace(" ", "")
         partner_pass = self.partner_pass_var.get().strip()
@@ -1086,6 +1096,8 @@ class NetworkMixin:
         
         threading.Thread(target=run_connect, daemon=True).start()
     def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None, reconnect_reason=""):
+        if self._is_host_only_app():
+            return
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
@@ -1515,7 +1527,7 @@ class NetworkMixin:
                 socket_passwords.pop(sock, None)
             
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release=""):
-        if getattr(self, "is_host_only", False) or HOST_ONLY_BUILD or run_client_viewer_loop is None:
+        if self._is_host_only_app() or run_client_viewer_loop is None:
             try:
                 sock.close()
             except Exception:

@@ -4,7 +4,7 @@ import os
 import time
 import sys
 _DIALOG_FONT = "Segoe UI" if sys.platform == "win32" else "Helvetica"
-from utils.logger import log_debug
+from utils.logger import log_debug, log_overwrite_conflict
 from core.i18n import _
 
 try:
@@ -14,6 +14,8 @@ except ImportError:
 
 from gui.window_icon import install_toplevel_app_icon, set_dialog_app_icon, hide_tk_from_taskbar
 install_toplevel_app_icon()
+
+from gui.windows_ui import ProgressDialog  # re-export; class lives in windows_ui
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
@@ -62,7 +64,7 @@ class PremiumProgressBar(tk.Canvas):
 from os_utils.ui import get_file_icon_as_image
 
 class ClassicCopyDialog(tk.Toplevel):
-    def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
+    def __init__(self, parent, filename, source_info, dest_info, has_multiple=False, on_done=None):
         super().__init__(parent)
         self.withdraw()
         self.resizable(False, False)
@@ -80,6 +82,17 @@ class ClassicCopyDialog(tk.Toplevel):
             
         self.choice = None
         self.has_multiple = has_multiple
+        self._on_done = on_done
+        self._finished = False
+        # Chặn click Paste/menu còn sót — nếu không dialog nháy rồi chọn Replace ngay.
+        self._clicks_armed = False
+        try:
+            log_overwrite_conflict(
+                f"ClassicCopyDialog.__init__ file={filename!r} "
+                f"dest={(dest_info or {}).get('path')!r} has_multiple={has_multiple}"
+            )
+        except Exception:
+            pass
         
         self.attributes("-topmost", True)
         self.title(_("Sao chép tệp"))
@@ -160,13 +173,16 @@ class ClassicCopyDialog(tk.Toplevel):
                         except: pass
                         
             def on_click(event):
-                self.choice = action_val
-                self.destroy()
+                if not getattr(self, "_clicks_armed", False):
+                    return "break"
+                self._finish(action_val)
                 
             for w in get_all_children(frame):
                 w.bind("<Enter>", on_enter)
                 w.bind("<Leave>", on_leave)
-                w.bind("<Button-1>", on_click)
+                # ButtonRelease: tránh nhận ButtonDown từ thao tác Paste trước đó.
+                w.bind("<Button-1>", lambda e: "break" if not self._clicks_armed else None)
+                w.bind("<ButtonRelease-1>", on_click)
                 w.configure(cursor="hand2")
                 
         # Link 1: Copy and Replace
@@ -263,6 +279,13 @@ class ClassicCopyDialog(tk.Toplevel):
             btn_cancel.configure(bg="#E1E1E1", bd=1)
         btn_cancel.bind("<Enter>", btn_enter)
         btn_cancel.bind("<Leave>", btn_leave)
+        # Chặn Hủy nhận click Paste sót (đóng dialog ngay → không hỏi).
+        def _cancel_click(event=None):
+            if not getattr(self, "_clicks_armed", False):
+                return "break"
+            self.on_cancel()
+        btn_cancel.configure(command=lambda: None)
+        btn_cancel.bind("<ButtonRelease-1>", _cancel_click)
         
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
 
@@ -285,612 +308,83 @@ class ClassicCopyDialog(tk.Toplevel):
         self.lift()
         self.focus_force()
         try:
+            self.grab_set()
+        except Exception:
+            pass
+        try:
             from gui.window_icon import set_dialog_app_icon
             set_dialog_app_icon(self)
         except Exception:
             pass
+        # Chỉ nhận click sau khi chuột đã nhả + grace — tránh Paste menu tự chọn Replace.
+        self.after(50, self._arm_clicks_when_idle)
         
-    def on_cancel(self):
-        self.choice = "cancel"
-        self.destroy()
-
-class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None, embed=False, owner_hwnd=None, dest_dir=None, reserve_finalize=False, stack_index=0, job_id=None, item_kind="file"):
-        super().__init__(parent)
-        self.parent_window = parent
-        self.host_hwnd = host_hwnd
-        # owner_hwnd: cửa sổ client sở hữu dialog (GWLP_HWNDPARENT), không phải vùng remote.
-        # embed/SetParent chỉ dùng File Manager (cùng toolkit). Clipboard không kẹp pygame.
-        self.owner_hwnd = self._toplevel_hwnd(owner_hwnd)
-        self._embed = bool(embed and host_hwnd and sys.platform == "win32")
-        parent_mapped = False
-        try:
-            parent_mapped = bool(parent and parent.winfo_exists() and parent.winfo_ismapped() and parent.state() != "withdrawn")
-        except Exception:
-            parent_mapped = False
-        self._helper_parent = not parent_mapped
-        self.withdraw()
-        if self._embed:
-            self.attributes("-alpha", 0.0)
-            self.overrideredirect(True)
-        else:
-            try:
-                self.title(title_text)
-            except Exception:
-                pass
-            self.resizable(False, False)
-        self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
-
-        self._drag_offset_x = 0
-        self._drag_offset_y = 0
-        if self._embed:
-            title_bg = "#F3F3F3"
-            self.title_bar = tk.Frame(self, bg=title_bg, height=28)
-            self.title_bar.pack(fill=tk.X, side=tk.TOP)
-            self.title_bar.pack_propagate(False)
-            self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
-            self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
-            for widget in (self.title_bar, self.title_lbl):
-                widget.bind("<ButtonPress-1>", self._start_drag)
-                widget.bind("<B1-Motion>", self._do_drag)
-        else:
-            self.title_bar = None
-            self.title_lbl = None
-
-        self.attributes("-topmost", True)
-        self.total_size = max(0, int(total_size or 0))
-        self.filename = str(filename) if filename is not None else "Unknown"
-        self._title_text = title_text
-        self._received = 0
-        self._copied = 0
-        self._copy_total = self._guess_copy_total(dest_dir, self.total_size) if reserve_finalize else 0
-        self._phase = "download"
-        self._done = False
-        self._last_ui = 0.0
-        self.start_time = time.time()
-        self.history = [(self.start_time, 0)]
-        self.on_cancel = on_cancel
-        self.stack_index = max(0, int(stack_index or 0))
-        self.job_id = job_id
-        
-        top_frame = tk.Frame(self, bg="#FFFFFF")
-        top_frame.pack(fill=tk.X, padx=12, pady=(6, 2))
-        
-        self.item_kind = "folder" if str(item_kind or "").lower() == "folder" else "file"
-        display_name = self._short_copy_label(
-            self.filename, max_len=32, is_folder=(self.item_kind == "folder"),
-        )
-        if self.item_kind == "folder":
-            action_text = _('Sao chép thư mục "{name}"').format(name=display_name)
-        else:
-            action_text = _('Sao chép tệp "{name}"').format(name=display_name)
-
-        self.lbl_action = tk.Label(
-            top_frame,
-            text=action_text,
-            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF",
-            anchor="w"
-        )
-        self.lbl_action.pack(fill=tk.X)
-
-        dest_row = tk.Frame(top_frame, bg="#FFFFFF")
-        dest_row.pack(fill=tk.X, pady=(2, 0))
-        self.lbl_percent = tk.Label(
-            dest_row, text="0%", font=(_DIALOG_FONT, 16, "bold"),
-            fg="#0066CC", bg="#FFFFFF", anchor="e"
-        )
-        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
-
-        dest_text = self._format_dest_dir(dest_dir)
-        if dest_text:
-            self.lbl_dest = tk.Label(
-                dest_row,
-                text=_("Thư mục đích") + ": " + dest_text,
-                font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF",
-                anchor="w", justify="left", wraplength=300
-            )
-            self.lbl_dest.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        else:
-            self.lbl_dest = None
-            
-        self.lbl_stats1 = tk.Label(
-            top_frame,
-            text=_("({done} trên {total})  {percent}%  {speed}  {eta}").format(
-                done="0 B", total=self.format_size(self._work_total()), percent=0, speed=_("-- MB/s"), eta=_("-- giây")
-            ),
-            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
-        )
-        self.lbl_stats1.pack(fill=tk.X, pady=(2, 2))
-        
-        self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
-        self.prog1.pack(fill=tk.X)
-        
-        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=34)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        bottom_frame.pack_propagate(False)
-        
-        sep = tk.Frame(self, height=1, bg="#DFDFDF", bd=0)
-        sep.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        if self.on_cancel:
-            btn_cancel = tk.Button(
-                bottom_frame, text=_("Hủy"), font=(_DIALOG_FONT, 9),
-                fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
-                relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
-            )
-            btn_cancel.pack(side=tk.RIGHT, padx=12, pady=4)
-            def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
-            def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
-            btn_cancel.bind("<Enter>", btn_enter)
-            btn_cancel.bind("<Leave>", btn_leave)
-            self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
-            
-        self.update_idletasks()
-        dialog_w = 400
-        dialog_h = max(int(self.winfo_reqheight() or 0), 1)
-        
-        if self._embed:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                tk_hwnd = int(self.frame(), 16)
-                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                style = (style | 0x40000000) & ~0x80000000
-                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                ctypes.windll.user32.SetParent(tk_hwnd, self.host_hwnd)
-                
-                rect = wintypes.RECT()
-                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
-                py_w = rect.right - rect.left
-                py_h = rect.bottom - rect.top
-                
-                x = max(0, (py_w - dialog_w) // 2)
-                y = max(0, (py_h - dialog_h) // 2)
-                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
-                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
-            except Exception:
-                self._place_on_screen(dialog_w, dialog_h)
-        else:
-            self._place_on_screen(dialog_w, dialog_h)
-
-        self.deiconify()
-        try:
-            if parent_mapped:
-                self.transient(parent)
-        except Exception:
-            pass
-        try:
-            self.state("normal")
-        except Exception:
-            pass
-        self.attributes("-topmost", True)
-        self.lift()
-        self.focus_force()
-        try:
-            self.attributes("-alpha", 1.0)
-        except Exception:
-            pass
-        try:
-            if self._embed:
-                hide_tk_from_taskbar(self)
-            set_dialog_app_icon(self)
-        except Exception:
-            pass
-        self.update()
-        self._apply_owner()
-        try:
-            set_dialog_app_icon(self)
-        except Exception:
-            pass
-        try:
-            self.after(0, self._force_show)
-            self.after(80, self._force_show)
-        except Exception:
-            pass
-
-    def _force_show(self):
-        """Parent Tk withdrawn có thể nuốt deiconify lần đầu — hiện lại dialog tiến trình."""
-        try:
-            if not self.winfo_exists():
-                return
-            self.deiconify()
-            self.attributes("-alpha", 1.0)
-            self.attributes("-topmost", True)
-            self.lift()
-            set_dialog_app_icon(self)
-        except Exception:
-            pass
-
-    def _toplevel_hwnd(self, hwnd):
-        if not hwnd or sys.platform != "win32":
-            return hwnd
+    def _arm_clicks_when_idle(self):
+        """Chờ LMB/RMB nhả rồi mới cho bấm Replace/Skip/Hủy."""
+        if self._finished or not self.winfo_exists():
+            return
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            root = user32.GetAncestor(ctypes.c_void_p(int(hwnd)), 2)  # GA_ROOT
-            return int(root) if root else int(hwnd)
+            lmb = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+            rmb = bool(user32.GetAsyncKeyState(0x02) & 0x8000)
         except Exception:
-            return hwnd
-
-    def _apply_owner(self):
-        """Gắn dialog thuộc cửa sổ client (owner), không biến thành child của vùng remote."""
-        if self._embed or not self.owner_hwnd or sys.platform != "win32":
+            lmb = rmb = False
+        if lmb or rmb:
+            self.after(50, self._arm_clicks_when_idle)
             return
-        hwnd = self._hwnd()
-        if not hwnd:
-            return
-        try:
-            import ctypes
-            owner = int(self.owner_hwnd)
-            GWLP_HWNDPARENT = -8
-            if ctypes.sizeof(ctypes.c_void_p) == 8:
-                ctypes.windll.user32.SetWindowLongPtrW(ctypes.c_void_p(hwnd), GWLP_HWNDPARENT, ctypes.c_void_p(owner))
-            else:
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWLP_HWNDPARENT, owner)
-        except Exception:
-            pass
-
-    def _owner_window_screen_rect(self):
-        if not (getattr(self, "owner_hwnd", None) and sys.platform == "win32"):
-            return None
-        try:
-            import ctypes
-            from ctypes import wintypes
-            rect = wintypes.RECT()
-            if not ctypes.windll.user32.GetWindowRect(int(self.owner_hwnd), ctypes.byref(rect)):
-                return None
-            return (rect.left, rect.top, rect.right, rect.bottom)
-        except Exception:
-            return None
-
-    def _place_on_screen(self, dialog_w, dialog_h):
-        geo = "%dx%d" % (int(dialog_w), int(dialog_h))
-        try:
-            self.tk.call("wm", "geometry", self._w, geo)
-        except Exception:
-            self.geometry(geo)
-        self.update_idletasks()
-        my_w = int(dialog_w)
-        my_h = int(dialog_h)
-        # Clipboard: căn giữa cửa sổ client (owner), không dùng client-area pygame/host view.
-        bounds = None
-        if not self._embed:
-            bounds = self._owner_window_screen_rect()
-        if not bounds:
-            bounds = self._host_client_screen_rect()
-        if not bounds:
-            p = self._usable_tk_parent()
-            if p:
-                bounds = (p.winfo_rootx(), p.winfo_rooty(),
-                          p.winfo_rootx() + p.winfo_width(),
-                          p.winfo_rooty() + p.winfo_height())
-        if bounds:
-            left, top, right, bottom = bounds
-            # Parent helper ẩn ngoài màn hình → đừng đặt dialog theo nó.
-            if right <= 0 or bottom <= 0 or left < -500 or top < -500:
-                bounds = None
-        if bounds:
-            left, top, right, bottom = bounds
-            x = left + max(0, (right - left - my_w) // 2)
-            y = top + max(0, (bottom - top - my_h) // 2)
-        else:
-            x = (self.winfo_screenwidth() - my_w) // 2
-            y = (self.winfo_screenheight() - my_h) // 2
-        y += int(getattr(self, "stack_index", 0) or 0) * (my_h + 8)
-        self._move_to_screen(x, y)
-
-    def trigger_cancel(self):
-        cb = self.on_cancel
-        self.on_cancel = None
-        if cb:
+        # Grace thêm: nút vừa nhả vẫn có thể gửi ButtonRelease vào dialog.
+        def _arm():
+            if self._finished or not self.winfo_exists():
+                return
+            self._clicks_armed = True
             try:
-                cb()
+                log_overwrite_conflict("ClassicCopyDialog clicks ARMED")
             except Exception:
                 pass
+        self.after(400, _arm)
+        
+    def _finish(self, action_val):
+        if self._finished:
+            return
+        if action_val != "cancel" and not getattr(self, "_clicks_armed", False):
+            try:
+                log_overwrite_conflict(
+                    f"ClassicCopyDialog IGNORE click (not armed) action={action_val!r}"
+                )
+            except Exception:
+                pass
+            return
+        self._finished = True
+        self.choice = action_val
+        try:
+            log_overwrite_conflict(
+                f"ClassicCopyDialog._finish choice={action_val!r} armed={self._clicks_armed}"
+            )
+        except Exception:
+            pass
+        cb = self._on_done
+        self._on_done = None
+        if cb:
+            try:
+                cb(action_val)
+            except Exception:
+                pass
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         try:
             self.destroy()
         except Exception:
             pass
 
-    def _hwnd(self):
-        try:
-            return int(self.frame(), 16)
-        except Exception:
-            return 0
-
-    def _usable_tk_parent(self):
-        p = getattr(self, "parent_window", None)
-        if not p:
-            return None
-        try:
-            if str(p) == str(self):
-                return None
-            if not p.winfo_exists() or not p.winfo_ismapped() or not p.winfo_viewable():
-                return None
-            if p.winfo_width() < 80 or p.winfo_height() < 80:
-                return None
-            return p
-        except Exception:
-            return None
-
-    def _host_client_screen_rect(self):
-        """(left, top, right, bottom) màn hình của client area cửa sổ host/viewer."""
-        if not (getattr(self, "host_hwnd", None) and sys.platform == "win32"):
-            return None
-        try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-            rect = wintypes.RECT()
-            if not user32.GetClientRect(self.host_hwnd, ctypes.byref(rect)):
-                return None
-            pt = wintypes.POINT(rect.left, rect.top)
-            user32.ClientToScreen(self.host_hwnd, ctypes.byref(pt))
-            return (pt.x, pt.y, pt.x + (rect.right - rect.left), pt.y + (rect.bottom - rect.top))
-        except Exception:
-            return None
-
-    def _virtual_screen_rect(self):
-        if sys.platform != "win32":
-            return (0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
-            SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
-            left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-            top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-            return (left, top, left + user32.GetSystemMetrics(SM_CXVIRTUALSCREEN),
-                    top + user32.GetSystemMetrics(SM_CYVIRTUALSCREEN))
-        except Exception:
-            return (0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
-
-    def _clamp_screen_pos(self, screen_x, screen_y):
-        my_w = max(self.winfo_width(), 1)
-        my_h = max(self.winfo_height(), 1)
-        bounds = None
-        if self._embed:
-            bounds = self._host_client_screen_rect()
-            if not bounds:
-                p = self._usable_tk_parent()
-                if p:
-                    bounds = (p.winfo_rootx(), p.winfo_rooty(),
-                              p.winfo_rootx() + p.winfo_width(),
-                              p.winfo_rooty() + p.winfo_height())
-        else:
-            # Clipboard: thuộc cửa sổ client nhưng kéo tự do trên desktop, không kẹt trong vùng remote.
-            bounds = self._virtual_screen_rect()
-        if bounds:
-            left, top, right, bottom = bounds
-            max_x = left if (right - left) <= my_w else right - my_w
-            max_y = top if (bottom - top) <= my_h else bottom - my_h
-            screen_x = max(left, min(screen_x, max_x))
-            screen_y = max(top, min(screen_y, max_y))
-        return screen_x, screen_y
-
-    def _move_to_screen(self, screen_x, screen_y):
-        screen_x, screen_y = self._clamp_screen_pos(screen_x, screen_y)
-        if self._embed:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                pt = wintypes.POINT(int(screen_x), int(screen_y))
-                ctypes.windll.user32.ScreenToClient(self.host_hwnd, ctypes.byref(pt))
-                hwnd = self._hwnd()
-                if hwnd:
-                    ctypes.windll.user32.SetWindowPos(hwnd, 0, pt.x, pt.y, 0, 0, 0x0001 | 0x0004)
-                    return
-            except Exception:
-                pass
-        try:
-            self.tk.call("wm", "geometry", self._w, "+%d+%d" % (int(screen_x), int(screen_y)))
-        except Exception:
-            self.geometry("+%d+%d" % (int(screen_x), int(screen_y)))
-
-    def _start_drag(self, event):
-        self._drag_offset_x = event.x_root - self.winfo_rootx()
-        self._drag_offset_y = event.y_root - self.winfo_rooty()
-
-    def _do_drag(self, event):
-        x = event.x_root - self._drag_offset_x
-        y = event.y_root - self._drag_offset_y
-        self._move_to_screen(x, y)
-
-    @staticmethod
-    def _short_copy_label(name, max_len=42, is_folder=False):
-        """Rút gọn tên file (giữ đuôi) hoặc tên folder — không cắt đầu+đuôi."""
-        raw = str(name or "Unknown").replace("\\", "/")
-        extra = ""
-        marker = " và "
-        if marker in raw:
-            idx = raw.find(marker)
-            extra = raw[idx:]
-            raw = raw[:idx]
-        base = os.path.basename(raw) or raw
-        if len(base) + len(extra) <= max_len:
-            return base + extra
-        if is_folder:
-            keep = max_len - len(extra) - 3
-            if keep < 6:
-                return (base + extra)[: max_len - 3] + "..."
-            return base[:keep] + "..." + extra
-        root, ext = os.path.splitext(base)
-        room = max_len - len(extra) - len(ext) - 3
-        if room < 6:
-            return (base + extra)[: max_len - 3] + "..."
-        return root[:room] + "..." + ext + extra
-
-    @staticmethod
-    def _guess_copy_total(dest_dir, file_total):
-        """Paste sang ổ khác thư mục tạm thì còn một lượt copy cùng tổng n file."""
-        if not dest_dir or file_total <= 0:
-            return 0
-        try:
-            dest_drive = os.path.splitdrive(os.path.abspath(str(dest_dir)))[0].lower()
-            temp_drive = os.path.splitdrive(os.path.abspath(os.environ.get("TEMP") or "C:\\"))[0].lower()
-            if dest_drive and dest_drive != temp_drive:
-                return file_total
-        except Exception:
-            return file_total
-        return 0
-
-    def _work_total(self):
-        """Mẫu số MB: dung lượng file thật — không cộng lượt copy nội bộ, không reset về 0."""
-        return max(1, int(self.total_size) or 1)
-
-    def _work_done(self):
-        recv = min(self._work_total(), max(0, int(self._received or 0)))
-        if self._phase in ("finalize", "done"):
-            return self._work_total()
-        return recv
-
-    def begin_finalize(self, total_bytes=0):
-        extra = max(0, int(total_bytes or 0))
-        if extra and extra > self._copy_total:
-            self._copy_total = extra
-        self._phase = "finalize"
-        self._received = max(int(self._received or 0), int(self.total_size or 0))
-        self._title_text = _("Đang chuyển vào thư mục đích...")
-        self._render_progress(status=self._title_text, force=True)
-
-    def add_finalize_bytes(self, n):
-        try:
-            self._copied += max(0, int(n or 0))
-        except Exception:
+    def on_cancel(self):
+        # Cho phép đóng bằng X ngay; nút Hủy cần armed (tránh click sót).
+        if self._finished:
             return
-        self._render_progress(status=self._title_text)
-
-    def mark_complete(self):
-        self._done = True
-        self._phase = "done"
-        self._received = max(self._received, self.total_size)
-        self._copied = max(self._copied, self._copy_total)
-        self._render_progress(force=True)
-
-    def update_progress(self, sent_bytes, status=None):
-        if self._phase in ("finalize", "done"):
-            try:
-                self._received = max(int(self._received or 0), int(sent_bytes or 0))
-            except Exception:
-                pass
-            return
-        try:
-            self._received = max(0, int(sent_bytes or 0))
-        except Exception:
-            return
-        self._render_progress(status=status)
-
-    def _bar_percent(self, done, work_total):
-        if self._done:
-            return 100
-        if work_total <= 0:
-            return 0
-        dl = int(done * 100 / work_total)
-        if self._phase != "finalize" or int(self._copy_total or 0) <= 0:
-            return max(0, min(99, dl))
-        if int(self._copied or 0) >= int(self._copy_total or 0):
-            return 100
-        return 99
-
-    def _render_progress(self, status=None, force=False):
-        now = time.time()
-        if not force and (now - self._last_ui) < 0.05:
-            return
-        self._last_ui = now
-        if status:
-            self._title_text = status
-        status_text = self._title_text
-
-        def _do_update():
-            try:
-                work_total = self._work_total()
-                done = self._work_done()
-                if self._done:
-                    percent = 100
-                    done = work_total
-                else:
-                    percent = self._bar_percent(done, work_total)
-
-                self.prog1["value"] = percent
-                try:
-                    self.lbl_percent.config(text=f"{percent}%")
-                    title = status_text if status_text else self._title_text
-                    full_title = f"{title}  —  {percent}%"
-                    if self.title_lbl is not None:
-                        self.title_lbl.config(text=full_title)
-                    else:
-                        self.title(full_title)
-                except Exception:
-                    pass
-
-                current_time = time.time()
-                self.history.append((current_time, done))
-                while len(self.history) > 1 and current_time - self.history[0][0] > 2.0:
-                    self.history.pop(0)
-
-                elapsed_time = current_time - self.history[0][0]
-                bytes_in_window = done - self.history[0][1]
-                speed = (bytes_in_window / elapsed_time) if elapsed_time > 0 and bytes_in_window > 0 else 0
-                remaining_bytes = max(0, work_total - done)
-
-                if self._done:
-                    time_str = _("0 giây")
-                    speed_str = f"{self.format_speed(speed)}" if speed > 0 else _("-- MB/s")
-                elif speed > 0 and remaining_bytes > 0:
-                    remaining_time = remaining_bytes / speed
-                    mins = int(remaining_time // 60)
-                    secs = int(remaining_time % 60)
-                    if mins > 0:
-                        time_str = _("{m} phút {n} giây").format(m=mins, n=secs)
-                    else:
-                        time_str = _("{n} giây").format(n=secs)
-                    speed_str = f"{self.format_speed(speed)}"
-                else:
-                    speed_str = f"{self.format_speed(speed)}" if speed > 0 else _("-- MB/s")
-                    time_str = _("-- giây")
-
-                self.lbl_stats1.config(
-                    text=_("({done} trên {total})  {percent}%  {speed}  {eta}").format(
-                        done=self.format_size(done),
-                        total=self.format_size(work_total),
-                        percent=percent,
-                        speed=speed_str,
-                        eta=time_str,
-                    )
-                )
-            except Exception:
-                pass
-        try:
-            self.after(0, _do_update)
-        except Exception:
-            pass
-
-    def safe_destroy(self):
-        try: self.after(0, self.destroy)
-        except: pass
-
-    @staticmethod
-    def _format_dest_dir(dest_dir):
-        if not dest_dir:
-            return ""
-        path = str(dest_dir).strip().rstrip("\\/")
-        if not path:
-            return ""
-        if len(path) <= 56:
-            return path
-        return path[:20] + "..." + path[-33:]
-
-    def format_size(self, size_bytes):
-        if size_bytes < 1024: return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024: return f"{size_bytes / 1024:.2f} KB"
-        elif size_bytes < 1024 * 1024 * 1024: return f"{size_bytes / (1024 * 1024):.2f} MB"
-        else: return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
-
-    def format_speed(self, speed_bytes_per_sec):
-        if speed_bytes_per_sec < 1024: return f"{speed_bytes_per_sec:.0f} B/s"
-        elif speed_bytes_per_sec < 1024 * 1024: return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
-        elif speed_bytes_per_sec < 1024 * 1024 * 1024: return f"{speed_bytes_per_sec / (1024 * 1024):.2f} MB/s"
-        else: return f"{speed_bytes_per_sec / (1024 * 1024 * 1024):.2f} GB/s"
+        self._clicks_armed = True
+        self._finish("cancel")
 
 class ConfirmDialog(tk.Toplevel):
     def __init__(self, parent, title, message, on_yes, on_no):

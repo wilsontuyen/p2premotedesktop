@@ -487,26 +487,28 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         
         # Window attributes
         title_text = "Easy Remote Desktop Host" if getattr(self, "is_host_only", False) else "Easy Remote Desktop"
-        try:
-            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+        # Host never runs as Android client; skip Android title decoration.
+        if not (HOST_ONLY_BUILD or getattr(self, "is_host_only", False)):
             try:
-                if hasattr(sys, 'getandroidapilevel'):
-                    is_android = True
-            except: pass
-            
-            if is_android:
-                serial = ""
+                is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
                 try:
-                    with open("/sys/block/mmcblk0/device/serial", "r") as f:
-                        serial = f.read().strip()
-                        if serial.startswith("0x"):
-                            serial = serial[2:]
-                except Exception:
-                    pass
-                if serial:
-                    title_text += f" - MC-Android {serial}"
-        except Exception:
-            pass
+                    if hasattr(sys, 'getandroidapilevel'):
+                        is_android = True
+                except: pass
+                
+                if is_android:
+                    serial = ""
+                    try:
+                        with open("/sys/block/mmcblk0/device/serial", "r") as f:
+                            serial = f.read().strip()
+                            if serial.startswith("0x"):
+                                serial = serial[2:]
+                    except Exception:
+                        pass
+                    if serial:
+                        title_text += f" - MC-Android {serial}"
+            except Exception:
+                pass
         self.title(title_text)
         self.resizable(False, False)
         
@@ -935,6 +937,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         
     def setup_ui(self):
         import sys
+        # Host app: Windows incoming-only UI (no Mac/Linux connect client UI).
+        if HOST_ONLY_BUILD or getattr(self, "is_host_only", False):
+            from gui.windows_ui import setup_windows_ui
+            setup_windows_ui(self)
+            return
         if sys.platform == "darwin":
             from gui.mac_ui import setup_mac_ui
             setup_mac_ui(self)
@@ -1029,7 +1036,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def fix_mac_permissions(self):
-        if sys.platform != "darwin":
+        if HOST_ONLY_BUILD or getattr(self, "is_host_only", False) or sys.platform != "darwin":
             return
             
         import subprocess

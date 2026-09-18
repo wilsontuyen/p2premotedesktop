@@ -1702,23 +1702,29 @@ class HostMixin:
                 import platform
                 computer_name = platform.node()
                 is_android = False
+                # Host Windows product never runs as Android; skip Android identity.
                 try:
-                    is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
-                    if hasattr(sys, 'getandroidapilevel'):
-                        is_android = True
-                    if is_android:
-                        serial = ""
-                        try:
-                            with open("/sys/block/mmcblk0/device/serial", "r") as f:
-                                serial = f.read().strip()
-                                if serial.startswith("0x"):
-                                    serial = serial[2:]
-                        except Exception:
-                            pass
-                        if serial:
-                            computer_name = f"MC-Android {serial}"
+                    from host_build_flag import HOST_ONLY_BUILD as _HOST_ONLY
                 except Exception:
-                    pass
+                    _HOST_ONLY = False
+                if not _HOST_ONLY and sys.platform != "win32":
+                    try:
+                        is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+                        if hasattr(sys, 'getandroidapilevel'):
+                            is_android = True
+                        if is_android:
+                            serial = ""
+                            try:
+                                with open("/sys/block/mmcblk0/device/serial", "r") as f:
+                                    serial = f.read().strip()
+                                    if serial.startswith("0x"):
+                                        serial = serial[2:]
+                            except Exception:
+                                pass
+                            if serial:
+                                computer_name = f"MC-Android {serial}"
+                    except Exception:
+                        pass
                 
                 is_domain = False
                 chk_reason = "Unknown"

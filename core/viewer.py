@@ -129,7 +129,7 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type in CLIPBOARD_PKT_TYPES:
                         if clipboard_sync_manager:
-                            clipboard_sync_manager.handle_received_packet(event)
+                            clipboard_sync_manager.enqueue_packet(event)
                         continue
                     elif evt_type == "domain_status":
                         if "is_domain" in event:

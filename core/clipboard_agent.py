@@ -15,4 +15,5 @@ if "CLIPBOARD_PKT_TYPES" not in globals():
         "files_copied_meta", "request_files", "cancel_transfer", "cancel_ack",
         "clipboard_text", "clipboard_image", "clear_clipboard",
         "resume_query", "resume_state",
+        "paste_conflict_query", "paste_conflict_reply",
     )
