@@ -64,9 +64,16 @@ class PremiumProgressBar(tk.Canvas):
 from os_utils.ui import get_file_icon_as_image
 
 class ClassicCopyDialog(tk.Toplevel):
-    def __init__(self, parent, filename, source_info, dest_info, has_multiple=False, on_done=None):
+    def __init__(self, parent, filename, source_info, dest_info, has_multiple=False, on_done=None, owner_hwnd=None):
         super().__init__(parent)
         self.withdraw()
+        # Viewer full-app: parent là Tk ẩn — dialog phải hiện trên cửa sổ pygame.
+        self.owner_hwnd = None
+        try:
+            if owner_hwnd:
+                self.owner_hwnd = int(owner_hwnd)
+        except Exception:
+            self.owner_hwnd = owner_hwnd
         self.resizable(False, False)
         self.configure(bg="#FFFFFF")
         # Không dùng Toplevel.geometry (bị DPI scale) — layout 520x420 bị vỡ, không bấm được.
@@ -304,6 +311,10 @@ class ClassicCopyDialog(tk.Toplevel):
             self.tk.call("wm", "geometry", self._w, geo)
         except Exception:
             self.geometry(geo)
+        try:
+            self.attributes("-alpha", 1.0)
+        except Exception:
+            pass
         self.deiconify()
         self.lift()
         self.focus_force()
@@ -316,8 +327,77 @@ class ClassicCopyDialog(tk.Toplevel):
             set_dialog_app_icon(self)
         except Exception:
             pass
+        self._apply_owner()
+        self._force_show_over_owner()
+        try:
+            self.after(0, self._force_show_over_owner)
+            self.after(80, self._force_show_over_owner)
+        except Exception:
+            pass
         # Chỉ nhận click sau khi chuột đã nhả + grace — tránh Paste menu tự chọn Replace.
         self.after(50, self._arm_clicks_when_idle)
+
+    def _hwnd(self):
+        try:
+            return int(self.frame(), 16)
+        except Exception:
+            return 0
+
+    def _apply_owner(self):
+        """Gắn dialog thuộc cửa sổ viewer — không bị pygame che / parent Tk ẩn nuốt."""
+        if not self.owner_hwnd or sys.platform != "win32":
+            return
+        hwnd = self._hwnd()
+        if not hwnd:
+            return
+        try:
+            import ctypes
+            owner = int(self.owner_hwnd)
+            GWLP_HWNDPARENT = -8
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                ctypes.windll.user32.SetWindowLongPtrW(
+                    ctypes.c_void_p(hwnd), GWLP_HWNDPARENT, ctypes.c_void_p(owner)
+                )
+            else:
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWLP_HWNDPARENT, owner)
+        except Exception:
+            pass
+
+    def _force_show_over_owner(self):
+        try:
+            if not self.winfo_exists():
+                return
+            self.attributes("-alpha", 1.0)
+            self.attributes("-topmost", True)
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            hwnd = self._hwnd()
+            if not hwnd:
+                return
+            user32 = ctypes.windll.user32
+            HWND_TOPMOST = -1
+            SWP_NOSIZE = 0x0001
+            SWP_NOMOVE = 0x0002
+            SWP_SHOWWINDOW = 0x0040
+            user32.SetWindowPos(
+                ctypes.c_void_p(hwnd), HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW,
+            )
+            user32.BringWindowToTop(ctypes.c_void_p(hwnd))
+            user32.ShowWindow(ctypes.c_void_p(hwnd), 5)
+            try:
+                user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+            except Exception:
+                pass
+        except Exception:
+            pass
         
     def _arm_clicks_when_idle(self):
         """Chờ LMB/RMB nhả rồi mới cho bấm Replace/Skip/Hủy."""

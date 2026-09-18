@@ -491,7 +491,7 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
     return moved, bool(moved) and all_in_dest
 
 
-def _promote_completed_xfer_file(staging_path, dest_dir, rel_name):
+def _promote_completed_xfer_file(staging_path, dest_dir, rel_name, replace_keys=None):
     """Đưa 1 file đã tải xong từ .rdxfer_* ra thư mục đích (giữ cây thư mục). Rename cùng ổ — không copy 4GB."""
     import shutil
     if not staging_path or not dest_dir or not os.path.isfile(staging_path):
@@ -511,9 +511,27 @@ def _promote_completed_xfer_file(staging_path, dest_dir, rel_name):
     parent = os.path.dirname(dest_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    allow_replace = set()
+    for k in (replace_keys or []):
+        try:
+            allow_replace.add(os.path.normcase(os.path.abspath(k)))
+        except Exception:
+            allow_replace.add(k)
     if os.path.exists(dest_path):
-        # Không im lặng ghi đè file user — chỉ xóa stub/junk; file thật để agent relocate sau khi đã hỏi.
-        if not _is_transfer_junk_at_dest(dest_path):
+        try:
+            dest_key = os.path.normcase(os.path.abspath(dest_path))
+        except Exception:
+            dest_key = dest_path
+        top_key = None
+        try:
+            top = rel.replace("\\", "/").strip("/").split("/")[0]
+            top_key = os.path.normcase(os.path.abspath(os.path.join(dest_dir, top)))
+        except Exception:
+            pass
+        may_replace = dest_key in allow_replace or (top_key and top_key in allow_replace)
+        # Không im lặng ghi đè file user — chỉ xóa stub/junk; file thật cần replace_keys
+        # (user đã chọn Replace trên ClassicCopyDialog).
+        if not _is_transfer_junk_at_dest(dest_path) and not may_replace:
             log_debug(f"[promote] Giữ file đích đã có, không ghi đè: {dest_path}")
             try:
                 log_overwrite_conflict(
@@ -1055,6 +1073,46 @@ def _menu_item_counts_as_paste(kind):
     if _is_windows_11() and k in ("unknown", ""):
         return True
     # Win10 classic: chỉ tin khi đọc đúng chữ Paste/Dán/...
+    return False
+
+
+def _win10_rmb_paste_click(
+    last_lbutton,
+    last_rbutton,
+    menu_item_kind="",
+    last_dblclick=0.0,
+    lmb_on_menu=False,
+    lmb_down=False,
+    menu_visible=False,
+):
+    """Win10 classic #32768: coi là RMP khi LMB sau RMB.
+
+    GetMenuString / MenuItemFromPoint hay trống (DPI, SendInput remote, menu đóng
+    trước poll) nên không đòi kind=='paste'. Menu-paint lúc RMB bị loại vì
+    last_lbutton phải sau last_rbutton.
+    """
+    if _is_windows_11():
+        return False
+    if (menu_item_kind or "").strip().lower() == "not_paste":
+        return False
+    now = time.time()
+    last_l = float(last_lbutton or 0)
+    last_r = float(last_rbutton or 0)
+    if last_l <= last_r or last_r <= 0:
+        return False
+    if last_dblclick and (now - float(last_dblclick)) < 0.7:
+        return False
+    age_l = now - last_l
+    age_r = now - last_r
+    if not (age_l < 3.0 and 0.12 < age_r < 8.0):
+        return False
+    if lmb_on_menu or menu_visible or lmb_down:
+        return True
+    try:
+        if _is_explorer_clipboard_client():
+            return True
+    except Exception:
+        pass
     return False
 
 
@@ -1641,13 +1699,16 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
             and time_since_lbutton < 2.0
         )
     else:
-        # Win10: chặt hơn — phải có kind=paste (hoặc lmb_on_menu đã ghi paste).
+        # Win10: kind==paste nếu đọc được chữ; không thì LMB sau RMB trên #32768.
         lmb_menu_paste_now = bool(
             lmb_down
             and lmb_on_menu
-            and menu_item_kind == "paste"
+            and menu_item_kind != "not_paste"
             and time_since_rbutton > 0.12
             and time_since_lbutton < 2.0
+        ) or _win10_rmb_paste_click(
+            last_lbutton, last_rbutton, menu_item_kind, last_dblclick,
+            lmb_on_menu=lmb_on_menu, lmb_down=lmb_down, menu_visible=menu_visible,
         )
     cmd_bar_paste = bool(
         (not lmb_on_menu)
@@ -1665,8 +1726,8 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     if cmd_bar_paste:
         log_debug("[check_is_menu_query] Paste: Win11 command-bar")
         return False
-    # Race RENDERFORMAT trước mouse-poll — chỉ nới lỏng trên Win11 (XAML).
-    if win11 and (
+    # Race RENDERFORMAT trước mouse-poll — Win11 XAML và Win10 #32768.
+    if (
         lmb_down
         and menu_visible
         and not rmb_down
@@ -1674,7 +1735,13 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         and time_since_rbutton < 8.0
         and menu_item_kind != "not_paste"
     ):
-        log_debug("[check_is_menu_query] Paste: Win11 LMB+menu visible (race trước poll)")
+        log_debug(f"[check_is_menu_query] Paste: {profile} LMB+menu visible (race trước poll)")
+        return False
+    if (not win11) and _win10_rmb_paste_click(
+        last_lbutton, last_rbutton, menu_item_kind, last_dblclick,
+        lmb_on_menu=lmb_on_menu, lmb_down=lmb_down, menu_visible=menu_visible,
+    ):
+        log_debug(f"[check_is_menu_query] Paste: Win10 LMB-after-RMB kind={menu_item_kind!r}")
         return False
     # Win11 XAML: hit-test menu hay fail — LMB sau RMB + Explorer GetData = Paste.
     # (gesture_ok ở render_format vẫn chặn paste giả sau khi đã clear _rmb_cursor_pos).
@@ -2079,7 +2146,17 @@ class FileCopyClientMixin:
         conflicts = list(packet.get("conflicts") or [])
         has_multiple = bool(packet.get("has_multiple")) or len(conflicts) > 1
 
-        if self.app and getattr(self.app, "is_headless", False):
+        # Host (headless worker / GUI host): luôn chuyển sang viewer — user đang nhìn pygame.
+        # Không hỏi trên Tk ẩn/tray của host (dialog bị che → “paste trùng tên không hoạt động”).
+        is_viewer = bool(getattr(self, "pygame_hwnd", None))
+        is_host_side = bool(
+            (self.app and (
+                getattr(self.app, "is_headless", False)
+                or getattr(self.app, "is_host_only", False)
+            ))
+            or (not is_viewer and getattr(self, "active_sockets", None))
+        )
+        if is_host_side and not is_viewer:
             pkt = json.dumps({
                 "type": "paste_conflict_query",
                 "paste_id": paste_id,
@@ -2141,14 +2218,7 @@ class FileCopyClientMixin:
         except Exception:
             pass
         try:
-            # Đưa cửa sổ app lên trước viewer để dialog giống host→client.
-            try:
-                if self.app and hasattr(self.app, "lift"):
-                    self.app.lift()
-                    self.app.attributes("-topmost", True)
-                    self.app.after(200, lambda: self.app.attributes("-topmost", False))
-            except Exception:
-                pass
+            # Không lift Tk ẩn của viewer (alpha=0) — kéo parent xuống sẽ che dialog dưới pygame.
             for i, item in enumerate(conflicts):
                 if not isinstance(item, dict):
                     continue
@@ -2305,7 +2375,7 @@ class FileCopyClientMixin:
             or (last_ctrl_v and (time.time() - last_ctrl_v) < 2.5)
         )
         if not gesture_ok:
-            # Win11: RENDERFORMAT có thể tới trước khi poll kịp note_paste_gesture.
+            # RENDERFORMAT có thể tới trước khi poll kịp note_paste_gesture.
             kind = getattr(self, "_lmb_menu_item_kind", "") or ""
             try:
                 user32 = ctypes.windll.user32
@@ -2314,12 +2384,22 @@ class FileCopyClientMixin:
                 lmb = False
             age_r = (time.time() - last_r) if last_r else 999.0
             age_l = (time.time() - (last_l or 0)) if last_l else 999.0
-            if (
-                _is_windows_11()
-                and lmb
-                and last_r
-                and getattr(self, "_rmb_cursor_pos", None)
-                and 0.18 < age_r < 8.0
+            lmb_after_rmb = bool(
+                last_r
+                and last_l
+                and last_l > last_r
+                and 0.12 < age_r < 8.0
+                and age_l < 3.0
+                and kind != "not_paste"
+                and (
+                    bool(getattr(self, "_lmb_hit_context_menu", False))
+                    or kind == "paste"
+                    or lmb
+                    or _is_explorer_clipboard_client()
+                )
+            )
+            if _is_windows_11() and lmb and last_r and getattr(self, "_rmb_cursor_pos", None) and (
+                0.18 < age_r < 8.0
                 and age_l < 1.5
                 and kind != "not_paste"
                 and (
@@ -2333,6 +2413,13 @@ class FileCopyClientMixin:
                 clip_trace(
                     f"[render_format] gesture_ok via win11 LMB-after-RMB "
                     f"age_r={age_r:.2f} kind={kind!r}"
+                )
+            elif (not _is_windows_11()) and lmb_after_rmb:
+                gesture_ok = True
+                self.note_paste_gesture()
+                clip_trace(
+                    f"[render_format] gesture_ok via win10 LMB-after-RMB "
+                    f"age_r={age_r:.2f} age_l={age_l:.2f} kind={kind!r}"
                 )
         if not gesture_ok:
             try:
@@ -2676,6 +2763,27 @@ class FileCopyClientMixin:
                     _keep_offer(offer_keep)
 
                     # Xóa các file cần ghi đè TRƯỚC khi bắt đầu tải (để tránh xung đột ghi)
+                    replace_key_set = set()
+                    for p in files_to_replace:
+                        try:
+                            replace_key_set.add(os.path.normcase(os.path.abspath(p)))
+                        except Exception:
+                            if p:
+                                replace_key_set.add(p)
+                    for n in (replace_names or []):
+                        if dest_dir and n:
+                            try:
+                                replace_key_set.add(
+                                    os.path.normcase(os.path.abspath(os.path.join(dest_dir, n)))
+                                )
+                            except Exception:
+                                pass
+                    if paste_tok:
+                        mp = getattr(self, "_xfer_replace_keys_by_paste", None)
+                        if mp is None:
+                            self._xfer_replace_keys_by_paste = {}
+                            mp = self._xfer_replace_keys_by_paste
+                        mp[paste_tok] = set(replace_key_set)
                     for p in files_to_replace:
                         try:
                             base = os.path.basename(str(p).rstrip("\\/"))
@@ -2684,9 +2792,16 @@ class FileCopyClientMixin:
                                 or str(f.get("name") if isinstance(f, dict) else f).replace("\\", "/").split("/")[0] == base
                                 for f in files_to_download
                             ):
-                                os.remove(p)
+                                if os.path.isdir(p) and not os.path.islink(p):
+                                    import shutil
+                                    shutil.rmtree(p, ignore_errors=True)
+                                else:
+                                    os.remove(p)
                         except Exception:
-                            pass
+                            try:
+                                _retry_remove_path(p)
+                            except Exception:
+                                pass
 
                     if not files_to_download:
                         _notify_explorer_paths_changed([dest_dir] if dest_dir else [])
@@ -2890,6 +3005,10 @@ class FileCopyClientMixin:
                         (getattr(self, "_xfer_dest_by_paste_id", None) or {}).pop(paste_tok, None)
                     except Exception:
                         pass
+                    try:
+                        (getattr(self, "_xfer_replace_keys_by_paste", None) or {}).pop(paste_tok, None)
+                    except Exception:
+                        pass
                     still = bool(getattr(self, "_xfer_jobs", None)) or any(
                         d for d in (getattr(self, "xfer_dialogs", None) or {}).values() if d
                     ) or any(
@@ -3058,6 +3177,10 @@ class FileCopyClientMixin:
             self._send_to_pipe("PENDING", json.dumps(msg_dict))
             return
 
+        log_overwrite_conflict(
+            f"{'CLIENT_VIEWER' if getattr(self, 'pygame_hwnd', None) else 'HOST_GUI'} "
+            f"apply offer={oid} n={len(files)} names={names} (delayed CF_HDROP, not agent PENDING)"
+        )
         temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
         self.target_save_dir = temp_dir
         self.setup_delayed_rendering()
@@ -3130,7 +3253,13 @@ class FileCopyClientMixin:
         final_path = path
         if dest and path and os.path.isfile(path):
             try:
-                final_path = _promote_completed_xfer_file(path, dest, filename)
+                pid = 0
+                try:
+                    pid = int((job or {}).get("paste_id") or 0)
+                except Exception:
+                    pid = 0
+                rk = (getattr(self, "_xfer_replace_keys_by_paste", None) or {}).get(pid) or set()
+                final_path = _promote_completed_xfer_file(path, dest, filename, replace_keys=rk)
                 print(f"[FileTransfer] Da chép {filename} -> {final_path}")
                 clip_trace(f"[finalize] promote {filename} → {final_path} (job_dest={dest})")
             except Exception as e:

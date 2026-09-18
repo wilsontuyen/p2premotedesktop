@@ -89,6 +89,7 @@ from filecopyclient import (
     _is_windows_11,
     _shell_menu_profile,
     _menu_item_counts_as_paste,
+    _win10_rmb_paste_click,
     _pid_image_name,
     _hwnd_process_name,
     _cursor_over_current_process,
@@ -195,12 +196,18 @@ class ClipboardEventListener:
                         self.manager._prev_lbutton_pos = (cx, cy)
                         hit_menu = (not on_self) and _cursor_over_context_menu()
                         paste_from_menu = False
+                        last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
+                        age_r = now - last_r
                         if hit_menu:
                             self.manager._lmb_hit_context_menu = True
                             kind, name = _capture_menu_item_at_cursor()
                             self.manager._lmb_menu_item_kind = kind
-                            # Win10: chỉ khi đọc đúng "Paste"/"Dán". Win11: unknown cũng tính.
-                            if _menu_item_counts_as_paste(kind):
+                            # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
+                            if _menu_item_counts_as_paste(kind) or (
+                                (not _is_windows_11())
+                                and kind != "not_paste"
+                                and 0.12 < age_r < 8.0
+                            ):
                                 paste_from_menu = True
                                 try:
                                     from utils.logger import clip_trace
@@ -865,8 +872,15 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                             self.overwrite_all = False
                         _finish_overwrite(choice)
 
+                    owner_hwnd = getattr(self, "pygame_hwnd", None)
+                    if not owner_hwnd and self.app:
+                        try:
+                            owner_hwnd = int(self.app.winfo_id())
+                        except Exception:
+                            owner_hwnd = None
                     dialog = ClassicCopyDialog(
-                        self.app, filename, source_info, dest_info, has_multiple, on_done=_on_done
+                        self.app, filename, source_info, dest_info, has_multiple,
+                        on_done=_on_done, owner_hwnd=owner_hwnd,
                     )
                     self._active_overwrite_dialog = dialog
                     self._conflict_ui_active = True

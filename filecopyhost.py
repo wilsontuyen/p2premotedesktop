@@ -50,10 +50,14 @@ from filecopyclient import (
     _PROBE_STUB_DIR,
     _capture_menu_item_at_cursor,
     _copy_batch_kind_and_name,
+    _context_menu_open,
     _cursor_over_context_menu,
     _cursor_over_current_process,
     _cursor_xy,
     _double_click_ms,
+    _is_windows_11,
+    _menu_item_counts_as_paste,
+    _win10_rmb_paste_click,
     _file_expected_size,
     _file_io_lock,
     _file_offer_fp,
@@ -1353,6 +1357,8 @@ def run_clipboard_agent_mode():
     _agent_prev_lbutton_time = 0.0
     _agent_prev_lbutton_pos = (0, 0)
     _agent_last_dblclick_time = 0.0
+    _agent_rmb_cursor_pos = None
+    _agent_context_menu_seen_at = 0.0
 
     def _note_paste_gesture():
         """Ctrl+V / click Paste — coalesced 80ms để hook+poll không đếm 2 lần."""
@@ -1382,6 +1388,108 @@ def run_clipboard_agent_mode():
         _agent_prev_lbutton_time = now
         _agent_prev_lbutton_pos = (cx, cy)
         _agent_last_lbutton_time = now
+
+    def _agent_lmb_is_context_paste(on_self):
+        """Win11 XAML: hit-test menu hay fail — LMB gần chỗ RMB + PENDING = click Paste."""
+        nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
+        nonlocal _agent_context_menu_seen_at
+        if on_self:
+            return False
+        # Không capture menu / không ghi gesture khi chưa có offer — Win11 XAML island
+        # hay bị nhận nhầm là menu (kind=unknown) → Ctrl+V/RMB paste chết.
+        pend = bool(_pending_info.get("files") if _pending_info else None)
+        if not pend:
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = ""
+            return False
+        now = time.time()
+        last_r = float(_agent_last_rbutton_time or 0)
+        age_r = now - last_r
+        hit_menu = _cursor_over_context_menu()
+        if hit_menu:
+            kind, name = _capture_menu_item_at_cursor()
+            _agent_lmb_menu_item_kind = kind
+            _agent_lmb_hit_context_menu = True
+            agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
+            try:
+                log_overwrite_conflict(
+                    f"AGENT LMB menu kind={kind!r} name={name!r} counts_paste={_menu_item_counts_as_paste(kind)}"
+                )
+            except Exception:
+                pass
+            if kind == "not_paste":
+                return False
+            if _menu_item_counts_as_paste(kind):
+                # unknown trên Win11: chỉ khi menu đang mở sau RMB (không phải click Explorer thường).
+                if _is_windows_11() and (kind or "").strip().lower() in ("unknown", ""):
+                    menu_open = False
+                    try:
+                        menu_open = _context_menu_open()
+                    except Exception:
+                        menu_open = False
+                    if not menu_open or not (0.12 < age_r < 8.0):
+                        return False
+                _note_paste_gesture()
+                return True
+            # Win10: đứng trên #32768 sau RMB nhưng không đọc được chữ → vẫn là RMP.
+            if (not _is_windows_11()) and 0.12 < age_r < 8.0:
+                _agent_lmb_menu_item_kind = kind or "paste"
+                _note_paste_gesture()
+                agent_print(f"[ClipboardAgent] LMB Win10 #32768 unknown → paste name={name!r}")
+                try:
+                    log_overwrite_conflict(
+                        f"AGENT LMB win10 classic menu → paste kind={kind!r} name={name!r} age_r={age_r:.2f}"
+                    )
+                except Exception:
+                    pass
+                return True
+            return False
+        rpos = _agent_rmb_cursor_pos
+        cx, cy = _cursor_xy()
+        near_rmb = bool(
+            rpos
+            and abs(cx - rpos[0]) <= 360
+            and abs(cy - rpos[1]) <= 360
+        )
+        recent_dbl = bool(_agent_last_dblclick_time and (now - float(_agent_last_dblclick_time)) < 0.7)
+        menu_open = False
+        try:
+            menu_open = _context_menu_open()
+        except Exception:
+            menu_open = False
+        if menu_open:
+            _agent_context_menu_seen_at = now
+        menu_just_closed = bool(
+            _agent_context_menu_seen_at
+            and (now - _agent_context_menu_seen_at) < 0.7
+            and not menu_open
+        )
+        if (
+            pend
+            and 0.12 < age_r < 8.0
+            and not recent_dbl
+            and near_rmb
+            and (menu_open or menu_just_closed)
+        ):
+            profile = "win11" if _is_windows_11() else "win10"
+            _agent_lmb_hit_context_menu = True
+            _agent_lmb_menu_item_kind = "paste"
+            _note_paste_gesture()
+            agent_print(
+                f"[ClipboardAgent] LMB {profile} near_rmb paste age_r={age_r:.2f} "
+                f"menu_open={menu_open} just_closed={menu_just_closed}"
+            )
+            try:
+                log_overwrite_conflict(
+                    f"AGENT LMB {profile} near_rmb → paste age_r={age_r:.2f} "
+                    f"menu_open={menu_open} just_closed={menu_just_closed}"
+                )
+            except Exception:
+                pass
+            return True
+        _agent_lmb_hit_context_menu = False
+        _agent_lmb_menu_item_kind = ""
+        return False
 
     def _paths_are_probe_or_xfer(files):
         dirs = []
@@ -1511,7 +1619,7 @@ def run_clipboard_agent_mode():
     def _agent_mouse_poll_loop():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
-        nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
+        nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_allow_delayed
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -1520,18 +1628,7 @@ def run_clipboard_agent_mode():
                     on_self = _cursor_over_current_process()
                     if not _agent_lmb_held:
                         _register_lmb_down()
-                        hit_menu = (not on_self) and _cursor_over_context_menu()
-                        if hit_menu:
-                            _agent_lmb_hit_context_menu = True
-                            kind, name = _capture_menu_item_at_cursor()
-                            _agent_lmb_menu_item_kind = kind
-                            agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
-                            if kind == "paste":
-                                _note_paste_gesture()
-                        else:
-                            # Click Explorer (đổi thư mục) — xóa cờ Paste cũ.
-                            _agent_lmb_hit_context_menu = False
-                            _agent_lmb_menu_item_kind = ""
+                        _agent_lmb_is_context_paste(on_self)
                     else:
                         _agent_last_lbutton_time = now
                     _agent_lmb_held = True
@@ -1544,6 +1641,10 @@ def run_clipboard_agent_mode():
                     _agent_last_rbutton_time = time.time()
                     _agent_lmb_hit_context_menu = False
                     _agent_lmb_menu_item_kind = ""
+                    try:
+                        _agent_rmb_cursor_pos = _cursor_xy()
+                    except Exception:
+                        pass
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -1559,6 +1660,8 @@ def run_clipboard_agent_mode():
                     if not _agent_ctrl_v_held:
                         _agent_last_ctrl_v_time = time.time()
                         _note_paste_gesture()
+                        if _pending_info:
+                            _agent_allow_delayed = True
                     _agent_ctrl_v_held = True
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
@@ -1569,6 +1672,8 @@ def run_clipboard_agent_mode():
                     if not _agent_shift_ins_held:
                         _agent_last_ctrl_v_time = time.time()
                         _note_paste_gesture()
+                        if _pending_info:
+                            _agent_allow_delayed = True
                     _agent_shift_ins_held = True
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
@@ -2077,6 +2182,9 @@ def run_clipboard_agent_mode():
                 f"gesture={_agent_paste_gesture_id}/{_agent_consumed_gesture_id} "
                 f"ctrl_v_age={(time.time()-_agent_last_ctrl_v_time) if _agent_last_ctrl_v_time else None}"
             )
+            recent_ctrl = bool(_agent_last_ctrl_v_time and (time.time() - _agent_last_ctrl_v_time) < 2.5)
+            if _pending_info and recent_ctrl:
+                _agent_allow_delayed = True
             if not _pending_info or not _agent_allow_delayed:
                 log_overwrite_conflict(
                     f"RENDERFORMAT EXIT early: no_pending_or_delayed "
@@ -2114,23 +2222,51 @@ def run_clipboard_agent_mode():
                 menu_item_kind=_agent_lmb_menu_item_kind,
                 last_dblclick=_agent_last_dblclick_time,
             )
+            recent_paste_click = (
+                _agent_paste_gesture_id > _agent_consumed_gesture_id
+                and (_agent_lmb_menu_item_kind or "") != "not_paste"
+                and (time.time() - (_agent_last_lbutton_time or 0)) < 3.0
+                and (_agent_last_lbutton_time or 0) > (_agent_last_rbutton_time or 0)
+                and (time.time() - (_agent_last_rbutton_time or 0)) > 0.12
+                and (time.time() - (_agent_last_rbutton_time or 0)) < 8.0
+            ) or _win10_rmb_paste_click(
+                _agent_last_lbutton_time,
+                _agent_last_rbutton_time,
+                _agent_lmb_menu_item_kind,
+                _agent_last_dblclick_time,
+                lmb_on_menu=_agent_lmb_hit_context_menu,
+            )
             if is_menu == "MENU":
-                agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Dummy HDROP, chờ user dán...")
-                log_overwrite_conflict(
-                    f"RENDERFORMAT EXIT: MENU probe (chua paste) kind={_agent_lmb_menu_item_kind!r}"
-                )
-                if _offer_probe_hdrop(_pending_info.get("files")):
-                    _agent_dummy_h_active = True
-                    # Không PostMessage SETUP ngay — để user click Paste / Ctrl+V mới rearm.
-                _schedule_scrub_probe(_agent_cached_explorer_path)
-                return 0
+                if recent_paste_click or recent_ctrl:
+                    is_menu = False
+                    log_overwrite_conflict(
+                        f"RENDERFORMAT MENU → PASTE (gesture "
+                        f"{_agent_paste_gesture_id}>{_agent_consumed_gesture_id} "
+                        f"kind={_agent_lmb_menu_item_kind!r} ctrl_v={recent_ctrl})"
+                    )
+                else:
+                    agent_print("[ClipboardAgent] Phát hiện truy vấn menu. Dummy HDROP, chờ user dán...")
+                    log_overwrite_conflict(
+                        f"RENDERFORMAT EXIT: MENU probe (chua paste) kind={_agent_lmb_menu_item_kind!r}"
+                    )
+                    if _offer_probe_hdrop(_pending_info.get("files")):
+                        _agent_dummy_h_active = True
+                    _schedule_scrub_probe(_agent_cached_explorer_path)
+                    return 0
             elif is_menu == "BACKGROUND":
-                agent_print("[ClipboardAgent] Probe Explorer — HDROP rỗng (không dán stub).")
-                log_overwrite_conflict("RENDERFORMAT EXIT: BACKGROUND probe")
-                if _offer_empty_hdrop():
-                    _agent_dummy_h_active = True
-                    # Không rearm ngay — tránh vòng probe. RMB/Ctrl+V sẽ setup lại.
-                return 0
+                if recent_paste_click or recent_ctrl:
+                    is_menu = False
+                    log_overwrite_conflict(
+                        f"RENDERFORMAT BACKGROUND → PASTE (gesture "
+                        f"{_agent_paste_gesture_id}>{_agent_consumed_gesture_id} "
+                        f"kind={_agent_lmb_menu_item_kind!r} ctrl_v={recent_ctrl})"
+                    )
+                else:
+                    agent_print("[ClipboardAgent] Probe Explorer — HDROP rỗng (không dán stub).")
+                    log_overwrite_conflict("RENDERFORMAT EXIT: BACKGROUND probe")
+                    if _offer_empty_hdrop():
+                        _agent_dummy_h_active = True
+                    return 0
 
             living = any(j.get("allow") for j in _agent_jobs.values())
             same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
@@ -2138,9 +2274,20 @@ def run_clipboard_agent_mode():
             fresh_input = (
                 _agent_last_ctrl_v_time > _agent_last_paste_start + 0.08
                 or (
-                    _agent_lmb_hit_context_menu
-                    and _agent_lmb_menu_item_kind == "paste"
-                    and _agent_last_lbutton_time > _agent_last_paste_start + 0.08
+                    _agent_last_lbutton_time > _agent_last_paste_start + 0.08
+                    and _agent_last_lbutton_time > (_agent_last_rbutton_time or 0)
+                    and (_agent_lmb_menu_item_kind or "") != "not_paste"
+                    and (
+                        _agent_lmb_hit_context_menu
+                        or _menu_item_counts_as_paste(_agent_lmb_menu_item_kind)
+                        or _win10_rmb_paste_click(
+                            _agent_last_lbutton_time,
+                            _agent_last_rbutton_time,
+                            _agent_lmb_menu_item_kind,
+                            _agent_last_dblclick_time,
+                            lmb_on_menu=_agent_lmb_hit_context_menu,
+                        )
+                    )
                 )
             )
             if same_gesture and (living or time.time() < _agent_paste_coalesce_until) and not fresh_input:
@@ -2154,11 +2301,21 @@ def run_clipboard_agent_mode():
             if _agent_xfer_cancel_at and not living:
                 new_kb = _agent_last_ctrl_v_time > _agent_xfer_cancel_at + 0.15
                 new_menu = (
-                    _agent_lmb_hit_context_menu
-                    and _agent_lmb_menu_item_kind == "paste"
-                    and _agent_last_lbutton_time > _agent_xfer_cancel_at + 0.15
+                    _agent_last_lbutton_time > _agent_xfer_cancel_at + 0.15
                     and _agent_last_rbutton_time > _agent_xfer_cancel_at
                     and _agent_last_lbutton_time > _agent_last_rbutton_time
+                    and (_agent_lmb_menu_item_kind or "") != "not_paste"
+                    and (
+                        _agent_lmb_hit_context_menu
+                        or _menu_item_counts_as_paste(_agent_lmb_menu_item_kind)
+                        or _win10_rmb_paste_click(
+                            _agent_last_lbutton_time,
+                            _agent_last_rbutton_time,
+                            _agent_lmb_menu_item_kind,
+                            _agent_last_dblclick_time,
+                            lmb_on_menu=_agent_lmb_hit_context_menu,
+                        )
+                    )
                 )
                 if not new_kb and not new_menu:
                     agent_print("[ClipboardAgent] Sau Hủy chưa có Paste mới — HDROP rỗng, không mở dialog.")
@@ -2347,9 +2504,11 @@ def run_clipboard_agent_mode():
             agent_print(f"[ClipboardAgent] AddClipboardFormatListener lỗi: {e}")
 
         def _stamp_ctrl_v():
-            nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active
+            nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active, _agent_allow_delayed
             _agent_last_ctrl_v_time = time.time()
             _note_paste_gesture()
+            if _pending_info:
+                _agent_allow_delayed = True
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
@@ -2360,15 +2519,9 @@ def run_clipboard_agent_mode():
             nonlocal _agent_last_lbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
             nonlocal _agent_lmb_menu_item_kind
             _register_lmb_down()
-            if _cursor_over_current_process():
-                return
-            if _cursor_over_context_menu():
-                _agent_lmb_hit_context_menu = True
-                kind, name = _capture_menu_item_at_cursor()
-                _agent_lmb_menu_item_kind = kind
-                agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
-                if kind == "paste":
-                    _note_paste_gesture()
+            on_self = _cursor_over_current_process()
+            if not on_self:
+                _agent_lmb_is_context_paste(on_self)
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
@@ -2377,10 +2530,14 @@ def run_clipboard_agent_mode():
 
         def _stamp_rbutton():
             nonlocal _agent_last_rbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
-            nonlocal _agent_lmb_menu_item_kind
+            nonlocal _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos
             _agent_last_rbutton_time = time.time()
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = ""
+            try:
+                _agent_rmb_cursor_pos = _cursor_xy()
+            except Exception:
+                _agent_rmb_cursor_pos = None
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
