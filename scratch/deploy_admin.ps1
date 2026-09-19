@@ -7,7 +7,7 @@ taskkill /F /IM RemoteDesktopService.exe /T
 Start-Sleep -Seconds 2
 
 # Copy files
-$Src = "D:\Data\AG\remote_desktop\dist_nuitka\app.dist"
+$Src = "D:\Data\AI Code\remote_desktop\dist_nuitka\app.dist"
 $Dst = "C:\Apps\P2P"
 
 if (!(Test-Path $Dst)) {

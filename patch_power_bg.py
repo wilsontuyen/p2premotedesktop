@@ -1,7 +1,7 @@
 import os
 
 def apply_patch():
-    target = r"d:\Data\AG\remote_desktop\app.py"
+    target = r"d:\Data\AI Code\remote_desktop\app.py"
     with open(target, "r", encoding="utf-8") as f:
         content = f.read()
 

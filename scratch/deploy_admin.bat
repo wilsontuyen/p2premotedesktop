@@ -19,14 +19,14 @@ timeout /t 3 /nobreak >nul
 
 REM 3. Deploy new build
 echo [3/5] Deploying new build...
-xcopy /E /Y /Q "d:\Data\AG\remote_desktop\dist_nuitka\app.dist\*" "C:\Apps\P2P\" >nul 2>&1
+xcopy /E /Y /Q "d:\Data\AI Code\remote_desktop\dist_nuitka\app.dist\*" "C:\Apps\P2P\" >nul 2>&1
 if errorlevel 1 (
     echo Retry deploy...
     timeout /t 2 /nobreak >nul
     taskkill /F /IM RemoteDesktopService.exe 2>nul
     taskkill /F /IM RemoteDesktopP2P.exe 2>nul
     timeout /t 2 /nobreak >nul
-    xcopy /E /Y /Q "d:\Data\AG\remote_desktop\dist_nuitka\app.dist\*" "C:\Apps\P2P\"
+    xcopy /E /Y /Q "d:\Data\AI Code\remote_desktop\dist_nuitka\app.dist\*" "C:\Apps\P2P\"
 )
 
 REM 4. Restart service

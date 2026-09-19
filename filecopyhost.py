@@ -456,6 +456,7 @@ class FileCopyHostMixin:
                 win32file.CloseHandle(pipe_handle)
             except: pass
 
+
     def _send_progress_signal(self, data_type, payload):
         """PROGRESS/FILES/CANCEL đi cùng pipe persistent xuống agent."""
         self._send_to_pipe(data_type, payload)
@@ -694,23 +695,8 @@ class FileCopyHostMixin:
         active_n = len(getattr(self, "_active_send_ids", None) or [])
         # Đang có batch khác trên dây / trong hàng → dialog này chờ lượt.
         waiting = self._send_job_q.qsize() > 0 or active_n > 1
-        # Mở dialog ngay — hàng sau hiện 0% / "đang chờ" tới lượt.
-        if not (self.app and getattr(self.app, "is_headless", False)):
-            try:
-                total_size = sum(int(f.get("size") or 0) for f in files_list if isinstance(f, dict))
-                item_kind, display_name = _copy_batch_kind_and_name(files_list, _("Tệp tin"))
-                self.open_paste_progress_dialog(
-                    display_name, total_size or 1,
-                    dest_dir=None, reserve_finalize=False,
-                    job_id=send_dlg_id, item_kind=item_kind,
-                )
-                if waiting:
-                    try:
-                        self.gui_queue.put(("status", (_("Đang chờ trong hàng đợi..."), send_dlg_id)))
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[FileTransfer] Mo dialog khi xep hang gui loi: {e}")
+        # Không mở dialog tiến trình ở phía gửi (Client) — phía nhận (Host)
+        # đã có ClipboardAgent hiển thị dialog với Thư mục đích. Mở ở cả 2 phía sẽ làm xuất hiện 2 dialog cho 1 file.
         self._send_job_q.put({
             "files": files_list,
             "my_id": my_id,
@@ -809,18 +795,9 @@ class FileCopyHostMixin:
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
             self._xfer_need_resync = False
-            # Client→host: dialog trên máy client (cùng chỗ user nhìn như host→client).
+            # Phía gửi không mở dialog tiến trình (phía nhận đã mở dialog tại thư mục đích).
             send_dlg_id = int(paste_id or 0) or my_id
-            show_send_dlg = not (self.app and getattr(self.app, "is_headless", False))
-            if show_send_dlg:
-                try:
-                    self.open_paste_progress_dialog(
-                        display_name, total_size or 1,
-                        dest_dir=None, reserve_finalize=False,
-                        job_id=send_dlg_id, item_kind=item_kind,
-                    )
-                except Exception as e:
-                    print(f"[FileTransfer] Mo dialog gui loi: {e}")
+            show_send_dlg = False
             if not self._send_file_msg(sock, start_pkt, my_id):
                 print("[FileTransfer] Huy truoc/luc batch_start — dung gui.")
                 if show_send_dlg:
@@ -1250,7 +1227,13 @@ def run_clipboard_agent_mode():
     _agent_jobs = {}
     _agent_req_lock = threading.Lock()
     _agent_req_q = queue.Queue()
-    # Không còn cổng 1-inflight — paste song song gửi REQUEST_FILES ngay.
+    _active_conflict_job = None
+    _active_conflict_lock = threading.Lock()
+    _in_poll_gui_queue = False
+    # Hàng đợi paste tuần tự: mỗi paste hiện dialog ngay, nhưng thực thi sau paste trước xong.
+    _paste_job_queue = []          # list[dict job] chờ thực thi
+    _paste_job_queue_lock = threading.Lock()
+    _paste_job_running_box = [False]  # [0] = bool, dùng list để có thể mutate từ nested scope
 
     def _apply_conflict_reply_raw(raw):
         """Pipe/GUI → set Event cho conflict_check đang chờ (client đã chọn Replace/Skip/Hủy)."""
@@ -1263,21 +1246,41 @@ def run_clipboard_agent_mode():
             pid = int((data or {}).get("paste_id") or 0)
         except Exception:
             pid = 0
-        job = _agent_jobs.get(pid) if pid else None
+
+        job = None
+        # 1. Tra cứu theo _active_conflict_job (ưu tiên hàng đầu vì đang trực tiếp chờ reply)
+        with _active_conflict_lock:
+            act = _active_conflict_job
+            if act:
+                act_pid = int(act.get("paste_id") or 0)
+                if (not pid) or pid == act_pid or act.get("ow_waiting_client"):
+                    job = act
+
+        # 2. Tra cứu theo _agent_jobs dict
+        if not job and pid:
+            job = _agent_jobs.get(pid)
+
+        # 3. Fallback quét tất cả jobs đang chờ
         if not job:
-            # Fallback: job đang chờ reply gần nhất
-            for j in _agent_jobs.values():
+            for j in list(_agent_jobs.values()):
                 if j and not (j.get("conflict_reply_event") or threading.Event()).is_set():
                     if j.get("conflict_reply") is None and j.get("ow_waiting_client"):
                         job = j
                         break
+
         if not job:
             agent_print(f"[ClipboardAgent] CONFLICT_REPLY khong map job paste_id={pid}")
             try:
-                log_overwrite_conflict(f"CONFLICT_REPLY no job paste_id={pid}")
+                with _active_conflict_lock:
+                    act_p = _active_conflict_job.get("paste_id") if _active_conflict_job else None
+                log_overwrite_conflict(
+                    f"CONFLICT_REPLY no job paste_id={pid} "
+                    f"active_pid={act_p} jobs_keys={list(_agent_jobs.keys())}"
+                )
             except Exception:
                 pass
             return False
+
         job["conflict_reply"] = data if isinstance(data, dict) else {}
         try:
             log_overwrite_conflict(
@@ -1289,7 +1292,9 @@ def run_clipboard_agent_mode():
         except Exception:
             pass
         try:
-            job["conflict_reply_event"].set()
+            ev = job.get("conflict_reply_event")
+            if ev:
+                ev.set()
         except Exception:
             pass
         return True
@@ -1353,6 +1358,8 @@ def run_clipboard_agent_mode():
     _agent_consumed_gesture_id = 0
     _agent_gesture_inc_at = 0.0
     _agent_last_paste_start = 0.0
+    _agent_last_menu_paste_trigger_time = 0.0
+    _agent_paste_trigger_lock = threading.Lock()
     _agent_lmb_held = False
     _agent_prev_lbutton_time = 0.0
     _agent_prev_lbutton_pos = (0, 0)
@@ -1620,18 +1627,31 @@ def run_clipboard_agent_mode():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_allow_delayed
+        nonlocal _agent_last_menu_paste_trigger_time
         user32 = ctypes.windll.user32
         while True:
             try:
                 if user32.GetAsyncKeyState(0x01) & 0x8000:
                     now = time.time()
                     on_self = _cursor_over_current_process()
+                    is_paste = False
                     if not _agent_lmb_held:
                         _register_lmb_down()
-                        _agent_lmb_is_context_paste(on_self)
+                        if not on_self:
+                            is_paste = _agent_lmb_is_context_paste(on_self)
                     else:
                         _agent_last_lbutton_time = now
                     _agent_lmb_held = True
+                    if is_paste:
+                        now_trig = time.time()
+                        if now_trig - _agent_last_menu_paste_trigger_time >= 1.5:
+                            _agent_last_menu_paste_trigger_time = now_trig
+                            threading.Thread(
+                                target=_agent_trigger_paste,
+                                args=("menu_paste",),
+                                daemon=True,
+                                name="AgentMenuPasteTrigger",
+                            ).start()
                     if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -1643,6 +1663,12 @@ def run_clipboard_agent_mode():
                     _agent_lmb_menu_item_kind = ""
                     try:
                         _agent_rmb_cursor_pos = _cursor_xy()
+                    except Exception:
+                        pass
+                    try:
+                        p = query_explorer_folder_path(allow_open_clipboard=False)
+                        if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
+                            _agent_cached_explorer_path = p
                     except Exception:
                         pass
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
@@ -1928,10 +1954,16 @@ def run_clipboard_agent_mode():
         info = job.get("info") or {}
         dest_dir = job.get("dest")
         try:
+            log_overwrite_conflict(f"AgentPasteFinish START paste_id={pid} dest={dest_dir!r}")
             while job.get("allow") and not job["conflict_event"].is_set():
                 job["conflict_event"].wait(0.2)
+            log_overwrite_conflict(
+                f"AgentPasteFinish conflict_wait_end paste_id={pid} allow={job.get('allow')} "
+                f"choice={job.get('conflict_choice')!r} conflict_set={job['conflict_event'].is_set()}"
+            )
             if (not job.get("allow")) or job.get("conflict_choice") == "cancel":
                 agent_print("[ClipboardAgent] Huy do ghi de / conflict.")
+                log_overwrite_conflict(f"AgentPasteFinish CANCEL exit paste_id={pid}")
                 _agent_cleanup_partial(list(job.get("paths") or []))
                 gui_queue.put(("cancel", pid))
                 return
@@ -2087,6 +2119,7 @@ def run_clipboard_agent_mode():
             except Exception:
                 pass
         finally:
+            log_overwrite_conflict(f"AgentPasteFinish FINALLY pop paste_id={pid}")
             _agent_jobs.pop(pid, None)
             if not _agent_jobs:
                 _agent_accept_files = False
@@ -2103,6 +2136,249 @@ def run_clipboard_agent_mode():
                 _agent_dummy_h_active = True
                 _agent_schedule_rearm(0.5)
                 agent_print("[ClipboardAgent] Rearm delayed CF_HDROP cho Paste lai.")
+            # Job xong → thử launch job tiếp theo trong hàng đợi
+            with _paste_job_queue_lock:
+                _paste_job_running_box[0] = False
+            _try_launch_next_paste_job()
+
+    def _try_launch_next_paste_job():
+        """Lấy job đầu tiên trong hàng đợi và thực thi nếu chưa có job nào đang chạy."""
+        nonlocal _agent_download_active, _agent_accept_files, _agent_allow_xfer
+        with _paste_job_queue_lock:
+            if _paste_job_running_box[0] or not _paste_job_queue:
+                return
+            job = _paste_job_queue.pop(0)
+            _paste_job_running_box[0] = True
+        pid = job.get("paste_id")
+        paste_dest = job.get("dest")
+        info = job.get("info") or {}
+        # Đưa job vào _agent_jobs ĐÚNG LÚC này (trước conflict_check)
+        _agent_jobs[pid] = job
+        _agent_download_active = True
+        _agent_accept_files = True
+        _agent_allow_xfer = True
+        log_overwrite_conflict(
+            f"PASTE_QUEUE launch paste_id={pid} dest={paste_dest!r} "
+            f"queue_remain={len(_paste_job_queue)}"
+        )
+        # Bắt đầu xử lý conflict + download
+        gui_queue.put(("conflict_check", (
+            paste_dest,
+            list(info.get("files") or []),
+            info.get("display_name", "Files"),
+            info.get("total_size", 0),
+            pid,
+        )))
+        threading.Thread(
+            target=_agent_complete_download,
+            args=(job,),
+            daemon=True,
+            name=f"AgentPasteFinish_{pid}",
+        ).start()
+
+    def _agent_trigger_paste(source="render_format"):
+        """Kích hoạt dán file (từ WM_RENDERFORMAT hoặc LMB context menu Paste)."""
+        nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id
+        nonlocal _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_last_paste_start
+        nonlocal _agent_accept_files, _agent_allow_xfer, _agent_cached_explorer_path, _ignore_destroy
+        nonlocal _agent_allow_delayed
+
+        with _agent_paste_trigger_lock:
+            # Người dùng thực hiện dán khi có file PENDING từ client → luôn mở allow_delayed
+            if _pending_info and not _agent_allow_delayed:
+                log_overwrite_conflict(
+                    f"TRIGGER_PASTE re-arm allow_delayed=True source={source} (files pending from client)"
+                )
+                _agent_allow_delayed = True
+
+            now = time.time()
+            time_since_last_paste = now - float(_agent_last_paste_start or 0)
+            same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
+
+            log_overwrite_conflict(
+                f"TRIGGER_PASTE source={source} enter pending={bool(_pending_info)} "
+                f"allow_delayed={_agent_allow_delayed} gesture={_agent_paste_gesture_id}/{_agent_consumed_gesture_id} "
+                f"time_since_last={time_since_last_paste:.2f}s same_gesture={same_gesture}"
+            )
+
+            if not _pending_info or not _agent_allow_delayed:
+                log_overwrite_conflict(
+                    f"TRIGGER_PASTE EXIT early: no_pending_or_delayed source={source} "
+                    f"pending={bool(_pending_info)} allow_delayed={_agent_allow_delayed}"
+                )
+                if source == "render_format":
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        _ignore_destroy = True
+                        try:
+                            res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                            if not res:
+                                fn_GlobalFree(empty_hdrop)
+                        finally:
+                            _ignore_destroy = False
+                return False
+
+            # Chặn trùng lặp:
+            # 1) Nếu vừa kích hoạt paste cách đây dưới 1.5s -> bỏ qua duplicate trigger
+            # 2) Hoặc cùng gesture và chưa tới 5.0s -> bỏ qua
+            if time_since_last_paste < 1.5 or (same_gesture and time_since_last_paste < 5.0):
+                log_overwrite_conflict(
+                    f"TRIGGER_PASTE IGNORE duplicate source={source} same_gesture={same_gesture} "
+                    f"elapsed={time_since_last_paste:.2f}s"
+                )
+                if source == "render_format":
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        _ignore_destroy = True
+                        try:
+                            res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                            if not res:
+                                fn_GlobalFree(empty_hdrop)
+                        finally:
+                            _ignore_destroy = False
+                return False
+
+            with _paste_job_queue_lock:
+                queue_busy = _paste_job_running_box[0] or bool(_paste_job_queue)
+
+            log_overwrite_conflict(
+                f"TRIGGER_PASTE source={source} → ENQUEUE PASTE queue_busy={queue_busy}"
+            )
+            _agent_expect_repaste_until = 0.0
+            _agent_paste_id += 1
+            paste_id = _agent_paste_id
+            _agent_consumed_gesture_id = _agent_paste_gesture_id
+            _agent_paste_coalesce_until = now + 2.0
+            _agent_last_paste_start = now
+            _agent_accept_files = True
+            _agent_allow_xfer = True
+            _agent_download_active = True
+
+            agent_print(
+                f"[ClipboardAgent] Kích hoạt Paste ({source}). "
+                f"Job paste_id={paste_id} queue_busy={queue_busy}."
+            )
+
+            try:
+                # Chốt dest Explorer ngay lúc Paste (tránh cache cũ / staging).
+                try:
+                    found = query_explorer_folder_path(allow_open_clipboard=False)
+                    if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
+                        _agent_cached_explorer_path = found
+                except Exception:
+                    pass
+                paste_dest = _agent_cached_explorer_path
+                info = {
+                    "display_name": _pending_info.get("display_name", "Files"),
+                    "item_kind": _pending_info.get("item_kind") or "file",
+                    "total_size": _pending_info.get("total_size", 0),
+                    "files": [dict(f) if isinstance(f, dict) else f for f in (_pending_info.get("files") or [])],
+                }
+                job = {
+                    "paste_id": paste_id,
+                    "info": info,
+                    "dest": paste_dest,
+                    "event": threading.Event(),
+                    "paths": [],
+                    "allow": True,
+                    "accept": True,
+                    "conflict_event": threading.Event(),
+                    "conflict_choice": "replace",
+                    "conflict_skip": set(),
+                    "replace_keys": set(),
+                    "conflict_reply_event": threading.Event(),
+                    "conflict_reply": None,
+                    "requested_files": [],
+                    "last_progress_bytes": 0,
+                    "last_progress_at": time.time(),
+                }
+                _agent_jobs[paste_id] = job
+                agent_print(f"[ClipboardAgent] Paste dest={paste_dest!r} files={len(info.get('files') or [])}")
+
+                # Trả HDROP rỗng NGAY — không chờ 100% trong GetData.
+                if source == "render_format":
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        _ignore_destroy = True
+                        try:
+                            res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                            if not res:
+                                fn_GlobalFree(empty_hdrop)
+                            agent_print(f"[ClipboardAgent] Unblock Explorer, tai file o nen. res={res}")
+                        finally:
+                            _ignore_destroy = False
+
+                _schedule_scrub_probe(paste_dest)
+
+                if queue_busy:
+                    # Có job khác đang chạy → enqueue (KHÔNG thêm vào _agent_jobs vội)
+                    with _paste_job_queue_lock:
+                        _paste_job_queue.append(job)
+                    # Xóa khỏi _agent_jobs (sẽ được thêm lại khi launch)
+                    _agent_jobs.pop(paste_id, None)
+                    agent_print(
+                        f"[ClipboardAgent] Paste paste_id={paste_id} vào hàng đợi "
+                        f"(queue={len(_paste_job_queue)}, job trước chưa xong)."
+                    )
+                    log_overwrite_conflict(
+                        f"PASTE_QUEUE enqueue paste_id={paste_id} queue={len(_paste_job_queue)}"
+                    )
+                    # Hiện dialog "đang chờ" ngay để user thấy paste được ghi nhận
+                    gui_queue.put(("pre_show", (
+                        paste_id,
+                        info.get("display_name", "Files"),
+                        info.get("total_size", 0) or 1,
+                        paste_dest,
+                    )))
+                else:
+                    # Hàng đợi trống → launch ngay, không cần pre_show riêng
+                    with _paste_job_queue_lock:
+                        _paste_job_running_box[0] = True
+                    # Bắt đầu conflict_check + download
+                    gui_queue.put(("conflict_check", (
+                        paste_dest,
+                        list(info.get("files") or []),
+                        info.get("display_name", "Files"),
+                        info.get("total_size", 0),
+                        paste_id,
+                    )))
+                    threading.Thread(
+                        target=_agent_complete_download,
+                        args=(job,),
+                        daemon=True,
+                        name=f"AgentPasteFinish_{paste_id}",
+                    ).start()
+
+                if _pending_info:
+                    _agent_schedule_rearm(0.35)
+                return True
+            except Exception as e:
+                agent_print(f"[ClipboardAgent] Lỗi xử lý Paste ({source}): {e}")
+                _agent_jobs.pop(paste_id, None)
+                with _paste_job_queue_lock:
+                    try:
+                        _paste_job_queue.remove(job)
+                    except ValueError:
+                        pass
+                    _paste_job_running_box[0] = False
+                if not _agent_jobs and not _paste_job_queue:
+                    _agent_download_active = False
+                    _agent_allow_xfer = False
+                    _agent_accept_files = False
+                if source == "render_format":
+                    empty_hdrop = create_hdrop_data([])
+                    if empty_hdrop:
+                        _ignore_destroy = True
+                        try:
+                            res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                            if not res:
+                                fn_GlobalFree(empty_hdrop)
+                        finally:
+                            _ignore_destroy = False
+                if _pending_info:
+                    _agent_schedule_rearm(0.45)
+                gui_queue.put(("cancel", paste_id))
+                return False
 
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
@@ -2183,7 +2459,15 @@ def run_clipboard_agent_mode():
                 f"ctrl_v_age={(time.time()-_agent_last_ctrl_v_time) if _agent_last_ctrl_v_time else None}"
             )
             recent_ctrl = bool(_agent_last_ctrl_v_time and (time.time() - _agent_last_ctrl_v_time) < 2.5)
-            if _pending_info and recent_ctrl:
+            recent_menu = bool(
+                _agent_last_lbutton_time
+                and (time.time() - _agent_last_lbutton_time) < 3.5
+                and (_agent_lmb_menu_item_kind in ("paste", None) or _agent_lmb_hit_context_menu)
+            )
+            if _pending_info and not _agent_allow_delayed:
+                log_overwrite_conflict(
+                    f"RENDERFORMAT re-arm allow_delayed=True (files pending from client)"
+                )
                 _agent_allow_delayed = True
             if not _pending_info or not _agent_allow_delayed:
                 log_overwrite_conflict(
@@ -2268,8 +2552,16 @@ def run_clipboard_agent_mode():
                         _agent_dummy_h_active = True
                     return 0
 
-            living = any(j.get("allow") for j in _agent_jobs.values())
+            living = any(j.get("allow") for j in _agent_jobs.values()) or bool(_paste_job_queue) or _paste_job_running_box[0]
             same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
+            time_since_paste = time.time() - float(_agent_last_paste_start or 0)
+            if time_since_paste < 1.5:
+                agent_print("[ClipboardAgent] WM_RENDERFORMAT ngay sau trigger paste — trả empty HDROP.")
+                log_overwrite_conflict(f"RENDERFORMAT EXIT: recent paste elapsed={time_since_paste:.2f}s")
+                if _offer_empty_hdrop():
+                    _agent_dummy_h_active = True
+                return 0
+
             # Paste mới khi đang tải: gesture mới HOẶC Ctrl+V / click Paste sau lần paste trước.
             fresh_input = (
                 _agent_last_ctrl_v_time > _agent_last_paste_start + 0.08
@@ -2330,103 +2622,8 @@ def run_clipboard_agent_mode():
                 f"living={living} → conflict_check"
             )
             _is_rendering = True
-            _agent_download_active = True
-            _agent_expect_repaste_until = 0.0
-            _agent_paste_id += 1
-            paste_id = _agent_paste_id
-            _agent_consumed_gesture_id = _agent_paste_gesture_id
-            _agent_paste_coalesce_until = time.time() + 0.35
-            _agent_last_paste_start = time.time()
-            _agent_accept_files = True
-            _agent_allow_xfer = True
-            agent_print(f"[ClipboardAgent] Nhận WM_RENDERFORMAT → Paste. Job paste_id={paste_id} (song song={len(_agent_jobs)}).")
             try:
-                # Chốt dest Explorer ngay lúc Paste (tránh cache cũ / staging).
-                try:
-                    found = query_explorer_folder_path(allow_open_clipboard=False)
-                    if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
-                        _agent_cached_explorer_path = found
-                except Exception:
-                    pass
-                paste_dest = _agent_cached_explorer_path
-                info = {
-                    "display_name": _pending_info.get("display_name", "Files"),
-                    "item_kind": _pending_info.get("item_kind") or "file",
-                    "total_size": _pending_info.get("total_size", 0),
-                    "files": [dict(f) if isinstance(f, dict) else f for f in (_pending_info.get("files") or [])],
-                }
-                job = {
-                    "paste_id": paste_id,
-                    "info": info,
-                    "dest": paste_dest,
-                    "event": threading.Event(),
-                    "paths": [],
-                    "allow": True,
-                    "accept": True,
-                    "conflict_event": threading.Event(),
-                    "conflict_choice": "replace",
-                    "conflict_skip": set(),
-                    "replace_keys": set(),
-                    "conflict_reply_event": threading.Event(),
-                    "conflict_reply": None,
-                    "requested_files": [],
-                    "last_progress_bytes": 0,
-                    "last_progress_at": time.time(),
-                }
-                _agent_jobs[paste_id] = job
-                agent_print(f"[ClipboardAgent] Paste dest={paste_dest!r} files={len(info.get('files') or [])}")
-                log_overwrite_conflict(
-                    f"PASTE start paste_id={paste_id} dest={paste_dest!r} "
-                    f"n_files={len(info.get('files') or [])} → queue conflict_check"
-                )
-                # Hỏi ghi đè TRƯỚC — rồi mới mở dialog tiến trình / REQUEST_FILES.
-                gui_queue.put(("conflict_check", (
-                    paste_dest,
-                    list(info.get("files") or []),
-                    info.get("display_name", "Files"),
-                    info.get("total_size", 0),
-                    paste_id,
-                )))
-                # Trả HDROP rỗng NGAY — không chờ 100% trong GetData (move file lúc Explorer lock thư mục = treo máy).
-                empty_hdrop = create_hdrop_data([])
-                if empty_hdrop:
-                    _ignore_destroy = True
-                    try:
-                        res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
-                        if not res:
-                            fn_GlobalFree(empty_hdrop)
-                        agent_print(f"[ClipboardAgent] Unblock Explorer, tai file o nen. res={res}")
-                    finally:
-                        _ignore_destroy = False
-                _schedule_scrub_probe(paste_dest)
-                dest = paste_dest
-                threading.Thread(
-                    target=_agent_complete_download,
-                    args=(job,),
-                    daemon=True,
-                    name="AgentPasteFinish",
-                ).start()
-                if _pending_info:
-                    _agent_schedule_rearm(0.35)
-            except Exception as e:
-                agent_print(f"[ClipboardAgent] Lỗi xử lý WM_RENDERFORMAT: {e}")
-                _agent_jobs.pop(paste_id, None)
-                if not _agent_jobs:
-                    _agent_download_active = False
-                    _agent_allow_xfer = False
-                    _agent_accept_files = False
-                empty_hdrop = create_hdrop_data([])
-                if empty_hdrop:
-                    _ignore_destroy = True
-                    try:
-                        res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
-                        if not res:
-                            fn_GlobalFree(empty_hdrop)
-                    finally:
-                        _ignore_destroy = False
-                if _pending_info:
-                    _agent_schedule_rearm(0.45)
-                gui_queue.put(("cancel", paste_id))
+                _agent_trigger_paste(source="render_format")
             finally:
                 _is_rendering = False
             return 0
@@ -2517,11 +2714,22 @@ def run_clipboard_agent_mode():
 
         def _stamp_lbutton():
             nonlocal _agent_last_lbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
-            nonlocal _agent_lmb_menu_item_kind
+            nonlocal _agent_lmb_menu_item_kind, _agent_last_menu_paste_trigger_time
             _register_lmb_down()
             on_self = _cursor_over_current_process()
+            is_paste = False
             if not on_self:
-                _agent_lmb_is_context_paste(on_self)
+                is_paste = _agent_lmb_is_context_paste(on_self)
+            if is_paste:
+                now_trig = time.time()
+                if now_trig - _agent_last_menu_paste_trigger_time >= 1.5:
+                    _agent_last_menu_paste_trigger_time = now_trig
+                    threading.Thread(
+                        target=_agent_trigger_paste,
+                        args=("menu_paste",),
+                        daemon=True,
+                        name="AgentMenuPasteTrigger",
+                    ).start()
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
@@ -2530,7 +2738,7 @@ def run_clipboard_agent_mode():
 
         def _stamp_rbutton():
             nonlocal _agent_last_rbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
-            nonlocal _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos
+            nonlocal _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_cached_explorer_path
             _agent_last_rbutton_time = time.time()
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = ""
@@ -2538,6 +2746,12 @@ def run_clipboard_agent_mode():
                 _agent_rmb_cursor_pos = _cursor_xy()
             except Exception:
                 _agent_rmb_cursor_pos = None
+            try:
+                p = query_explorer_folder_path(allow_open_clipboard=False)
+                if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
+                    _agent_cached_explorer_path = p
+            except Exception:
+                pass
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
@@ -2635,6 +2849,22 @@ def run_clipboard_agent_mode():
         if paste_id is None:
             for pid, job in list(_agent_jobs.items()):
                 _stop_job(pid, job)
+            # Xóa hết hàng đợi (cancel all)
+            with _paste_job_queue_lock:
+                for qjob in list(_paste_job_queue):
+                    qjob["allow"] = False
+                    qjob["accept"] = False
+                    qjob["conflict_choice"] = "cancel"
+                    try:
+                        qjob["conflict_event"].set()
+                    except Exception:
+                        pass
+                    try:
+                        qjob["event"].set()
+                    except Exception:
+                        pass
+                    gui_queue.put(("cancel", qjob.get("paste_id")))
+                _paste_job_queue.clear()
         else:
             try:
                 paste_id = int(paste_id)
@@ -2644,6 +2874,13 @@ def run_clipboard_agent_mode():
             if job:
                 _stop_job(paste_id, job)
             else:
+                # Kiểm tra trong hàng đợi
+                with _paste_job_queue_lock:
+                    queued = [j for j in _paste_job_queue if j.get("paste_id") == paste_id]
+                    for qjob in queued:
+                        _paste_job_queue.remove(qjob)
+                        qjob["allow"] = False
+                        qjob["accept"] = False
                 gui_queue.put(("cancel", paste_id))
 
         leftover = list(_files_ready_paths)
@@ -2652,7 +2889,7 @@ def run_clipboard_agent_mode():
             _files_ready_event.set()
             _agent_cleanup_partial(leftover)
 
-        still_allow = any(j.get("allow") for j in _agent_jobs.values())
+        still_allow = any(j.get("allow") for j in _agent_jobs.values()) or bool(_paste_job_queue)
         if not still_allow:
             _agent_allow_xfer = False
             _agent_accept_files = False
@@ -2685,6 +2922,7 @@ def run_clipboard_agent_mode():
                 dlg.deiconify()
                 dlg.lift()
                 dlg.attributes("-topmost", True)
+                dlg.update_progress(0, status="")
             except Exception:
                 pass
             return dlg
@@ -2746,7 +2984,10 @@ def run_clipboard_agent_mode():
     def poll_gui_queue():
         nonlocal active_dialog, _agent_meta_arrival_time, _agent_allow_xfer, _agent_suppress_render_until
         nonlocal _agent_conflict_choice, _agent_conflict_skip, _agent_allow_delayed, _agent_clip_seq_at_pending, _agent_paste_coalesce_until, _agent_force_delayed_setup, _agent_pending_offer_id
-        nonlocal _agent_repaste_local_by_name, _agent_expect_repaste_until
+        nonlocal _agent_repaste_local_by_name, _agent_expect_repaste_until, _in_poll_gui_queue, _active_conflict_job
+        if _in_poll_gui_queue:
+            return
+        _in_poll_gui_queue = True
         while not gui_queue.empty():
             try:
                 action, val = gui_queue.get_nowait()
@@ -2858,6 +3099,17 @@ def run_clipboard_agent_mode():
                     job["paths"][:] = paths
                     job["event"].set()
                     agent_print(f"[ClipboardAgent] files_ready paste_id={job.get('paste_id')}: {len(paths)} file đã sẵn sàng.")
+                elif action == "pre_show":
+                    # Hiện dialog placeholder ngay cho job đang trong hàng đợi chờ thực thi
+                    pre_pid, pre_name, pre_size, pre_dest = val
+                    _open_paste_progress_dialog(pre_pid, pre_name, pre_size or 1, pre_dest)
+                    # Cập nhật label "đang chờ" trên dialog
+                    _dlg = active_dialogs.get(pre_pid)
+                    if _dlg:
+                        try:
+                            _dlg.update_progress(0, status=_("Đang chờ trong hàng đợi..."))
+                        except Exception:
+                            pass
                 elif action == "start":
                     display_name, total_size = val[0], val[1]
                     dest_dir = val[2] if len(val) > 2 else None
@@ -3306,7 +3558,7 @@ def run_clipboard_agent_mode():
                                             dialog.focus_force()
                                             dialog.grab_set()
                                             try:
-                                                hwnd = int(dialog.winfo_id())
+                                                hwnd = int(dialog._hwnd() if hasattr(dialog, "_hwnd") else dialog.winfo_id())
                                                 ctypes.windll.user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
                                             except Exception:
                                                 pass
@@ -3391,6 +3643,8 @@ def run_clipboard_agent_mode():
                             ev.clear()
                             job["conflict_reply"] = None
                             job["ow_waiting_client"] = True
+                            with _active_conflict_lock:
+                                _active_conflict_job = job
                             sent_q = _write_conflict_query_pipe(paste_id, conflicts, has_multiple)
                             log_overwrite_conflict(
                                 f"CONFLICT_QUERY send={sent_q} paste_id={paste_id} "
@@ -3426,6 +3680,11 @@ def run_clipboard_agent_mode():
                             job["ow_waiting_client"] = False
                             log_overwrite_conflict(f"CONFLICT_QUERY path loi: {e_q} → HOST dialog")
                             _ask_on_host()
+                        finally:
+                            with _active_conflict_lock:
+                                if _active_conflict_job is job:
+                                    _active_conflict_job = None
+                            job["ow_waiting_client"] = False
                         if cancelled:
                             job["conflict_choice"] = "cancel"
                             log_overwrite_conflict(f"USER CANCEL paste_id={paste_id}")
@@ -3489,6 +3748,7 @@ def run_clipboard_agent_mode():
                 break
             except Exception as e:
                 agent_print(f"[ClipboardAgent] Lỗi xử lý hàng đợi GUI: {e}")
+        _in_poll_gui_queue = False
         root.after(50, poll_gui_queue)
 
     t = threading.Thread(target=pipe_listener_loop, daemon=True)

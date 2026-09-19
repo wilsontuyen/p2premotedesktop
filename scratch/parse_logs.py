@@ -2,7 +2,7 @@ import re
 import os
 
 log_path = r"C:\Apps\P2P\clipboard_agent.log"
-out_path = r"d:\Data\AG\remote_desktop\scratch\unique_messages.txt"
+out_path = r"d:\Data\AI Code\remote_desktop\scratch\unique_messages.txt"
 if os.path.exists(log_path):
     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()

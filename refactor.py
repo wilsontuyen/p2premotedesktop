@@ -1,6 +1,6 @@
-﻿import os
+import os
 
-file_path = r'd:\Data\AG\remote_desktop\os_utils\windows_clipboard.py'
+file_path = r'd:\Data\AI Code\remote_desktop\os_utils\windows_clipboard.py'
 with open(file_path, 'r', encoding='utf-8') as f:
     content = f.read()
 

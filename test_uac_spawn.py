@@ -59,6 +59,6 @@ t.join()
 """
 with open('C:\\Apps\\P2P\\test_uac_inner.py', 'w') as f: f.write(py_code)
 
-pid, _, _, _ = win32process.CreateProcessAsUser(h_token_dup, r'd:\Data\AG\remote_desktop\.venv\Scripts\python.exe', 'python C:\\Apps\\P2P\\test_uac_inner.py', None, None, False, 0, None, r'C:\Apps\P2P', si)
+pid, _, _, _ = win32process.CreateProcessAsUser(h_token_dup, r'd:\Data\AI Code\remote_desktop\.venv\Scripts\python.exe', 'python C:\\Apps\\P2P\\test_uac_inner.py', None, None, False, 0, None, r'C:\Apps\P2P', si)
 print('Spawned PID:', pid)
 time.sleep(2)

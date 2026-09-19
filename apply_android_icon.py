@@ -2,7 +2,7 @@ import os
 import shutil
 from PIL import Image
 
-src_icon = r"d:\Data\AG\remote_desktop\app_icon.png"
+src_icon = r"d:\Data\AI Code\remote_desktop\app_icon.png"
 android_res_dir = r"d:\SOFT\Coder\Android\app\src\main\res"
 
 sizes = {

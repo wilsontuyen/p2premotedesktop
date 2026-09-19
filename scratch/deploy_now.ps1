@@ -4,7 +4,7 @@ taskkill /F /IM RemoteDesktopP2P.exe 2>$null
 Start-Sleep -Seconds 3
 
 # Deploy from build output to target
-$src = "d:\Data\AG\remote_desktop\dist_nuitka\app.dist"
+$src = "d:\Data\AI Code\remote_desktop\dist_nuitka\app.dist"
 $dst = "C:\Apps\P2P"
 
 Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force -ErrorAction Continue
