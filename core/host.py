@@ -2002,9 +2002,12 @@ class HostMixin:
                     if now - _last_switching_signal_time >= 12:
                         print("[Host] Secure Desktop detected and cannot be accessed. Signaling client...")
                         try:
-                            send_msg(conn, _encode_switching_desktop(), password)
+                            if not send_msg(conn, _encode_switching_desktop(), password):
+                                client_state["running"] = False
+                                break
                         except:
-                            pass
+                            client_state["running"] = False
+                            break
                         _last_switching_signal_time = now
                     _sync_lock_status()
                     time.sleep(0.5)
@@ -2033,10 +2036,13 @@ class HostMixin:
                         try:
                             if time.time() - _last_hb >= 2.0:
                                 try:
-                                    send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password)
+                                    if not send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password):
+                                        client_state["running"] = False
+                                        break
                                     _last_hb = time.time()
                                 except Exception:
-                                    pass
+                                    client_state["running"] = False
+                                    break
                                 _sync_lock_status()
                             if not _legacy_host:
                                 want_logon = _should_capture_logon_ui()
@@ -2221,9 +2227,12 @@ class HostMixin:
                                 force_update = True
                                 try:
                                     res_meta = {"type": "resolution_change", "w": cap_w, "h": cap_h}
-                                    send_msg(conn, json.dumps(res_meta).encode('utf-8'), password)
+                                    if not send_msg(conn, json.dumps(res_meta).encode('utf-8'), password):
+                                        client_state["running"] = False
+                                        break
                                 except Exception:
-                                    pass
+                                    client_state["running"] = False
+                                    break
 
                             # dyn_scale < 0 = gửi gần độ phân giải gốc (không thu về kích thước cửa sổ viewer)
                             send_max_edge = _MAX_SEND_EDGE_LEGACY if _legacy_host else (
@@ -2297,7 +2306,9 @@ class HostMixin:
                                 if box_w * box_h < (frame_w_cur * frame_h_cur) * 0.7:
                                     frame_bgr = frame_bgr[diff_bbox[1]:diff_bbox[3], diff_bbox[0]:diff_bbox[2]]
                                     partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
-                                    send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password)
+                                    if not send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password):
+                                        client_state["running"] = False
+                                        break
                             
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
                             if (not _legacy_host) and hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
@@ -2313,7 +2324,9 @@ class HostMixin:
                             jpeg_data = encimg.tobytes()
                             
                             t_start_send = time.time()
-                            send_msg(conn, jpeg_data, password)
+                            if not send_msg(conn, jpeg_data, password):
+                                client_state["running"] = False
+                                break
                             send_time = time.time() - t_start_send
                             _last_hb = time.time()
                             

@@ -1355,6 +1355,7 @@ def run_clipboard_agent_mode():
     _agent_consumed_gesture_id = 0
     _agent_gesture_inc_at = 0.0
     _agent_last_paste_start = 0.0
+    _agent_last_paste_finish_time = 0.0
     _agent_last_menu_paste_trigger_time = 0.0
     _agent_paste_trigger_lock = threading.Lock()
     _agent_lmb_held = False
@@ -1590,7 +1591,7 @@ def run_clipboard_agent_mode():
         nonlocal _agent_suppress_render_until
         if not _agent_allow_delayed or _agent_user_clipboard_wins():
             return
-        _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + delay_s)
+        _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + delay_s + 2.5)
         def _go():
             if not _agent_allow_delayed:
                 return
@@ -1877,6 +1878,7 @@ def run_clipboard_agent_mode():
     def _execute_agent_delayed_rendering(hwnd):
         """Chạy trong WndProc thread: mở clipboard, đăng ký deferred CF_HDROP."""
         nonlocal _ignore_destroy, _agent_setup_tries, _agent_force_delayed_setup, _agent_allow_delayed
+        nonlocal _agent_suppress_render_until
         force = _agent_force_delayed_setup
         _agent_force_delayed_setup = False
         if not force:
@@ -1924,6 +1926,7 @@ def run_clipboard_agent_mode():
                 res = fn_SetClipboardData(CF_HDROP, None)
                 user32.CloseClipboard()
                 mark_own_clipboard_write()
+                _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + 2.0)
                 agent_print(f"[ClipboardAgent] Đã setup delayed rendering CF_HDROP. res={res}")
             finally:
                 _ignore_destroy = False
@@ -1952,6 +1955,7 @@ def run_clipboard_agent_mode():
         """Chờ FILES rồi chuyển vào thư mục Explorer — KHÔNG chạy trong WM_RENDERFORMAT (tránh deadlock OLE)."""
         nonlocal _agent_allow_xfer, _agent_accept_files, _agent_download_active, _pending_info
         nonlocal _agent_expect_repaste_until, _agent_dummy_h_active, _agent_allow_delayed, _agent_repaste_local_by_name
+        nonlocal _agent_last_paste_finish_time
         pid = job.get("paste_id")
         info = job.get("info") or {}
         dest_dir = job.get("dest")
@@ -2123,6 +2127,7 @@ def run_clipboard_agent_mode():
         finally:
             log_overwrite_conflict(f"AgentPasteFinish FINALLY pop paste_id={pid}")
             try:
+                _agent_last_paste_finish_time = time.time()
                 _agent_jobs.pop(pid, None)
                 if not _agent_jobs:
                     _agent_accept_files = False
@@ -2186,8 +2191,8 @@ def run_clipboard_agent_mode():
 
             # Chặn trùng lặp:
             # 1) Nếu vừa kích hoạt paste cách đây dưới 1.5s -> bỏ qua duplicate trigger
-            # 2) Hoặc cùng gesture và chưa tới 5.0s -> bỏ qua
-            if time_since_last_paste < 1.5 or (same_gesture and time_since_last_paste < 5.0):
+            # 2) Hoặc cùng gesture (đã tiêu thụ) -> bỏ qua
+            if time_since_last_paste < 1.5 or same_gesture:
                 log_overwrite_conflict(
                     f"TRIGGER_PASTE IGNORE duplicate source={source} same_gesture={same_gesture} "
                     f"elapsed={time_since_last_paste:.2f}s"
@@ -2316,6 +2321,7 @@ def run_clipboard_agent_mode():
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
         nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active, _agent_cached_explorer_path, _agent_suppress_render_until, _agent_expect_repaste_until, _agent_paste_id, _agent_accept_files, _agent_allow_xfer, _agent_xfer_cancel_at, _agent_download_active, _agent_conflict_choice, _agent_conflict_skip, _agent_allow_delayed, _agent_paste_gesture_id, _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_force_delayed_setup, _agent_last_paste_start
+        nonlocal _agent_last_paste_finish_time
 
         if msg == WM_USER_SETUP_DELAYED:
             if not _agent_force_delayed_setup and _agent_user_clipboard_wins():
@@ -2423,9 +2429,12 @@ def run_clipboard_agent_mode():
                 if _offer_empty_hdrop():
                     _agent_dummy_h_active = True
                 return 0
-            if time.time() < _agent_suppress_render_until and _agent_paste_gesture_id <= _agent_consumed_gesture_id:
-                agent_print("[ClipboardAgent] Ngay sau Hủy — HDROP rỗng, không tải ngầm.")
-                log_overwrite_conflict("RENDERFORMAT EXIT: suppress_after_cancel")
+            if (
+                time.time() < _agent_suppress_render_until
+                or time.time() < (_agent_last_paste_finish_time or 0) + 2.5
+            ) and _agent_paste_gesture_id <= _agent_consumed_gesture_id:
+                agent_print("[ClipboardAgent] Sau Rearm / Hoàn tất paste — HDROP rỗng, không tải ngầm.")
+                log_overwrite_conflict("RENDERFORMAT EXIT: suppress_after_finish_or_rearm")
                 if _offer_empty_hdrop():
                     _agent_dummy_h_active = True
                     _agent_schedule_rearm(0.25)
@@ -2515,7 +2524,7 @@ def run_clipboard_agent_mode():
                     )
                 )
             )
-            if same_gesture and (living or time.time() < _agent_paste_coalesce_until) and not fresh_input:
+            if same_gesture and not fresh_input:
                 agent_print("[ClipboardAgent] GetData trùng (chưa có Paste mới) — không mở dialog thêm.")
                 log_overwrite_conflict(
                     f"RENDERFORMAT EXIT: coalesce same_gesture living={living} fresh={fresh_input}"
@@ -2554,6 +2563,8 @@ def run_clipboard_agent_mode():
                 f"RENDERFORMAT → PASTE OK is_menu={is_menu!r} fresh={fresh_input} "
                 f"living={living} → conflict_check"
             )
+            if fresh_input and same_gesture:
+                _note_paste_gesture()
             _is_rendering = True
             try:
                 _agent_trigger_paste(source="render_format")

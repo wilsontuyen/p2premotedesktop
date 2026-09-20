@@ -36,6 +36,12 @@ def force_close_socket(sock):
         _socket_send_locks.pop(sock, None)
     socket_passwords.pop(sock, None)
 
+def _is_disconnect_error(e):
+    if isinstance(e, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+        return True
+    err_str = str(e)
+    return any(code in err_str for code in ("10053", "10054", "10058", "10038", "WSAECONNABORTED", "WSAECONNRESET"))
+
 def send_msg(sock, data_bytes, password=None, should_stop=None, lock_timeout=None):
     """Gửi 1 khung. Mặc định sendall (signaling/video). should_stop/lock_timeout chỉ dùng lúc gửi file/Hủy."""
     if should_stop and should_stop():
@@ -53,7 +59,8 @@ def send_msg(sock, data_bytes, password=None, should_stop=None, lock_timeout=Non
                 sock.sendall(msg)
             return True
         except Exception as e:
-            print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+            if not _is_disconnect_error(e):
+                print(f"[Socket] Lỗi gửi dữ liệu: {e}")
             return False
 
     acquired = False
@@ -91,14 +98,16 @@ def send_msg(sock, data_bytes, password=None, should_stop=None, lock_timeout=Non
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+                if not _is_disconnect_error(e):
+                    print(f"[Socket] Lỗi gửi dữ liệu: {e}")
                 return False
             if n == 0:
                 return False
             sent += n
         return True
     except Exception as e:
-        print(f"[Socket] Lỗi gửi dữ liệu: {e}")
+        if not _is_disconnect_error(e):
+            print(f"[Socket] Lỗi gửi dữ liệu: {e}")
         return False
     finally:
         if acquired:

@@ -1804,6 +1804,7 @@ class FileCopyClientMixin:
         else:
             self._allow_delayed = True
         if self.listener and self.listener.hwnd:
+            self._suppress_render_until = max(getattr(self, "_suppress_render_until", 0), time.time() + 2.0)
             user32 = ctypes.windll.user32
             hwnd = ctypes.c_void_p(self.listener.hwnd)
             msg = 0x0400 + 101
@@ -1821,7 +1822,7 @@ class FileCopyClientMixin:
         """Sau paste/Hủy: đợi Explorer xong rồi hứa CF_HDROP lại (nếu vẫn còn offer)."""
         gen = int(getattr(self, "_rearm_gen", 0) or 0) + 1
         self._rearm_gen = gen
-        self._suppress_render_until = max(getattr(self, "_suppress_render_until", 0), time.time() + delay_s)
+        self._suppress_render_until = max(getattr(self, "_suppress_render_until", 0), time.time() + delay_s + 2.5)
 
         def _go(g=gen):
             if g != getattr(self, "_rearm_gen", 0):
@@ -2456,10 +2457,13 @@ class FileCopyClientMixin:
                 return
 
         if (
-            time.time() < getattr(self, "_suppress_render_until", 0)
+            (
+                time.time() < getattr(self, "_suppress_render_until", 0)
+                or time.time() < (getattr(self, "_last_paste_finish_time", 0) or 0) + 2.5
+            )
             and getattr(self, "_paste_gesture_id", 0) <= getattr(self, "_consumed_paste_gesture_id", 0)
         ):
-            log_debug("[render_format] Ngay sau Hủy — HDROP rỗng, không tải ngầm.")
+            log_debug("[render_format] Ngay sau Hủy / Hoàn tất paste — HDROP rỗng, không tải ngầm.")
             self._offer_empty_and_rearm(0.25)
             return
             
@@ -2475,12 +2479,21 @@ class FileCopyClientMixin:
             self._offer_empty_and_rearm(0.25)
             return
 
-        dest_dir = self.get_active_explorer_path()
-        # Không gọi COM trong WM_RENDERFORMAT — chỉ dùng path đã chốt lúc RMB / last-good.
-        living = any(d for d in (getattr(self, "xfer_dialogs", None) or {}).values() if d)
-        if living and getattr(self, "_paste_gesture_id", 0) <= getattr(self, "_consumed_paste_gesture_id", 0):
+        same_gesture = getattr(self, "_paste_gesture_id", 0) <= getattr(self, "_consumed_paste_gesture_id", 0)
+        fresh_input = (
+            getattr(self, "last_ctrl_v_time", 0) > (getattr(self, "_last_paste_start", 0) or 0) + 0.08
+            or (
+                getattr(self, "last_lbutton_time", 0) > (getattr(self, "_last_paste_start", 0) or 0) + 0.08
+                and getattr(self, "last_lbutton_time", 0) > (getattr(self, "last_rbutton_time", 0) or 0)
+                and (
+                    getattr(self, "_lmb_hit_context_menu", False)
+                    or getattr(self, "_lmb_menu_item_kind", "") == "paste"
+                )
+            )
+        )
+        if same_gesture and not fresh_input:
             log_debug("[render_format] GetData trùng (chưa có Paste mới) — không mở dialog thêm.")
-            clip_trace("[render_format] → living dialog, no new gesture", throttle_s=1.0, key="rf_living")
+            clip_trace("[render_format] → same gesture no fresh input, skip", throttle_s=1.0, key="rf_same_gesture")
             self._offer_empty_and_rearm(0.25)
             return
             
@@ -2489,6 +2502,7 @@ class FileCopyClientMixin:
         self._rearm_delayed_after_render = False
         self._clipboard_paste_id = getattr(self, "_clipboard_paste_id", 0) + 1
         self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
+        self._last_paste_start = time.time()
         paste_tok = int(getattr(self, "_clipboard_paste_id", 0) or 0)
         clip_trace(f"[render_format] PASTE START paste_id={paste_tok} dest_before_lock={dest_dir!r} living={living}")
         dest_dir = self._lock_paste_dest(dest_dir, paste_tok) or dest_dir
@@ -3014,6 +3028,7 @@ class FileCopyClientMixin:
                     ) or any(
                         not e.is_set() for e in (getattr(self, "_paste_done", None) or {}).values()
                     )
+                    self._last_paste_finish_time = time.time()
                     if not still:
                         self.transfer_in_progress = False
                         self._unlock_paste_dest()

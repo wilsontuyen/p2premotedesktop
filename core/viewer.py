@@ -546,13 +546,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     try:
                         now = time.time()
                         if now - last_ping_time >= 3.0:
-                            send_msg(sock, json.dumps({"type": "ping"}).encode('utf-8'), partner_pass)
+                            if not send_msg(sock, json.dumps({"type": "ping"}).encode('utf-8'), partner_pass):
+                                break
                             last_ping_time = now
 
                         # Ưu tiên gửi sự kiện quan trọng (click/key/scroll) trước
                         try:
                             event_dict = critical_queue.get_nowait()
-                            send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
+                            if not send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass):
+                                break
                             continue
                         except queue.Empty:
                             pass
@@ -562,7 +564,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 move = _mouse_move_buf.get("latest")
                                 _mouse_move_has_new.clear()
                             if move:
-                                send_msg(sock, json.dumps(move).encode('utf-8'), partner_pass)
+                                if not send_msg(sock, json.dumps(move).encode('utf-8'), partner_pass):
+                                    break
                     except Exception:
                         break
                         
