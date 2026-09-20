@@ -11,7 +11,7 @@ if insert_idx != -1:
     code = """
 def get_computers_xml_path():
     import os, sys
-    installed_path = r"C:\\Apps\\P2P\\saved_computers.xml"
+    installed_path = r"C:\\Program Files (x86)\\Easy Remote Desktop\\saved_computers.xml"
     if os.path.exists(installed_path):
         return installed_path
     if getattr(sys, 'frozen', False):

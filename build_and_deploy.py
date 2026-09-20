@@ -5,7 +5,7 @@ import shutil
 import time
 
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
-target_dir = r"C:\Apps\P2P"
+target_dir = r"C:\Program Files (x86)\Easy Remote Desktop"
 log_path = os.path.join(workspace_dir, "build_deploy.log")
 
 def log(msg):

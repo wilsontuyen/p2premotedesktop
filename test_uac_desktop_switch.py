@@ -39,7 +39,7 @@ def run_test_as_system():
     py_code = """
 import ctypes, time, threading, os
 
-log_file = r"C:\\Apps\\P2P\\uac_switch_test_log.txt"
+log_file = r"C:\\Program Files (x86)\\Easy Remote Desktop\\uac_switch_test_log.txt"
 if os.path.exists(log_file):
     try: os.remove(log_file)
     except: pass
@@ -123,7 +123,7 @@ t.start()
 t.join()
 log("Test process inner finished.")
 """
-    inner_script = r"C:\Apps\P2P\test_uac_switch_inner.py"
+    inner_script = r"C:\Program Files (x86)\Easy Remote Desktop\test_uac_switch_inner.py"
     with open(inner_script, 'w', encoding='utf-8') as f:
         f.write(py_code)
     
@@ -132,7 +132,7 @@ log("Test process inner finished.")
         h_token_dup, 
         python_exe, 
         f'python "{inner_script}"', 
-        None, None, False, 0, None, r'C:\Apps\P2P', si
+        None, None, False, 0, None, r'C:\Program Files (x86)\Easy Remote Desktop', si
     )
     print(f"Spawned process ID {process_id} under winlogon desktop as SYSTEM.")
     
@@ -156,7 +156,7 @@ log("Test process inner finished.")
     subprocess.run('taskkill /F /IM consent.exe', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     print("\n--- TEST LOG ---")
-    log_file = r"C:\Apps\P2P\uac_switch_test_log.txt"
+    log_file = r"C:\Program Files (x86)\Easy Remote Desktop\uac_switch_test_log.txt"
     if os.path.exists(log_file):
         with open(log_file, "r", encoding="utf-8") as f:
             print(f.read())

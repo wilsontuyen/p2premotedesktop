@@ -4151,7 +4151,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                             os.makedirs(os.path.join(current_dir, new_name), exist_ok=True)
                                                             refresh_local()
                                                         except Exception as e:
-                                                            with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f: f.write(f"Error mkdir: {str(e)}\n")
+                                                            with open("C:\\Program Files (x86)\\Easy Remote Desktop\\debug_view.txt", "a", encoding="utf-8") as f: f.write(f"Error mkdir: {str(e)}\n")
                                                     return
                                                 if not sel: return
                                                 item = local_tree.item(sel[0])
@@ -4277,7 +4277,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         try:
                                                             from datetime import datetime
                                                             ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                            open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
+                                                            open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
                                                             content = event.get("content", "")
                                                             path = event.get("path", "")
                                                             name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
@@ -4381,7 +4381,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if action == "view":
                                                 from datetime import datetime
                                                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
+                                                open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
                                                 if is_dir:
                                                     messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                 else:
@@ -4394,7 +4394,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         req = {"type": "request_open_file", "path": full_path}
                                                         messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
                                                     try:
-                                                        open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\n")
+                                                        open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\n")
                                                         send_event(req)
                                                     except Exception as ex:
                                                         messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)
@@ -5510,7 +5510,7 @@ class UnifiedApp(tk.Tk):
             is_installed_version = False
             try:
                 exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
-                if "C:\\Apps\\P2P" in os.path.abspath(exe_path):
+                if "C:\\Program Files (x86)\\Easy Remote Desktop" in os.path.abspath(exe_path):
                     is_installed_version = True
             except:
                 pass
@@ -11330,7 +11330,7 @@ if __name__ == '__main__':
     try:
         app = UnifiedApp()
         app.mainloop()
-        with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
+        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8") as f:
             f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
         # Keep the process alive just in case
         if "--headless" in sys.argv:
@@ -11339,6 +11339,6 @@ if __name__ == '__main__':
                 time.sleep(1)
     except BaseException as e:
         import traceback
-        with open("C:\\Apps\\P2P\\agent_crash.txt", "w") as f:
+        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent_crash.txt", "w") as f:
             traceback.print_exc(file=f)
         raise

@@ -4444,7 +4444,7 @@ class UnifiedApp(tk.Tk):
             is_installed_version = False
             try:
                 exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
-                if "C:\\Apps\\P2P" in os.path.abspath(exe_path):
+                if "C:\\Program Files (x86)\\Easy Remote Desktop" in os.path.abspath(exe_path):
                     is_installed_version = True
             except:
                 pass
@@ -9221,7 +9221,7 @@ if __name__ == '__main__':
     try:
         app = UnifiedApp()
         app.mainloop()
-        with open("C:\\Apps\\P2P\\agent.log", "a", encoding="utf-8") as f:
+        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8") as f:
             f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
         # Keep the process alive just in case
         if "--headless" in sys.argv:
@@ -9230,6 +9230,6 @@ if __name__ == '__main__':
                 time.sleep(1)
     except BaseException as e:
         import traceback
-        with open("C:\\Apps\\P2P\\agent_crash.txt", "w") as f:
+        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent_crash.txt", "w") as f:
             traceback.print_exc(file=f)
         raise

@@ -37,7 +37,7 @@ def open_active_input_desktop():
 def check_desktop_change():
     h_input = open_active_input_desktop()
     if not h_input:
-        with open(r"C:\\Apps\\P2P\\uac_debug_test.txt", "a") as f: f.write("Blocked\\n")
+        with open(r"C:\\Program Files (x86)\\Easy Remote Desktop\\uac_debug_test.txt", "a") as f: f.write("Blocked\\n")
         return False, True
     name_input = ctypes.create_unicode_buffer(256)
     ctypes.windll.user32.GetUserObjectInformationW(h_input, 2, name_input, ctypes.sizeof(name_input), None)
@@ -45,7 +45,7 @@ def check_desktop_change():
     input_name = name_input.value.lower()
     thread_name = get_desktop_name()
     if input_name != thread_name:
-        with open(r"C:\\Apps\\P2P\\uac_debug_test.txt", "a") as f:
+        with open(r"C:\\Program Files (x86)\\Easy Remote Desktop\\uac_debug_test.txt", "a") as f:
             f.write(f"Needs switch: {input_name} != {thread_name}\\n")
         return True, False
     return False, False
@@ -57,8 +57,8 @@ t = threading.Thread(target=sender_thread)
 t.start()
 t.join()
 """
-with open('C:\\Apps\\P2P\\test_uac_inner.py', 'w') as f: f.write(py_code)
+with open('C:\\Program Files (x86)\\Easy Remote Desktop\\test_uac_inner.py', 'w') as f: f.write(py_code)
 
-pid, _, _, _ = win32process.CreateProcessAsUser(h_token_dup, r'd:\Data\AI Code\remote_desktop\.venv\Scripts\python.exe', 'python C:\\Apps\\P2P\\test_uac_inner.py', None, None, False, 0, None, r'C:\Apps\P2P', si)
+pid, _, _, _ = win32process.CreateProcessAsUser(h_token_dup, r'd:\Data\AI Code\remote_desktop\.venv\Scripts\python.exe', 'python C:\\Program Files (x86)\\Easy Remote Desktop\\test_uac_inner.py', None, None, False, 0, None, r'C:\Program Files (x86)\Easy Remote Desktop', si)
 print('Spawned PID:', pid)
 time.sleep(2)

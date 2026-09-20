@@ -3125,7 +3125,7 @@ if __name__ == '__main__':
         try:
             import sys
             if sys.platform == "win32":
-                log_path = "C:\\Apps\\P2P\\agent.log"
+                log_path = "C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log"
             else:
                 log_path = "/tmp/agent.log"
             with open(log_path, "a", encoding="utf-8") as f:
@@ -3143,7 +3143,7 @@ if __name__ == '__main__':
         try:
             import sys, os
             if sys.platform == "win32":
-                crash_log_path = "C:\\Apps\\P2P\\agent_crash.txt"
+                crash_log_path = "C:\\Program Files (x86)\\Easy Remote Desktop\\agent_crash.txt"
             else:
                 crash_log_path = "/opt/p2p_remote/agent_crash.txt"
             
