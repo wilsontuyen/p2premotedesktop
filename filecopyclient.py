@@ -1002,6 +1002,11 @@ _NOT_PASTE_MENU_TOKENS = (
     "rename", "đổi tên", "share", "chia sẻ", "open", "mở",
     "pin", "ghim", "format", "định dạng", "eject", "đẩy ra",
     "new", "mới", "refresh", "làm mới",
+    "task manager", "trình quản lý tác vụ", "task-manager", "taskmgr",
+    "taskbar", "thanh tác vụ", "taskbar settings", "cài đặt thanh tác vụ",
+    "cascade windows", "show windows stacked", "show windows side by side",
+    "show the desktop", "cortana", "news and interests", "search", "tìm kiếm",
+    "toolbars", "thanh công cụ", "settings", "cài đặt",
 )
 
 
@@ -1030,6 +1035,8 @@ def _capture_menu_item_at_cursor():
     pt = _cursor_point()
     if not pt:
         return "unknown", ""
+    if _is_taskbar_or_taskmgr_at_point(pt):
+        return "not_paste", "[taskbar-or-taskmgr]"
     user32.WindowFromPoint.restype = wintypes.HWND
     hwnd = user32.WindowFromPoint(pt)
     root = _context_menu_root_hwnd(hwnd)
@@ -1132,6 +1139,56 @@ def _hwnd_process_name(hwnd):
         return _pid_image_name(pid.value)
     except Exception:
         return ""
+
+
+def _is_taskbar_or_taskmgr_hwnd(hwnd):
+    """Kiểm tra xem hwnd có thuộc Taskbar, System Tray, Start Menu, hoặc Task Manager."""
+    if not hwnd:
+        return False
+    user32 = ctypes.windll.user32
+    cur = hwnd
+    for _ in range(8):
+        if not cur:
+            break
+        buf = ctypes.create_unicode_buffer(128)
+        user32.GetClassNameW(ctypes.c_void_p(cur), buf, 128)
+        cls = buf.value
+        if cls in (
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "TrayNotifyWnd",
+            "NotifyIconOverflowWindow",
+            "TaskManagerWindow",
+            "TrayClockWClass",
+            "Taskbar.TaskListButtonHWND",
+            "ReBarWindow32",
+            "MSTaskSwWClass",
+        ):
+            return True
+        pname = _hwnd_process_name(cur)
+        if pname in ("taskmgr.exe", "perfmon.exe", "procexp.exe", "procexp64.exe", "processhacker.exe"):
+            return True
+        parent = user32.GetAncestor(ctypes.c_void_p(cur), 2)  # GA_ROOT
+        if parent == cur:
+            parent = user32.GetParent(ctypes.c_void_p(cur))
+        if not parent or parent == cur:
+            break
+        cur = parent
+    return False
+
+
+def _is_taskbar_or_taskmgr_at_point(pt):
+    """Kiểm tra xem tọa độ pt có nằm trên Taskbar hoặc Task Manager."""
+    user32 = ctypes.windll.user32
+    if isinstance(pt, (tuple, list)):
+        p = wintypes.POINT(int(pt[0]), int(pt[1]))
+    else:
+        p = pt
+    user32.WindowFromPoint.restype = wintypes.HWND
+    hwnd = user32.WindowFromPoint(p)
+    if not hwnd:
+        return False
+    return _is_taskbar_or_taskmgr_hwnd(hwnd)
 
 
 def _cursor_over_current_process():
@@ -1646,8 +1703,25 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
                 return "BACKGROUND"
             proc_name = _pid_image_name(pid.value)
             if proc_name in _CLIPBOARD_PROBE_PROCS and proc_name not in _EXPLORER_CLIPBOARD_PROCS:
-                log_debug(f"[check_is_menu_query] BACKGROUND: probe {proc_name}")
-                return "BACKGROUND"
+                log_debug(f"[check_is_menu_query] PROBE: probe {proc_name}")
+                return "PROBE"
+    except Exception:
+        pass
+
+    try:
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        hwnd_fg = user32.GetForegroundWindow()
+        if hwnd_fg:
+            pid_fg = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd_fg, ctypes.byref(pid_fg))
+            if pid_fg.value:
+                proc_fg = _pid_image_name(pid_fg.value)
+                if proc_fg in _CLIPBOARD_PROBE_PROCS and proc_fg not in _EXPLORER_CLIPBOARD_PROCS:
+                    log_debug(f"[check_is_menu_query] PROBE: foreground probe {proc_fg}")
+                    return "PROBE"
+            if _is_taskbar_or_taskmgr_hwnd(hwnd_fg):
+                log_debug("[check_is_menu_query] PROBE: foreground taskbar/taskmgr")
+                return "PROBE"
     except Exception:
         pass
 
@@ -2005,6 +2079,9 @@ class FileCopyClientMixin:
         không ghi đè _paste_dest_dir của job đang chạy.
         """
         def _go(why=reason):
+            if why == "rmb" and _is_taskbar_or_taskmgr_at_point(_cursor_xy()):
+                clip_trace("[snapshot_paste_dest] skip rmb on taskbar/taskmgr")
+                return
             frozen = bool(getattr(self, "_paste_dest_frozen", False))
             # Ưu tiên path đang cache (không COM) — RMB lúc clipboard mở hay fail COM.
             instant = getattr(self, "_last_good_explorer_path", None) or getattr(self, "cached_explorer_path", None)
@@ -2363,9 +2440,9 @@ class FileCopyClientMixin:
             dest = self.get_active_explorer_path()
             _schedule_scrub_probe(dest)
             return
-        elif is_menu == "BACKGROUND":
-            log_debug("[render_format] Probe/menu Explorer — HDROP rỗng (không dán stub 0 byte).")
-            clip_trace("[render_format] → BACKGROUND (empty HDROP)", throttle_s=1.0, key="rf_bg")
+        elif is_menu in ("BACKGROUND", "PROBE"):
+            log_debug(f"[render_format] Probe/menu Explorer ({is_menu}) — HDROP rỗng (không dán stub 0 byte).")
+            clip_trace(f"[render_format] → {is_menu} (empty HDROP)", throttle_s=1.0, key=f"rf_{is_menu.lower()}")
             self._offer_empty_and_rearm(0.25)
             return
 

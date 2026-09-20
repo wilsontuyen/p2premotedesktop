@@ -78,6 +78,10 @@ from filecopyclient import (
     check_is_menu_query,
     cleanup_incomplete_named_files,
     query_explorer_folder_path,
+    _is_taskbar_or_taskmgr_at_point,
+    _is_taskbar_or_taskmgr_hwnd,
+    _pid_image_name,
+    _hwnd_process_name,
 )
 
 # Injected by windows_clipboard._bind
@@ -1363,7 +1367,21 @@ def run_clipboard_agent_mode():
     _agent_prev_lbutton_pos = (0, 0)
     _agent_last_dblclick_time = 0.0
     _agent_rmb_cursor_pos = None
+    _agent_rmb_is_taskbar = False
     _agent_context_menu_seen_at = 0.0
+
+    def _clear_agent_paste_gesture_flags(suppress_s=1.0):
+        nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
+        nonlocal _agent_rmb_cursor_pos, _agent_rmb_is_taskbar, _agent_context_menu_seen_at
+        nonlocal _agent_consumed_gesture_id, _agent_suppress_render_until
+        _agent_lmb_hit_context_menu = False
+        _agent_lmb_menu_item_kind = ""
+        _agent_rmb_cursor_pos = None
+        _agent_rmb_is_taskbar = False
+        _agent_context_menu_seen_at = 0.0
+        _agent_consumed_gesture_id = _agent_paste_gesture_id
+        if suppress_s > 0:
+            _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + suppress_s)
 
     def _note_paste_gesture():
         """Ctrl+V / click Paste — coalesced 80ms để hook+poll không đếm 2 lần."""
@@ -1397,8 +1415,13 @@ def run_clipboard_agent_mode():
     def _agent_lmb_is_context_paste(on_self):
         """Win11 XAML: hit-test menu hay fail — LMB gần chỗ RMB + PENDING = click Paste."""
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
-        nonlocal _agent_context_menu_seen_at
-        if on_self:
+        nonlocal _agent_context_menu_seen_at, _agent_rmb_is_taskbar, _agent_rmb_cursor_pos
+        if on_self or _agent_rmb_is_taskbar:
+            return False
+        cx, cy = _cursor_xy()
+        if _is_taskbar_or_taskmgr_at_point((cx, cy)):
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = ""
             return False
         # Không capture menu / không ghi gesture khi chưa có offer — Win11 XAML island
         # hay bị nhận nhầm là menu (kind=unknown) → Ctrl+V/RMB paste chết.
@@ -1450,9 +1473,9 @@ def run_clipboard_agent_mode():
                 return True
             return False
         rpos = _agent_rmb_cursor_pos
-        cx, cy = _cursor_xy()
         near_rmb = bool(
             rpos
+            and not _agent_rmb_is_taskbar
             and abs(cx - rpos[0]) <= 360
             and abs(cy - rpos[1]) <= 360
         )
@@ -1474,6 +1497,7 @@ def run_clipboard_agent_mode():
             and 0.12 < age_r < 8.0
             and not recent_dbl
             and near_rmb
+            and not _agent_rmb_is_taskbar
             and (menu_open or menu_just_closed)
         ):
             profile = "win11" if _is_windows_11() else "win10"
@@ -1625,7 +1649,7 @@ def run_clipboard_agent_mode():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_allow_delayed
-        nonlocal _agent_last_menu_paste_trigger_time
+        nonlocal _agent_last_menu_paste_trigger_time, _agent_rmb_is_taskbar
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -1659,16 +1683,23 @@ def run_clipboard_agent_mode():
                     _agent_last_rbutton_time = time.time()
                     _agent_lmb_hit_context_menu = False
                     _agent_lmb_menu_item_kind = ""
+                    cxy = None
                     try:
-                        _agent_rmb_cursor_pos = _cursor_xy()
+                        cxy = _cursor_xy()
                     except Exception:
-                        pass
-                    try:
-                        p = query_explorer_folder_path(allow_open_clipboard=False)
-                        if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
-                            _agent_cached_explorer_path = p
-                    except Exception:
-                        pass
+                        cxy = None
+                    if cxy and _is_taskbar_or_taskmgr_at_point(cxy):
+                        _agent_rmb_is_taskbar = True
+                        _agent_rmb_cursor_pos = None
+                    else:
+                        _agent_rmb_is_taskbar = False
+                        _agent_rmb_cursor_pos = cxy
+                        try:
+                            p = query_explorer_folder_path(allow_open_clipboard=False)
+                            if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
+                                _agent_cached_explorer_path = p
+                        except Exception:
+                            pass
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -2127,6 +2158,7 @@ def run_clipboard_agent_mode():
         finally:
             log_overwrite_conflict(f"AgentPasteFinish FINALLY pop paste_id={pid}")
             try:
+                _clear_agent_paste_gesture_flags(1.0)
                 _agent_last_paste_finish_time = time.time()
                 _agent_jobs.pop(pid, None)
                 if not _agent_jobs:
@@ -2448,6 +2480,23 @@ def run_clipboard_agent_mode():
                 menu_item_kind=_agent_lmb_menu_item_kind,
                 last_dblclick=_agent_last_dblclick_time,
             )
+            opener_hwnd = ctypes.windll.user32.GetOpenClipboardWindow()
+            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            opener_p = (_pid_image_name(_hwnd_process_name(opener_hwnd)[1]) or "").lower() if opener_hwnd else ""
+            fg_p = (_pid_image_name(_hwnd_process_name(fg_hwnd)[1]) or "").lower() if fg_hwnd else ""
+            is_probe_proc = (
+                opener_p in _CLIPBOARD_PROBE_PROCS
+                or fg_p in _CLIPBOARD_PROBE_PROCS
+                or _is_taskbar_or_taskmgr_hwnd(opener_hwnd)
+                or _is_taskbar_or_taskmgr_hwnd(fg_hwnd)
+            )
+            if is_probe_proc or is_menu == "PROBE":
+                agent_print(f"[ClipboardAgent] Probe tu process {opener_p or fg_p or 'probe'} — empty HDROP.")
+                log_overwrite_conflict(f"RENDERFORMAT EXIT: PROBE process opener={opener_p} fg={fg_p}")
+                if _offer_empty_hdrop():
+                    _agent_dummy_h_active = True
+                return 0
+
             recent_paste_click = (
                 _agent_paste_gesture_id > _agent_consumed_gesture_id
                 and (_agent_lmb_menu_item_kind or "") != "not_paste"
@@ -2480,7 +2529,7 @@ def run_clipboard_agent_mode():
                     _schedule_scrub_probe(_agent_cached_explorer_path)
                     return 0
             elif is_menu == "BACKGROUND":
-                if recent_paste_click or recent_ctrl:
+                if (recent_paste_click or recent_ctrl) and not is_probe_proc:
                     is_menu = False
                     log_overwrite_conflict(
                         f"RENDERFORMAT BACKGROUND → PASTE (gesture "
@@ -2682,20 +2731,27 @@ def run_clipboard_agent_mode():
 
         def _stamp_rbutton():
             nonlocal _agent_last_rbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
-            nonlocal _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_cached_explorer_path
+            nonlocal _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_rmb_is_taskbar, _agent_cached_explorer_path
             _agent_last_rbutton_time = time.time()
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = ""
+            cxy = None
             try:
-                _agent_rmb_cursor_pos = _cursor_xy()
+                cxy = _cursor_xy()
             except Exception:
+                cxy = None
+            if cxy and _is_taskbar_or_taskmgr_at_point(cxy):
+                _agent_rmb_is_taskbar = True
                 _agent_rmb_cursor_pos = None
-            try:
-                p = query_explorer_folder_path(allow_open_clipboard=False)
-                if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
-                    _agent_cached_explorer_path = p
-            except Exception:
-                pass
+            else:
+                _agent_rmb_is_taskbar = False
+                _agent_rmb_cursor_pos = cxy
+                try:
+                    p = query_explorer_folder_path(allow_open_clipboard=False)
+                    if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
+                        _agent_cached_explorer_path = p
+                except Exception:
+                    pass
             if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
@@ -2813,6 +2869,7 @@ def run_clipboard_agent_mode():
 
         still_allow = any(j.get("allow") for j in _agent_jobs.values())
         if not still_allow:
+            _clear_agent_paste_gesture_flags(1.5)
             _agent_allow_xfer = False
             _agent_accept_files = False
             _agent_download_active = False

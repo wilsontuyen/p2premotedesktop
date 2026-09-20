@@ -118,6 +118,8 @@ from filecopyclient import (
     _DUMMY_HDROP_PATH,
     _PROBE_STUB_NAME,
     _PROBE_STUB_DIR,
+    _is_taskbar_or_taskmgr_at_point,
+    _is_taskbar_or_taskmgr_hwnd,
 )
 from filecopyhost import (
     FileCopyHostMixin,
@@ -194,7 +196,7 @@ class ClipboardEventListener:
                             self.manager.last_dblclick_time = now
                         self.manager._prev_lbutton_time = now
                         self.manager._prev_lbutton_pos = (cx, cy)
-                        hit_menu = (not on_self) and _cursor_over_context_menu()
+                        hit_menu = (not on_self) and (not getattr(self.manager, "_rmb_is_taskbar", False)) and (not _is_taskbar_or_taskmgr_at_point((cx, cy))) and _cursor_over_context_menu()
                         paste_from_menu = False
                         last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
                         age_r = now - last_r
@@ -236,6 +238,8 @@ class ClipboardEventListener:
                             rpos = getattr(self.manager, "_rmb_cursor_pos", None)
                             near_rmb = bool(
                                 rpos
+                                and not getattr(self.manager, "_rmb_is_taskbar", False)
+                                and not _is_taskbar_or_taskmgr_at_point((cx, cy))
                                 and abs(cx - rpos[0]) <= 360
                                 and abs(cy - rpos[1]) <= 360
                             )
@@ -263,6 +267,8 @@ class ClipboardEventListener:
                                 and 0.15 < age_r < 8.0
                                 and not recent_dbl
                                 and near_rmb
+                                and not getattr(self.manager, "_rmb_is_taskbar", False)
+                                and not _is_taskbar_or_taskmgr_at_point((cx, cy))
                                 and (menu_open or menu_just_closed or near_rmb)
                             ):
                                 paste_from_menu = True
@@ -308,12 +314,19 @@ class ClipboardEventListener:
                     self.manager._lmb_menu_item_kind = ""
                     self.manager._rmb_held = True
                     if not was_rmb:
+                        cxy = None
                         try:
-                            self.manager._rmb_cursor_pos = _cursor_xy()
+                            cxy = _cursor_xy()
                         except Exception:
+                            cxy = None
+                        if cxy and _is_taskbar_or_taskmgr_at_point(cxy):
+                            self.manager._rmb_is_taskbar = True
                             self.manager._rmb_cursor_pos = None
-                        # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
-                        self.manager.snapshot_paste_dest("rmb", sync=True)
+                        else:
+                            self.manager._rmb_is_taskbar = False
+                            self.manager._rmb_cursor_pos = cxy
+                            # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
+                            self.manager.snapshot_paste_dest("rmb", sync=True)
                         pend = getattr(self.manager, "pending_remote_files", None) or []
                         try:
                             from utils.logger import clip_trace
@@ -600,6 +613,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._paste_dest_frozen = False
         self._xfer_dest_by_paste_id = {}
         self._rmb_held = False
+        self._rmb_is_taskbar = False
         self.dummy_h_active = False
         self._recv_dialog_open = False
         self._reoffer_files = None
@@ -954,6 +968,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._lmb_hit_context_menu = False
         self._lmb_menu_item_kind = ""
         self._rmb_cursor_pos = None
+        self._rmb_is_taskbar = False
         self._context_menu_seen_at = 0.0
         self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
         if suppress_s > 0:
