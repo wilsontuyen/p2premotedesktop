@@ -99,6 +99,9 @@ class ClipboardTextMixin:
         current_text = get_clipboard_text(owner_hwnd)
         if not current_text:
             return False
+        self.pending_remote_files = []
+        self._reoffer_files = None
+        self._allow_delayed = False
         if self._forward_clipboard_text(current_text):
             log_debug(f"[Clipboard] Phát hiện text clipboard mới locally: {current_text[:50]}...")
             print("[Clipboard] Đang gửi text clipboard sang đối tác...")

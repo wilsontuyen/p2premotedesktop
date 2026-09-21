@@ -260,7 +260,11 @@ class ClipboardEventListener:
                                 and (now - menu_seen) < 0.7
                                 and not menu_open
                             )
-                            if (
+                            chk_kind, _ = _capture_menu_item_at_cursor()
+                            if chk_kind == "not_paste":
+                                self.manager._lmb_hit_context_menu = False
+                                self.manager._lmb_menu_item_kind = "not_paste"
+                            elif (
                                 (not on_self)
                                 and _is_windows_11()
                                 and pend
@@ -377,13 +381,16 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_ctrl_v_held", False):
-                        self.manager.last_ctrl_v_time = time.time()
-                        self.manager.note_paste_gesture()
-                        self.manager.snapshot_paste_dest("ctrl_v")
-                        try:
-                            self.manager._ensure_delayed_for_gesture()
-                        except Exception:
-                            pass
+                        has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_exp = _is_explorer_clipboard_client()
+                        if is_exp and not has_text:
+                            self.manager.last_ctrl_v_time = time.time()
+                            self.manager.note_paste_gesture()
+                            self.manager.snapshot_paste_dest("ctrl_v")
+                            try:
+                                self.manager._ensure_delayed_for_gesture()
+                            except Exception:
+                                pass
                     self.manager._ctrl_v_held = True
             else:
                 if self.manager:
@@ -391,13 +398,16 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_shift_ins_held", False):
-                        self.manager.last_ctrl_v_time = time.time()
-                        self.manager.note_paste_gesture()
-                        self.manager.snapshot_paste_dest("shift_ins")
-                        try:
-                            self.manager._ensure_delayed_for_gesture()
-                        except Exception:
-                            pass
+                        has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_exp = _is_explorer_clipboard_client()
+                        if is_exp and not has_text:
+                            self.manager.last_ctrl_v_time = time.time()
+                            self.manager.note_paste_gesture()
+                            self.manager.snapshot_paste_dest("shift_ins")
+                            try:
+                                self.manager._ensure_delayed_for_gesture()
+                            except Exception:
+                                pass
                     self.manager._shift_ins_held = True
             else:
                 if self.manager:

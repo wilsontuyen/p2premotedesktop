@@ -988,6 +988,40 @@ def _xaml_click_is_show_more_strip(pt, menu_hwnd):
     return pt.y >= rc.bottom - band
 
 
+def _xaml_click_is_menu_body(pt, menu_hwnd):
+    """Win11 XAML menu: Dải giữa (View, Sort, Refresh, New...) KHÔNG bao giờ là Paste.
+    Paste là nút icon ở dải đỉnh (~48px) hoặc dải đáy (khi menu lật).
+    Dải giữa luôn là danh sách text menu items thông thường."""
+    if not pt or not menu_hwnd:
+        return False
+    if _hwnd_class_name(menu_hwnd) == "#32768":
+        return False
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        ]
+
+    rc = RECT()
+    if not user32.GetWindowRect(ctypes.c_void_p(menu_hwnd), ctypes.byref(rc)):
+        return False
+    if not (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom):
+        return False
+    height = int(rc.bottom - rc.top)
+    if height < 140:
+        return False
+    dpi = 96
+    try:
+        dpi = int(user32.GetDpiForWindow(ctypes.c_void_p(menu_hwnd)) or 96)
+    except Exception:
+        dpi = 96
+    top_band = int(48 * dpi / 96.0)
+    bottom_band = int(44 * dpi / 96.0)
+    return (rc.top + top_band) < pt.y < (rc.bottom - bottom_band)
+
+
 _PASTE_MENU_TOKENS = (
     "paste", "dán", "einfügen", "coller", "incolla", "pegar",
     "вставить", "붙여넣기", "貼り付け", "粘贴", "貼上",
@@ -1002,6 +1036,16 @@ _NOT_PASTE_MENU_TOKENS = (
     "rename", "đổi tên", "share", "chia sẻ", "open", "mở",
     "pin", "ghim", "format", "định dạng", "eject", "đẩy ra",
     "new", "mới", "refresh", "làm mới",
+    "folder", "new folder", "thư mục", "thư mục mới", "thu muc", "thu muc moi",
+    "ordner", "neuer ordner", "dossier", "nouveau dossier", "carpeta", "nueva carpeta",
+    "cartella", "nuova cartella", "pasta", "nova pasta", "папка", "новая папка",
+    "폴더", "새 폴더", "フォルダー", "新しいフォルダー", "新建文件夹", "文件夹", "新增資料夾", "資料夾",
+    "shortcut", "lối tắt", "loi tat", "verknüpfung", "raccourci", "acceso directo", "collegamento", "atalho",
+    "ярлык", "바로 가기", "ショートカット", "快捷方式", "捷徑",
+    "document", "tài liệu", "văn bản", "rich text", "bitmap", "text document", "archive", "zip", "rar", "7-zip",
+    "view", "xem", "sort", "sắp xếp", "group", "nhóm", "next desktop background", "hình nền tiếp theo",
+    "terminal", "powershell", "command prompt", "cmd",
+    "display settings", "cài đặt hiển thị", "personalize", "cá nhân hóa", "undo", "hoàn tác", "redo",
     "task manager", "trình quản lý tác vụ", "task-manager", "taskmgr",
     "taskbar", "thanh tác vụ", "taskbar settings", "cài đặt thanh tác vụ",
     "cascade windows", "show windows stacked", "show windows side by side",
@@ -1019,13 +1063,13 @@ def _classify_context_menu_item(name):
     compact = n.replace(" ", "").replace("+", "")
     if "ctrlv" in compact:
         return "paste"
-    for tok in _NOT_PASTE_MENU_TOKENS:
-        if tok in n or tok.replace(" ", "") in compact:
-            return "not_paste"
     first = n.split("\t", 1)[0].strip()
     for tok in _PASTE_MENU_TOKENS:
         if first == tok or first.startswith(tok + " ") or tok in first.split():
             return "paste"
+    for tok in _NOT_PASTE_MENU_TOKENS:
+        if tok in n or tok.replace(" ", "") in compact:
+            return "not_paste"
     return "unknown"
 
 
@@ -1045,6 +1089,9 @@ def _capture_menu_item_at_cursor():
     if kind == "unknown" and _xaml_click_is_show_more_strip(pt, root):
         kind = "not_paste"
         text = text or "[show-more-strip]"
+    elif kind == "unknown" and _xaml_click_is_menu_body(pt, root):
+        kind = "not_paste"
+        text = text or "[xaml-menu-body]"
     elif kind == "unknown":
         # Không mặc định "paste" — Win11 XAML thường không đọc được tên mục;
         # coi unknown = paste khiến copy host tự dán vào Explorer client.
@@ -1748,8 +1795,15 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         return "MENU"
 
     if is_ctrl_v or is_shift_ins or recent_ctrl_v:
-        log_debug("[check_is_menu_query] Paste: phim Ctrl+V / Shift+Ins")
-        return False
+        # Ctrl+V chỉ coi là Paste file khi cửa sổ đích là Explorer VÀ clipboard không chứa định dạng Text
+        has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+        is_explorer = _is_explorer_clipboard_client()
+        if is_explorer and not has_text:
+            log_debug("[check_is_menu_query] Paste: phim Ctrl+V / Shift+Ins trong Explorer")
+            return False
+        else:
+            log_debug(f"[check_is_menu_query] Bỏ qua Ctrl+V: is_explorer={is_explorer} has_text={has_text}")
+            return "BACKGROUND"
 
     win11 = _is_windows_11()
     profile = _shell_menu_profile()
@@ -2448,9 +2502,13 @@ class FileCopyClientMixin:
 
         # is_menu is False (coi là Paste) — vẫn đòi cử chỉ Paste thật để tránh
         # Explorer GetData / click mơ hồ tự tải vào thư mục đang mở (vd. D:\).
+        has_clip_text = bool(
+            ctypes.windll.user32.IsClipboardFormatAvailable(13)
+            or ctypes.windll.user32.IsClipboardFormatAvailable(1)
+        )
         gesture_ok = (
             getattr(self, "_paste_gesture_id", 0) > getattr(self, "_consumed_paste_gesture_id", 0)
-            or (last_ctrl_v and (time.time() - last_ctrl_v) < 2.5)
+            or (last_ctrl_v and (time.time() - last_ctrl_v) < 2.5 and _is_explorer_clipboard_client() and not has_clip_text)
         )
         if not gesture_ok:
             # RENDERFORMAT có thể tới trước khi poll kịp note_paste_gesture.

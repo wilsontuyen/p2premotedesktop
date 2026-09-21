@@ -82,6 +82,8 @@ from filecopyclient import (
     _is_taskbar_or_taskmgr_hwnd,
     _pid_image_name,
     _hwnd_process_name,
+    _is_explorer_clipboard_client,
+    _EXPLORER_CLIPBOARD_PROCS,
 )
 
 # Injected by windows_clipboard._bind
@@ -1492,6 +1494,11 @@ def run_clipboard_agent_mode():
             and (now - _agent_context_menu_seen_at) < 0.7
             and not menu_open
         )
+        chk_kind, _ = _capture_menu_item_at_cursor()
+        if chk_kind == "not_paste":
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = "not_paste"
+            return False
         if (
             pend
             and 0.12 < age_r < 8.0
@@ -1544,6 +1551,7 @@ def run_clipboard_agent_mode():
         """User copy local — đừng EmptyClipboard/delayed HDROP (mất copy, chuột xoay)."""
         nonlocal _agent_allow_delayed
         _agent_allow_delayed = False
+        _pending_info.clear()
         agent_print(f"[ClipboardAgent] Nha clipboard cho user ({reason}).")
 
     def _agent_user_clipboard_wins():
@@ -1713,24 +1721,30 @@ def run_clipboard_agent_mode():
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
                     if not _agent_ctrl_v_held:
-                        _agent_last_ctrl_v_time = time.time()
-                        _note_paste_gesture()
-                        if _pending_info:
-                            _agent_allow_delayed = True
+                        has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_exp = _is_explorer_clipboard_client()
+                        if is_exp and not has_text:
+                            _agent_last_ctrl_v_time = time.time()
+                            _note_paste_gesture()
+                            if _pending_info:
+                                _agent_allow_delayed = True
                     _agent_ctrl_v_held = True
-                    if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
+                    if not has_text and is_exp and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 else:
                     _agent_ctrl_v_held = False
                 if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
                     if not _agent_shift_ins_held:
-                        _agent_last_ctrl_v_time = time.time()
-                        _note_paste_gesture()
-                        if _pending_info:
-                            _agent_allow_delayed = True
+                        has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_exp = _is_explorer_clipboard_client()
+                        if is_exp and not has_text:
+                            _agent_last_ctrl_v_time = time.time()
+                            _note_paste_gesture()
+                            if _pending_info:
+                                _agent_allow_delayed = True
                     _agent_shift_ins_held = True
-                    if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
+                    if not has_text and is_exp and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 else:
@@ -2429,7 +2443,18 @@ def run_clipboard_agent_mode():
                 f"gesture={_agent_paste_gesture_id}/{_agent_consumed_gesture_id} "
                 f"ctrl_v_age={(time.time()-_agent_last_ctrl_v_time) if _agent_last_ctrl_v_time else None}"
             )
-            recent_ctrl = bool(_agent_last_ctrl_v_time and (time.time() - _agent_last_ctrl_v_time) < 2.5)
+            opener_hwnd = ctypes.windll.user32.GetOpenClipboardWindow()
+            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            opener_p = (_pid_image_name(_hwnd_process_name(opener_hwnd)[1]) or "").lower() if opener_hwnd else ""
+            fg_p = (_pid_image_name(_hwnd_process_name(fg_hwnd)[1]) or "").lower() if fg_hwnd else ""
+            has_clip_text = bool(ctypes.windll.user32.IsClipboardFormatAvailable(13) or ctypes.windll.user32.IsClipboardFormatAvailable(1))
+            is_exp_target = fg_p in _EXPLORER_CLIPBOARD_PROCS or opener_p in _EXPLORER_CLIPBOARD_PROCS
+            recent_ctrl = bool(
+                _agent_last_ctrl_v_time
+                and (time.time() - _agent_last_ctrl_v_time) < 2.5
+                and is_exp_target
+                and not has_clip_text
+            )
             recent_menu = bool(
                 _agent_last_lbutton_time
                 and (time.time() - _agent_last_lbutton_time) < 3.5
@@ -2480,19 +2505,15 @@ def run_clipboard_agent_mode():
                 menu_item_kind=_agent_lmb_menu_item_kind,
                 last_dblclick=_agent_last_dblclick_time,
             )
-            opener_hwnd = ctypes.windll.user32.GetOpenClipboardWindow()
-            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-            opener_p = (_pid_image_name(_hwnd_process_name(opener_hwnd)[1]) or "").lower() if opener_hwnd else ""
-            fg_p = (_pid_image_name(_hwnd_process_name(fg_hwnd)[1]) or "").lower() if fg_hwnd else ""
             is_probe_proc = (
-                opener_p in _CLIPBOARD_PROBE_PROCS
-                or fg_p in _CLIPBOARD_PROBE_PROCS
+                (opener_p in _CLIPBOARD_PROBE_PROCS and opener_p not in _EXPLORER_CLIPBOARD_PROCS)
+                or (fg_p in _CLIPBOARD_PROBE_PROCS and fg_p not in _EXPLORER_CLIPBOARD_PROCS)
                 or _is_taskbar_or_taskmgr_hwnd(opener_hwnd)
                 or _is_taskbar_or_taskmgr_hwnd(fg_hwnd)
             )
-            if is_probe_proc or is_menu == "PROBE":
-                agent_print(f"[ClipboardAgent] Probe tu process {opener_p or fg_p or 'probe'} — empty HDROP.")
-                log_overwrite_conflict(f"RENDERFORMAT EXIT: PROBE process opener={opener_p} fg={fg_p}")
+            if (not is_exp_target) or is_probe_proc or is_menu == "PROBE" or has_clip_text:
+                agent_print(f"[ClipboardAgent] Probe/non-explorer tu process {opener_p or fg_p or 'probe'} — empty HDROP.")
+                log_overwrite_conflict(f"RENDERFORMAT EXIT: non-explorer/probe opener={opener_p} fg={fg_p} has_text={has_clip_text}")
                 if _offer_empty_hdrop():
                     _agent_dummy_h_active = True
                 return 0
@@ -2529,7 +2550,7 @@ def run_clipboard_agent_mode():
                     _schedule_scrub_probe(_agent_cached_explorer_path)
                     return 0
             elif is_menu == "BACKGROUND":
-                if (recent_paste_click or recent_ctrl) and not is_probe_proc:
+                if (recent_paste_click or recent_ctrl) and is_exp_target and not is_probe_proc and not has_clip_text:
                     is_menu = False
                     log_overwrite_conflict(
                         f"RENDERFORMAT BACKGROUND → PASTE (gesture "
@@ -2789,6 +2810,7 @@ def run_clipboard_agent_mode():
                 if not text:
                     last_seq = seq
                     continue
+                _yield_clipboard_to_user("local text poll")
                 try:
                     import win32pipe, win32file, json
                     pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
@@ -2972,6 +2994,8 @@ def run_clipboard_agent_mode():
                 action, val = gui_queue.get_nowait()
                 if action == "text":
                     agent_print(f"[ClipboardAgent] Đang nạp text vào Clipboard...")
+                    _pending_info.clear()
+                    _agent_allow_delayed = False
                     set_clipboard_text(val, owner_hwnd=_agent_hwnd)
                 elif action == "files":
                     agent_print("[ClipboardAgent] Bỏ qua action files (không dán HDROP im lặng).")
