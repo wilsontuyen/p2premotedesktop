@@ -52,6 +52,7 @@ from filecopyclient import (
     _copy_batch_kind_and_name,
     _context_menu_open,
     _cursor_over_context_menu,
+    _cursor_within_any_visible_menu_rect,
     _cursor_over_current_process,
     _cursor_xy,
     _double_click_ms,
@@ -1499,6 +1500,18 @@ def run_clipboard_agent_mode():
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = "not_paste"
             return False
+        # Nếu menu đang mở nhưng WindowFromPoint không nhận ra cửa sổ menu (hit_menu=False),
+        # kiểm tra bổ sung: cursor có nằm trong vùng rect của bất kỳ menu nào đang hiện không?
+        # Nếu không → người dùng đang click ra ngoài menu để đóng nó (dismiss click), không phải Paste.
+        if menu_open and not hit_menu:
+            if not _cursor_within_any_visible_menu_rect(cx, cy):
+                agent_print(
+                    f"[ClipboardAgent] LMB cursor ngoài menu rect (cx={cx},cy={cy}) "
+                    f"→ dismiss click, không phải Paste"
+                )
+                _agent_lmb_hit_context_menu = False
+                _agent_lmb_menu_item_kind = "not_paste"
+                return False
         if (
             pend
             and 0.12 < age_r < 8.0

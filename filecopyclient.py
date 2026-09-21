@@ -887,6 +887,45 @@ def _cursor_over_context_menu():
         return False
 
 
+def _cursor_within_any_visible_menu_rect(cx, cy):
+    """Kiểm tra tọa độ (cx, cy) có nằm trong vùng hình chữ nhật của bất kỳ cửa sổ context menu
+    nào đang hiển thị không.  Dùng để phân biệt "click vào menu XAML (WindowFromPoint lỗi)"
+    vs "click ra ngoài menu để đóng nó" khi hit_menu = False nhưng menu_open = True."""
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        ]
+
+    menu_hwnds = []
+
+    def _enum_cb(hwnd, _lp):
+        try:
+            if _hwnd_looks_like_popup_menu(hwnd):
+                menu_hwnds.append(hwnd)
+        except Exception:
+            pass
+        return 1
+
+    try:
+        cb = _WNDENUMPROC(_enum_cb)
+        user32.EnumWindows(cb, 0)
+    except Exception:
+        pass
+
+    rc = RECT()
+    for hwnd in menu_hwnds:
+        try:
+            if user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rc)):
+                if rc.left <= cx <= rc.right and rc.top <= cy <= rc.bottom:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
 def _cursor_point():
     pt = wintypes.POINT()
     if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
