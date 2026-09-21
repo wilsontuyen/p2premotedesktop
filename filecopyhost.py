@@ -1205,6 +1205,18 @@ def run_clipboard_agent_mode():
                         err_code = getattr(read_err, 'winerror', 0)
                         if err_code == 109:
                             agent_print("[ClipboardAgent] Pipe bị ngắt. Đang kết nối lại...")
+                            # Khi pipe đứt (peer disconnect / session end) → xóa pending offer cũ
+                            # để tránh clipboard cũ kích hoạt Paste nhầm sau khi phiên kết thúc.
+                            if _pending_info:
+                                _pending_info.clear()
+                                agent_print("[ClipboardAgent] Đã xóa PENDING offer (pipe disconnect).")
+                            _clear_agent_paste_gesture_flags(0.0)
+                            # Xóa cả HDROP delayed-render trên Windows clipboard
+                            # (dùng gui_queue để chạy trên GUI thread của Tkinter).
+                            try:
+                                gui_queue.put(("clear_clip", None))
+                            except Exception:
+                                pass
                             break
                         elif err_code == 234:
                             continue
@@ -1372,16 +1384,18 @@ def run_clipboard_agent_mode():
     _agent_rmb_cursor_pos = None
     _agent_rmb_is_taskbar = False
     _agent_context_menu_seen_at = 0.0
+    _agent_lmb_dismiss_at = 0.0  # Thời điểm phát hiện click ra ngoài menu để đóng nó
 
     def _clear_agent_paste_gesture_flags(suppress_s=1.0):
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
         nonlocal _agent_rmb_cursor_pos, _agent_rmb_is_taskbar, _agent_context_menu_seen_at
-        nonlocal _agent_consumed_gesture_id, _agent_suppress_render_until
+        nonlocal _agent_consumed_gesture_id, _agent_suppress_render_until, _agent_lmb_dismiss_at
         _agent_lmb_hit_context_menu = False
         _agent_lmb_menu_item_kind = ""
         _agent_rmb_cursor_pos = None
         _agent_rmb_is_taskbar = False
         _agent_context_menu_seen_at = 0.0
+        _agent_lmb_dismiss_at = 0.0
         _agent_consumed_gesture_id = _agent_paste_gesture_id
         if suppress_s > 0:
             _agent_suppress_render_until = max(_agent_suppress_render_until, time.time() + suppress_s)
@@ -1419,6 +1433,7 @@ def run_clipboard_agent_mode():
         """Win11 XAML: hit-test menu hay fail — LMB gần chỗ RMB + PENDING = click Paste."""
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
         nonlocal _agent_context_menu_seen_at, _agent_rmb_is_taskbar, _agent_rmb_cursor_pos
+        nonlocal _agent_lmb_dismiss_at
         if on_self or _agent_rmb_is_taskbar:
             return False
         cx, cy = _cursor_xy()
@@ -1508,6 +1523,18 @@ def run_clipboard_agent_mode():
                 agent_print(
                     f"[ClipboardAgent] LMB cursor ngoài menu rect (cx={cx},cy={cy}) "
                     f"→ dismiss click, không phải Paste"
+                )
+                _agent_lmb_dismiss_at = now  # Ghi nhận thời điểm dismiss để lọc menu_just_closed
+                _agent_lmb_hit_context_menu = False
+                _agent_lmb_menu_item_kind = "not_paste"
+                return False
+        # Nếu menu vừa đóng (menu_just_closed) nhưng vừa phát hiện dismiss click,
+        # thì đây là trường hợp poll chạy sau khi menu đã đóng — vẫn là dismiss, không phải Paste.
+        if menu_just_closed and not menu_open and not hit_menu:
+            if _agent_lmb_dismiss_at and (now - _agent_lmb_dismiss_at) < 1.0:
+                agent_print(
+                    f"[ClipboardAgent] LMB menu_just_closed nhưng dismiss_at={now - _agent_lmb_dismiss_at:.3f}s trước "
+                    f"→ không phải Paste"
                 )
                 _agent_lmb_hit_context_menu = False
                 _agent_lmb_menu_item_kind = "not_paste"
@@ -1670,7 +1697,7 @@ def run_clipboard_agent_mode():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_allow_delayed
-        nonlocal _agent_last_menu_paste_trigger_time, _agent_rmb_is_taskbar
+        nonlocal _agent_last_menu_paste_trigger_time, _agent_rmb_is_taskbar, _agent_lmb_dismiss_at
         user32 = ctypes.windll.user32
         while True:
             try:
@@ -1704,6 +1731,7 @@ def run_clipboard_agent_mode():
                     _agent_last_rbutton_time = time.time()
                     _agent_lmb_hit_context_menu = False
                     _agent_lmb_menu_item_kind = ""
+                    _agent_lmb_dismiss_at = 0.0  # Reset khi có RMB mới
                     cxy = None
                     try:
                         cxy = _cursor_xy()
@@ -3668,56 +3696,8 @@ def run_clipboard_agent_mode():
                                 _skip_path(k)
                             return True
 
-                        # Giống host→client: hỏi trên máy client (ClassicCopyDialog GUI).
-                        asked_client = False
-                        try:
-                            ev = job.get("conflict_reply_event") or threading.Event()
-                            job["conflict_reply_event"] = ev
-                            ev.clear()
-                            job["conflict_reply"] = None
-                            job["ow_waiting_client"] = True
-                            with _active_conflict_lock:
-                                _active_conflict_job = job
-                            sent_q = _write_conflict_query_pipe(paste_id, conflicts, has_multiple)
-                            log_overwrite_conflict(
-                                f"CONFLICT_QUERY send={sent_q} paste_id={paste_id} "
-                                f"n={len(conflicts)} names={[c[0] for c in conflicts]}"
-                            )
-                            if sent_q:
-                                asked_client = True
-                                deadline = time.time() + 300.0
-                                while time.time() < deadline:
-                                    if ev.is_set():
-                                        break
-                                    try:
-                                        root.update()
-                                    except Exception:
-                                        pass
-                                    time.sleep(0.03)
-                                data = job.get("conflict_reply")
-                                job["ow_waiting_client"] = False
-                                if _apply_client_reply(data):
-                                    log_overwrite_conflict(
-                                        f"CLIENT reply applied paste_id={paste_id} "
-                                        f"cancelled={cancelled} replace={len(job.get('replace_keys') or [])}"
-                                    )
-                                else:
-                                    log_overwrite_conflict(
-                                        f"CLIENT reply missing/unavailable paste_id={paste_id} → HOST dialog"
-                                    )
-                                    _ask_on_host()
-                            else:
-                                job["ow_waiting_client"] = False
-                                _ask_on_host()
-                        except Exception as e_q:
-                            job["ow_waiting_client"] = False
-                            log_overwrite_conflict(f"CONFLICT_QUERY path loi: {e_q} → HOST dialog")
-                            _ask_on_host()
-                        finally:
-                            with _active_conflict_lock:
-                                if _active_conflict_job is job:
-                                    _active_conflict_job = None
-                            job["ow_waiting_client"] = False
+                        # Hiện dialog ghi đè trực tiếp trên HOST (máy bị remote).
+                        _ask_on_host()
                         if cancelled:
                             job["conflict_choice"] = "cancel"
                             log_overwrite_conflict(f"USER CANCEL paste_id={paste_id}")

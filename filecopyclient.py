@@ -1090,6 +1090,31 @@ _NOT_PASTE_MENU_TOKENS = (
     "cascade windows", "show windows stacked", "show windows side by side",
     "show the desktop", "cortana", "news and interests", "search", "tìm kiếm",
     "toolbars", "thanh công cụ", "settings", "cài đặt",
+    # Give access to / Send to — hay bị nhầm là Paste trên Win11
+    "give access to", "cấp quyền truy cập", "cap quyen truy cap",
+    "send to", "gửi tới", "gửi đến", "gui toi", "gui den",
+    "access", "zugriff", "accès", "acceso", "accesso", "доступ", "アクセス", "액세스",
+    # Compress / Extract
+    "compress", "nén", "extract", "giải nén", "giai nen",
+    "add to archive", "add to zip", "thêm vào kho lưu trữ",
+    "komprimieren", "compresser", "comprimir", "comprimere",
+    # Print / Cast
+    "print", "in", "drucken", "imprimer", "stampa",
+    "cast to device", "cast to", "chiếu tới", "chieu toi",
+    # Run as
+    "run as administrator", "chạy với tư cách quản trị", "chay voi tu cach quan tri",
+    "als administrator ausführen", "exécuter en tant qu'administrateur",
+    # Restore / Previous versions
+    "restore previous versions", "khôi phục phiên bản trước",
+    "restore", "khôi phục",
+    # Set as desktop background
+    "set as desktop background", "đặt làm hình nền desktop",
+    # Troubleshoot compatibility
+    "troubleshoot compatibility", "khắc phục sự cố tương thích",
+    # Edit / Open with
+    "edit", "chỉnh sửa", "open with", "mở bằng", "mo bang",
+    # Scan
+    "scan", "quét",
 )
 
 
