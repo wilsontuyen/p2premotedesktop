@@ -2696,6 +2696,8 @@ class FileCopyClientMixin:
             self._offer_empty_and_rearm(0.25)
             return
             
+        dest_dir = self.get_active_explorer_path()
+        living = bool(getattr(self, "_xfer_jobs", None))
         self.is_rendering = True
         self._expect_repaste_until = 0.0
         self._rearm_delayed_after_render = False
