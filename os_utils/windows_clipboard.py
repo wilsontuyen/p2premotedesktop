@@ -23,7 +23,7 @@ from core.config import *
 from network.socket_utils import socket_passwords, send_msg, recv_msg, is_lan_socket, tune_socket_for_lan_bulk
 from gui.components import ClassicCopyDialog
 from gui.windows_ui import ProgressDialog, file_download_dialog_title
-from utils.logger import log_file_transfer, log_activity, log_debug
+from utils.logger import log_file_transfer, log_activity, log_debug, log_overwrite_conflict
 from core.i18n import _
 
 CLIPBOARD_PKT_TYPES = (
