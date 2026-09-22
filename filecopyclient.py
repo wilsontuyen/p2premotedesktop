@@ -1168,6 +1168,26 @@ def _evaluate_win11_paste_geometry(px, py, rc):
     return "not_paste"
 
 
+def _has_file_in_clipboard():
+    """Kiểm tra xem hệ thống có đang copy File/Folder hay không (CF_HDROP = 15)"""
+    try:
+        return ctypes.windll.user32.IsClipboardFormatAvailable(15) != 0
+    except Exception:
+        return False
+
+
+_GLOBAL_RMB_POS = None  # (rx, ry)
+
+
+def set_global_rmb_pos(cxy):
+    global _GLOBAL_RMB_POS
+    if cxy and len(cxy) >= 2:
+        try:
+            _GLOBAL_RMB_POS = (int(cxy[0]), int(cxy[1]))
+        except Exception:
+            pass
+
+
 def _classify_win11_empty_space_click(pt, menu_hwnd):
     """
     Phân loại vị trí click XAML context menu khi right-click vào VÙNG TRỐNG trên Win 11.
@@ -1283,7 +1303,7 @@ def _classify_context_menu_item(name):
     return "unknown"
 
 
-def _capture_menu_item_at_cursor():
+def _capture_menu_item_at_cursor(rmb_pos=None):
     """Phân loại mục lúc click."""
     user32 = ctypes.windll.user32
     pt = _cursor_point()
@@ -1328,6 +1348,28 @@ def _capture_menu_item_at_cursor():
                         except Exception:
                             pass
                         break
+
+        # 3. Trạng thái 3 (Tối hậu): Mất Handle VÀ Cache rỗng -> Dùng mỏ neo RMB
+        if geo_kind == "unknown" and not root:
+            pos = rmb_pos or _GLOBAL_RMB_POS
+            if pos:
+                rx, ry = pos[0], pos[1]
+                dx = px - rx
+                dy = py - ry
+
+                # CHỐT AN TOÀN 3 LỚP:
+                # Lớp 1: Clipboard phải có File (nếu không có, click gì cũng là False)
+                # Lớp 2: dy nằm trong 50px (Khít thanh Icon, View bị đẩy xuống >50 nên sẽ thoát)
+                # Lớp 3: dx nằm trong nửa trái của menu (-10 đến 150) để bắt trúng Icon Paste
+                if _has_file_in_clipboard() and -10 <= dx <= 150 and abs(dy) <= 50:
+                    geo_kind = "paste"
+                    try:
+                        from utils.logger import clip_trace
+                        clip_trace(f"[Win11 Fallback] RMB Anchor exact hit: dx={dx}, dy={dy} -> PASTE")
+                    except Exception:
+                        pass
+                else:
+                    geo_kind = "not_paste"
 
         # Áp dụng kết quả hình học
         if geo_kind in ("paste", "not_paste"):
@@ -2363,9 +2405,12 @@ class FileCopyClientMixin:
         không ghi đè _paste_dest_dir của job đang chạy.
         """
         def _go(why=reason):
-            if why == "rmb" and _is_taskbar_or_taskmgr_at_point(_cursor_xy()):
-                clip_trace("[snapshot_paste_dest] skip rmb on taskbar/taskmgr")
-                return
+            if why == "rmb":
+                cxy = _cursor_xy()
+                set_global_rmb_pos(cxy)
+                if _is_taskbar_or_taskmgr_at_point(cxy):
+                    clip_trace("[snapshot_paste_dest] skip rmb on taskbar/taskmgr")
+                    return
             frozen = bool(getattr(self, "_paste_dest_frozen", False))
             # Ưu tiên path đang cache (không COM) — RMB lúc clipboard mở hay fail COM.
             instant = getattr(self, "_last_good_explorer_path", None) or getattr(self, "cached_explorer_path", None)

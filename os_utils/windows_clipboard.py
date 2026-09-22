@@ -87,6 +87,7 @@ from filecopyclient import (
     _classify_context_menu_item,
     _capture_menu_item_at_cursor,
     _update_cached_menu_rects,
+    set_global_rmb_pos,
     _is_windows_11,
     _shell_menu_profile,
     _menu_item_counts_as_paste,
@@ -203,7 +204,7 @@ class ClipboardEventListener:
                         age_r = now - last_r
                         if hit_menu:
                             self.manager._lmb_hit_context_menu = True
-                            kind, name = _capture_menu_item_at_cursor()
+                            kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                             self.manager._lmb_menu_item_kind = kind
                             # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
                             if _menu_item_counts_as_paste(kind) or (
@@ -231,7 +232,7 @@ class ClipboardEventListener:
                                     pass
                         else:
                             # Win11 XAML
-                            chk_kind, _ = _capture_menu_item_at_cursor()
+                            chk_kind, _ = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                             if chk_kind == "paste":
                                 paste_from_menu = True
                                 try:
@@ -288,6 +289,8 @@ class ClipboardEventListener:
                         else:
                             self.manager._rmb_is_taskbar = False
                             self.manager._rmb_cursor_pos = cxy
+                            if cxy:
+                                set_global_rmb_pos(cxy)
                             # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
                             self.manager.snapshot_paste_dest("rmb", sync=True)
                         pend = getattr(self.manager, "pending_remote_files", None) or []
