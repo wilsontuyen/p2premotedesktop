@@ -86,6 +86,7 @@ from filecopyclient import (
     _xaml_click_is_show_more_strip,
     _classify_context_menu_item,
     _capture_menu_item_at_cursor,
+    _update_cached_menu_rects,
     _is_windows_11,
     _shell_menu_profile,
     _menu_item_counts_as_paste,
@@ -229,68 +230,24 @@ class ClipboardEventListener:
                                 except Exception:
                                     pass
                         else:
-                            # Win11 XAML: hit-test menu thường fail — dùng near_rmb.
-                            # Sau paste xong _clear_paste_gesture_flags xóa _rmb_cursor_pos
-                            # → click đổi thư mục không còn bị nhận là Paste lần 2.
-                            pend = getattr(self.manager, "pending_remote_files", None) or []
-                            last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
-                            age_r = now - last_r
-                            rpos = getattr(self.manager, "_rmb_cursor_pos", None)
-                            near_rmb = bool(
-                                rpos
-                                and not getattr(self.manager, "_rmb_is_taskbar", False)
-                                and not _is_taskbar_or_taskmgr_at_point((cx, cy))
-                                and abs(cx - rpos[0]) <= 360
-                                and abs(cy - rpos[1]) <= 360
-                            )
-                            recent_dbl = bool(
-                                getattr(self.manager, "last_dblclick_time", 0)
-                                and (now - float(self.manager.last_dblclick_time)) < 0.7
-                            )
-                            menu_open = False
-                            try:
-                                menu_open = _context_menu_open()
-                            except Exception:
-                                menu_open = False
-                            if menu_open:
-                                self.manager._context_menu_seen_at = now
-                            menu_seen = float(getattr(self.manager, "_context_menu_seen_at", 0) or 0)
-                            menu_just_closed = bool(
-                                menu_seen
-                                and (now - menu_seen) < 0.7
-                                and not menu_open
-                            )
+                            # Win11 XAML
                             chk_kind, _ = _capture_menu_item_at_cursor()
-                            if chk_kind == "not_paste":
-                                self.manager._lmb_hit_context_menu = False
-                                self.manager._lmb_menu_item_kind = "not_paste"
-                            elif (
-                                (not on_self)
-                                and _is_windows_11()
-                                and pend
-                                and 0.15 < age_r < 8.0
-                                and not recent_dbl
-                                and near_rmb
-                                and not getattr(self.manager, "_rmb_is_taskbar", False)
-                                and not _is_taskbar_or_taskmgr_at_point((cx, cy))
-                                and (menu_open or menu_just_closed or near_rmb)
-                            ):
+                            if chk_kind == "paste":
                                 paste_from_menu = True
-                                self.manager._lmb_hit_context_menu = True
-                                self.manager._lmb_menu_item_kind = "paste"
                                 try:
                                     from utils.logger import clip_trace
-                                    clip_trace(
-                                        f"[LMB menu] win11 heuristic near_rmb={near_rmb} "
-                                        f"menu_open={menu_open} just_closed={menu_just_closed} "
-                                        f"age_r={age_r:.2f} → paste gesture"
-                                    )
+                                    clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
                                 except Exception:
                                     pass
-                            else:
-                                # Click Explorer xa chỗ RMB / không phải Paste — xóa cờ cũ.
+                            elif chk_kind == "not_paste":
                                 self.manager._lmb_hit_context_menu = False
-                                self.manager._lmb_menu_item_kind = ""
+                                self.manager._lmb_menu_item_kind = "not_paste"
+                            else:
+                                # TỪ CHỐI ÉP KIỂU: Nếu là unknown, dứt khoát coi là unknown.
+                                # Xóa bỏ hoàn toàn cái bẫy near_rmb ở đây.
+                                self.manager._lmb_hit_context_menu = False
+                                self.manager._lmb_menu_item_kind = "unknown"
+
                         if paste_from_menu:
                             if getattr(self.manager, "_conflict_ui_active", False):
                                 try:
@@ -299,6 +256,8 @@ class ClipboardEventListener:
                                 except Exception:
                                     pass
                             else:
+                                self.manager._lmb_hit_context_menu = True
+                                self.manager._lmb_menu_item_kind = "paste"
                                 self.manager.note_paste_gesture()
                                 self.manager.snapshot_paste_dest("menu_paste")
                                 try:
@@ -357,10 +316,13 @@ class ClipboardEventListener:
             _sleep = 0.05
             try:
                 if self.manager and (
-                    getattr(self.manager, "pending_remote_files", None)
-                    and (time.time() - float(getattr(self.manager, "last_rbutton_time", 0) or 0)) < 8.0
+                    (time.time() - float(getattr(self.manager, "last_rbutton_time", 0) or 0)) < 8.0
                 ):
                     _sleep = 0.015
+                    try:
+                        _update_cached_menu_rects()
+                    except Exception:
+                        pass
             except Exception:
                 pass
             if user32.GetAsyncKeyState(0x0D) & 0x8000: # Enter

@@ -1027,14 +1027,155 @@ def _xaml_click_is_show_more_strip(pt, menu_hwnd):
     return pt.y >= rc.bottom - band
 
 
-def _xaml_click_is_menu_body(pt, menu_hwnd):
-    """Win11 XAML menu: Dải giữa (View, Sort, Refresh, New...) KHÔNG bao giờ là Paste.
-    Paste là nút icon ở dải đỉnh (~48px) hoặc dải đáy (khi menu lật).
-    Dải giữa luôn là danh sách text menu items thông thường."""
+def _find_visible_popup_menu_containing_point(pt):
+    if not pt:
+        return None
+    user32 = ctypes.windll.user32
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        ]
+    found = [None]
+    px = int(pt[0]) if isinstance(pt, (tuple, list)) else int(getattr(pt, "x", 0))
+    py = int(pt[1]) if isinstance(pt, (tuple, list)) else int(getattr(pt, "y", 0))
+
+    def _enum_cb(hwnd, _lp):
+        try:
+            if user32.IsWindowVisible(ctypes.c_void_p(hwnd)):
+                cls = _hwnd_class_name(hwnd)
+                if cls in (
+                    "#32768",
+                    "XamlExplorerHostIslandWindow",
+                    "Microsoft.UI.Content.PopupWindowSiteBridge",
+                    "Microsoft.UI.Content.DesktopChildSiteBridge",
+                    "Windows.UI.Composition.DesktopWindowContentBridge",
+                ):
+                    rc = RECT()
+                    if user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rc)):
+                        if rc.left <= px <= rc.right and rc.top <= py <= rc.bottom:
+                            w, h = rc.right - rc.left, rc.bottom - rc.top
+                            if 40 < h < 1200 and 80 < w < 800:
+                                found[0] = hwnd
+                                return 0
+        except Exception:
+            pass
+        return 1
+
+    try:
+        EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        cb = EnumProc(_enum_cb)
+        user32.EnumWindows(cb, 0)
+    except Exception:
+        pass
+    return found[0]
+
+
+_CACHED_MENU_RECTS = []  # list of (left, top, right, bottom, timestamp)
+
+
+def _update_cached_menu_rects():
+    """Lưu lại bounding rect của các cửa sổ menu XAML/popup đang hiển thị."""
+    global _CACHED_MENU_RECTS
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        ]
+
+    rects = []
+
+    def _enum_cb(hwnd, _lp):
+        try:
+            if user32.IsWindowVisible(ctypes.c_void_p(hwnd)):
+                cls = _hwnd_class_name(hwnd)
+                if cls in (
+                    "#32768",
+                    "XamlExplorerHostIslandWindow",
+                    "Microsoft.UI.Content.PopupWindowSiteBridge",
+                    "Microsoft.UI.Content.DesktopChildSiteBridge",
+                    "Windows.UI.Composition.DesktopWindowContentBridge",
+                ):
+                    rc = RECT()
+                    if user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rc)):
+                        w, h = rc.right - rc.left, rc.bottom - rc.top
+                        if 40 < h < 1200 and 80 < w < 800:
+                            rects.append((rc.left, rc.top, rc.right, rc.bottom))
+        except Exception:
+            pass
+        return 1
+
+    try:
+        EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        cb = EnumProc(_enum_cb)
+        user32.EnumWindows(cb, 0)
+    except Exception:
+        pass
+    if rects:
+        now = time.time()
+        _CACHED_MENU_RECTS = [(r[0], r[1], r[2], r[3], now) for r in rects]
+    return _CACHED_MENU_RECTS
+
+
+def _get_cached_menu_rects():
+    global _CACHED_MENU_RECTS
+    now = time.time()
+    return [(r[0], r[1], r[2], r[3]) for r in _CACHED_MENU_RECTS if (now - r[4]) < 8.0]
+
+
+def _evaluate_win11_paste_geometry(px, py, rc):
+    """
+    Đánh giá tọa độ click Win11 (Dành riêng cho click vùng trống).
+    Bắt Icon Paste ở đỉnh/đáy và Text Paste ở giữa.
+    """
+    if hasattr(rc, "top"):
+        top, bottom, left, right = rc.top, rc.bottom, rc.left, rc.right
+    else:
+        left, top, right, bottom = rc[:4]
+
+    height = bottom - top
+    width = right - left
+
+    # Menu quá lùn hoặc quá hẹp thì không phải menu hợp lệ
+    if height < 100 or width < 50:
+        return "not_paste"
+
+    frac_y = (py - top) / float(height) if height > 0 else 0
+    offset_top = py - top
+    offset_bottom = bottom - py
+
+    # =====================================================================
+    # 1. ICON PASTE TRÊN CÙNG HOẶC DƯỚI CÙNG (COMMAND BAR)
+    # =====================================================================
+    # Click ra khoảng trống thì thanh lệnh chỉ có nút Paste.
+    # Bất chấp tọa độ X (trái/phải), cứ nằm trong dải 60px đỉnh/đáy là Paste!
+    ICON_BAR_HEIGHT = 60
+    if offset_top <= ICON_BAR_HEIGHT or offset_bottom <= ICON_BAR_HEIGHT:
+        return "paste"
+
+    # =====================================================================
+    # 2. TEXT PASTE DỌC
+    # =====================================================================
+    # Trạng thái Paste hiện dưới dạng chữ ở giữa menu (dưới Refresh, trên New)
+    if 0.36 <= frac_y <= 0.48:
+        return "paste"
+
+    # =====================================================================
+    # 3. TẤT CẢ CÁC VÙNG KHÁC (View, Sort by, Group by, New, v.v...)
+    # =====================================================================
+    return "not_paste"
+
+
+def _classify_win11_empty_space_click(pt, menu_hwnd):
+    """
+    Phân loại vị trí click XAML context menu khi right-click vào VÙNG TRỐNG trên Win 11.
+    Chỉ bắt Icon Paste ở đỉnh/đáy và Text Paste ở giữa. Loại bỏ hoàn toàn tất cả các mục khác.
+    """
     if not pt or not menu_hwnd:
-        return False
-    if _hwnd_class_name(menu_hwnd) == "#32768":
-        return False
+        return "unknown"
+
     user32 = ctypes.windll.user32
 
     class RECT(ctypes.Structure):
@@ -1045,20 +1186,25 @@ def _xaml_click_is_menu_body(pt, menu_hwnd):
 
     rc = RECT()
     if not user32.GetWindowRect(ctypes.c_void_p(menu_hwnd), ctypes.byref(rc)):
-        return False
-    if not (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom):
-        return False
-    height = int(rc.bottom - rc.top)
-    if height < 140:
-        return False
-    dpi = 96
+        return "unknown"
+
+    global _CACHED_MENU_RECTS
+    _CACHED_MENU_RECTS = [(rc.left, rc.top, rc.right, rc.bottom, time.time())]
+
+    px = int(pt[0]) if isinstance(pt, (tuple, list)) else int(getattr(pt, "x", 0))
+    py = int(pt[1]) if isinstance(pt, (tuple, list)) else int(getattr(pt, "y", 0))
+
+    if not (rc.left <= px <= rc.right and rc.top <= py <= rc.bottom):
+        return "unknown"
+
+    res = _evaluate_win11_paste_geometry(px, py, rc)
+
     try:
-        dpi = int(user32.GetDpiForWindow(ctypes.c_void_p(menu_hwnd)) or 96)
+        from utils.logger import clip_trace
+        clip_trace(f"[classify_xaml] px={px} py={py} rect=({rc.left},{rc.top},{rc.right},{rc.bottom}) -> {res}")
     except Exception:
-        dpi = 96
-    top_band = int(48 * dpi / 96.0)
-    bottom_band = int(44 * dpi / 96.0)
-    return (rc.top + top_band) < pt.y < (rc.bottom - bottom_band)
+        pass
+    return res
 
 
 _PASTE_MENU_TOKENS = (
@@ -1138,7 +1284,7 @@ def _classify_context_menu_item(name):
 
 
 def _capture_menu_item_at_cursor():
-    """Phân loại mục lúc click. Không dùng UIA (mouse hook hay fail)."""
+    """Phân loại mục lúc click."""
     user32 = ctypes.windll.user32
     pt = _cursor_point()
     if not pt:
@@ -1148,18 +1294,60 @@ def _capture_menu_item_at_cursor():
     user32.WindowFromPoint.restype = wintypes.HWND
     hwnd = user32.WindowFromPoint(pt)
     root = _context_menu_root_hwnd(hwnd)
+    if not root:
+        root = _find_visible_popup_menu_containing_point(pt)
     text = _win32_menu_text_at_point(pt)
     kind = _classify_context_menu_item(text)
+    if kind in ("paste", "not_paste"):
+        try:
+            log_debug(f"[menu-item] name={text!r} kind={kind}")
+        except Exception:
+            pass
+        return kind, text
+
+    px = int(pt.x) if hasattr(pt, "x") else int(pt[0])
+    py = int(pt.y) if hasattr(pt, "y") else int(pt[1])
+
+    if _is_windows_11():
+        geo_kind = "unknown"
+        # Trạng thái 1: Menu vẫn còn Handle (HWND)
+        if root and _hwnd_class_name(root) != "#32768":
+            geo_kind = _classify_win11_empty_space_click(pt, root)
+
+        # Trạng thái 2: Menu đóng quá nhanh mất HWND (root = None) -> CỨU NGUY BẰNG CACHE RECT
+        elif not root:
+            cached_rects = _get_cached_menu_rects()
+            if cached_rects:
+                for rc in cached_rects:
+                    rc_left, rc_top, rc_right, rc_bottom = rc[:4]
+                    if rc_left <= px <= rc_right and rc_top <= py <= rc_bottom:
+                        geo_kind = _evaluate_win11_paste_geometry(px, py, rc)
+                        try:
+                            from utils.logger import clip_trace
+                            clip_trace(f"[cached_rect hit] px={px} py={py} rect={rc[:4]} -> {geo_kind}")
+                        except Exception:
+                            pass
+                        break
+
+        # Áp dụng kết quả hình học
+        if geo_kind in ("paste", "not_paste"):
+            kind = geo_kind
+            text = text or f"[xaml-pos-{geo_kind}]"
+            try:
+                log_debug(f"[menu-item] by-position -> {geo_kind}")
+            except Exception:
+                pass
+            return kind, text
+
     if kind == "unknown" and _xaml_click_is_show_more_strip(pt, root):
         kind = "not_paste"
         text = text or "[show-more-strip]"
-    elif kind == "unknown" and _xaml_click_is_menu_body(pt, root):
-        kind = "not_paste"
-        text = text or "[xaml-menu-body]"
     elif kind == "unknown":
-        # Không mặc định "paste" — Win11 XAML thường không đọc được tên mục;
-        # coi unknown = paste khiến copy host tự dán vào Explorer client.
-        kind = "unknown"
+        if _is_windows_11() and root:
+            kind = "not_paste"
+            text = text or "[xaml-not-paste]"
+        else:
+            kind = "unknown"
     try:
         log_debug(f"[menu-item] name={text!r} kind={kind}")
     except Exception:
@@ -1181,17 +1369,9 @@ def _shell_menu_profile():
 
 
 def _menu_item_counts_as_paste(kind):
-    """True nếu click mục menu được coi là Paste — khác nhau Win10 / Win11."""
+    """True nếu click mục menu được coi là Paste."""
     k = (kind or "").strip().lower()
-    if k == "not_paste":
-        return False
-    if k == "paste":
-        return True
-    # Win11 XAML: GetMenuString thường trống → unknown; vẫn là Paste nếu không phải Show more.
-    if _is_windows_11() and k in ("unknown", ""):
-        return True
-    # Win10 classic: chỉ tin khi đọc đúng chữ Paste/Dán/...
-    return False
+    return k == "paste"
 
 
 def _win10_rmb_paste_click(
@@ -1882,11 +2062,11 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         and time_since_rbutton < 8.0
     )
     if win11:
-        # Win11: LMB đang giữ trên menu (poll có thể chưa kịp set kind=paste).
+        # Win11: LMB đang giữ trên menu
         lmb_menu_paste_now = bool(
             lmb_down
             and lmb_on_menu
-            and menu_item_kind != "not_paste"
+            and _menu_item_counts_as_paste(menu_item_kind)
             and time_since_rbutton > 0.12
             and time_since_lbutton < 2.0
         )
@@ -1925,7 +2105,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         and not rmb_down
         and time_since_rbutton > 0.12
         and time_since_rbutton < 8.0
-        and menu_item_kind != "not_paste"
+        and _menu_item_counts_as_paste(menu_item_kind)
     ):
         log_debug(f"[check_is_menu_query] Paste: {profile} LMB+menu visible (race trước poll)")
         return False
@@ -1934,20 +2114,6 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         lmb_on_menu=lmb_on_menu, lmb_down=lmb_down, menu_visible=menu_visible,
     ):
         log_debug(f"[check_is_menu_query] Paste: Win10 LMB-after-RMB kind={menu_item_kind!r}")
-        return False
-    # Win11 XAML: hit-test menu hay fail — LMB sau RMB + Explorer GetData = Paste.
-    # (gesture_ok ở render_format vẫn chặn paste giả sau khi đã clear _rmb_cursor_pos).
-    if win11 and (
-        lmb_down
-        and not rmb_down
-        and not recent_dblclick
-        and menu_item_kind != "not_paste"
-        and time_since_rbutton > 0.18
-        and time_since_rbutton < 8.0
-        and time_since_lbutton < 1.5
-        and _is_explorer_clipboard_client()
-    ):
-        log_debug("[check_is_menu_query] Paste: Win11 LMB after RMB (XAML heuristic)")
         return False
     if menu_visible:
         # Menu còn mở nhưng chưa click Paste (chỉ hover / RMB) — dummy HDROP.
@@ -2601,12 +2767,7 @@ class FileCopyClientMixin:
             if _is_windows_11() and lmb and last_r and getattr(self, "_rmb_cursor_pos", None) and (
                 0.18 < age_r < 8.0
                 and age_l < 1.5
-                and kind != "not_paste"
-                and (
-                    bool(getattr(self, "_lmb_hit_context_menu", False))
-                    or kind == "paste"
-                    or _is_explorer_clipboard_client()
-                )
+                and _menu_item_counts_as_paste(kind)
             ):
                 gesture_ok = True
                 self.note_paste_gesture()
