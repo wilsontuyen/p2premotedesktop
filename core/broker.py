@@ -1200,6 +1200,12 @@ def _run_worker_session(app, cmd):
         print(f"[Worker] mo data socket loi: {e}")
         return
 
+    try:
+        if hasattr(app, "wake_display"):
+            app.wake_display()
+    except Exception:
+        pass
+
     w, h, monitor = _worker_screen_size()
     try:
         app._capture_origin = (int(monitor.get("left", 0)), int(monitor.get("top", 0)))

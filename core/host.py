@@ -1218,14 +1218,67 @@ def grab_secure_desktop_bgr():
         return _grab_secure_desktop_bgr_here()
 
 
+_dxcam_patched = False
+
+def _patch_dxcam_safe():
+    """Vá lỗi chí mạng trong dxcam.dxcam.DXCamera._on_output_change:
+    Ngăn vòng lặp vô tận `while True` khi màn hình tắt / sleep / khóa máy làm CPU 100% và treo capture engine."""
+    global _dxcam_patched
+    if _dxcam_patched or sys.platform != "win32":
+        return
+    try:
+        import dxcam
+        from dxcam.dxcam import DXCamera
+        from dxcam.core.duplicator import Duplicator
+
+        def _safe_on_output_change(self):
+            time.sleep(0.05)
+            try:
+                if hasattr(self, "_duplicator") and self._duplicator:
+                    self._duplicator.release()
+                if hasattr(self, "_stagesurf") and self._stagesurf:
+                    self._stagesurf.release()
+                if hasattr(self, "_output") and self._output:
+                    self._output.update_desc()
+                    self.width, self.height = self._output.resolution
+                    if self.region is None or not self._region_set_by_user:
+                        self.region = (0, 0, self.width, self.height)
+                    self._validate_region(self.region)
+                    if self.is_capturing:
+                        self._rebuild_frame_buffer(self.region)
+                    self.rotation_angle = self._output.rotation_angle
+            except Exception:
+                pass
+            # Thử tối đa 3 lần, mỗi lần cách nhau 50ms. Nếu màn hình đang ngủ/khóa,
+            # ném lỗi ra ngoài để luồng capture chuyển sang fallback MSS / GDI ngay lập tức!
+            for _ in range(3):
+                try:
+                    self._stagesurf.rebuild(output=self._output, device=self._device)
+                    self._duplicator = Duplicator(output=self._output, device=self._device)
+                    return
+                except Exception:
+                    time.sleep(0.05)
+            raise RuntimeError("DXCam output duplication access lost (screen sleeping or locked)")
+
+        DXCamera._on_output_change = _safe_on_output_change
+        _dxcam_patched = True
+        print("[Host] Da ap dung ban va an toan chong treo cho DXCam.")
+    except Exception as e:
+        print(f"[Host] Khong the va DXCam: {e}")
+
+
 def _open_dxcam_outputs():
     cams = []
     if not _windows_has_dxgi_duplication():
         print("[Host] Skip dxcam (Windows 7/Vista không hỗ trợ Desktop Duplication)")
         return cams
+    _patch_dxcam_safe()
     try:
         import dxcam
         fac = dxcam.DXFactory()
+        # Dọn dẹp cache instance cũ đã bị release trong DXFactory để không nhận lại camera lỗi
+        if hasattr(fac, "_camera_instances"):
+            fac._camera_instances.clear()
     except Exception as e:
         print(f"[Host] dxcam factory failed: {e}")
         return cams
@@ -1594,9 +1647,18 @@ class HostMixin:
             # Prevent sleep
             ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000002)
             # Simulate a harmless VK_F15 keypress to wake display/lockscreen
-            import win32api, win32con
-            win32api.keybd_event(win32con.VK_F15, 0, 0, 0)
-            win32api.keybd_event(win32con.VK_F15, 0, win32con.KEYEVENTF_KEYUP, 0)
+            try:
+                import win32api, win32con
+                win32api.keybd_event(win32con.VK_F15, 0, 0, 0)
+                win32api.keybd_event(win32con.VK_F15, 0, win32con.KEYEVENTF_KEYUP, 0)
+            except Exception:
+                pass
+            # Di chuyển chuột vi mô (1 pixel rồi về vị trí cũ) - đánh thức driver GPU/màn hình cực nhạy
+            try:
+                ctypes.windll.user32.mouse_event(0x0001, 1, 1, 0, 0)
+                ctypes.windll.user32.mouse_event(0x0001, -1, -1, 0, 0)
+            except Exception:
+                pass
             print("[Host] Wake display signal sent.")
         except Exception as e:
             print(f"[Host] Failed to wake display: {e}")
@@ -1907,6 +1969,13 @@ class HostMixin:
                     except Exception:
                         pass
                 self.dx_cams = []
+                try:
+                    import dxcam
+                    fac = dxcam.DXFactory()
+                    if hasattr(fac, "_camera_instances"):
+                        fac._camera_instances.clear()
+                except Exception:
+                    pass
                 if self.sct:
                     try:
                         self.sct.__exit__(exc_type, exc_val, exc_tb)
@@ -2134,6 +2203,18 @@ class HostMixin:
                                     grabbed = False
                                 elif grabbed and on_uac and _frame_is_nearly_white(frame_bgr):
                                     grabbed = False
+                                if grabbed:
+                                    client_state["_dxcam_fail_streak"] = 0
+                                else:
+                                    streak = client_state.get("_dxcam_fail_streak", 0) + 1
+                                    client_state["_dxcam_fail_streak"] = streak
+                                    if streak >= 4:
+                                        print("[Host] DXCam khong bat duoc hinh (man hinh ngu/khoa). Chuyen sang MSS/GDI fallback.")
+                                        for c in dx_cams:
+                                            try: c.release()
+                                            except Exception: pass
+                                        dx_cams = []
+                                        cap_ctx.dx_cams = []
                             if not grabbed:
                                 if on_uac:
                                     frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()

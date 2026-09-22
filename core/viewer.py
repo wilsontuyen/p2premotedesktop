@@ -1105,20 +1105,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         wait_surf = wait_font.render(_("Đang nhận màn hình máy Android..."), True, (220, 220, 220))
                         wait_rect = wait_surf.get_rect(center=(window_w // 2, window_h // 2))
                         screen.blit(wait_surf, wait_rect)
-                    elif pygame_theme == "light":
-                        screen.fill((240, 240, 245))
-                    elif pygame_theme == "gray":
-                        screen.fill((82, 89, 98))
-                    elif pygame_theme == "pink":
-                        screen.fill((255, 240, 245))
-                    elif pygame_theme == "crystal":
-                        screen.fill((224, 247, 250))
-                    elif pygame_theme == "orange":
-                        screen.fill((255, 243, 224))
-                    elif pygame_theme == "red":
-                        screen.fill((255, 235, 238))
                     else:
-                        screen.fill((30, 30, 30))
+                        if pygame_theme == "light":
+                            screen.fill((240, 240, 245))
+                            text_col = (110, 115, 125)
+                        elif pygame_theme == "gray":
+                            screen.fill((82, 89, 98))
+                            text_col = (220, 220, 225)
+                        elif pygame_theme == "pink":
+                            screen.fill((255, 240, 245))
+                            text_col = (150, 100, 120)
+                        elif pygame_theme == "crystal":
+                            screen.fill((224, 247, 250))
+                            text_col = (80, 120, 130)
+                        elif pygame_theme == "orange":
+                            screen.fill((255, 243, 224))
+                            text_col = (150, 110, 70)
+                        elif pygame_theme == "red":
+                            screen.fill((255, 235, 238))
+                            text_col = (150, 90, 100)
+                        else:
+                            screen.fill((30, 30, 30))
+                            text_col = (200, 200, 200)
+                        try:
+                            wait_font = pygame.font.SysFont(font_names, 20, bold=True)
+                        except Exception:
+                            wait_font = pygame.font.Font(None, 24)
+                        wait_surf = wait_font.render(_("Đang kết nối / Đang chờ màn hình từ máy chủ..."), True, text_col)
+                        wait_rect = wait_surf.get_rect(center=(window_w // 2, window_h // 2))
+                        screen.blit(wait_surf, wait_rect)
                     
                 # Draw red border if blinking (focus requested)
                 if blink_frames_remaining > 0:
