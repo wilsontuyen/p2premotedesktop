@@ -1249,9 +1249,9 @@ def _patch_dxcam_safe():
                     self.rotation_angle = self._output.rotation_angle
             except Exception:
                 pass
-            # Thử tối đa 3 lần, mỗi lần cách nhau 50ms. Nếu màn hình đang ngủ/khóa,
-            # ném lỗi ra ngoài để luồng capture chuyển sang fallback MSS / GDI ngay lập tức!
-            for _ in range(3):
+            # Thử tối đa 10 lần, mỗi lần cách nhau 50ms (tổng 500ms). Nếu sau 500ms vẫn chưa sẵn sàng (màn hình đang ngủ/khóa),
+            # ném lỗi ra ngoài để luồng capture chuyển sang fallback MSS / GDI an toàn, không bị while True vô tận!
+            for _ in range(10):
                 try:
                     self._stagesurf.rebuild(output=self._output, device=self._device)
                     self._duplicator = Duplicator(output=self._output, device=self._device)
@@ -2188,6 +2188,19 @@ class HostMixin:
                                             f"logonui={_logonui_running()} explorer={_explorer_running()} "
                                             f"mean={_mean:.1f} size={cap_w}x{cap_h}"
                                         )
+                            if not dx_cams and not _legacy_host and not on_winlogon and sys.platform == "win32":
+                                now_dxcam = time.time()
+                                if now_dxcam - client_state.get("_last_dxcam_retry", 0) >= 5.0:
+                                    client_state["_last_dxcam_retry"] = now_dxcam
+                                    try:
+                                        new_cams = _open_dxcam_outputs()
+                                        if new_cams:
+                                            dx_cams = new_cams
+                                            cap_ctx.dx_cams = new_cams
+                                            client_state["_dxcam_fail_streak"] = 0
+                                            print("[Host] DXCam da phuc hoi va gan lai thanh cong.")
+                                    except Exception:
+                                        pass
                             if dx_cams and not grabbed:
                                 retries = 8 if not client_state.get("_got_frame") else 1
                                 for _try in range(retries):
@@ -2208,7 +2221,7 @@ class HostMixin:
                                 else:
                                     streak = client_state.get("_dxcam_fail_streak", 0) + 1
                                     client_state["_dxcam_fail_streak"] = streak
-                                    if streak >= 4:
+                                    if streak >= 30:
                                         print("[Host] DXCam khong bat duoc hinh (man hinh ngu/khoa). Chuyen sang MSS/GDI fallback.")
                                         for c in dx_cams:
                                             try: c.release()
@@ -2219,15 +2232,29 @@ class HostMixin:
                                 if on_uac:
                                     frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
                                     self._capture_origin = origin
-                                elif on_winlogon or sct is None:
-                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr() if on_winlogon else grab_gdi_primary_bgr()
+                                elif on_winlogon:
+                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
                                     self._capture_origin = origin
                                 else:
-                                    frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
-                                        sct, client_state.get("_stitch_canvas")
-                                    )
-                                    client_state["_stitch_canvas"] = frame_bgr
-                                    self._capture_origin = origin
+                                    # Fallback 1: MSS
+                                    fb_ok = False
+                                    if sct is not None:
+                                        try:
+                                            frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
+                                                sct, client_state.get("_stitch_canvas")
+                                            )
+                                            client_state["_stitch_canvas"] = frame_bgr
+                                            self._capture_origin = origin
+                                            fb_ok = True
+                                        except Exception:
+                                            pass
+                                    # Fallback 2: GDI (luôn hoạt động ổn định trên Windows Server / sau khi ngắt RDP)
+                                    if not fb_ok:
+                                        try:
+                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                            self._capture_origin = origin
+                                        except Exception as e:
+                                            print(f"[Host] GDI grab fallback failed: {e}")
 
                             if (
                                 not on_winlogon
