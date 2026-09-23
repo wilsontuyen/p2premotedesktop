@@ -59,6 +59,7 @@ from filecopyclient import (
     _is_windows_11,
     _menu_item_counts_as_paste,
     _win10_rmb_paste_click,
+    set_global_rmb_pos,
     _file_expected_size,
     _file_io_lock,
     _file_offer_fp,
@@ -370,6 +371,21 @@ class FileCopyHostMixin:
                             print(f"[FileTransfer] Bo REQUEST_FILES paste_id={tok} (blacklist Huy).")
                             return
                         files_req = list(requested_files)
+                        now = time.time()
+                        last_req_time = float(getattr(self, "_last_request_files_time", 0.0) or 0.0)
+                        last_req_tok = getattr(self, "_last_request_files_tok", None)
+                        last_req_files = getattr(self, "_last_request_files_list", None)
+                        if (tok and tok == last_req_tok and (now - last_req_time) < 5.0) or (
+                            (now - last_req_time) < 10.0 and files_req == last_req_files
+                        ):
+                            log_debug(
+                                f"[_handle_uppipe_client] Bo REQUEST_FILES trung lap tok={tok} (elapsed={now - last_req_time:.2f}s)."
+                            )
+                            print(f"[FileTransfer] Bo REQUEST_FILES trung lap tok={tok} (elapsed={now - last_req_time:.2f}s).")
+                            return
+                        self._last_request_files_time = now
+                        self._last_request_files_tok = tok
+                        self._last_request_files_list = files_req
                         expected = getattr(self, "_xfer_expected_files", None)
                         if expected is None:
                             self._xfer_expected_files = {}
@@ -1453,7 +1469,7 @@ def run_clipboard_agent_mode():
         age_r = now - last_r
         hit_menu = _cursor_over_context_menu()
         if hit_menu:
-            kind, name = _capture_menu_item_at_cursor()
+            kind, name = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
             _agent_lmb_menu_item_kind = kind
             _agent_lmb_hit_context_menu = True
             agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
@@ -1510,7 +1526,7 @@ def run_clipboard_agent_mode():
             and (now - _agent_context_menu_seen_at) < 0.7
             and not menu_open
         )
-        chk_kind, _ = _capture_menu_item_at_cursor()
+        chk_kind, _ = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
         if chk_kind == "not_paste":
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = "not_paste"
@@ -1743,6 +1759,10 @@ def run_clipboard_agent_mode():
                     else:
                         _agent_rmb_is_taskbar = False
                         _agent_rmb_cursor_pos = cxy
+                        try:
+                            set_global_rmb_pos(cxy)
+                        except Exception:
+                            pass
                         try:
                             p = query_explorer_folder_path(allow_open_clipboard=False)
                             if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
@@ -2239,7 +2259,8 @@ def run_clipboard_agent_mode():
         nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id
         nonlocal _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_last_paste_start
         nonlocal _agent_accept_files, _agent_allow_xfer, _agent_cached_explorer_path, _ignore_destroy
-        nonlocal _agent_allow_delayed
+        nonlocal _agent_allow_delayed, _agent_last_paste_finish_time
+        nonlocal _agent_last_lbutton_time, _agent_last_ctrl_v_time, _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
 
         with _agent_paste_trigger_lock:
             # Người dùng thực hiện dán khi có file PENDING từ client → luôn mở allow_delayed
@@ -2251,12 +2272,15 @@ def run_clipboard_agent_mode():
 
             now = time.time()
             time_since_last_paste = now - float(_agent_last_paste_start or 0)
+            time_since_last_finish = now - float(_agent_last_paste_finish_time or 0)
             same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
 
             log_overwrite_conflict(
                 f"TRIGGER_PASTE source={source} enter pending={bool(_pending_info)} "
-                f"allow_delayed={_agent_allow_delayed} gesture={_agent_paste_gesture_id}/{_agent_consumed_gesture_id} "
-                f"time_since_last={time_since_last_paste:.2f}s same_gesture={same_gesture}"
+                f"allow_delayed={_agent_allow_delayed} "
+                f"elapsed_start={time_since_last_paste:.2f}s elapsed_finish={time_since_last_finish:.2f}s "
+                f"same_gesture={same_gesture} gesture_id={_agent_paste_gesture_id} "
+                f"consumed={_agent_consumed_gesture_id}"
             )
 
             if not _pending_info or not _agent_allow_delayed:
@@ -2277,12 +2301,19 @@ def run_clipboard_agent_mode():
                 return False
 
             # Chặn trùng lặp:
-            # 1) Nếu vừa kích hoạt paste cách đây dưới 1.5s -> bỏ qua duplicate trigger
-            # 2) Hoặc cùng gesture (đã tiêu thụ) -> bỏ qua
-            if time_since_last_paste < 1.5 or same_gesture:
+            # 1) Nếu có job đang chạy (living_jobs) -> không kích hoạt thêm job trùng
+            # 2) Nếu vừa kích hoạt paste cách đây dưới 3.5s -> bỏ qua duplicate trigger
+            # 3) Nếu lần paste trước vừa hoàn tất cách đây dưới 3.5s -> bỏ qua duplicate trigger
+            # 4) Hoặc cùng gesture (đã tiêu thụ) -> bỏ qua
+            living_jobs = any(
+                j.get("allow") and not (j.get("event") and j["event"].is_set())
+                for j in _agent_jobs.values()
+            )
+            if living_jobs or time_since_last_paste < 3.5 or time_since_last_finish < 3.5 or same_gesture:
                 log_overwrite_conflict(
                     f"TRIGGER_PASTE IGNORE duplicate source={source} same_gesture={same_gesture} "
-                    f"elapsed={time_since_last_paste:.2f}s"
+                    f"living={living_jobs} elapsed_start={time_since_last_paste:.2f}s "
+                    f"elapsed_finish={time_since_last_finish:.2f}s"
                 )
                 if source == "render_format":
                     empty_hdrop = create_hdrop_data([])
@@ -2302,6 +2333,10 @@ def run_clipboard_agent_mode():
             _agent_expect_repaste_until = 0.0
             _agent_paste_id += 1
             paste_id = _agent_paste_id
+            _agent_last_lbutton_time = 0.0
+            _agent_last_ctrl_v_time = 0.0
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = ""
             _agent_consumed_gesture_id = _agent_paste_gesture_id
             _agent_paste_coalesce_until = now + 0.35
             _agent_last_paste_start = now
@@ -2529,8 +2564,8 @@ def run_clipboard_agent_mode():
                 return 0
             if (
                 time.time() < _agent_suppress_render_until
-                or time.time() < (_agent_last_paste_finish_time or 0) + 2.5
-            ) and _agent_paste_gesture_id <= _agent_consumed_gesture_id:
+                or time.time() < (_agent_last_paste_finish_time or 0) + 3.5
+            ):
                 agent_print("[ClipboardAgent] Sau Rearm / Hoàn tất paste — HDROP rỗng, không tải ngầm.")
                 log_overwrite_conflict("RENDERFORMAT EXIT: suppress_after_finish_or_rearm")
                 if _offer_empty_hdrop():
@@ -2605,12 +2640,22 @@ def run_clipboard_agent_mode():
                         _agent_dummy_h_active = True
                     return 0
 
-            living = any(j.get("allow") for j in _agent_jobs.values())
+            living = any(
+                j.get("allow") and not (j.get("event") and j["event"].is_set())
+                for j in _agent_jobs.values()
+            )
             same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
             time_since_paste = time.time() - float(_agent_last_paste_start or 0)
-            if time_since_paste < 1.5:
-                agent_print("[ClipboardAgent] WM_RENDERFORMAT ngay sau trigger paste — trả empty HDROP.")
-                log_overwrite_conflict(f"RENDERFORMAT EXIT: recent paste elapsed={time_since_paste:.2f}s")
+            time_since_finish = time.time() - float(_agent_last_paste_finish_time or 0)
+            if living or time_since_paste < 3.5 or time_since_finish < 3.5:
+                agent_print(
+                    f"[ClipboardAgent] WM_RENDERFORMAT coalesce (living={living}, "
+                    f"elapsed_start={time_since_paste:.2f}s, elapsed_finish={time_since_finish:.2f}s) — trả empty HDROP."
+                )
+                log_overwrite_conflict(
+                    f"RENDERFORMAT EXIT: living={living} recent paste elapsed_start={time_since_paste:.2f}s "
+                    f"elapsed_finish={time_since_finish:.2f}s"
+                )
                 if _offer_empty_hdrop():
                     _agent_dummy_h_active = True
                 return 0
@@ -2674,7 +2719,7 @@ def run_clipboard_agent_mode():
                 f"RENDERFORMAT → PASTE OK is_menu={is_menu!r} fresh={fresh_input} "
                 f"living={living} → conflict_check"
             )
-            if fresh_input and same_gesture:
+            if fresh_input and same_gesture and not living and time_since_finish >= 3.5:
                 _note_paste_gesture()
             _is_rendering = True
             try:
@@ -2808,6 +2853,10 @@ def run_clipboard_agent_mode():
             else:
                 _agent_rmb_is_taskbar = False
                 _agent_rmb_cursor_pos = cxy
+                try:
+                    set_global_rmb_pos(cxy)
+                except Exception:
+                    pass
                 try:
                     p = query_explorer_folder_path(allow_open_clipboard=False)
                     if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):

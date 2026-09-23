@@ -1843,11 +1843,20 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             if not tok and time.time() < getattr(self, "_suppress_request_files_until", 0):
                 print("[FileTransfer] Bo request_files khong paste_id sau Huy.")
                 return
+            files_to_send = packet.get("files", [])
+            now = time.time()
+            last_rf_time = float(getattr(self, "_last_peer_request_files_time", 0.0) or 0.0)
+            last_rf_files = getattr(self, "_last_peer_request_files_list", None)
+            if (now - last_rf_time) < 8.0 and files_to_send == last_rf_files:
+                print(f"[FileTransfer] Bo request_files trung lap tu peer tok={tok} (elapsed={now - last_rf_time:.2f}s < 8s).")
+                log_debug(f"[request_files] Bo qua goi yeu cau trung lap tok={tok} elapsed={now - last_rf_time:.2f}s")
+                return
+            self._last_peer_request_files_time = now
+            self._last_peer_request_files_list = files_to_send
             if tok:
                 self._clipboard_paste_id = tok
             if not self._arm_file_xfer("peer_request_files"):
                 return
-            files_to_send = packet.get("files", [])
             sid = getattr(self, "_send_xfer_id", 0)
             self._enqueue_send_job(files_to_send, sid, tok)
             return
