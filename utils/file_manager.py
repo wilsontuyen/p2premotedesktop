@@ -888,7 +888,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 try:
                     from core.clipboard_agent import clipboard_sync_manager as cm
                     if cm:
-                        cm.process_clipboard_event(event)
+                        fn = getattr(cm, "process_clipboard_event", None) or getattr(cm, "handle_received_packet", None)
+                        if fn: fn(event)
                 except Exception:
                     pass
             elif evt_type == "upload_progress_ack":
@@ -901,7 +902,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 try:
                     from core.clipboard_agent import clipboard_sync_manager as cm
                     if cm:
-                        cm.process_clipboard_event(event)
+                        fn = getattr(cm, "process_clipboard_event", None) or getattr(cm, "handle_received_packet", None)
+                        if fn: fn(event)
                 except Exception:
                     pass
                 top.after(500, lambda: fm_event_queue.put({"type": "trigger_local_refresh"}))
@@ -1607,16 +1609,72 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
             if cm:
                 cm.target_save_dir = target_dir
+                cm._paste_dest_dir = target_dir
                 cm.batch_total_size = total_size
                 cm.batch_received = 0
                 cm.active_batch = True
+                cm._allow_file_xfer = True
                 cm._receive_cancelled = False
+
+                # Hook cm methods so File Manager download works completely without modifying other files
+                if getattr(cm, "_fm_patched", False) is not True:
+                    cm._fm_patched = True
+                    orig_open_dialog = getattr(cm, "open_paste_progress_dialog", None)
+                    def _fm_open_dialog(*args, **kwargs):
+                        if getattr(cm, "active_batch", False) and getattr(cm, "active_dialog", None):
+                            return
+                        if orig_open_dialog:
+                            return orig_open_dialog(*args, **kwargs)
+                    cm.open_paste_progress_dialog = _fm_open_dialog
+
+                    orig_update_dialog = getattr(cm, "update_dialog", None)
+                    def _fm_update_dialog(sent_bytes, job_id=None):
+                        if getattr(cm, "active_batch", False) and getattr(cm, "active_dialog", None):
+                            try:
+                                cm.active_dialog.update_progress(sent_bytes)
+                            except Exception:
+                                pass
+                        if orig_update_dialog:
+                            orig_update_dialog(sent_bytes, job_id)
+                    cm.update_dialog = _fm_update_dialog
+
+                    orig_close_dialog = getattr(cm, "close_dialog", None)
+                    def _fm_close_dialog(job_id=None, reason=None):
+                        if getattr(cm, "active_dialog", None):
+                            dlg = cm.active_dialog
+                            cm.active_dialog = None
+                            cm.active_batch = False
+                            cm._allow_file_xfer = False
+                            try:
+                                dlg.after(0, dlg.destroy)
+                            except Exception:
+                                pass
+                            try:
+                                top.after(300, refresh_local)
+                            except Exception:
+                                pass
+                        if orig_close_dialog:
+                            orig_close_dialog(job_id, reason)
+                    cm.close_dialog = _fm_close_dialog
+
+                    orig_paste_dest = getattr(cm, "_paste_dest_for_job", None)
+                    def _fm_paste_dest_for_job(job):
+                        if getattr(cm, "active_batch", False) and getattr(cm, "target_save_dir", None):
+                            return cm.target_save_dir
+                        if orig_paste_dest:
+                            return orig_paste_dest(job)
+                        return getattr(cm, "target_save_dir", None)
+                    cm._paste_dest_for_job = _fm_paste_dest_for_job
 
                 display_name = display_names[0]
                 if len(display_names) > 1:
                     display_name += _(" và {count} mục khác").format(count=len(display_names)-1)
 
                 def _cancel():
+                    if cm:
+                        cm.active_batch = False
+                        cm._allow_file_xfer = False
+                        cm.active_dialog = None
                     cm.cancel_active_transfer(remote_triggered=False)
 
                 dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd, embed=True, dest_dir=target_dir)

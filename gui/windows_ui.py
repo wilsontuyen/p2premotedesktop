@@ -58,7 +58,8 @@ class ProgressDialog(tk.Toplevel):
             self.title_bar = None
             self.title_lbl = None
 
-        self.attributes("-topmost", True)
+        if not self._embed:
+            self.attributes("-topmost", True)
         self.total_size = max(0, int(total_size or 0))
         self.filename = str(filename) if filename is not None else "Unknown"
         self._title_text = title_text
@@ -154,20 +155,26 @@ class ProgressDialog(tk.Toplevel):
             try:
                 import ctypes
                 from ctypes import wintypes
+                try:
+                    ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                    ctypes.windll.user32.SetParent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                    ctypes.windll.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                except Exception:
+                    pass
                 tk_hwnd = int(self.frame(), 16)
                 style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
                 style = (style | 0x40000000) & ~0x80000000
                 ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                ctypes.windll.user32.SetParent(tk_hwnd, self.host_hwnd)
+                ctypes.windll.user32.SetParent(tk_hwnd, int(self.host_hwnd))
                 
                 rect = wintypes.RECT()
-                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
+                ctypes.windll.user32.GetClientRect(int(self.host_hwnd), ctypes.byref(rect))
                 py_w = rect.right - rect.left
                 py_h = rect.bottom - rect.top
                 
                 x = max(0, (py_w - dialog_w) // 2)
                 y = max(0, (py_h - dialog_h) // 2)
-                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
+                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020 | 0x0040)
                 self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
             except Exception:
                 self._place_on_screen(dialog_w, dialog_h)
@@ -176,7 +183,7 @@ class ProgressDialog(tk.Toplevel):
 
         self.deiconify()
         try:
-            if parent_mapped:
+            if parent_mapped and not self._embed:
                 self.transient(parent)
         except Exception:
             pass
@@ -184,7 +191,8 @@ class ProgressDialog(tk.Toplevel):
             self.state("normal")
         except Exception:
             pass
-        self.attributes("-topmost", True)
+        if not self._embed:
+            self.attributes("-topmost", True)
         self.lift()
         self.focus_force()
         try:
@@ -192,25 +200,28 @@ class ProgressDialog(tk.Toplevel):
         except Exception:
             pass
         try:
-            if self._embed:
-                hide_tk_from_taskbar(self)
-            set_dialog_app_icon(self)
+            if not self._embed:
+                set_dialog_app_icon(self)
         except Exception:
             pass
         self.update()
         self._apply_owner()
         try:
-            set_dialog_app_icon(self)
+            if not self._embed:
+                set_dialog_app_icon(self)
         except Exception:
             pass
-        try:
-            self.after(0, self._force_show)
-            self.after(80, self._force_show)
-        except Exception:
-            pass
+        if not self._embed:
+            try:
+                self.after(0, self._force_show)
+                self.after(80, self._force_show)
+            except Exception:
+                pass
 
     def _force_show(self):
         """Parent Tk withdrawn có thể nuốt deiconify lần đầu — hiện lại dialog tiến trình."""
+        if self._embed:
+            return
         try:
             if not self.winfo_exists():
                 return
@@ -363,10 +374,11 @@ class ProgressDialog(tk.Toplevel):
             from ctypes import wintypes
             user32 = ctypes.windll.user32
             rect = wintypes.RECT()
-            if not user32.GetClientRect(self.host_hwnd, ctypes.byref(rect)):
+            h_hwnd = int(self.host_hwnd)
+            if not user32.GetClientRect(h_hwnd, ctypes.byref(rect)):
                 return None
             pt = wintypes.POINT(rect.left, rect.top)
-            user32.ClientToScreen(self.host_hwnd, ctypes.byref(pt))
+            user32.ClientToScreen(h_hwnd, ctypes.byref(pt))
             return (pt.x, pt.y, pt.x + (rect.right - rect.left), pt.y + (rect.bottom - rect.top))
         except Exception:
             return None
@@ -416,7 +428,7 @@ class ProgressDialog(tk.Toplevel):
                 import ctypes
                 from ctypes import wintypes
                 pt = wintypes.POINT(int(screen_x), int(screen_y))
-                ctypes.windll.user32.ScreenToClient(self.host_hwnd, ctypes.byref(pt))
+                ctypes.windll.user32.ScreenToClient(int(self.host_hwnd), ctypes.byref(pt))
                 hwnd = self._hwnd()
                 if hwnd:
                     ctypes.windll.user32.SetWindowPos(hwnd, 0, pt.x, pt.y, 0, 0, 0x0001 | 0x0004)
