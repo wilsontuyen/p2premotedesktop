@@ -22,8 +22,8 @@ def write_host_flag():
 
 def remove_host_flag():
     try:
-        if os.path.exists(flag_path):
-            os.remove(flag_path)
+        with open(flag_path, "w", encoding="utf-8") as f:
+            f.write("HOST_ONLY_BUILD = False\n")
     except Exception:
         pass
 

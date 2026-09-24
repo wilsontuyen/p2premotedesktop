@@ -160,10 +160,53 @@ def uac_consent_running():
     return found
 
 
+def is_logonui_running():
+    """True nếu LogonUI.exe đang chạy (máy đang ở màn hình khóa / đăng nhập)."""
+    if sys.platform != "win32":
+        return False
+    now = __import__("time").time()
+    cache = getattr(is_logonui_running, "_c", (0.0, False))
+    if now - cache[0] < 0.2:
+        return cache[1]
+    found = False
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if str(p.info.get("name") or "").lower() == "logonui.exe":
+                found = True
+                break
+    except Exception:
+        found = False
+    is_logonui_running._c = (now, found)
+    return found
+
+
+def is_explorer_running():
+    """True nếu explorer.exe đang chạy trong session người dùng."""
+    if sys.platform != "win32":
+        return False
+    now = __import__("time").time()
+    cache = getattr(is_explorer_running, "_c", (0.0, False))
+    if now - cache[0] < 0.2:
+        return cache[1]
+    found = False
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if str(p.info.get("name") or "").lower() == "explorer.exe":
+                found = True
+                break
+    except Exception:
+        found = False
+    is_explorer_running._c = (now, found)
+    return found
+
+
 def check_desktop_change():
-    """(needs_switch, is_blocked). Winlogon trên Server vẫn OpenInputDesktop được
-    với MAXIMUM_ALLOWED nhưng OpenDesktopW(GENERIC_ALL) hay fail — không được
-    đánh blocked nếu đã mở được input desktop (SetThreadDesktop + GDI vẫn capture)."""
+    """(needs_switch, is_blocked). Tránh ping-pong desktop loop khi:
+    - Màn hình ngủ qua đêm (DPMS off)
+    - Windows Server đang log off (không có explorer.exe)
+    - Máy đang ở màn hình khóa / đăng nhập của MS RDP hoặc Windows Server."""
     try:
         thread_name = get_desktop_name()
         h_input = open_input_desktop_handle()
@@ -184,27 +227,24 @@ def check_desktop_change():
                 return False, True
             return False, False
 
-        try:
-            v = __import__("sys").getwindowsversion()
-            if v.major < 6 or (v.major == 6 and v.minor < 2):
+        # Khi OpenInputDesktop trả về None (màn hình ngủ DPMS / tắt hiển thị / RDP ngắt kết nối / Logoff):
+        # Trạng thái đăng nhập:
+        # Nếu LogonUI đang chạy HOẶC không có explorer.exe -> máy đang ở màn hình khóa / đăng nhập / logoff (Winlogon)
+        has_explorer = is_explorer_running()
+        logon_active = is_logonui_running() or (not has_explorer)
+
+        if not logon_active:
+            # Người dùng đang đăng nhập bình thường (explorer đang chạy, không có LogonUI)
+            if thread_name in ("default", "", "agprivacydesk"):
                 return False, False
-        except Exception:
-            pass
-        if thread_name not in ("default", "", "agprivacydesk"):
-            return False, False
-        for name in ("Winlogon", "Default"):
-            h_named = open_named_desktop_handle(name)
-            if not h_named:
-                continue
-            try:
-                named = _desktop_name_from_handle(h_named)
-            finally:
-                ctypes.windll.user32.CloseDesktop(h_named)
-            if named and named != thread_name:
-                return True, False
-            if named == thread_name:
+            # Nếu thread đang kẹt ở winlogon mà người dùng đã vào Default -> chuyển về Default
+            return True, False
+        else:
+            # Màn hình đang ở Winlogon (máy bị khóa, logoff, hoặc đang ở màn hình đăng nhập của RDP/Server)
+            if thread_name == "winlogon":
                 return False, False
-        return False, True
+            # Thread đang ở default nhưng máy bị khóa/logoff -> chuyển sang winlogon
+            return True, False
     except Exception as e:
         print(f"[DesktopCheck] Error: {e}")
         return False, False

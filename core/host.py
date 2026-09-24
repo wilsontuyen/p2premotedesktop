@@ -584,13 +584,11 @@ def _should_capture_logon_ui():
     # Lock: LogonUI trên Winlogon, explorer thường vẫn sống.
     if phase == "lock" and (logonui or secure_ui or input_name == "winlogon"):
         return True
+    if not explorer:
+        return True
     if saw and secure_ui:
         return True
-    if saw and not explorer:
-        return True
     if saw and logonui:
-        return True
-    if logonui and not explorer:
         return True
     if input_name in ("default", "", "agprivacydesk") and (explorer or logged_in is True):
         return False
@@ -628,7 +626,10 @@ def _switch_capture_thread_to_input_desktop():
         hdesk = open_input_desktop_handle()
         if not hdesk:
             thread_name = get_desktop_name()
-            target_name = "Winlogon" if thread_name == "default" else "Default"
+            want_winlogon = _should_capture_logon_ui() or _logonui_running() or (not _explorer_running())
+            target_name = "Winlogon" if want_winlogon else "Default"
+            if thread_name == target_name.lower():
+                return True
             hdesk = open_named_desktop_handle(target_name)
             if hdesk:
                 print(f"[Host] Opened {target_name} desktop by name (fallback)")
@@ -819,15 +820,31 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
     h = int(user32.GetSystemMetrics(1))
     if w < 1 or h < 1:
         raise RuntimeError("GDI invalid screen size")
-    hwnd = 0 if use_screen_dc else user32.GetDesktopWindow()
+    is_server = False
+    try:
+        is_server = bool(user32.GetSystemMetrics(89))
+    except Exception:
+        pass
+    prefer_screen_dc = use_screen_dc or is_server or get_desktop_name() == "winlogon"
+    hwnd = 0 if prefer_screen_dc else user32.GetDesktopWindow()
     hdc = user32.GetDC(hwnd)
+    if not hdc and hwnd != 0:
+        hwnd = 0
+        hdc = user32.GetDC(0)
     if not hdc:
         raise RuntimeError("GDI GetDC failed")
     memdc = gdi32.CreateCompatibleDC(hdc)
     hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
     old = gdi32.SelectObject(memdc, hbmp)
     try:
-        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020):
+        blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)
+        if not blt_ok and hwnd != 0:
+            user32.ReleaseDC(hwnd, hdc)
+            hwnd = 0
+            hdc = user32.GetDC(0)
+            if hdc:
+                blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)
+        if not blt_ok:
             raise RuntimeError("GDI BitBlt failed")
 
         class BITMAPINFOHEADER(ctypes.Structure):
@@ -869,6 +886,25 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
         if not top_down:
             img = np.flipud(img).copy()
         frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+        # Tránh màn hình trắng/đen sau khi ngắt MS RDP trên Windows Server:
+        # Nếu GetDesktopWindow() trả về frame trắng tinh hoặc đen tinh, fallback ngay sang GetDC(0)
+        if hwnd != 0 and (_frame_is_nearly_white(frame) or _frame_is_nearly_black(frame)):
+            hdc_screen = user32.GetDC(0)
+            if hdc_screen:
+                try:
+                    if gdi32.BitBlt(memdc, 0, 0, w, h, hdc_screen, 0, 0, 0x00CC0020):
+                        got2 = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+                        if got2 != 0:
+                            img2 = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+                            if not top_down:
+                                img2 = np.flipud(img2).copy()
+                            frame2 = cv2.cvtColor(img2, cv2.COLOR_BGRA2BGR)
+                            if not (_frame_is_nearly_white(frame2) or _frame_is_nearly_black(frame2)):
+                                frame = frame2
+                finally:
+                    user32.ReleaseDC(0, hdc_screen)
+
         return frame, w, h, (0, 0)
     finally:
         gdi32.SelectObject(memdc, old)
@@ -1641,19 +1677,35 @@ class HostMixin:
     def wake_display(self):
         try:
             import ctypes
-            # WM_SYSCOMMAND = 0x0112, SC_MONITORPOWER = 0xF170, -1 = power on
-            # Use SendNotifyMessageW to avoid blocking if a window is non-responsive
-            ctypes.windll.user32.SendNotifyMessageW(0xFFFF, 0x0112, 0xF170, -1)
-            # Prevent sleep
-            ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000002)
-            # Simulate a harmless VK_F15 keypress to wake display/lockscreen
+            # 1. Báo Windows người dùng có mặt và yêu cầu bật màn hình ngay lập tức (ES_USER_PRESENT | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED)
+            # Chú ý: Không kèm ES_CONTINUOUS khi có ES_USER_PRESENT thì Windows mới kích hoạt đánh thức màn hình
             try:
-                import win32api, win32con
-                win32api.keybd_event(win32con.VK_F15, 0, 0, 0)
-                win32api.keybd_event(win32con.VK_F15, 0, win32con.KEYEVENTF_KEYUP, 0)
+                ctypes.windll.kernel32.SetThreadExecutionState(0x00000001 | 0x00000002 | 0x00000004)
+                # 2. Duy trì trạng thái không ngủ trong suốt phiên kết nối
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001 | 0x00000002)
             except Exception:
                 pass
-            # Di chuyển chuột vi mô (1 pixel rồi về vị trí cũ) - đánh thức driver GPU/màn hình cực nhạy
+
+            # 3. Gửi lệnh bật nguồn màn hình SC_MONITORPOWER = 0xF170, -1 = power on
+            try:
+                ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, -1)
+            except Exception:
+                pass
+
+            # 4. Gắn input desktop nếu có thể để phím/chuột gửi đúng desktop đang hoạt động
+            try:
+                attach_thread_for_remote_input()
+            except Exception:
+                pass
+
+            # 5. Giả lập phím VK_SHIFT (0x10) nhả ngay - an toàn không gõ chữ nhưng kích hoạt GPU driver & Windows DPMS
+            try:
+                ctypes.windll.user32.keybd_event(0x10, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(0x10, 0, 0x0002, 0)
+            except Exception:
+                pass
+
+            # 6. Di chuyển chuột vi mô (1 pixel rồi về vị trí cũ) - đánh thức driver GPU/màn hình cực nhạy
             try:
                 ctypes.windll.user32.mouse_event(0x0001, 1, 1, 0, 0)
                 ctypes.windll.user32.mouse_event(0x0001, -1, -1, 0, 0)
@@ -1764,9 +1816,8 @@ class HostMixin:
                 import platform
                 computer_name = platform.node()
                 is_android = False
-                # Host Windows product never runs as Android; skip Android identity.
                 try:
-                    from host_build_flag import HOST_ONLY_BUILD as _HOST_ONLY
+                    _HOST_ONLY = bool(getattr(__import__("host_build_flag", fromlist=["HOST_ONLY_BUILD"]), "HOST_ONLY_BUILD", False))
                 except Exception:
                     _HOST_ONLY = False
                 if not _HOST_ONLY and sys.platform != "win32":
@@ -2103,6 +2154,11 @@ class HostMixin:
                         
                     while client_state.get("running", False):
                         try:
+                            if not client_state.get("_got_frame"):
+                                _now_w = time.time()
+                                if _now_w - client_state.get("_last_wake_ts", 0) >= 1.0:
+                                    client_state["_last_wake_ts"] = _now_w
+                                    self.wake_display()
                             if time.time() - _last_hb >= 2.0:
                                 try:
                                     if not send_msg(conn, json.dumps({"type": "pong"}).encode("utf-8"), password):
@@ -2170,11 +2226,16 @@ class HostMixin:
                             elif _legacy_host or on_winlogon:
                                 if on_winlogon:
                                     frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
+                                    self._capture_origin = origin
+                                    grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                 else:
-                                    frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
-                                self._capture_origin = origin
-                                grabbed = True
-                                if on_winlogon:
+                                    try:
+                                        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                        self._capture_origin = origin
+                                        grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                    except Exception as ge:
+                                        grabbed = False
+                                if on_winlogon and grabbed:
                                     _now_diag = time.time()
                                     if _now_diag - client_state.get("_secure_diag_ts", 0) >= 0.8:
                                         client_state["_secure_diag_ts"] = _now_diag
@@ -2232,9 +2293,11 @@ class HostMixin:
                                 if on_uac:
                                     frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
                                     self._capture_origin = origin
+                                    grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                 elif on_winlogon:
                                     frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
                                     self._capture_origin = origin
+                                    grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                 else:
                                     # Fallback 1: MSS
                                     fb_ok = False
@@ -2245,7 +2308,9 @@ class HostMixin:
                                             )
                                             client_state["_stitch_canvas"] = frame_bgr
                                             self._capture_origin = origin
-                                            fb_ok = True
+                                            fb_ok = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                            if fb_ok:
+                                                grabbed = True
                                         except Exception:
                                             pass
                                     # Fallback 2: GDI (luôn hoạt động ổn định trên Windows Server / sau khi ngắt RDP)
@@ -2253,8 +2318,13 @@ class HostMixin:
                                         try:
                                             frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
                                             self._capture_origin = origin
+                                            grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                         except Exception as e:
                                             print(f"[Host] GDI grab fallback failed: {e}")
+
+                            if not grabbed or frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
+                                time.sleep(0.05)
+                                continue
 
                             if (
                                 not on_winlogon
