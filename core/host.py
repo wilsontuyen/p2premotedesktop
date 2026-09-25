@@ -766,8 +766,23 @@ def _is_legacy_windows_host():
         return str(platform.release()) in ("7", "Vista", "XP")
 
 
+def _is_server_or_remote_session():
+    """Windows Server hoac RDP remote session: khong dung DXGI Desktop Duplication."""
+    if sys.platform != "win32":
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        if user32.GetSystemMetrics(89):  # SM_SERVERR2
+            return True
+        if user32.GetSystemMetrics(4096):  # SM_REMOTESESSION
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _windows_has_dxgi_duplication():
-    return sys.platform == "win32" and not _is_legacy_windows_host()
+    return sys.platform == "win32" and not _is_legacy_windows_host() and not _is_server_or_remote_session()
 
 
 def _virtual_screen_rect():
@@ -811,6 +826,26 @@ def _clip_tile_onto_canvas(canvas, tile, x, y):
     return True
 
 
+def attach_disconnected_session_to_console():
+    """Tren Windows Server, khi ngat MS RDP ma khong log off,
+    session bi chuyen sang Disconnected (khong co display output).
+    Goi tscon <session_id> /dest:console de tra session ve man hinh console."""
+    if sys.platform != "win32":
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        current_sid = ctypes.c_ulong()
+        if kernel32.ProcessIdToSessionId(kernel32.GetCurrentProcessId(), ctypes.byref(current_sid)):
+            sid = current_sid.value
+            if sid not in (0, 0xFFFFFFFF):
+                tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+                if os.path.exists(tscon_exe):
+                    import subprocess
+                    subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
+    except Exception:
+        pass
+
+
 def grab_gdi_primary_bgr(use_screen_dc=False):
     """BitBlt màn chính — ổn định trên Windows 7 (không DXGI, không mss virtual desktop).
     use_screen_dc=True: GetDC(0) — cần cho Winlogon/Server sau SetThreadDesktop."""
@@ -819,7 +854,10 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
     w = int(user32.GetSystemMetrics(0))
     h = int(user32.GetSystemMetrics(1))
     if w < 1 or h < 1:
-        raise RuntimeError("GDI invalid screen size")
+        w = int(user32.GetSystemMetrics(78))
+        h = int(user32.GetSystemMetrics(79))
+    if w < 1 or h < 1:
+        w, h = 1280, 720
     is_server = False
     try:
         is_server = bool(user32.GetSystemMetrics(89))
@@ -830,6 +868,9 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
     hdc = user32.GetDC(hwnd)
     if not hdc and hwnd != 0:
         hwnd = 0
+        hdc = user32.GetDC(0)
+    if not hdc:
+        attach_disconnected_session_to_console()
         hdc = user32.GetDC(0)
     if not hdc:
         raise RuntimeError("GDI GetDC failed")
@@ -1996,8 +2037,9 @@ class HostMixin:
                 self.dx_cams = []
                 self.sct = None
             def __enter__(self):
-                if _is_legacy_windows_host():
-                    print("[Host] Using GDI BitBlt capture (Windows 7)")
+                if _is_legacy_windows_host() or _is_server_or_remote_session():
+                    print("[Host] Using GDI BitBlt capture (Windows 7 / Windows Server / Remote Session)")
+                    attach_disconnected_session_to_console()
                     return self
                 if _should_capture_logon_ui():
                     print("[Host] Winlogon/Signing out: PrintWindow/BitBlt HWND (skip DXGI)")
@@ -2010,8 +2052,9 @@ class HostMixin:
                 except Exception as e:
                     print(f"[Host] mss init failed: {e}")
                     self.sct = None
-                if not self.dx_cams and not self.sct and not _should_capture_logon_ui():
-                    raise RuntimeError("no screen capture backend")
+                if not self.dx_cams and not self.sct:
+                    print("[Host] DXGI and MSS unavailable (Server/RDP/headless). Using GDI BitBlt capture.")
+                    attach_disconnected_session_to_console()
                 return self
             def __exit__(self, exc_type, exc_val, exc_tb):
                 for cam in self.dx_cams:
@@ -2223,16 +2266,24 @@ class HostMixin:
                                     )
                                 except Exception:
                                     grabbed = False
-                            elif _legacy_host or on_winlogon:
+                            elif _legacy_host or _is_server_or_remote_session() or on_winlogon or (not dx_cams and sct is None):
                                 if on_winlogon:
-                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
-                                    self._capture_origin = origin
-                                    grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                    try:
+                                        frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
+                                        self._capture_origin = origin
+                                        grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                    except Exception:
+                                        grabbed = False
                                 else:
                                     try:
                                         frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
                                         self._capture_origin = origin
                                         grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                        if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
+                                            attach_disconnected_session_to_console()
+                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                            self._capture_origin = origin
+                                            grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                     except Exception as ge:
                                         grabbed = False
                                 if on_winlogon and grabbed:
@@ -2244,12 +2295,12 @@ class HostMixin:
                                         except Exception:
                                             _mean = -1.0
                                         print(
-                                            f"[SecureCap] phase={_wts_phase()} thread_desk={get_desktop_name()} "
-                                            f"input={_input_desktop_name()} secure_ui={len(_winlogon_secure_ui_hwnds())} "
-                                            f"logonui={_logonui_running()} explorer={_explorer_running()} "
-                                            f"mean={_mean:.1f} size={cap_w}x{cap_h}"
-                                        )
-                            if not dx_cams and not _legacy_host and not on_winlogon and sys.platform == "win32":
+                                             f"[SecureCap] phase={_wts_phase()} thread_desk={get_desktop_name()} "
+                                             f"input={_input_desktop_name()} secure_ui={len(_winlogon_secure_ui_hwnds())} "
+                                             f"logonui={_logonui_running()} explorer={_explorer_running()} "
+                                             f"mean={_mean:.1f} size={cap_w}x{cap_h}"
+                                         )
+                            if not dx_cams and not _legacy_host and not _is_server_or_remote_session() and not on_winlogon and sys.platform == "win32":
                                 now_dxcam = time.time()
                                 if now_dxcam - client_state.get("_last_dxcam_retry", 0) >= 5.0:
                                     client_state["_last_dxcam_retry"] = now_dxcam
@@ -2282,7 +2333,7 @@ class HostMixin:
                                 else:
                                     streak = client_state.get("_dxcam_fail_streak", 0) + 1
                                     client_state["_dxcam_fail_streak"] = streak
-                                    if streak >= 30:
+                                    if streak >= 3:
                                         print("[Host] DXCam khong bat duoc hinh (man hinh ngu/khoa). Chuyen sang MSS/GDI fallback.")
                                         for c in dx_cams:
                                             try: c.release()
@@ -2295,9 +2346,12 @@ class HostMixin:
                                     self._capture_origin = origin
                                     grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                 elif on_winlogon:
-                                    frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
-                                    self._capture_origin = origin
-                                    grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                    try:
+                                        frame_bgr, cap_w, cap_h, origin = grab_secure_desktop_bgr()
+                                        self._capture_origin = origin
+                                        grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                    except Exception:
+                                        grabbed = False
                                 else:
                                     # Fallback 1: MSS
                                     fb_ok = False
@@ -2308,7 +2362,12 @@ class HostMixin:
                                             )
                                             client_state["_stitch_canvas"] = frame_bgr
                                             self._capture_origin = origin
-                                            fb_ok = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                            fb_ok = bool(
+                                                frame_bgr is not None 
+                                                and getattr(frame_bgr, "size", 0)
+                                                and not _frame_is_nearly_white(frame_bgr)
+                                                and not _frame_is_nearly_black(frame_bgr)
+                                            )
                                             if fb_ok:
                                                 grabbed = True
                                         except Exception:
@@ -2319,6 +2378,11 @@ class HostMixin:
                                             frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
                                             self._capture_origin = origin
                                             grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                            if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
+                                                attach_disconnected_session_to_console()
+                                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                                self._capture_origin = origin
+                                                grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                         except Exception as e:
                                             print(f"[Host] GDI grab fallback failed: {e}")
 

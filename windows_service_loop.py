@@ -269,6 +269,7 @@ def get_active_session_id():
     Chua login: WTSGetActiveConsoleSessionId hoac WTSConnected."""
     WTSActive = 0
     WTSConnected = 1
+    WTSDisconnected = 4
     invalid = {0xFFFFFFFF, -1, 0}
 
     sessions = []
@@ -277,6 +278,7 @@ def get_active_session_id():
     except Exception as e:
         log(f"Lỗi liệt kê các session WTS: {e}")
 
+    # 1. Tìm session đang Active (người dùng đang tương tác)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
@@ -284,6 +286,32 @@ def get_active_session_id():
         if s.get("State") == WTSActive:
             return sid
 
+    # 2. Đặc biệt cho Windows Server sau khi ngắt MS RDP:
+    # Tìm session đang Disconnected nhưng có Token đăng nhập của user (user vẫn đang đăng nhập)
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        if s.get("State") == WTSDisconnected:
+            has_user = False
+            try:
+                h_tok = win32ts.WTSQueryUserToken(sid)
+                win32api.CloseHandle(h_tok)
+                has_user = True
+            except Exception:
+                pass
+            if has_user:
+                try:
+                    tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+                    if os.path.exists(tscon_exe):
+                        import subprocess
+                        subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
+                        log(f"[Service] Đã gọi tscon {sid} /dest:console để khôi phục session RDP của user.")
+                except Exception as te:
+                    log(f"Gọi tscon thất bại: {te}")
+                return sid
+
+    # 3. Kiểm tra Console Session nếu có
     console = 0xFFFFFFFF
     try:
         console = win32ts.WTSGetActiveConsoleSessionId()
@@ -292,11 +320,27 @@ def get_active_session_id():
     if console not in invalid:
         return console
 
+    # 4. Kiểm tra session WTSConnected
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
             continue
         if s.get("State") == WTSConnected:
+            return sid
+
+    # 5. Bất kỳ session Disconnected nào còn lại
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        if s.get("State") == WTSDisconnected:
+            try:
+                tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+                if os.path.exists(tscon_exe):
+                    import subprocess
+                    subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
+            except Exception:
+                pass
             return sid
     return 0xFFFFFFFF
 
@@ -640,6 +684,10 @@ def spawn_taskmgr_system():
         if is_screen_locked:
             log("Màn hình đang khóa, bỏ qua việc chạy Task Manager.")
             return
+
+        sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        taskmgr_exe = os.path.join(sys32, "taskmgr.exe")
+        desktop = r"WinSta0\Default"
 
         try:
             h_user_token = win32ts.WTSQueryUserToken(active_session_id)
