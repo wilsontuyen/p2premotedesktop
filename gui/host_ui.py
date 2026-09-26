@@ -301,3 +301,5 @@ def setup_host_ui(self):
 
     if not self.is_headless:
         self.setup_tray_icon()
+        if hasattr(self, "adjust_host_window_size"):
+            self.adjust_host_window_size()

@@ -27,10 +27,14 @@ _DESKTOP_ACCESS_MASKS = (
     0x02000000, 0x01FF, 0x0183, 0x0100, 0x0001, 0x0040, 0x80000000, 0,
 )
 
-def _desktop_name_from_handle(hdesk):
+def get_desktop_name_from_handle(hdesk):
+    if not hdesk:
+        return ""
     name = ctypes.create_unicode_buffer(256)
     ctypes.windll.user32.GetUserObjectInformationW(hdesk, 2, name, ctypes.sizeof(name), None)
     return (name.value or "").lower()
+
+_desktop_name_from_handle = get_desktop_name_from_handle
 
 def open_input_desktop_handle():
     user32 = ctypes.windll.user32
@@ -80,6 +84,7 @@ def uac_on_secure_desktop():
 
 def attach_thread_for_remote_input():
     """Fix UAC ok 2: bám OpenInputDesktop (desktop đang nhận chuột), không ép Default/Winlogon."""
+    attach_process_window_station("WinSta0")
     user32 = ctypes.windll.user32
     h_input = None
     for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
@@ -104,7 +109,11 @@ def attach_thread_for_remote_input():
             print(f"[Host Input] Desktop changed from {name_thread} to {name_input}. Switching input thread...")
             result = user32.SetThreadDesktop(h_input)
             if not result:
-                print(f"[Host Input] SetThreadDesktop failed. Error code: {ctypes.get_last_error()}")
+                err = ctypes.windll.kernel32.GetLastError()
+                if err == 170:
+                    print("[Host Input] SetThreadDesktop failed with ERROR_BUSY (170): thread has existing windows or hooks.")
+                else:
+                    print(f"[Host Input] SetThreadDesktop failed. Error code: {err}")
             return bool(result)
         return True
     finally:

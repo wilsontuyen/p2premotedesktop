@@ -73,6 +73,7 @@ from os_utils.system import (
     get_session_id,
     get_desktop_name,
     get_input_desktop_name,
+    get_desktop_name_from_handle,
     is_secure_desktop,
     check_desktop_change,
     is_machine_domain_joined,
@@ -82,6 +83,8 @@ from os_utils.system import (
     uac_consent_running,
     attach_thread_for_remote_input,
 )
+
+_desktop_name_from_handle = get_desktop_name_from_handle
 
 def _encode_switching_desktop():
     desk = ""
@@ -210,7 +213,7 @@ def _pid_image_is_logonui(pid):
     return _pid_image_basename(pid) == "logonui.exe"
 
 def _pid_is_secure_ui(pid):
-    return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe", "consent.exe")
+    return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe")
 
 def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
     """Cửa sổ visible trên HDESK (không cần thread đang gắn desktop đó)."""
@@ -239,39 +242,88 @@ def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
     return out
 
 def _winlogon_secure_ui_hwnds():
-    """HWND LogonUI.exe / winlogon.exe trên desktop Winlogon (Signing out, Welcome, khóa)."""
+    """HWND LogonUI.exe / winlogon.exe / LockApp.exe / Network Flyout trên desktop Winlogon hoặc Input Desktop."""
     if sys.platform != "win32":
         return []
+    attach_process_window_station("WinSta0")
     logoff = getattr(_wts_phase, "_v", "none") == "logoff" or (
         float(getattr(_wts_phase, "_until", 0) or 0) > time.time()
     )
     now = time.time()
     cache = getattr(_winlogon_secure_ui_hwnds, "_c", (0.0, []))
-    if (not logoff) and now - cache[0] < 0.06:
+    if (not logoff) and now - cache[0] < 0.03:
         return cache[1]
     found = []
-    hdesk = None
+    seen = set()
+    user32 = ctypes.windll.user32
     try:
-        hdesk = open_named_desktop_handle("Winlogon")
-        if hdesk:
-            try:
-                sw = int(ctypes.windll.user32.GetSystemMetrics(0))
-                sh = int(ctypes.windll.user32.GetSystemMetrics(1))
-            except Exception:
-                sw, sh = 800, 600
-            for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
+        sw = int(user32.GetSystemMetrics(0))
+        sh = int(user32.GetSystemMetrics(1))
+    except Exception:
+        sw, sh = 800, 600
+
+    desks_to_close = []
+    desks = []
+    try:
+        h_wl = open_named_desktop_handle("Winlogon")
+        if h_wl:
+            desks.append(h_wl)
+            desks_to_close.append(h_wl)
+        h_in = open_input_desktop_handle()
+        if h_in:
+            desks.append(h_in)
+            desks_to_close.append(h_in)
+        h_cur = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+        if h_cur and h_cur not in desks:
+            desks.append(h_cur)
+
+        for hd in desks:
+            for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hd, 20, 20):
+                if hwnd in seen:
+                    continue
+                seen.add(hwnd)
                 name = _pid_image_basename(pid)
-                if name in ("logonui.exe", "consent.exe"):
+                is_fullscreen = (w >= int(sw * 0.85) and h >= int(sh * 0.85))
+                if not is_fullscreen:
+                    # Bất kỳ flyout, popup, menu con (mạng LAN/Wifi, nguồn, accessibility...) trên Winlogon
+                    found.append((hwnd, w, h, pid, x, y))
+                elif name in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not name:
                     found.append((hwnd, w, h, pid, x, y))
                 elif name == "winlogon.exe":
-                    if logoff or (w >= max(200, int(sw * 0.45)) and h >= max(150, int(sh * 0.45))):
+                    if logoff:
                         found.append((hwnd, w, h, pid, x, y))
+
+        # Enum child windows của mọi cửa sổ tìm thấy (Network Flyout, DirectUIHWND, popup con)
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _child_cb(ch, _lp):
+            if ch in seen:
+                return True
+            is_vis = user32.IsWindowVisible(ch) or bool(user32.GetWindowLongW(ch, -16) & 0x10000000)
+            if not is_vis or user32.IsIconic(ch):
+                return True
+            if _hwnd_is_dwm_cloaked(ch):
+                return True
+            r = wintypes.RECT()
+            if not user32.GetWindowRect(ch, ctypes.byref(r)):
+                return True
+            cw = int(r.right - r.left)
+            ch_h = int(r.bottom - r.top)
+            if 20 <= cw < int(sw * 0.95) and 20 <= ch_h < int(sh * 0.95):
+                seen.add(ch)
+                cpid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(ch, ctypes.byref(cpid))
+                found.append((ch, cw, ch_h, int(cpid.value), int(r.left), int(r.top)))
+            return True
+
+        child_proc = WNDENUMPROC(_child_cb)
+        for item in list(found):
+            user32.EnumChildWindows(item[0], child_proc, 0)
     except Exception:
         found = []
     finally:
-        if hdesk:
+        for hd in desks_to_close:
             try:
-                ctypes.windll.user32.CloseDesktop(hdesk)
+                ctypes.windll.user32.CloseDesktop(hd)
             except Exception:
                 pass
     _winlogon_secure_ui_hwnds._c = (now, found)
@@ -344,7 +396,10 @@ def _bitblt_screen_rect_bgr(x, y, w, h):
     hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
     old = gdi32.SelectObject(memdc, hbmp)
     try:
-        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, x, y, 0x00CC0020):
+        blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, x, y, 0x40CC0020)
+        if not blt_ok:
+            blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, x, y, 0x00CC0020)
+        if not blt_ok:
             return None
 
         class BITMAPINFOHEADER(ctypes.Structure):
@@ -621,6 +676,7 @@ def _switch_capture_thread_to_named_desktop(name):
             pass
 
 def _switch_capture_thread_to_input_desktop():
+    attach_process_window_station("WinSta0")
     hdesk = None
     try:
         hdesk = open_input_desktop_handle()
@@ -636,10 +692,21 @@ def _switch_capture_thread_to_input_desktop():
         if not hdesk:
             print("[Host] OpenInputDesktop failed for all access masks.")
             return False
+
+        target_name = _desktop_name_from_handle(hdesk)
+        thread_name = get_desktop_name()
+        if target_name and thread_name == target_name.lower():
+            return True
+
         result = ctypes.windll.user32.SetThreadDesktop(hdesk)
         if not result:
-            print("[Host] SetThreadDesktop() failed (thread may have existing windows). Retrying...")
+            err = ctypes.windll.kernel32.GetLastError()
+            if err == 170:
+                print(f"[Host] SetThreadDesktop({target_name}) failed with ERROR_BUSY (170): thread has existing windows/hooks/GDI handles.")
+            else:
+                print(f"[Host] SetThreadDesktop({target_name}) failed with error code: {err}. Retrying...")
             return False
+        print(f"[Host] Capture thread desktop successfully switched to: {target_name}")
         return True
     except Exception as e:
         print(f"[Host] SetThreadDesktop exception: {e}")
@@ -655,6 +722,11 @@ def _frame_is_nearly_black(frame, max_mean=6.0):
     try:
         if frame is None or getattr(frame, "size", 0) == 0:
             return True
+        # Nếu frame có điểm sáng rõ rệt (chữ Admin, icon, avatar, text trong dark theme flyout như Network flyout):
+        # np.max > 35 và có ít nhất 30 pixel sáng -> Đây là giao diện dark theme có nội dung, không phải màn hình đen rỗng!
+        if float(np.max(frame)) > 35.0:
+            if np.count_nonzero(frame > 30) > 30:
+                return False
         return float(np.mean(frame)) < max_mean
     except Exception:
         return False
@@ -722,17 +794,19 @@ def set_windows_graphics_effects(enabled=True):
         return
     try:
         import ctypes
-        # Font Smoothing (ClearType)
-        ctypes.windll.user32.SystemParametersInfoW(0x004B, 1 if enabled else 0, None, 3)
+        # Font Smoothing (ClearType) - LUÔN LUÔN BẬT ĐỂ CHỮ MỊN VÀ SẮC NÉT TRÊN MỌI BẢN WINDOWS (7, 10, 11)
+        # Tuyệt đối không tắt vì sẽ làm font chữ răng cưa, vỡ nét, biến dạng như Windows 95
+        ctypes.windll.user32.SystemParametersInfoW(0x004B, 1, None, 3)  # SPI_SETFONTSMOOTHING = 1
+        ctypes.windll.user32.SystemParametersInfoW(0x200B, 0, ctypes.c_void_p(2), 3)  # SPI_SETFONTSMOOTHINGTYPE = ClearType (2)
         
         # Drag Full Windows
-        ctypes.windll.user32.SystemParametersInfoW(0x0025, 1 if enabled else 0, None, 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x0025, 1, None, 3)
         
         # Menu Animation
         ctypes.windll.user32.SystemParametersInfoW(0x1003, 1 if enabled else 0, None, 3)
         
         # UI Effects
-        ctypes.windll.user32.SystemParametersInfoW(0x103E, 1 if enabled else 0, None, 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x103E, 1, None, 3)
         
         # Window Animations (iMinAnimate)
         class ANIMATIONINFO(ctypes.Structure):
@@ -742,7 +816,7 @@ def set_windows_graphics_effects(enabled=True):
         info.iMinAnimate = 1 if enabled else 0
         ctypes.windll.user32.SystemParametersInfoW(0x0049, info.cbSize, ctypes.byref(info), 3)
         
-        print(f"[Host] Set Windows graphics effects to: {enabled}")
+        print(f"[Host] Set Windows graphics effects to: {enabled} (ClearType always ON)")
     except Exception as e:
         print(f"[Host] Error setting Windows graphics effects: {e}")
 
@@ -822,9 +896,16 @@ def _clip_tile_onto_canvas(canvas, tile, x, y):
     if src.shape[0] != dst.shape[0] or src.shape[1] != dst.shape[1]:
         interp = cv2.INTER_AREA if (src.shape[1] > dst.shape[1] or src.shape[0] > dst.shape[0]) else cv2.INTER_NEAREST
         src = cv2.resize(src, (dst.shape[1], dst.shape[0]), interpolation=interp)
-    dst[:] = src
+    is_large = (tw >= cw * 0.75 and th >= ch * 0.75)
+    if is_large:
+        mask = (src[:, :, 0] > 12) | (src[:, :, 1] > 12) | (src[:, :, 2] > 12)
+        dst[mask] = src[mask]
+    else:
+        dst[:] = src
     return True
 
+
+_last_tscon_call_time = 0.0
 
 def attach_disconnected_session_to_console():
     """Tren Windows Server, khi ngat MS RDP ma khong log off,
@@ -832,6 +913,11 @@ def attach_disconnected_session_to_console():
     Goi tscon <session_id> /dest:console de tra session ve man hinh console."""
     if sys.platform != "win32":
         return
+    global _last_tscon_call_time
+    now = time.time()
+    if now - _last_tscon_call_time < 10.0:
+        return
+    _last_tscon_call_time = now
     try:
         kernel32 = ctypes.windll.kernel32
         current_sid = ctypes.c_ulong()
@@ -957,18 +1043,17 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
 def _printwindow_hwnd_bgr(hwnd, w, h):
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
+    used_screen_dc = False
     hdc = user32.GetDC(hwnd)
+    if not hdc:
+        hdc = user32.GetDC(0)
+        used_screen_dc = True
     if not hdc:
         return None
     memdc = gdi32.CreateCompatibleDC(hdc)
     hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
     old = gdi32.SelectObject(memdc, hbmp)
     try:
-        PW_RENDERFULLCONTENT = 2
-        if not user32.PrintWindow(hwnd, memdc, PW_RENDERFULLCONTENT):
-            if not user32.PrintWindow(hwnd, memdc, 0):
-                return None
-
         class BITMAPINFOHEADER(ctypes.Structure):
             _fields_ = [
                 ("biSize", ctypes.c_uint32),
@@ -990,31 +1075,56 @@ def _printwindow_hwnd_bgr(hwnd, w, h):
         bmi = BITMAPINFO()
         bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
         bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biHeight = -h
         bmi.bmiHeader.biPlanes = 1
         bmi.bmiHeader.biBitCount = 32
         bmi.bmiHeader.biCompression = 0
         buf = (ctypes.c_ubyte * (w * h * 4))()
-        bmi.bmiHeader.biHeight = -h
-        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
-        top_down = True
-        if got == 0:
-            bmi.bmiHeader.biHeight = h
-            got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
-            top_down = False
-        if got == 0:
+
+        def _fetch_frame(target_hwnd):
+            for flag in (2, 0, 3, 1): # PW_RENDERFULLCONTENT, standard, client+render, clientonly
+                try:
+                    if user32.PrintWindow(target_hwnd, memdc, flag):
+                        got = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+                        if got != 0:
+                            img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+                            f = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                            if not _frame_is_nearly_black(f):
+                                return f
+                except Exception:
+                    pass
             return None
-        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
-        if not top_down:
-            img = np.flipud(img).copy()
-        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        if _frame_is_nearly_black(frame):
+
+        # 1. Thử trực tiếp trên cửa sổ target
+        frame = _fetch_frame(hwnd)
+
+        # 2. Nếu cửa sổ cha là container rỗng (như ApplicationFrameWindow của UWP Network Flyout):
+        # 2. Nếu cửa sổ cha là container rỗng (như ApplicationFrameWindow của UWP Network Flyout):
+        # Duyệt qua các cửa sổ con bên trong để tìm nơi chứa DirectComposition content
+        if frame is None:
+            child_hwnds = []
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+            def _child_cb(chwnd, _lp):
+                child_hwnds.append(chwnd)
+                return True
+            try:
+                user32.EnumChildWindows(hwnd, WNDENUMPROC(_child_cb), 0)
+                for chwnd in child_hwnds:
+                    f_child = _fetch_frame(chwnd)
+                    if f_child is not None:
+                        frame = f_child
+                        break
+            except Exception:
+                pass
+
+        if frame is None or _frame_is_nearly_black(frame):
             return None
         return frame, w, h, (0, 0)
     finally:
         gdi32.SelectObject(memdc, old)
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(memdc)
-        user32.ReleaseDC(hwnd, hdc)
+        user32.ReleaseDC(0 if used_screen_dc else hwnd, hdc)
 
 
 def _bitblt_hwnd_bgr(hwnd, w, h):
@@ -1027,7 +1137,10 @@ def _bitblt_hwnd_bgr(hwnd, w, h):
     hbmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
     old = gdi32.SelectObject(memdc, hbmp)
     try:
-        if not gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020):
+        blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x40CC0020)
+        if not blt_ok:
+            blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)
+        if not blt_ok:
             return None
 
         class BITMAPINFOHEADER(ctypes.Structure):
@@ -1078,43 +1191,108 @@ def _bitblt_hwnd_bgr(hwnd, w, h):
         user32.ReleaseDC(hwnd, hdc)
 
 
-def _capture_hwnd_bgr(hwnd, w, h):
+def _capture_hwnd_bgr(hwnd, w, h, x=0, y=0):
     r = _printwindow_hwnd_bgr(hwnd, w, h)
     if r is not None:
         return r
-    return _bitblt_hwnd_bgr(hwnd, w, h)
+    r = _bitblt_hwnd_bgr(hwnd, w, h)
+    if r is not None:
+        return r
+    # Fallback cho Windows 10: Nếu PrintWindow và WindowDC không chụp được cửa sổ XAML/DirectComposition,
+    # nhưng cửa sổ đang hiện trên màn hình tại tọa độ (x, y), chụp trực tiếp vùng màn hình đó từ Screen DC!
+    if w >= 20 and h >= 20:
+        try:
+            r_scr = _bitblt_screen_rect_bgr(x, y, w, h)
+            if r_scr is not None and not _frame_is_nearly_black(r_scr[0]):
+                return r_scr
+        except Exception:
+            pass
+    return None
 
 
 def _logonui_window_captures():
-    """Cửa sổ LogonUI / Sign out trên desktop Winlogon — enum theo HDESK, không theo thread hiện tại."""
+    """Cửa sổ LogonUI / Sign out trên desktop Winlogon."""
     if sys.platform != "win32":
         return []
     out = []
     seen = set()
-    for hwnd, w, h, _pid, x, y in _winlogon_secure_ui_hwnds():
+    hwnds_info = list(_winlogon_secure_ui_hwnds())
+    
+    # Thread hiện tại có thể đang gắn desktop Winlogon: enum thêm để không bỏ sót popup menu
+    try:
+        user32 = ctypes.windll.user32
+        sw = int(user32.GetSystemMetrics(0))
+        sh = int(user32.GetSystemMetrics(1))
+    except Exception:
+        sw, sh = 800, 600
+
+    try:
+        user32 = ctypes.windll.user32
+        existing = {item[0] for item in hwnds_info}
+        hdesk_cur = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+        if hdesk_cur:
+            for item in _enum_desktop_hwnds(hdesk_cur, 20, 20):
+                if item[0] not in existing:
+                    hwnd, w, h, pid, x, y = item
+                    name = _pid_image_basename(pid)
+                    is_fullscreen = (w >= int(sw * 0.85) and h >= int(sh * 0.85))
+                    if not is_fullscreen or name in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not name:
+                        existing.add(hwnd)
+                        hwnds_info.append(item)
+            
+        def _cur_top_cb(h, _lp):
+            if h not in existing:
+                is_vis = user32.IsWindowVisible(h) or bool(user32.GetWindowLongW(h, -16) & 0x10000000)
+                if is_vis and not user32.IsIconic(h) and not _hwnd_is_dwm_cloaked(h):
+                    r = wintypes.RECT()
+                    if user32.GetWindowRect(h, ctypes.byref(r)):
+                        cw = int(r.right - r.left)
+                        ch = int(r.bottom - r.top)
+                        if cw >= 20 and ch >= 20:
+                            cpid = wintypes.DWORD()
+                            user32.GetWindowThreadProcessId(h, ctypes.byref(cpid))
+                            cname = _pid_image_basename(cpid.value)
+                            c_full = (cw >= int(sw * 0.85) and ch >= int(sh * 0.85))
+                            if not c_full or cname in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not cname:
+                                existing.add(h)
+                                hwnds_info.append((h, cw, ch, int(cpid.value), int(r.left), int(r.top)))
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+        top_proc = WNDENUMPROC(_cur_top_cb)
+        user32.EnumDesktopWindows(None, top_proc, 0)
+        user32.EnumWindows(top_proc, 0)
+
+        # Duyệt child windows của mọi cửa sổ tìm thấy (Network Flyout, DirectUIHWND, popup con)
+        def _child_cb(ch, _lp):
+            if ch not in existing:
+                is_vis = user32.IsWindowVisible(ch) or bool(user32.GetWindowLongW(ch, -16) & 0x10000000)
+                if is_vis and not user32.IsIconic(ch) and not _hwnd_is_dwm_cloaked(ch):
+                    r = wintypes.RECT()
+                    if user32.GetWindowRect(ch, ctypes.byref(r)):
+                        cw = int(r.right - r.left)
+                        ch_h = int(r.bottom - r.top)
+                        if 20 <= cw < int(sw * 0.95) and 20 <= ch_h < int(sh * 0.95):
+                            existing.add(ch)
+                            cpid = wintypes.DWORD()
+                            user32.GetWindowThreadProcessId(ch, ctypes.byref(cpid))
+                            hwnds_info.append((ch, cw, ch_h, int(cpid.value), int(r.left), int(r.top)))
+            return True
+
+        child_proc = WNDENUMPROC(_child_cb)
+        for item in list(hwnds_info):
+            user32.EnumChildWindows(item[0], child_proc, 0)
+    except Exception:
+        pass
+
+    for hwnd, w, h, _pid, x, y in hwnds_info:
         if hwnd in seen:
             continue
         seen.add(hwnd)
-        cap = _capture_hwnd_bgr(hwnd, w, h)
+        cap = _capture_hwnd_bgr(hwnd, w, h, x, y)
         if cap is None:
             continue
         out.append((cap[0], x, y, w, h))
-    if out:
-        return out
-    # Thread đã ở Winlogon: enum desktop hiện tại (LogonUI mới spawn).
-    hdesk = None
-    try:
-        hdesk = ctypes.windll.user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
-        for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hdesk, 80, 40):
-            if hwnd in seen or not _pid_is_secure_ui(pid):
-                continue
-            seen.add(hwnd)
-            cap = _capture_hwnd_bgr(hwnd, w, h)
-            if cap is None:
-                continue
-            out.append((cap[0], x, y, w, h))
-    except Exception:
-        pass
     return out
 
 
@@ -1141,7 +1319,7 @@ def grab_current_desktop_printwindow():
         import psutil
         for p in psutil.process_iter(["name", "pid"]):
             nm = str(p.info.get("name") or "").lower()
-            if nm in ("logonui.exe", "winlogon.exe", "consent.exe"):
+            if nm in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe"):
                 extra_pids.add(int(p.info["pid"]))
     except Exception:
         pass
@@ -1182,45 +1360,75 @@ def grab_logonui_printwindow():
 
 def _grab_secure_desktop_bgr_here():
     """PrintWindow HWND LogonUI/winlogon → BitBlt HWND → BitBlt cả desktop Winlogon."""
-    overlays = _logonui_window_captures()
-    if overlays:
-        overlays.sort(key=lambda t: t[3] * t[4], reverse=True)
-        tile, _x, _y, tw, th = overlays[0]
-        if not _frame_is_nearly_black(tile):
-            try:
-                sw = int(ctypes.windll.user32.GetSystemMetrics(0))
-                sh = int(ctypes.windll.user32.GetSystemMetrics(1))
-            except Exception:
-                sw, sh = tw, th
-            if tw >= max(200, int(sw * 0.6)) and th >= max(200, int(sh * 0.6)):
-                return tile, tw, th, (0, 0)
-
+    # Ưu tiên BitBlt toàn bộ màn hình Winlogon để lấy trọn vẹn nền, hộp đăng nhập và nút Power/Restart menu ở góc
     frame_bgr = None
     cap_w = cap_h = 0
     origin = (0, 0)
     try:
-        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=True)
+        sw = int(ctypes.windll.user32.GetSystemMetrics(0))
+        sh = int(ctypes.windll.user32.GetSystemMetrics(1))
+        left = int(ctypes.windll.user32.GetSystemMetrics(76))
+        top = int(ctypes.windll.user32.GetSystemMetrics(77))
+        vw = int(ctypes.windll.user32.GetSystemMetrics(78))
+        vh = int(ctypes.windll.user32.GetSystemMetrics(79))
+        if vw > 0 and vh > 0:
+            sw, sh = vw, vh
+        else:
+            left, top = 0, 0
+        frame_bgr, cap_w, cap_h, origin = _bitblt_screen_rect_bgr(left, top, sw, sh)
     except Exception:
-        try:
-            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr(use_screen_dc=False)
-        except Exception:
-            frame_bgr = None
+        frame_bgr = None
 
-    if overlays and frame_bgr is not None:
-        left0 = origin[0] if origin else 0
-        top0 = origin[1] if origin else 0
-        try:
-            left0 = int(ctypes.windll.user32.GetSystemMetrics(76))
-            top0 = int(ctypes.windll.user32.GetSystemMetrics(77))
-        except Exception:
-            pass
+    frame_bgr_orig = frame_bgr.copy() if frame_bgr is not None else None
+
+    # 2. Trên Windows 10/11, BitBlt GetDC(0) CHỈ chụp được hình nền (Bloom wallpaper),
+    # KHÔNG chụp được các cửa sổ XAML/DirectComposition của LogonUI (Avatar, tên Admin, nút Sign in, Power menu).
+    # Do đó BẮT BUỘC phải lấy cửa sổ LogonUI qua PrintWindow và dán đè lên canvas!
+    overlays = _logonui_window_captures()
+    if overlays:
+        if frame_bgr is None:
+            frame_bgr = np.zeros((sh, sw, 3), dtype=np.uint8)
+            cap_w, cap_h = sw, sh
+            origin = (left, top)
+        left0 = origin[0] if origin else left
+        top0 = origin[1] if origin else top
+        # QUAN TRỌNG: Sắp xếp theo diện tích giảm dần (Painter's Algorithm)
+        # Cửa sổ to (nền LogonUI) dán trước.
+        # Cửa sổ nhỏ (menu con Restart, Shutdown, Sleep, dialog, Network flyout) dán sau đè lên trên!
+        overlays.sort(key=lambda t: t[3] * t[4], reverse=True)
+        has_small_bottom_right_overlay = False
         for tile, x, y, _tw, _th in overlays:
             if _frame_is_nearly_black(tile):
                 continue
+            is_large = (_tw >= sw * 0.75 and _th >= sh * 0.75)
+            if not is_large and (int(x) >= int(sw * 0.45)) and (int(y) >= int(sh * 0.35)):
+                has_small_bottom_right_overlay = True
             _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0)
+
+        # Failsafe cho Network Flyout / Popup: Nếu không có overlay riêng ở góc phải dưới,
+        # nhưng frame_bgr_orig (Screen DC trước khi bị LogonUI PrintWindow đè lên)
+        # có chứa popup menu (chữ trắng/icon/nút), phục hồi lại vùng flyout đó!
+        if not has_small_bottom_right_overlay and frame_bgr_orig is not None:
+            try:
+                fly_w = max(500, int(sw * 0.28))
+                fly_h = max(550, int(sh * 0.38))
+                rx0 = max(0, sw - fly_w)
+                ry0 = max(0, sh - fly_h)
+                rx1 = sw
+                ry1 = sh
+                orig_roi = frame_bgr_orig[ry0:ry1, rx0:rx1]
+                if float(np.max(orig_roi)) > 55.0 and np.count_nonzero(orig_roi > 40) > 100:
+                    cur_roi = frame_bgr[ry0:ry1, rx0:rx1]
+                    diff = cv2.absdiff(orig_roi, cur_roi)
+                    if np.count_nonzero(diff > 25) > 150:
+                        frame_bgr[ry0:ry1, rx0:rx1] = orig_roi
+            except Exception:
+                pass
+
         if not _frame_is_nearly_black(frame_bgr):
             return frame_bgr, cap_w, cap_h, origin
 
+    # Nếu không có overlay (không tìm thấy cửa sổ LogonUI riêng), dùng frame BitBlt toàn màn hình
     if frame_bgr is not None and not _frame_is_nearly_black(frame_bgr):
         return frame_bgr, cap_w, cap_h, origin
 
@@ -1487,6 +1695,8 @@ class HostMixin:
             print(f"[Host Input] Error in ensure_input_thread_desktop: {e}")
 
     def start_host_server(self):
+        if sys.platform == "win32":
+            set_windows_graphics_effects(True)
         global BOUND_PORT
         bound = False
         for port in PORTS_TO_TRY:
@@ -1933,12 +2143,8 @@ class HostMixin:
                             net_class = probe.get("net_class", "medium")
                             client_state["net_class"] = net_class
                             bandwidth = probe.get("bandwidth", 32.0)
-                            print(f"[Host] Speed test finished. Class: {net_class}, Bandwidth: {bandwidth:.2f} Mbps")
-                            if not _is_legacy_windows_host():
-                                if net_class == "high":
-                                    set_windows_graphics_effects(True)
-                                else:
-                                    set_windows_graphics_effects(False)
+                            # Luôn đảm bảo hiệu ứng đồ họa và ClearType font smoothing đầy đủ cho cả Win 7, Win 10, Win 11
+                            set_windows_graphics_effects(True)
                             break
                         elif evt == "ping":
                             if is_lan_socket(conn):
@@ -2038,8 +2244,14 @@ class HostMixin:
                 self.sct = None
             def __enter__(self):
                 if _is_legacy_windows_host() or _is_server_or_remote_session():
-                    print("[Host] Using GDI BitBlt capture (Windows 7 / Windows Server / Remote Session)")
+                    print("[Host] Using GDI/MSS BitBlt capture (Windows 7 / Windows Server / Remote Session)")
                     attach_disconnected_session_to_console()
+                    try:
+                        self.sct = mss.mss()
+                        self.sct.__enter__()
+                    except Exception as e:
+                        print(f"[Host] mss init for legacy host fallback to GDI: {e}")
+                        self.sct = None
                     return self
                 if _should_capture_logon_ui():
                     print("[Host] Winlogon/Signing out: PrintWindow/BitBlt HWND (skip DXGI)")
@@ -2212,31 +2424,35 @@ class HostMixin:
                                     client_state["running"] = False
                                     break
                                 _sync_lock_status()
-                            if not _legacy_host:
-                                want_logon = _should_capture_logon_ui()
-                                thread_desk = get_desktop_name()
-                                if want_logon:
-                                    # PrintWindow ngay frame này. Không break DXGI trước — teardown
-                                    # DXGI mất trăm ms và nuốt man Signing out.
-                                    client_state["_secure_frames"] = client_state.get("_secure_frames", 0) + 1
-                                    if dx_cams and client_state["_secure_frames"] > 8:
-                                        print("[Host] Signing out/logon: drop DXGI after Winlogon frames.")
-                                        break
-                                else:
-                                    client_state["_secure_frames"] = 0
-                                if (not want_logon) and thread_desk == "winlogon":
-                                    print("[Host] Explorer/Default ready. Dropping Winlogon capture to show desktop.")
-                                    client_state["force_update"] = True
-                                    client_state.pop("prev_sent_img", None)
+                            want_logon = _should_capture_logon_ui()
+                            thread_desk = get_desktop_name()
+                            if want_logon:
+                                # PrintWindow ngay frame này. Không break DXGI trước — teardown
+                                # DXGI mất trăm ms và nuốt man Signing out.
+                                client_state["_secure_frames"] = client_state.get("_secure_frames", 0) + 1
+                                if dx_cams and client_state["_secure_frames"] > 8:
+                                    print("[Host] Signing out/logon: drop DXGI after Winlogon frames.")
                                     break
-                                if not want_logon and not uac_consent_running():
-                                    inner_needs_switch, inner_is_blocked = check_desktop_change()
-                                    if inner_is_blocked or inner_needs_switch:
-                                        if inner_is_blocked:
-                                            print("[Host] Secure Desktop mid-session: recreate capture after desktop switch...")
-                                        else:
-                                            print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
+                                elif _legacy_host and thread_desk != "winlogon":
+                                    really_logon = _logonui_running() or (_wts_phase() in ("logoff", "lock")) or (_session_has_interactive_user() is False) or (not _explorer_running())
+                                    if really_logon:
+                                        print("[Host] Windows 7 Logon/Logoff detected. Breaking capture to switch to Winlogon...")
                                         break
+                            else:
+                                client_state["_secure_frames"] = 0
+                            if (not want_logon) and thread_desk == "winlogon":
+                                print("[Host] Explorer/Default ready. Dropping Winlogon capture to show desktop.")
+                                client_state["force_update"] = True
+                                client_state.pop("prev_sent_img", None)
+                                break
+                            if not want_logon and not uac_consent_running():
+                                inner_needs_switch, inner_is_blocked = check_desktop_change()
+                                if inner_is_blocked or inner_needs_switch:
+                                    if inner_is_blocked:
+                                        print("[Host] Secure Desktop mid-session: recreate capture after desktop switch...")
+                                    else:
+                                        print("[Host] Desktop switched mid-session. Breaking capture loop to switch thread...")
+                                    break
                                 
                             sys_w, sys_h = 0, 0
                             try:
@@ -2416,36 +2632,36 @@ class HostMixin:
                             q_mode = getattr(self, 'client_quality_mode', 'quality')
 
                             if _legacy_host:
-                                # Win7/GDI: không ép speed (trước đây JPEG 55 + scale 0.7 → chữ vỡ).
-                                # Tôn trọng mode client; CPU yếu hơn nên FPS thấp hơn Win10.
-                                if q_mode == "quality" or net_class == "high":
+                                # Win7/GDI: CPU yếu hơn nên FPS thấp hơn, luôn ưu tiên chữ nét (-1.0)
+                                if q_mode == "quality" or net_class in ("high", "medium"):
                                     base_quality = 90
                                     fps_limit = 15
                                     res_scale = -1.0
                                 elif net_class == "low":
-                                    base_quality = 72
+                                    base_quality = 75
                                     fps_limit = 10
-                                    res_scale = 0.9
+                                    res_scale = -1.0
                                 else:
-                                    base_quality = 85
+                                    base_quality = 88
                                     fps_limit = 12
-                                    res_scale = 1.0
+                                    res_scale = -1.0
                             elif q_mode == "quality":
                                 base_quality = 96
-                                fps_limit = 25
+                                fps_limit = 30
                                 res_scale = -1.0
                             elif net_class == "high":
                                 base_quality = 98
                                 fps_limit = 60
                                 res_scale = -1.0
                             elif net_class == "low":
-                                base_quality = 40
-                                fps_limit = 12
-                                res_scale = 0.6
-                            else:
                                 base_quality = 75
+                                fps_limit = 15
+                                res_scale = -1.0
+                            else:
+                                # Windows 10 / 11 mặc định: Giữ độ phân giải gốc (-1.0) và chất lượng 90 để chữ nét đẹp như Win 7
+                                base_quality = 90
                                 fps_limit = 30
-                                res_scale = 1.0
+                                res_scale = -1.0
 
                             quality = client_state.get("dyn_quality", base_quality)
                             sleep_time = client_state.get("dyn_sleep_time", 1.0 / fps_limit)
@@ -2524,7 +2740,7 @@ class HostMixin:
                             if static_frame:
                                 current_q = client_state.get("dyn_quality", 40)
                                 current_s = client_state.get("dyn_scale", 0.6)
-                                target_scale = -1.0 if net_class == "high" else 1.0
+                                target_scale = -1.0  # Luôn phục hồi về độ phân giải gốc khi màn hình tĩnh để chữ nét tuyệt đối
                                 if current_q < 98 or (current_s >= 0 and current_s < target_scale) or (current_s >= 0 and target_scale < 0):
                                     client_state["dyn_quality"] = min(98, current_q + 15)
                                     if target_scale < 0:
@@ -2555,8 +2771,8 @@ class HostMixin:
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
                             if (not _legacy_host) and hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_OPTIMIZE), 1])
-                            # 4:4:4 giữ sắc độ chữ (Win7 trước đây tắt → chữ bị lem/block).
-                            _jpeg_444_min = 80 if _legacy_host else 88
+                            # 4:4:4 giữ sắc độ chữ và icon (cả Win 7, Win 10, Win 11), tránh lem màu/vỡ viền
+                            _jpeg_444_min = 75
                             if quality >= _jpeg_444_min and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
@@ -2589,8 +2805,8 @@ class HostMixin:
                                     sleep_time = max(1.0 / (15 if _legacy_host else 30), sleep_time - 0.005)
                                 dyn_scale = -1.0
                             elif ema > 0.35:
-                                # Mạng chậm: Chỉ giảm chất lượng ảnh, hạn chế bóp scale để tránh vỡ khối pixel
-                                floor_drop = 55 if _legacy_host else max(35, base_quality - 20)
+                                # Mạng chậm: Chỉ giảm chất lượng ảnh, không bóp xuống dưới 65 để giữ chữ nét
+                                floor_drop = 65
                                 quality = max(floor_drop, quality - 5)
                                 sleep_time = min(0.3, sleep_time + 0.05)
                                 if ema > 0.6 and dyn_scale >= 0:

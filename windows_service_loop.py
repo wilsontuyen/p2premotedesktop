@@ -213,9 +213,10 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                     si.dwFlags = win32process.STARTF_USESHOWWINDOW
                     si.wShowWindow = win32con.SW_HIDE
                 
-                pi = PROCESS_INFORMATION()
-                
-                LOGON_WITH_PROFILE = 1
+                # dwLogonFlags = 0 (No logon options): khong load user profile.
+                # Tren Windows 7 voi token SYSTEM, co LOGON_WITH_PROFILE (1) khien ProfSvc
+                # bi deadlock/timeout 120s-180s (2-3 phut) moi spawn xong process!
+                dw_logon_flags = 0
                 cmd_line_buf = ctypes.create_unicode_buffer(cmd_line) if cmd_line else None
                 
                 # Convert environment block to LPVOID
@@ -227,7 +228,7 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                 
                 res = CreateProcessWithTokenW(
                     int(h_token),
-                    LOGON_WITH_PROFILE,
+                    dw_logon_flags,
                     exe_path,
                     cmd_line_buf,
                     creation_flags,

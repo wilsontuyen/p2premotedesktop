@@ -747,6 +747,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         # Setup UI
         try:
             self.setup_ui()
+            if getattr(self, "is_host_only", False):
+                self.adjust_host_window_size()
             
             # Hiển thị lại cửa sổ chính sau khi UI đã được khởi tạo xong
             if not self.is_headless:
@@ -1073,6 +1075,37 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             from tkinter import messagebox
             messagebox.showerror(_("Lỗi"), _("Không thể reset quyền tự động: ") + str(e))
 
+    def adjust_host_window_size(self):
+        """Tự động điều chỉnh kích thước cửa sổ Host vừa khít nội dung thực tế (không dư thừa khoảng trống)."""
+        try:
+            self.update_idletasks()
+            scale = self.winfo_fpixels('1i') / 96.0
+            req_w = self.winfo_reqwidth()
+            req_h = self.winfo_reqheight()
+            if req_h <= 100:
+                return
+            w = max(int(380 * scale), req_w)
+            h = req_h
+            self.minsize(w, h)
+            self.maxsize(w, h)
+
+            cur_geom = self.geometry()
+            pos = ""
+            if "+" in cur_geom:
+                pos = "+" + "+".join(cur_geom.split("+")[1:])
+            else:
+                screen_w = self.winfo_screenwidth()
+                screen_h = self.winfo_screenheight()
+                x = max(0, (screen_w - w) // 2)
+                y = max(0, (screen_h - h) // 2)
+                pos = f"+{x}+{y}"
+
+            new_geom = f"{w}x{h}{pos}"
+            self.geometry(new_geom)
+            self.last_normal_geometry = new_geom
+        except Exception as e:
+            print(f"[Host] adjust_host_window_size error: {e}")
+
     def load_window_position(self):
         # Force Tkinter to calculate proper font/widget scales based on physical DPI
         try:
@@ -1085,7 +1118,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         scale = self.winfo_fpixels('1i') / 96.0
         if getattr(self, "is_host_only", False):
             min_w = int(380 * scale)
-            min_h = int(420 * scale)  # vừa khít nội dung + thanh trạng thái
+            min_h = int(280 + 128 * scale)
         else:
             min_w = int(680 * scale)
             min_h = int(445 * scale) # Chiều cao vừa khít, không để lại khoảng trống thừa
