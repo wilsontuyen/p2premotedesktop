@@ -874,7 +874,7 @@ def _virtual_screen_rect():
     return left0, top0, w, h
 
 
-def _clip_tile_onto_canvas(canvas, tile, x, y):
+def _clip_tile_onto_canvas(canvas, tile, x, y, mask_black=False):
     if tile is None or getattr(tile, "size", 0) == 0:
         return False
     if tile.ndim == 2:
@@ -896,8 +896,7 @@ def _clip_tile_onto_canvas(canvas, tile, x, y):
     if src.shape[0] != dst.shape[0] or src.shape[1] != dst.shape[1]:
         interp = cv2.INTER_AREA if (src.shape[1] > dst.shape[1] or src.shape[0] > dst.shape[0]) else cv2.INTER_NEAREST
         src = cv2.resize(src, (dst.shape[1], dst.shape[0]), interpolation=interp)
-    is_large = (tw >= cw * 0.75 and th >= ch * 0.75)
-    if is_large:
+    if mask_black:
         mask = (src[:, :, 0] > 12) | (src[:, :, 1] > 12) | (src[:, :, 2] > 12)
         dst[mask] = src[mask]
     else:
@@ -1403,7 +1402,7 @@ def _grab_secure_desktop_bgr_here():
             is_large = (_tw >= sw * 0.75 and _th >= sh * 0.75)
             if not is_large and (int(x) >= int(sw * 0.45)) and (int(y) >= int(sh * 0.35)):
                 has_small_bottom_right_overlay = True
-            _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0)
+            _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0, mask_black=is_large)
 
         # Failsafe cho Network Flyout / Popup: Nếu không có overlay riêng ở góc phải dưới,
         # nhưng frame_bgr_orig (Screen DC trước khi bị LogonUI PrintWindow đè lên)
