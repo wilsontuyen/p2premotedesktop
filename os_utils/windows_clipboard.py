@@ -405,6 +405,24 @@ class ClipboardEventListener:
         
         if msg == WM_CLIPBOARDUPDATE:
             log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
+            try:
+                import time
+                import ctypes
+                time.sleep(0.05)
+                u32 = ctypes.windll.user32
+                u32.IsClipboardFormatAvailable.restype = ctypes.c_bool
+                has_img = u32.IsClipboardFormatAvailable(2) or u32.IsClipboardFormatAvailable(8) or u32.IsClipboardFormatAvailable(17)
+                has_txt = u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1)
+                
+                from utils.clipboard_api import clipboard_has_file_formats
+                has_file = clipboard_has_file_formats()
+                
+                if has_img and not has_file and not has_txt:
+                    log_debug("[Listener] Clipboard chỉ chứa Image, bỏ qua để tránh gây lỗi Zalo/WeChat.")
+                    return 0
+            except Exception as e:
+                log_debug(f"[Listener] Lỗi check image clipboard: {e}")
+                
             self.callback()
             return 0
         elif msg == WM_RENDERFORMAT:
