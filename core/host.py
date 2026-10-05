@@ -2853,6 +2853,28 @@ class HostMixin:
     def host_receiver_thread(self, conn, client_state, password):
         print("[Host] Started Input Receiver Thread.")
         import select
+        import queue
+        import threading
+        
+        input_queue = queue.Queue()
+        
+        def _input_worker():
+            print("[Host Input] Dedicated Worker Started")
+            while client_state.get("running", False):
+                try:
+                    event = input_queue.get(timeout=0.5)
+                    if event == "STOP":
+                        break
+                    self.host_handle_event(event, conn, password)
+                except queue.Empty:
+                    pass
+                except Exception as e:
+                    print(f"[Host Input] Worker error: {e}")
+            print("[Host Input] Dedicated Worker Stopped")
+            
+        worker_thread = threading.Thread(target=_input_worker, daemon=True)
+        worker_thread.start()
+
         # Cache để tránh gọi OpenInputDesktop/SetThreadDesktop mỗi vòng lặp
         _last_desk_check_time = 0.0
         _last_desk_name = None
@@ -2913,7 +2935,7 @@ class HostMixin:
                         if clipboard_sync_manager:
                             clipboard_sync_manager.enqueue_packet(event)
                     else:
-                        self.host_handle_event(event, conn, password)
+                        input_queue.put(event)
                         if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
                             client_state["force_update"] = True
                             if "wake_event" in client_state:
@@ -2925,6 +2947,7 @@ class HostMixin:
                 print(f"[Host] Input Receiver Critical Error: {e}")
                 break
         print("[Host] Input Receiver Thread Stopped.")
+        input_queue.put("STOP")
         self.host_release_all_modifiers()
         print("[Host] Client disconnected, forcing screen cover to disable.")
         self.disable_screen_cover()
