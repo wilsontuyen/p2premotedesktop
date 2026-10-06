@@ -406,8 +406,6 @@ class ClipboardEventListener:
         if msg == WM_CLIPBOARDUPDATE:
             log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
             try:
-                import time
-                import ctypes
                 time.sleep(0.05)
                 u32 = ctypes.windll.user32
                 u32.IsClipboardFormatAvailable.restype = ctypes.c_bool

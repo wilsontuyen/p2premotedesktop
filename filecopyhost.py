@@ -2226,22 +2226,19 @@ def run_clipboard_agent_mode():
                         agent_print(f"[ClipboardAgent] File da o dest={dest_dir}, bo copy lan 2.")
                     elif not to_move:
                         agent_print("[ClipboardAgent] Khong chuyen file (skip het / Huy).")
-                    try:
-                        _purge_rdxfer_staging(
-                            dest_dir=dest_dir,
-                            extra_paths=list(final_paths) + list(to_move or []),
-                        )
-                        # Delayed: Explorer/AV đôi khi giữ khóa .rdxfer_* vừa HIDDEN|SYSTEM.
-                        def _late_purge(d=dest_dir, xp=list(final_paths) + list(to_move or [])):
-                            try:
-                                _purge_rdxfer_staging(dest_dir=d, extra_paths=xp)
-                            except Exception:
-                                pass
-                        threading.Timer(0.8, _late_purge).start()
-                        threading.Timer(2.5, _late_purge).start()
-                        _schedule_scrub_probe(dest_dir)
-                    except Exception:
-                        pass
+                    # Đóng dialog ngay khi file đã vào đích — dọn staging (AV/Explorer có thể
+                    # giữ khóa vài giây) chạy nền, không giữ dialog ở 100%.
+                    gui_queue.put(("end", pid))
+                    def _bg_purge(d=dest_dir, xp=list(final_paths) + list(to_move or [])):
+                        try:
+                            _purge_rdxfer_staging(dest_dir=d, extra_paths=xp)
+                            # Delayed: Explorer/AV đôi khi giữ khóa .rdxfer_* vừa HIDDEN|SYSTEM.
+                            threading.Timer(0.8, lambda: _purge_rdxfer_staging(dest_dir=d, extra_paths=xp)).start()
+                            threading.Timer(2.5, lambda: _purge_rdxfer_staging(dest_dir=d, extra_paths=xp)).start()
+                            _schedule_scrub_probe(d)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_bg_purge, daemon=True, name="AgentPurge").start()
                     # Giữ PENDING + cache local để Paste tiếp thư mục khác (không cần copy lại trên client).
                     keep_files = []
                     for f in (
