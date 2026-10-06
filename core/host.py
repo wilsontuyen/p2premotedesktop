@@ -923,10 +923,20 @@ def attach_disconnected_session_to_console():
         if kernel32.ProcessIdToSessionId(kernel32.GetCurrentProcessId(), ctypes.byref(current_sid)):
             sid = current_sid.value
             if sid not in (0, 0xFFFFFFFF):
-                tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-                if os.path.exists(tscon_exe):
-                    import subprocess
-                    subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
+                # Chỉ khôi phục console nếu session đã bị ngắt kết nối (Disconnected = 4)
+                # Nếu MS RDP đang active (WTSActive = 0), việc gọi tscon sẽ làm văng người dùng
+                state = None
+                try:
+                    import win32ts
+                    state = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, sid, win32ts.WTSConnectState)
+                except Exception:
+                    pass
+                
+                if state == 4:
+                    tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+                    if os.path.exists(tscon_exe):
+                        import subprocess
+                        subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
     except Exception:
         pass
 
