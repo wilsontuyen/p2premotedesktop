@@ -37,7 +37,7 @@ new_code = """                                                    def upload_thr
                                                                 dialog.update_progress(0)
                                                             except Exception as e:
                                                                 import traceback
-                                                                with open('C:/Apps/P2P/client_error.log', 'a', encoding='utf-8') as f:
+                                                                with open('C:/Apps/P2P/client_error.log', 'a', encoding='utf-8-sig') as f:
                                                                     f.write(f"Exception in create_dialog (upload): {e}\\n")
                                                                     f.write(traceback.format_exc() + "\\n")
                                                         top.after(0, create_dialog)

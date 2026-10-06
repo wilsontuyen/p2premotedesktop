@@ -16,7 +16,7 @@ def log(msg):
     except UnicodeEncodeError:
         print(log_line.encode("ascii", "replace").decode("ascii"), end="")
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
+        with open(log_path, "a", encoding="utf-8-sig") as f:
             f.write(log_line)
     except Exception as e:
         print(f"Failed to write log: {e}")
@@ -33,7 +33,7 @@ def run_cmd(cmd, cwd=workspace_dir):
         # log in real time
         print(line, end="")
         try:
-            with open(log_path, "a", encoding="utf-8") as f:
+            with open(log_path, "a", encoding="utf-8-sig") as f:
                 f.write(line)
         except:
             pass

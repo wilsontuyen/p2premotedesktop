@@ -343,7 +343,7 @@ if 'from core.i18n import _' not in content:
         content = 'from core.i18n import _\n' + content
 
 # TODO MANUAL F-STRING: )} - [Client] Lỗi giải mã ảnh Pillow: {ie}\n
-# Context: with open(")client_error.log", "a", encoding="utf-8") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
+# Context: with open(")client_error.log", "a", encoding="utf-8-sig") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
 # content = content.replace(..., ...)
 # TODO MANUAL F-STRING: Bắt đầu điều khiển ID {partner_id} ({computer_name})
 # Context: try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")

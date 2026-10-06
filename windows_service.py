@@ -38,7 +38,7 @@ def log(msg):
             print(log_line, end="")
         except:
             pass
-        with open(log_file, "a", encoding="utf-8") as f:
+        with open(log_file, "a", encoding="utf-8-sig") as f:
             f.write(log_line)
     except:
         pass

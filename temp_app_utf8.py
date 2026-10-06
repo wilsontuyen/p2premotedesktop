@@ -64,7 +64,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    with open("crash.log", "w", encoding="utf-8") as f:
+    with open("crash.log", "w", encoding="utf-8-sig") as f:
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
 sys.excepthook = handle_exception
@@ -2601,7 +2601,7 @@ def client_receiver_thread(sock):
                         client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
                         try:
-                            with open("domain_debug.log", "a", encoding="utf-8") as df:
+                            with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                                 df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n")
                         except:
                             pass
@@ -2696,7 +2696,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
             except:
                 pass
@@ -2956,7 +2956,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             sys.exit(99)
     except Exception as critical_e:
         import traceback
-        with open("client_crash.log", "w", encoding="utf-8") as f:
+        with open("client_crash.log", "w", encoding="utf-8-sig") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
         try: pygame.quit()
         except: pass
@@ -3197,7 +3197,7 @@ class UnifiedApp(tk.Tk):
             self.withdraw()
             try:
                 log_path = os.path.join(app_dir, "agent.log")
-                sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
                 sys.stderr = sys.stdout
                 print(f"\n--- Agent started in headless mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
             except Exception as e:
@@ -5399,7 +5399,7 @@ class UnifiedApp(tk.Tk):
                     chk_reason = f"Error: {ex}"
                 
                 try:
-                    with open("domain_debug.log", "a", encoding="utf-8") as df:
+                    with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                         df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host domain check: is_domain={is_domain}, reason={chk_reason}\n")
                 except:
                     pass
@@ -5770,7 +5770,7 @@ class UnifiedApp(tk.Tk):
             is_locked = (get_desktop_name() == "winlogon")
             
             try:
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host check_domain query response: is_domain={is_domain}, reason={chk_reason}, is_locked={is_locked}\n")
             except:
                 pass
@@ -6546,7 +6546,7 @@ if __name__ == '__main__':
         # Redirect stdout/stderr cho clipboard agent mode
         try:
             log_path = os.path.join(app_dir, "clipboard_agent.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except:
             pass

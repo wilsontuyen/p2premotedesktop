@@ -138,7 +138,7 @@ def client_receiver_thread(sock, password):
                             client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
                         try:
-                            with open("domain_debug.log", "a", encoding="utf-8") as df:
+                            with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                                 df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n")
                         except:
                             pass
@@ -211,7 +211,7 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a", encoding="utf-8") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
+                with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
         except BlockingIOError:
             ensure_session_socket_blocking(sock)
             continue
@@ -219,7 +219,7 @@ def client_receiver_thread(sock, password):
             if getattr(e, "winerror", None) == 10035:
                 ensure_session_socket_blocking(sock)
                 continue
-            with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
+            with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
             if _non_windows_close_is_shutdown():
                 print(f"[Client] Non-Windows host socket error: {e}. Treating as host shutdown.")
                 client_host_did_shutdown = True
@@ -499,7 +499,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
             except:
                 pass
@@ -1442,7 +1442,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     reconnect_queue.put("RECONNECT_REQUEST|LOGIN" if session_handoff else "RECONNECT_REQUEST")
                 except: pass
                 
-                status_msg_text = None
+                status_msg_text = _("Đang thử kết nối lại lần {count}/30...").format(count=1)
                 
                 while countdown > 0 and outer_running:
                     for event in pygame.event.get():
@@ -1503,10 +1503,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     if status_msg_text:
                         detail = str(status_msg_text)
                     else:
-                        detail = _("Đang thử kết nối lại... ") + str(countdown) + _(" giây...")
-                    detail_surf = msg_font.render(detail, True, (255, 255, 255))
-                    detail_rect = detail_surf.get_rect(center=(window_w//2, window_h//2 + 8))
-                    screen.blit(detail_surf, detail_rect)
+                        detail = ""
+                    if detail:
+                        detail_surf = msg_font.render(detail, True, (255, 255, 255))
+                        detail_rect = detail_surf.get_rect(center=(window_w//2, window_h//2 + 8))
+                        screen.blit(detail_surf, detail_rect)
 
                     cd_surf = msg_font.render(_("Thời gian chờ: ") + str(countdown) + _(" giây"), True, (180, 180, 180))
                     cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 44))
@@ -1546,7 +1547,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     except Exception as critical_e:
         uninstall_keyboard_hook()
         import traceback
-        with open("client_crash.log", "w", encoding="utf-8") as f:
+        with open("client_crash.log", "w", encoding="utf-8-sig") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
         # try: pygame.quit()
         # except: pass

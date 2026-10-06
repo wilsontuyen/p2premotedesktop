@@ -534,7 +534,7 @@ if n1 == 1 and n2 == 1 and n3 == 1:
     os.makedirs("d:/Data/AG/remote_desktop/utils", exist_ok=True)
     with open("d:/Data/AG/remote_desktop/utils/__init__.py", "w", encoding="utf-8") as f:
         pass
-    with open("d:/Data/AG/remote_desktop/utils/logger.py", "w", encoding="utf-8") as f:
+    with open("d:/Data/AG/remote_desktop/utils/logger.py", "w", encoding="utf-8-sig") as f:
         f.write(logger_code)
     with open("d:/Data/AG/remote_desktop/utils/hwid.py", "w", encoding="utf-8") as f:
         f.write(hwid_code)

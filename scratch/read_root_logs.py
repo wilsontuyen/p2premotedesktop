@@ -11,5 +11,5 @@ for lf in log_files:
         output_lines.extend(lines[-200:])
         output_lines.append("\n\n")
 
-with open("scratch/root_logs_output.txt", "w", encoding="utf-8") as f:
+with open("scratch/root_logs_output.txt", "w", encoding="utf-8-sig") as f:
     f.writelines(output_lines)

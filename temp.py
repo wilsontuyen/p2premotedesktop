@@ -72,7 +72,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    with open("crash.log", "w", encoding="utf-8") as f:
+    with open("crash.log", "w", encoding="utf-8-sig") as f:
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
 sys.excepthook = handle_exception
@@ -3511,7 +3511,7 @@ def client_receiver_thread(sock, password):
                         client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
                         try:
-                            with open("domain_debug.log", "a", encoding="utf-8") as df:
+                            with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                                 df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n")
                         except:
                             pass
@@ -3560,9 +3560,9 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Lỗi giải mã ảnh Pillow: {ie}\n")
+                with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Lỗi giải mã ảnh Pillow: {ie}\n")
         except Exception as e:
-            with open("client_error.log", "a", encoding="utf-8") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
+            with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
             client_running = False
             break
 
@@ -3759,7 +3759,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
             except:
                 pass
@@ -4277,7 +4277,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         try:
                                                             from datetime import datetime
                                                             ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                            open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
+                                                            open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8-sig").write(f"{ts} [Remote] Remote read success, creating Toplevel Notepad\n")
                                                             content = event.get("content", "")
                                                             path = event.get("path", "")
                                                             name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
@@ -4381,7 +4381,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                             if action == "view":
                                                 from datetime import datetime
                                                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
+                                                open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8-sig").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\n")
                                                 if is_dir:
                                                     messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                 else:
@@ -4394,7 +4394,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                         req = {"type": "request_open_file", "path": full_path}
                                                         messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
                                                     try:
-                                                        open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\n")
+                                                        open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8-sig").write(f"{ts} [Remote] Sending file read request: {req}\n")
                                                         send_event(req)
                                                     except Exception as ex:
                                                         messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)
@@ -4454,7 +4454,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                                 import datetime
                                                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                                 log_line = f"[{now}] {direction} | File: {file_name} | Size: {format_size(file_size)} | To: {dest_dir}\n"
-                                                with open("transfer.log", "a", encoding="utf-8") as lf:
+                                                with open("transfer.log", "a", encoding="utf-8-sig") as lf:
                                                     lf.write(log_line)
                                             except Exception as e:
                                                 print("Log error:", e)
@@ -5047,7 +5047,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     except Exception as critical_e:
         uninstall_keyboard_hook()
         import traceback
-        with open("client_crash.log", "w", encoding="utf-8") as f:
+        with open("client_crash.log", "w", encoding="utf-8-sig") as f:
             f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
         try: pygame.quit()
         except: pass
@@ -5374,7 +5374,7 @@ class UnifiedApp(tk.Tk):
             self.withdraw()
             try:
                 log_path = os.path.join(app_dir, "agent.log")
-                sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
                 sys.stderr = sys.stdout
                 print(f"\n--- Agent started in headless mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
             except Exception as e:
@@ -9248,7 +9248,7 @@ class UnifiedApp(tk.Tk):
                     chk_reason = f"Error: {ex}"
                 
                 try:
-                    with open("domain_debug.log", "a", encoding="utf-8") as df:
+                    with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                         df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host domain check: is_domain={is_domain}, reason={chk_reason}\n")
                 except:
                     pass
@@ -9615,7 +9615,7 @@ class UnifiedApp(tk.Tk):
                             break  # Break inner loop to recreate mss.mss()
                         except Exception as e:
                             import traceback
-                            with open("host_error.log", "a", encoding="utf-8") as f:
+                            with open("host_error.log", "a", encoding="utf-8-sig") as f:
                                 f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
                             client_state["running"] = False
                             try:
@@ -9772,7 +9772,7 @@ class UnifiedApp(tk.Tk):
             is_locked = (get_desktop_name() == "winlogon")
             
             try:
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host check_domain query response: is_domain={is_domain}, reason={chk_reason}, is_locked={is_locked}\n")
             except:
                 pass
@@ -11246,7 +11246,7 @@ if __name__ == '__main__':
         # Redirect stdout/stderr cho clipboard agent mode
         try:
             log_path = os.path.join(app_dir, "clipboard_agent.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except:
             pass
@@ -11330,7 +11330,7 @@ if __name__ == '__main__':
     try:
         app = UnifiedApp()
         app.mainloop()
-        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8") as f:
+        with open("C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log", "a", encoding="utf-8-sig") as f:
             f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
         # Keep the process alive just in case
         if "--headless" in sys.argv:

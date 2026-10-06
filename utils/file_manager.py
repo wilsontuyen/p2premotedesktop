@@ -1307,7 +1307,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 import datetime
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_line = f"[{now}] {direction} | File: {file_name} | Size: {format_size(file_size)} | To: {dest_dir}\n"
-                with open("transfer.log", "a", encoding="utf-8") as lf:
+                with open("transfer.log", "a", encoding="utf-8-sig") as lf:
                     lf.write(log_line)
             except Exception as e:
                 print("Log error:", e)

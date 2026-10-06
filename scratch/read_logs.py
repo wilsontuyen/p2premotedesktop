@@ -13,5 +13,5 @@ if os.path.exists(temp_dir):
 else:
     output_lines.append("Temp directory does not exist.")
 
-with open("scratch/read_logs_output.txt", "w", encoding="utf-8") as f:
+with open("scratch/read_logs_output.txt", "w", encoding="utf-8-sig") as f:
     f.writelines(output_lines)

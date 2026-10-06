@@ -106,7 +106,7 @@ class TeeLogger:
         self.terminal = sys.stdout
         self.at_line_start = True
         try:
-            self.log = open(filename, "a", encoding="utf-8", buffering=1)
+            self.log = open(filename, "a", encoding="utf-8-sig", buffering=1)
         except:
             self.log = None
 

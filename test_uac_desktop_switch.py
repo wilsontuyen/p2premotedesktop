@@ -46,7 +46,7 @@ if os.path.exists(log_file):
 
 def log(msg):
     timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
-    with open(log_file, "a", encoding="utf-8") as f:
+    with open(log_file, "a", encoding="utf-8-sig") as f:
         f.write(f"{timestamp} {msg}\\n")
     print(f"{timestamp} {msg}")
 
@@ -158,7 +158,7 @@ log("Test process inner finished.")
     print("\n--- TEST LOG ---")
     log_file = r"C:\Program Files (x86)\Easy Remote Desktop\uac_switch_test_log.txt"
     if os.path.exists(log_file):
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, "r", encoding="utf-8-sig") as f:
             print(f.read())
     else:
         print("Log file not found.")

@@ -33,7 +33,7 @@ new_remote_action = """                                            if not sel: r
                                                 if action == "view":
                                                     from datetime import datetime
                                                     ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-                                                    open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\\n")
+                                                    open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8-sig").write(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}\\n")
                                                     if is_dir:
                                                         messagebox.showwarning(_("Cảnh báo"), f"Không thể xem thư mục '{name}' bằng Notepad!", parent=top)
                                                     else:
@@ -45,7 +45,7 @@ new_remote_action = """                                            if not sel: r
                                                             req = {"type": "request_open_file", "path": full_path}
                                                             messagebox.showinfo(_("Thông báo"), f"Đã gửi yêu cầu mở file {ext} bằng ứng dụng mặc định trên máy bị điều khiển.", parent=top)
                                                         try:
-                                                            open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8").write(f"{ts} [Remote] Sending file read request: {req}\\n")
+                                                            open("C:\\\\Apps\\\\P2P\\\\agent.log", "a", encoding="utf-8-sig").write(f"{ts} [Remote] Sending file read request: {req}\\n")
                                                             send_event(req)
                                                         except Exception as ex:
                                                             messagebox.showerror(_("Lỗi"), f"Không thể gửi lệnh: {ex}", parent=top)

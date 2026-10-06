@@ -9,7 +9,7 @@ import os
 try:
     import tempfile
     crash_log_path = os.path.join(tempfile.gettempdir(), "early_crash.log")
-    _f = open(crash_log_path, "w", encoding="utf-8", buffering=1)
+    _f = open(crash_log_path, "w", encoding="utf-8-sig", buffering=1)
     sys.stderr = _f
     sys.stdout = _f
     print("Bắt đầu khởi chạy ứng dụng...")
@@ -209,7 +209,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     # In ra stderr (để hiển thị trên terminal hoặc gui.log)
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
     # Ghi vào file
-    with open("crash.log", "w", encoding="utf-8") as f:
+    with open("crash.log", "w", encoding="utf-8-sig") as f:
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
 sys.excepthook = handle_exception
@@ -321,7 +321,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         try:
             log_filename = "agent.log" if self.is_headless else "gui.log"
             log_path = os.path.join(app_dir, log_filename)
-            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
             
             # Override built-in print to flush immediately so logs are unbuffered
@@ -760,7 +760,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         except Exception as e:
             import traceback
             try:
-                with open("mac_crash.log", "w", encoding="utf-8") as f:
+                with open("mac_crash.log", "w", encoding="utf-8-sig") as f:
                     traceback.print_exc(file=f)
             except:
                 pass
@@ -2945,7 +2945,7 @@ if __name__ == '__main__':
         # Redirect stdout/stderr cho clipboard agent mode
         try:
             log_path = os.path.join(app_dir, "clipboard_agent.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except:
             pass
@@ -2967,7 +2967,7 @@ if __name__ == '__main__':
     if "--broker" in sys.argv:
         try:
             log_path = os.path.join(app_dir, "broker.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except Exception:
             pass
@@ -3122,7 +3122,7 @@ if __name__ == '__main__':
             def graceful_shutdown(signum, frame):
                 print(f"[App] Caught signal {signum}, notifying clients and shutting down...")
                 try:
-                    with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                    with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
                         f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Caught signal {signum}, notifying clients and shutting down...\n")
                 except: pass
                 try:
@@ -3135,10 +3135,10 @@ if __name__ == '__main__':
                     for conn in list(socket_passwords.keys()):
                         try:
                             send_msg(conn, pkt, socket_passwords[conn])
-                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
                                 f.write(f"  -> Sent host_shutdown to {conn.getpeername() if hasattr(conn, 'getpeername') else conn}\n")
                         except Exception as e:
-                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8") as f:
+                            with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
                                 f.write(f"  -> Failed to send to {conn}: {e}\n")
                 except: pass
                 import time
@@ -3161,7 +3161,7 @@ if __name__ == '__main__':
                 log_path = "C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log"
             else:
                 log_path = "/tmp/agent.log"
-            with open(log_path, "a", encoding="utf-8") as f:
+            with open(log_path, "a", encoding="utf-8-sig") as f:
                 f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
         except:
             pass
@@ -3180,7 +3180,7 @@ if __name__ == '__main__':
             else:
                 crash_log_path = "/opt/p2p_remote/agent_crash.txt"
             
-            with open(crash_log_path, "w", encoding="utf-8") as f:
+            with open(crash_log_path, "w", encoding="utf-8-sig") as f:
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"[{timestamp}] Exception: {e}\n\n")
                 traceback.print_exc(file=f)

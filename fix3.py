@@ -2,7 +2,7 @@ import sys, re
 with open('utils/file_manager.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
-with open('temp_dialog.py', 'r', encoding='utf-8') as f:
+with open('temp_dialog.py', 'r', encoding='utf-8-sig') as f:
     dialog_code = f.read()
 
 idx = content.find('def open_transfer_window')

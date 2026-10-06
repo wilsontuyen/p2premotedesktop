@@ -2107,7 +2107,7 @@ class HostMixin:
                     chk_reason = f"Error: {ex}"
                 
                 try:
-                    with open("domain_debug.log", "a", encoding="utf-8") as df:
+                    with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                         df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host domain check: is_domain={is_domain}, reason={chk_reason}\n")
                 except:
                     pass
@@ -2847,7 +2847,7 @@ class HostMixin:
                         except Exception as e:
                             import traceback
                             try:
-                                with open("host_error.log", "a", encoding="utf-8") as f:
+                                with open("host_error.log", "a", encoding="utf-8-sig") as f:
                                     f.write(f"[{time.strftime('%H:%M:%S')}] [Host] Screen Sender Error: {e}\n{traceback.format_exc()}\n")
                             except Exception:
                                 pass
@@ -3060,7 +3060,7 @@ class HostMixin:
                 is_locked = (get_desktop_name() or "default") not in ("default", "", "agprivacydesk")
             
             try:
-                with open("domain_debug.log", "a", encoding="utf-8") as df:
+                with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
                     df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Host check_domain query response: is_domain={is_domain}, reason={chk_reason}, is_locked={is_locked}\n")
             except:
                 pass
