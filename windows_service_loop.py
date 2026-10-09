@@ -226,6 +226,8 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                     # we will just pass None for fallback. The process will inherit the token's environment.
                     pass
                 
+                pi = PROCESS_INFORMATION()
+                
                 res = CreateProcessWithTokenW(
                     int(h_token),
                     dw_logon_flags,
@@ -287,7 +289,15 @@ def get_active_session_id():
         if s.get("State") == WTSActive:
             return sid
 
-    # 2. Đặc biệt cho Windows Server sau khi ngắt MS RDP:
+    # 2. Kiểm tra session WTSConnected (ưu tiên session đang trong quá trình kết nối RDP)
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        if s.get("State") == WTSConnected:
+            return sid
+
+    # 3. Đặc biệt cho Windows Server sau khi ngắt MS RDP:
     # Tìm session đang Disconnected nhưng có Token đăng nhập của user (user vẫn đang đăng nhập)
     for s in sessions:
         sid = s.get("SessionId")
@@ -312,7 +322,7 @@ def get_active_session_id():
                     log(f"Gọi tscon thất bại: {te}")
                 return sid
 
-    # 3. Kiểm tra Console Session nếu có
+    # 4. Kiểm tra Console Session nếu có
     console = 0xFFFFFFFF
     try:
         console = win32ts.WTSGetActiveConsoleSessionId()
@@ -320,14 +330,6 @@ def get_active_session_id():
         pass
     if console not in invalid:
         return console
-
-    # 4. Kiểm tra session WTSConnected
-    for s in sessions:
-        sid = s.get("SessionId")
-        if sid in invalid:
-            continue
-        if s.get("State") == WTSConnected:
-            return sid
 
     # 5. Bất kỳ session Disconnected nào còn lại
     for s in sessions:
