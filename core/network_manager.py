@@ -834,7 +834,18 @@ class NetworkMixin:
                 except Exception: pass
                 
                 sock.settimeout(5.0)
-                sock.connect((host, core.config.SIGNALING_SERVER_PORT))
+                try:
+                    sock.connect((host, core.config.SIGNALING_SERVER_PORT))
+                except Exception as ce:
+                    if getattr(ce, 'winerror', None) == 10048 or "10048" in str(ce):
+                        try: sock.close()
+                        except: pass
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        sock.settimeout(5.0)
+                        sock.connect((host, core.config.SIGNALING_SERVER_PORT))
+                    else:
+                        raise ce
                 sock.settimeout(None)
                 
                 # Use base HWID if we are the primary instance (port 12345), else append port to avoid stealing ID from background service

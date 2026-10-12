@@ -1067,6 +1067,7 @@ class SavedListMixin:
                     if gs_node is not None:
                         for g_node in gs_node.findall("collapsed_group"):
                             self.collapsed_groups.add(decrypt_text(g_node.text) if g_node.text else "")
+                    self._saved_collapsed_snapshot = set(self.collapsed_groups)
             except Exception as e:
                 print(f"[Config] Lỗi tải XML: {e}")
         self._saved_computers_cache = lst
@@ -1282,6 +1283,8 @@ class SavedListMixin:
         expanded = []
         collapsed_ids = []
         focus = getattr(self, "_status_fg_focus_group", None)
+        if not focus:
+            focus = getattr(self, "_status_last_active_group", None)
         grp_order = sorted(by_grp.keys(), key=self._saved_group_sort_key)
         if focus in by_grp and focus not in collapsed:
             grp_order = [focus] + [g for g in grp_order if g != focus]
@@ -1501,8 +1504,8 @@ class SavedListMixin:
 
     def _probe_one_saved_id(self, cid, gap, abort_on_open_burst=False, force=False):
         """Hỏi check_online 1 máy rồi pace theo gap. True = restart vòng."""
-        # Open-groups: không chờ probe cũ quá lâu — force hỏi lại để vòng 0.5s không kẹt.
-        wait_s = 0.2 if force else 1.0
+        # Open-groups: force hỏi lại để vòng quét nhanh không kẹt chờ vote cũ
+        wait_s = 0.05 if force else 1.0
         self._wait_probe_slot(cid, timeout_s=wait_s, abort_on_open_burst=abort_on_open_burst)
         if self._online_probe_pending(cid):
             if force:
@@ -1547,8 +1550,8 @@ class SavedListMixin:
         ).start()
 
     def _saved_status_open_groups_loop(self):
-        """Luôn chạy riêng: quét máy trong nhóm đang mở — 0.5s/máy, round-robin."""
-        gap = 0.5
+        """Luôn chạy riêng: quét máy trong nhóm đang mở — round-robin nhanh, đáp ứng ngay khi máy online."""
+        gap = 0.08
         my_gen = int(getattr(self, "_status_open_loop_gen", 0) or 0)
         self._touch_open_groups_heartbeat()
         while True:
@@ -1563,12 +1566,13 @@ class SavedListMixin:
                 focus = getattr(self, "_status_fg_focus_group", None)
                 if focus is not None:
                     self._status_fg_focus_group = None
+                    self._status_last_active_group = focus
                     if self._saved_list_is_open():
                         self._burst_saved_group_status(focus)
                         self._status_fg_scan_ids = list(self._ids_in_saved_group(focus))
                         self._status_fg_scan_idx = 0
                     self._touch_open_groups_heartbeat()
-                    time.sleep(max(0.5, gap))
+                    time.sleep(0.1)
                     continue
 
                 if not self._saved_list_is_open():
@@ -1603,10 +1607,13 @@ class SavedListMixin:
                 if nxt == 0:
                     # Hết vòng → lấy lại danh sách expanded (có thể đổi khi bung/thu)
                     self._status_fg_scan_ids = None
+                    # Nghỉ 1.5s giữa các chu kỳ quét mở — nếu có bung nhóm mới sẽ được wake ngay lập tức
+                    if self._pace_status_probe(time.time(), 1.5, abort_on_open_burst=True):
+                        continue
 
                 if not self._saved_id_is_expanded(cid):
                     # Máy đã thu nhóm — bỏ qua, không spin CPU
-                    time.sleep(0.02)
+                    time.sleep(0.01)
                     continue
 
                 if self._probe_one_saved_id(cid, gap, abort_on_open_burst=True, force=True):

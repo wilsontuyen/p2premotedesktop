@@ -220,11 +220,23 @@ def print_with_timestamp(*args, **kwargs):
     timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
     if args:
         first_arg = str(args[0])
-        if first_arg.startswith("[202") and first_arg.find("]") < 25:
+        try:
             _orig_print(*args, **kwargs)
-            return
+        except UnicodeEncodeError:
+            try:
+                _orig_print(*(str(a).encode(sys.stdout.encoding or 'ascii', errors='backslashreplace').decode(sys.stdout.encoding or 'ascii', errors='ignore') for a in args), **kwargs)
+            except Exception:
+                pass
+        return
     msg = " ".join(str(arg) for arg in args)
-    _orig_print(f"{timestamp} {msg}", **kwargs)
+    try:
+        _orig_print(f"{timestamp} {msg}", **kwargs)
+    except UnicodeEncodeError:
+        try:
+            safe_text = f"{timestamp} {msg}".encode(sys.stdout.encoding or 'ascii', errors='backslashreplace').decode(sys.stdout.encoding or 'ascii', errors='ignore')
+            _orig_print(safe_text, **kwargs)
+        except Exception:
+            pass
 
 print = print_with_timestamp
 
@@ -328,7 +340,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             import builtins
             orig_print = builtins.print
             def unbuffered_print(*args, **kwargs):
-                orig_print(*args, **kwargs)
+                try:
+                    orig_print(*args, **kwargs)
+                except UnicodeEncodeError:
+                    try:
+                        target_file = kwargs.get('file', sys.stdout)
+                        enc = getattr(target_file, 'encoding', None) or 'ascii'
+                        orig_print(*(str(a).encode(enc, errors='backslashreplace').decode(enc, errors='ignore') for a in args), **kwargs)
+                    except Exception:
+                        pass
                 try:
                     sys.stdout.flush()
                 except:
