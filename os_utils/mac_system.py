@@ -44,3 +44,8 @@ def is_machine_domain_joined():
     # Checking for Active Directory on Linux is complex (e.g. checking realmd, sssd, winbind)
     # For now, return False as a placeholder.
     return False, "Not implemented for Linux"
+
+
+def boost_process_priority():
+    return True
+

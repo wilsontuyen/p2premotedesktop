@@ -29,6 +29,13 @@ if not app_dir:
         app_dir = os.path.dirname(os.path.abspath(__file__))
 log_file = os.path.join(app_dir, "service.log")
 
+try:
+    from os_utils.windows_system import boost_process_priority
+    boost_process_priority()
+except Exception:
+    pass
+
+
 # Broker architecture (Phase 1): broker Session 0 giu ket noi viewer, agent chay
 # --capture-worker va noi toi broker qua IPC. Bat/tat bang file "broker.on" trong
 # app_dir de doi che do ma khong can build lai (mac dinh: BAT).

@@ -22,10 +22,66 @@ def get_desktop_name():
     return "default"
 
 # MAXIMUM_ALLOWED, GENERIC_ALL, SWITCH|READ|WRITE|CREATEWINDOW, SWITCHDESKTOP,
-# READOBJECTS, ENUMERATE, GENERIC_READ, then 0.
+# SETTHREADDESKTOP, READOBJECTS, ENUMERATE, GENERIC_READ, then 0.
 _DESKTOP_ACCESS_MASKS = (
-    0x02000000, 0x01FF, 0x0183, 0x0100, 0x0001, 0x0040, 0x80000000, 0,
+    0x02000000, 0x01FF, 0x0183, 0x0180, 0x0080, 0x0100, 0x0001, 0x0040, 0x80000000, 0,
 )
+
+_THREAD_DESKTOP_ACCESS_MASKS = (
+    0x02000000,  # MAXIMUM_ALLOWED
+    0x01FF,      # DESKTOP_ALL
+    0x0183,      # DESKTOP_SWITCHDESKTOP | DESKTOP_SETTHREADDESKTOP | DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS
+    0x0180,      # DESKTOP_SWITCHDESKTOP | DESKTOP_SETTHREADDESKTOP
+    0x0080,      # DESKTOP_SETTHREADDESKTOP
+)
+
+_last_input_thread_desktop_handle = None
+
+
+def boost_process_priority():
+    """Tối ưu độ ưu tiên và vô hiệu hóa Power Throttling / EcoQoS cho Host trên Windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        p = kernel32.GetCurrentProcess()
+
+        # 1. Thiết lập độ ưu tiên ABOVE_NORMAL_PRIORITY_CLASS (0x8000)
+        kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetPriorityClass.restype = wintypes.BOOL
+        kernel32.SetPriorityClass(p, 0x00008000)
+
+        # 2. Vô hiệu hóa Power Throttling / EcoQoS (chống Windows bóp CPU khi chạy pin)
+        try:
+            class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+                _fields_ = [
+                    ("Version", wintypes.DWORD),
+                    ("ControlMask", wintypes.DWORD),
+                    ("StateMask", wintypes.DWORD),
+                ]
+
+            t = PROCESS_POWER_THROTTLING_STATE()
+            t.Version = 1
+            t.ControlMask = 0x1 | 0x4  # EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION
+            t.StateMask = 0            # 0: tắt power throttling
+
+            kernel32.SetProcessInformation.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD
+            ]
+            kernel32.SetProcessInformation.restype = wintypes.BOOL
+            kernel32.SetProcessInformation(p, 4, ctypes.byref(t), ctypes.sizeof(t))
+        except Exception:
+            pass
+
+        # 3. Yêu cầu Timer Resolution 1ms
+        try:
+            ctypes.windll.winmm.timeBeginPeriod(1)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 def get_desktop_name_from_handle(hdesk):
     if not hdesk:
@@ -83,11 +139,12 @@ def uac_on_secure_desktop():
 
 
 def attach_thread_for_remote_input():
-    """Fix UAC ok 2: bám OpenInputDesktop (desktop đang nhận chuột), không ép Default/Winlogon."""
+    """Gắn thread hiện tại (worker thread) vào input desktop đang nhận chuột/phím (UAC Yes/No hoặc Logon)."""
+    global _last_input_thread_desktop_handle
     attach_process_window_station("WinSta0")
     user32 = ctypes.windll.user32
     h_input = None
-    for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
+    for access_mask in _THREAD_DESKTOP_ACCESS_MASKS:
         try:
             h_input = user32.OpenInputDesktop(0, False, access_mask)
             if h_input:
@@ -97,30 +154,48 @@ def attach_thread_for_remote_input():
     if not h_input:
         thread_name = get_desktop_name()
         target_name = "Winlogon" if thread_name == "default" else "Default"
-        h_input = open_named_desktop_handle(target_name)
-        if h_input:
-            print(f"[Host Input] Opened {target_name} desktop by name (fallback)")
+        for access_mask in _THREAD_DESKTOP_ACCESS_MASKS:
+            try:
+                h_input = user32.OpenDesktopW(target_name, 0, False, access_mask)
+                if h_input:
+                    break
+            except Exception:
+                pass
     if not h_input:
         return False
     try:
         name_input = _desktop_name_from_handle(h_input)
         name_thread = get_desktop_name()
         if name_input and name_input != name_thread:
-            print(f"[Host Input] Desktop changed from {name_thread} to {name_input}. Switching input thread...")
             result = user32.SetThreadDesktop(h_input)
-            if not result:
-                err = ctypes.windll.kernel32.GetLastError()
-                if err == 170:
-                    print("[Host Input] SetThreadDesktop failed with ERROR_BUSY (170): thread has existing windows or hooks.")
-                else:
-                    print(f"[Host Input] SetThreadDesktop failed. Error code: {err}")
-            return bool(result)
-        return True
-    finally:
-        try:
-            user32.CloseDesktop(h_input)
-        except Exception:
-            pass
+            if result:
+                old_h = _last_input_thread_desktop_handle
+                _last_input_thread_desktop_handle = h_input
+                if old_h:
+                    try:
+                        user32.CloseDesktop(old_h)
+                    except Exception:
+                        pass
+                return True
+            else:
+                try:
+                    user32.CloseDesktop(h_input)
+                except Exception:
+                    pass
+                return False
+        else:
+            try:
+                user32.CloseDesktop(h_input)
+            except Exception:
+                pass
+            return True
+    except Exception:
+        if h_input:
+            try:
+                user32.CloseDesktop(h_input)
+            except Exception:
+                pass
+        return False
 
 
 def get_input_desktop_name():

@@ -82,6 +82,7 @@ from os_utils.system import (
     attach_process_window_station,
     uac_consent_running,
     attach_thread_for_remote_input,
+    boost_process_priority,
 )
 
 _desktop_name_from_handle = get_desktop_name_from_handle
@@ -1706,6 +1707,7 @@ class HostMixin:
     def start_host_server(self):
         if sys.platform == "win32":
             set_windows_graphics_effects(True)
+            boost_process_priority()
         global BOUND_PORT
         bound = False
         for port in PORTS_TO_TRY:
@@ -2885,15 +2887,11 @@ class HostMixin:
         worker_thread = threading.Thread(target=_input_worker, daemon=True)
         worker_thread.start()
 
-        # Cache để tránh gọi OpenInputDesktop/SetThreadDesktop mỗi vòng lặp
-        _last_desk_check_time = 0.0
-        _last_desk_name = None
-        _DESK_CHECK_INTERVAL = 0.5  # Chỉ kiểm tra desktop mỗi 0.5 giây
         last_recv_time = time.time()
         while client_state.get("running", False):
             try:
-                # Chờ 2 giây, nếu không có gói tin nào thì nhả hết phím modifier để chống kẹt
-                r, _, _ = select.select([conn], [], [], 2.0)
+                # Chờ gói tin; nếu quá 1 giây không có gói thì nhả modifier để chống kẹt phím
+                r, _, _ = select.select([conn], [], [], 1.0)
                 if not r:
                     self.host_release_all_modifiers()
                     if time.time() - last_recv_time > 60.0:
@@ -2902,22 +2900,6 @@ class HostMixin:
                         break
                     continue
 
-                # Chỉ kiểm tra/chuyển desktop khi có gói tin đến VÀ đã qua interval
-                # Điều này tránh overhead khi mouse_move liên tục và tránh SetThreadDesktop
-                # gọi quá nhiều lần (có thể fail nếu hook đã được gắn vào thread)
-                now = time.monotonic()
-                if now - _last_desk_check_time >= _DESK_CHECK_INTERVAL:
-                    _last_desk_check_time = now
-                    if sys.platform == "win32":
-                        try:
-                            attach_thread_for_remote_input()
-                            _last_desk_name = get_desktop_name()
-                        except Exception:
-                            pass
-                    
-                import select
-                r, _, _ = select.select([conn], [], [], 0.2)
-                
                 try:
                     self._sync_privacy_with_uac()
                 except Exception:

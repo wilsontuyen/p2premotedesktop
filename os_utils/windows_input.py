@@ -61,6 +61,27 @@ class INPUT(ctypes.Structure):
         ("union", INPUT_union)
     ]
 
+try:
+    _user32 = ctypes.windll.user32
+    _user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+    _user32.SendInput.restype = wintypes.UINT
+except Exception:
+    _user32 = getattr(ctypes.windll, "user32", None)
+
+def _send_input_with_retry(n_inputs, p_inputs, cb_size):
+    """Gửi SendInput; nếu trả về 0 (bị chặn/vừa đổi desktop UAC), tự re-attach và thử lại."""
+    if not _user32:
+        return 0
+    res = _user32.SendInput(n_inputs, p_inputs, cb_size)
+    if res == 0:
+        try:
+            from os_utils.windows_system import attach_thread_for_remote_input
+            if attach_thread_for_remote_input():
+                res = _user32.SendInput(n_inputs, p_inputs, cb_size)
+        except Exception:
+            pass
+    return res
+
 # Map Pygame/common key names to Windows Virtual Key (VK) codes
 vk_map = {
     'space': 0x20,      # VK_SPACE
@@ -257,7 +278,7 @@ def send_input_keyboard_event(key_name, pressed):
             inject_vk = generic_vks.get(vk, vk)
                 
             inp.union.ki = KEYBDINPUT(inject_vk, scan, flags, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         elif len(key_name) == 1 and not is_modifier:
             # Fallback: Use KEYEVENTF_UNICODE only for characters without a VK code
             # (e.g. pre-composed Unicode characters, emoji, special symbols)
@@ -267,7 +288,7 @@ def send_input_keyboard_event(key_name, pressed):
             if not pressed:
                 flags |= KEYEVENTF_KEYUP
             inp.union.ki = KEYBDINPUT(0, ord(key_name), flags, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Keyboard injection failed: {e}")
 
@@ -317,7 +338,7 @@ def send_input_mouse_click(button_name, pressed):
             inp = INPUT()
             inp.type = INPUT_MOUSE
             inp.union.mi = MOUSEINPUT(0, 0, 0, flags, 0, None)
-            n = ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            n = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
             return n
     except Exception as e:
         print(f"[SendInput] Mouse click injection failed: {e}")
@@ -342,7 +363,7 @@ def send_input_mouse_scroll(dx, dy):
             inp = INPUT()
             inp.type = INPUT_MOUSE
             inp.union.mi = MOUSEINPUT(0, 0, int(dy * 120), MOUSEEVENTF_WHEEL, 0, None)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Mouse scroll injection failed: {e}")
 
@@ -356,7 +377,7 @@ def send_input_mouse_move(x, y):
             MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
             0, None
         )
-        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
     except Exception as e:
         print(f"[SendInput] Mouse move injection failed: {e}")
 
