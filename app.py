@@ -678,8 +678,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 if "/opt/p2p_remote" in exe_path_abs:
                     self.is_service_active = True
             elif sys.platform == "win32":
-                if getattr(self, "is_host_only", False):
-                    self.ensure_host_background_agent()
+                self.ensure_host_background_agent()
                 self.is_service_active = self.check_if_service_active()
                 print(f"[Host GUI] Background host running: {self.is_service_active}")
 
@@ -2601,19 +2600,25 @@ Comment=Remote Desktop P2P AutoStart
         return False
 
     def ensure_host_background_agent(self):
-        """Ensure SYSTEM Host service is registered/running (Winlogon / login screen capture)."""
-        if sys.platform != "win32" or not getattr(self, "is_host_only", False):
+        """Ensure SYSTEM Host service is registered/running with battery support."""
+        if sys.platform != "win32":
             return False
         if self.check_if_service_active():
             return True
         try:
             import subprocess
-            service_exe = os.path.join(app_dir, "RemoteDesktopHostService.exe")
+            is_host = getattr(self, "is_host_only", False)
+            service_exe_name = "RemoteDesktopHostService.exe" if is_host else "RemoteDesktopService.exe"
+            task = "EasyRemoteDesktopHostAgent" if is_host else "EasyRemoteDesktopAgent"
+            service_exe = os.path.join(app_dir, service_exe_name)
             if not os.path.exists(service_exe):
-                print("[Host] RemoteDesktopHostService.exe missing — login-screen capture unavailable.")
+                for sub in ("dist_nuitka_service\\windows_service_loop.dist", "dist_nuitka_service", "dist"):
+                    cand = os.path.join(app_dir, sub, service_exe_name)
+                    if os.path.exists(cand):
+                        service_exe = cand
+                        break
+            if not os.path.exists(service_exe):
                 return False
-            task = "EasyRemoteDesktopHostAgent"
-            # Quoted path required when install dir has spaces (Program Files).
             tr = f'"{service_exe}"'
             create = [
                 "schtasks.exe", "/create", "/tn", task,
@@ -2621,20 +2626,18 @@ Comment=Remote Desktop P2P AutoStart
                 "/ru", "NT AUTHORITY\\SYSTEM", "/rl", "highest", "/f",
             ]
             run = ["schtasks.exe", "/run", "/tn", task]
-            for args in (create, run):
-                try:
-                    r = subprocess.run(args, capture_output=True, text=True, timeout=20)
-                    if r.returncode != 0:
-                        err = (r.stderr or r.stdout or "").strip()
-                        print(f"[Host] {' '.join(args[:3])}... rc={r.returncode} {err[:200]}")
-                except Exception as e:
-                    print(f"[Host] Background agent cmd failed: {e}")
-            for _ in range(20):
+            subprocess.run(create, capture_output=True, text=True, timeout=10)
+            try:
+                from os_utils.windows_system import ensure_task_battery_support
+                ensure_task_battery_support(task)
+            except Exception:
+                pass
+            subprocess.run(run, capture_output=True, text=True, timeout=10)
+            for _ in range(12):
                 if self.check_if_service_active():
-                    print("[Host] Background agent is running (login/lock screen capture ready).")
+                    print(f"[Host] Background agent ({task}) is running.")
                     return True
                 time.sleep(0.25)
-            print("[Host] Background agent not detected yet — reinstall Host or run as admin once.")
         except Exception as e:
             print(f"[Host] ensure_host_background_agent: {e}")
         return False
@@ -2646,6 +2649,9 @@ Comment=Remote Desktop P2P AutoStart
             
         # Check if service became active
         if not getattr(self, 'is_headless', False) and not getattr(self, 'is_service_active', False):
+            # Nếu đang có client điều khiển qua GUI, KHÔNG ngắt kết nối giữa chừng!
+            if getattr(self, 'active_clients', None):
+                return
             if self.check_if_service_active():
                 print("[Host GUI] Service has started in background. Switching to service-compatible mode...")
                 self.is_service_active = True

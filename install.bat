@@ -60,6 +60,7 @@ echo [+] Registering background system service (Scheduled Task)...
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1
 schtasks /create /tn "%TASK_NAME%" /tr "\"%EXE_SVC%\"" /sc onstart /ru "NT AUTHORITY\SYSTEM" /rl highest /f
 if errorlevel 1 goto :fail_task
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t = Get-ScheduledTask -TaskName '%TASK_NAME%' -ErrorAction SilentlyContinue; if ($t) { $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }" >nul 2>&1
 
 echo [+] Starting background service...
 schtasks /run /tn "%TASK_NAME%"

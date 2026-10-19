@@ -83,6 +83,61 @@ def boost_process_priority():
     except Exception:
         pass
 
+
+def ensure_task_battery_support(task_name=None):
+    """Cấu hình Scheduled Task cho phép chạy trên Pin và không bị Windows tự ngắt."""
+    if sys.platform != "win32":
+        return
+    try:
+        import subprocess
+        import os
+        tasks = [task_name] if task_name else ["EasyRemoteDesktopAgent", "EasyRemoteDesktopHostAgent"]
+        for tn in tasks:
+            if not tn:
+                continue
+            # 1. PowerShell: cập nhật trực tiếp qua API Task Scheduler
+            ps_cmd = (
+                f"$t = Get-ScheduledTask -TaskName '{tn}' -ErrorAction SilentlyContinue; "
+                f"if ($t) {{ "
+                f"$t.Settings.DisallowStartIfOnBatteries = $false; "
+                f"$t.Settings.StopIfGoingOnBatteries = $false; "
+                f"$t.Settings.ExecutionTimeLimit = 'PT0S'; "
+                f"Set-ScheduledTask -InputObject $t -ErrorAction SilentlyContinue "
+                f"}}"
+            )
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                capture_output=True, timeout=8
+            )
+            # 2. XML fallback (hỗ trợ cả Windows 7/8/Server)
+            try:
+                res = subprocess.run(["schtasks.exe", "/query", "/tn", tn, "/xml"], capture_output=True, text=True, timeout=6)
+                if res.returncode == 0 and res.stdout:
+                    xml = res.stdout
+                    needs_fix = False
+                    if "<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>" in xml:
+                        xml = xml.replace("<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>", "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>")
+                        needs_fix = True
+                    if "<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>" in xml:
+                        xml = xml.replace("<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>", "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>")
+                        needs_fix = True
+                    if "<ExecutionTimeLimit>PT72H</ExecutionTimeLimit>" in xml:
+                        xml = xml.replace("<ExecutionTimeLimit>PT72H</ExecutionTimeLimit>", "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>")
+                        needs_fix = True
+                    if needs_fix:
+                        import tempfile
+                        tmp_xml = os.path.join(tempfile.gettempdir(), f"{tn}_bat.xml")
+                        with open(tmp_xml, "w", encoding="utf-16") as f:
+                            f.write(xml)
+                        subprocess.run(["schtasks.exe", "/create", "/tn", tn, "/xml", tmp_xml, "/ru", "NT AUTHORITY\\SYSTEM", "/f"], capture_output=True, timeout=6)
+                        try: os.remove(tmp_xml)
+                        except Exception: pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def get_desktop_name_from_handle(hdesk):
     if not hdesk:
         return ""

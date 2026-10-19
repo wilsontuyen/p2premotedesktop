@@ -58,6 +58,9 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRem
 ; Register background system service (Scheduled Task) using schtasks for Windows 7 compatibility
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopAgent"" /tr ""\""{app}\RemoteDesktopService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\task_creation.log"" 2>&1"; Flags: runhidden
 
+; Configure task to allow starting and running on battery power (disallow stopping on battery)
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$t = Get-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue; if ($t) {{{{ $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }}}}"""; Flags: runhidden
+
 ; Start background service
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAgent"" > ""{app}\task_run.log"" 2>&1"; Flags: runhidden
 

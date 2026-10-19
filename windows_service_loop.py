@@ -30,8 +30,9 @@ if not app_dir:
 log_file = os.path.join(app_dir, "service.log")
 
 try:
-    from os_utils.windows_system import boost_process_priority
+    from os_utils.windows_system import boost_process_priority, ensure_task_battery_support
     boost_process_priority()
+    ensure_task_battery_support()
 except Exception:
     pass
 

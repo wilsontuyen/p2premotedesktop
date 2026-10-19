@@ -49,3 +49,8 @@ def is_machine_domain_joined():
 def boost_process_priority():
     return True
 
+
+def ensure_task_battery_support(task_name=None):
+    return True
+
+
