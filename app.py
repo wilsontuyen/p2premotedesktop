@@ -2575,10 +2575,23 @@ Comment=Remote Desktop P2P AutoStart
         """True only if a background host (service/broker/headless agent) is running — not this GUI."""
         if getattr(self, 'is_headless', False):
             return False
+        # 1. Probe Session 0 broker IPC port (12400)
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.3)
+            res = s.connect_ex(('127.0.0.1', 12400))
+            s.close()
+            if res == 0:
+                return True
+        except Exception:
+            pass
+
+        # 2. Process check
         my_pid = os.getpid()
         try:
             import psutil
-            for proc in psutil.process_iter(['name', 'pid', 'cmdline']):
+            for proc in psutil.process_iter(['name', 'pid']):
                 try:
                     pid = proc.info.get('pid')
                     if pid == my_pid:
@@ -2587,11 +2600,15 @@ Comment=Remote Desktop P2P AutoStart
                     if name in ("remotedesktopservice.exe", "remotedesktophostservice.exe"):
                         return True
                     if name in ("remotedesktopp2p.exe", "remotedesktophost.exe"):
-                        cmd = proc.info.get('cmdline') or []
-                        joined = " ".join(str(x) for x in cmd).lower()
-                        if "--capture-worker" in joined:
-                            continue
-                        if "--broker" in joined or "--headless" in joined:
+                        try:
+                            cmd = proc.cmdline() or []
+                            joined = " ".join(str(x) for x in cmd).lower()
+                            if "--capture-worker" in joined:
+                                continue
+                            if "--broker" in joined or "--headless" in joined:
+                                return True
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
+                            # In Session 0 (SYSTEM), unprivileged user gets AccessDenied reading cmdline
                             return True
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
@@ -2612,7 +2629,13 @@ Comment=Remote Desktop P2P AutoStart
             task = "EasyRemoteDesktopHostAgent" if is_host else "EasyRemoteDesktopAgent"
             service_exe = os.path.join(app_dir, service_exe_name)
             if not os.path.exists(service_exe):
-                for sub in ("dist_nuitka_service\\windows_service_loop.dist", "dist_nuitka_service", "dist"):
+                for sub in (
+                    "dist_nuitka_host_service\\windows_service_loop.dist",
+                    "dist_nuitka_host_service",
+                    "dist_nuitka_service\\windows_service_loop.dist",
+                    "dist_nuitka_service",
+                    "dist"
+                ):
                     cand = os.path.join(app_dir, sub, service_exe_name)
                     if os.path.exists(cand):
                         service_exe = cand

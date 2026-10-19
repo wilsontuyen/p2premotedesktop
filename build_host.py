@@ -183,13 +183,12 @@ def main():
     jobs_limit = max(1, int(cpu_count * 0.8))
     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
 
-    log("Building RemoteDesktopHostService via Nuitka (standalone + in-process broker)...")
+    log("Building RemoteDesktopHostService via Nuitka (standalone)...")
     service_cmd = (
         f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
-        f'--include-module=core.broker --include-module=core.config --include-module=psutil '
-        f'--include-package=network --include-module=cryptography '
+        f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
         f'--windows-company-name="{company_name}" --windows-product-name="P2P Remote Desktop Host Service" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="Easy Remote Desktop Host Service" '

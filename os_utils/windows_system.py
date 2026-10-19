@@ -96,6 +96,7 @@ def ensure_task_battery_support(task_name=None):
             if not tn:
                 continue
             # 1. PowerShell: cập nhật trực tiếp qua API Task Scheduler
+            import base64
             ps_cmd = (
                 f"$t = Get-ScheduledTask -TaskName '{tn}' -ErrorAction SilentlyContinue; "
                 f"if ($t) {{ "
@@ -105,8 +106,9 @@ def ensure_task_battery_support(task_name=None):
                 f"Set-ScheduledTask -InputObject $t -ErrorAction SilentlyContinue "
                 f"}}"
             )
+            b64 = base64.b64encode(ps_cmd.encode("utf-16le")).decode("ascii")
             subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", b64],
                 capture_output=True, timeout=8
             )
             # 2. XML fallback (hỗ trợ cả Windows 7/8/Server)

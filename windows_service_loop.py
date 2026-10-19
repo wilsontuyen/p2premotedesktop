@@ -430,26 +430,8 @@ def get_executable_to_run():
     return None, None
 
 def ensure_broker_running():
-    """Giu broker Session 0. Host: chay trong cung process Service (bot 1 process)."""
-    global broker_pid, _broker_thread
-    if HOST_PRODUCT:
-        if _broker_thread and _broker_thread.is_alive():
-            broker_pid = os.getpid()
-            return
-        def _run():
-            try:
-                log("Host: khoi dong broker trong process Service...")
-                import core.broker
-                core.broker.run_broker()
-            except Exception as e:
-                log(f"Host in-process broker loi: {e}\n{traceback.format_exc()}")
-
-        _broker_thread = threading.Thread(target=_run, daemon=True, name="HostInProcessBroker")
-        _broker_thread.start()
-        broker_pid = os.getpid()
-        log(f"Host broker thread da start (cung PID Service {broker_pid}).")
-        return
-
+    """Giu 1 tien trinh broker song trong Session 0 (bat tu qua doi session)."""
+    global broker_pid
     if broker_pid and is_process_alive(broker_pid):
         return
     exe_path, cmd_line = get_executable_to_run()
