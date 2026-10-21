@@ -398,6 +398,8 @@ class Broker:
             self._broadcast_workers({"cmd": "session_phase", "phase": "lock"})
         elif kind in ("interactive", "logon", "unlock"):
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
+        elif kind in ("remote_disconnect", "console_disconnect"):
+            self._broadcast_workers({"cmd": "remote_disconnect", "session": sid})
 
     def _on_power_event(self, info):
         kind = (info.get("kind") or "shutdown").lower()
@@ -1322,6 +1324,19 @@ def run_capture_worker(app):
                         print(f"[Worker] session_phase={ph} (tu broker/service)")
                     except Exception as e:
                         print(f"[Worker] session_phase: {e}")
+                elif cmd.get("cmd") == "remote_disconnect":
+                    print(f"[Worker] Nhan lenh remote_disconnect tu broker! Chuyen ngay sang desktop console.")
+                    setattr(app, "_remote_disconnect_requested", True)
+                    try:
+                        from core.host import _wts_phase
+                        _wts_phase("none")
+                    except Exception:
+                        pass
+                    if hasattr(app, "wake_display"):
+                        try:
+                            app.wake_display()
+                        except Exception:
+                            pass
         except Exception as e:
             print(f"[Worker] control loi: {e}")
         finally:

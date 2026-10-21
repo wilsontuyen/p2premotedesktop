@@ -274,10 +274,62 @@ def configure_uac_registry():
     else:
         log(f"Thất bại khi cấu hình Registry: {err}")
 
+def connect_session_to_console(source_session_id):
+    """Kết nối session về console desktop mà không chạy qua cmd.exe / shell=True.
+    Ưu tiên gọi trực tiếp Win32 Terminal Services API (WTSConnectSessionW),
+    nếu không thành công mới gọi trực tiếp tscon.exe với shell=False (tránh Windows Defender Persistence heuristic)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        wtsapi32.WTSConnectSessionW.argtypes = [
+            wintypes.ULONG, wintypes.ULONG, wintypes.LPCWSTR, wintypes.BOOL
+        ]
+        wtsapi32.WTSConnectSessionW.restype = wintypes.BOOL
+
+        target_console_id = 0xFFFFFFFF
+        try:
+            target_console_id = win32ts.WTSGetActiveConsoleSessionId()
+        except Exception:
+            pass
+        if target_console_id in (0xFFFFFFFF, -1):
+            target_console_id = 1
+
+        ok = wtsapi32.WTSConnectSessionW(int(target_console_id), int(source_session_id), "", False)
+        if ok:
+            log(f"[Service] WTSConnectSessionW thành công: session {source_session_id} -> console {target_console_id}")
+            return True
+    except Exception as e:
+        log(f"[Service] WTSConnectSessionW thất bại ({e}), dùng fallback tscon.exe")
+
+    try:
+        tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+        if os.path.exists(tscon_exe):
+            import subprocess
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+            res = subprocess.run(
+                [tscon_exe, str(source_session_id), "/dest:console"],
+                shell=False,
+                startupinfo=startupinfo,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+                capture_output=True,
+                timeout=3
+            )
+            log(f"[Service] tscon.exe (shell=False): returncode={res.returncode}")
+            return res.returncode == 0
+    except Exception as te:
+        log(f"[Service] tscon.exe lỗi: {te}")
+    return False
+
 def get_active_session_id():
     """Session tuong tac (khac Session 0).
     User dang login / Signing out: uu tien WTSActive (session cu con man Signing out).
-    Chua login: WTSGetActiveConsoleSessionId hoac WTSConnected."""
+    Chua login: WTSGetActiveConsoleSessionId hoac WTSConnected.
+    TUYỆT ĐỐI không gọi connect_session_to_console ở đây để tránh cướp session khi Ms RDP đang kết nối."""
     WTSActive = 0
     WTSConnected = 1
     WTSDisconnected = 4
@@ -297,7 +349,16 @@ def get_active_session_id():
         if s.get("State") == WTSActive:
             return sid
 
-    # 2. Kiểm tra session WTSConnected (ưu tiên session đang trong quá trình kết nối RDP)
+    # 2. Kiểm tra Console Session nếu có
+    console = 0xFFFFFFFF
+    try:
+        console = win32ts.WTSGetActiveConsoleSessionId()
+    except Exception:
+        pass
+    if console not in invalid:
+        return console
+
+    # 3. Kiểm tra session WTSConnected (đang kết nối)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
@@ -305,8 +366,7 @@ def get_active_session_id():
         if s.get("State") == WTSConnected:
             return sid
 
-    # 3. Đặc biệt cho Windows Server sau khi ngắt MS RDP:
-    # Tìm session đang Disconnected nhưng có Token đăng nhập của user (user vẫn đang đăng nhập)
+    # 4. Session Disconnected có token user (sau khi RDP đóng hoặc user khóa máy)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
@@ -320,24 +380,7 @@ def get_active_session_id():
             except Exception:
                 pass
             if has_user:
-                try:
-                    tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-                    if os.path.exists(tscon_exe):
-                        import subprocess
-                        subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
-                        log(f"[Service] Đã gọi tscon {sid} /dest:console để khôi phục session RDP của user.")
-                except Exception as te:
-                    log(f"Gọi tscon thất bại: {te}")
                 return sid
-
-    # 4. Kiểm tra Console Session nếu có
-    console = 0xFFFFFFFF
-    try:
-        console = win32ts.WTSGetActiveConsoleSessionId()
-    except Exception:
-        pass
-    if console not in invalid:
-        return console
 
     # 5. Bất kỳ session Disconnected nào còn lại
     for s in sessions:
@@ -345,13 +388,6 @@ def get_active_session_id():
         if sid in invalid:
             continue
         if s.get("State") == WTSDisconnected:
-            try:
-                tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-                if os.path.exists(tscon_exe):
-                    import subprocess
-                    subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
-            except Exception:
-                pass
             return sid
     return 0xFFFFFFFF
 
@@ -461,8 +497,8 @@ def cleanup_stale_agent_processes():
         import subprocess
         if not HOST_PRODUCT:
             subprocess.run(
-                "taskkill /F /IM RemoteDesktopP2P.exe",
-                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                ["taskkill", "/F", "/IM", "RemoteDesktopP2P.exe"],
+                shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             log("Đã dọn dẹp các tiến trình RemoteDesktopP2P.exe còn sót lại.")
             return
@@ -471,8 +507,8 @@ def cleanup_stale_agent_processes():
         except Exception:
             # Fallback: van taskkill (co the dong GUI) neu thieu psutil.
             subprocess.run(
-                "taskkill /F /IM RemoteDesktopHost.exe",
-                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                ["taskkill", "/F", "/IM", "RemoteDesktopHost.exe"],
+                shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             log("Host cleanup fallback taskkill RemoteDesktopHost.exe")
             return
@@ -757,12 +793,67 @@ def _push_session_event(kind, session_id):
         _session_events.append({"kind": kind, "session_id": int(session_id), "ts": time.time()})
     _wake_service.set()
     # Bao worker ngay trong callback WTS — không đợi vòng lặp service (sleep 1s).
-    if kind in ("logoff", "lock", "interactive"):
+    if kind in ("logoff", "lock", "interactive", "remote_disconnect"):
         notify_broker_session_event(kind, session_id)
     # Signing out: spawn Winlogon ngay, ke ca khi console session dang 0xFFFFFFFF
     # (neu doi vong lap main continue, hu man Signing out).
     if kind == "logoff" and BROKER_MODE:
         spawn_winlogon_for_logoff(session_id)
+
+
+def _handle_session_disconnect(session_id):
+    """Khi người dùng đóng cửa sổ Microsoft RDP (WTS remote_disconnect),
+    chỉ khi session chuyển sang trạng thái Disconnected (4) thì mới gọi tscon
+    để chuyển sang màn hình desktop console mà không làm văng RDP lúc đang kết nối song song."""
+    def _worker():
+        try:
+            tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+            if not os.path.exists(tscon_exe):
+                return
+            import subprocess
+            sids = []
+            try:
+                sid_val = int(session_id)
+                if sid_val not in (0, 0xFFFFFFFF, -1):
+                    sids.append(sid_val)
+            except Exception:
+                pass
+            # Quét thêm tất cả các session Disconnected có user token
+            try:
+                sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
+                for s in sessions:
+                    sid = s.get("SessionId")
+                    if sid in (0, 0xFFFFFFFF, -1) or sid in sids:
+                        continue
+                    if s.get("State") == win32ts.WTSDisconnected:
+                        try:
+                            h_tok = win32ts.WTSQueryUserToken(sid)
+                            win32api.CloseHandle(h_tok)
+                            sids.append(sid)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            for target_sid in sids:
+                # Kiểm tra chặt chẽ: chỉ gọi nếu session thực sự đã ngắt kết nối (Disconnected = 4)
+                # Tuyệt đối không gọi nếu session đang Active (RDP đang kết nối song song)!
+                try:
+                    cur_state = win32ts.WTSQuerySessionInformation(
+                        win32ts.WTS_CURRENT_SERVER_HANDLE, target_sid, win32ts.WTSConnectState
+                    )
+                    if cur_state != win32ts.WTSDisconnected:
+                        log(f"[Service] Session {target_sid} có state={cur_state} (không phải Disconnected). Bỏ qua để bảo toàn phiên song song.")
+                        continue
+                except Exception:
+                    pass
+
+                log(f"[Service] Đang khôi phục session {target_sid} về console sau khi đóng RDP...")
+                connect_session_to_console(target_sid)
+        except Exception as e:
+            log(f"[Service] _handle_session_disconnect lỗi: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def spawn_winlogon_for_logoff(session_id):
@@ -795,7 +886,7 @@ def agent_mutex_present(session_id, desktop_name):
         return err_code != 2
 
 def wts_session_notification_thread():
-    """WTS 6 = Signing out, WTS 7 = khóa LogonUI — xử lý tách."""
+    """WTS 6 = Signing out, WTS 7 = khóa LogonUI, WTS 4 = RDP disconnect — xử lý tách."""
     global _wts_wndproc_ref
     import ctypes
     from ctypes import wintypes
@@ -827,6 +918,8 @@ def wts_session_notification_thread():
     names = {
         1: "console_connect",
         2: "console_disconnect",
+        3: "remote_connect",
+        4: "remote_disconnect",
         5: "logon",
         6: "logoff",
         7: "lock",
@@ -846,6 +939,9 @@ def wts_session_notification_thread():
                 _push_session_event("lock", sid)
             elif code in (5, 8):
                 _push_session_event("interactive", sid)
+            elif code == 4:  # remote_disconnect (CHỈ khi người dùng đóng cửa sổ Ms RDP)
+                _handle_session_disconnect(sid)
+                _push_session_event("remote_disconnect", sid)
             return 0
         if msg == WM_DESTROY:
             user32.PostQuitMessage(0)
@@ -894,7 +990,7 @@ def terminate_process_with_pid(pid):
     if not success:
         try:
             import subprocess
-            subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             log(f"Đã dừng tiến trình {pid} qua lệnh taskkill.")
             success = True
         except Exception as e:
@@ -994,6 +1090,9 @@ def main():
                     force_logoff_until = 0.0
                     lock_pending_until = 0.0
                     log(f"WTS logon/unlock session={ev.get('session_id')}: hết logoff/lock.")
+                elif kind == "remote_disconnect":
+                    log(f"WTS remote_disconnect session={ev.get('session_id')}: đảm bảo khôi phục console desktop.")
+                    _handle_session_disconnect(ev.get("session_id"))
 
             if active_session_id in (0xFFFFFFFF, -1, 0):
                 # Chua co session console (boot som / console_disconnect) hoac Session 0.

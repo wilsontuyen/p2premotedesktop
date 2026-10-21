@@ -907,15 +907,61 @@ def _clip_tile_onto_canvas(canvas, tile, x, y, mask_black=False):
 
 _last_tscon_call_time = 0.0
 
+def connect_session_to_console(source_session_id):
+    """Kết nối session về console desktop mà không chạy qua cmd.exe / shell=True."""
+    if sys.platform != "win32":
+        return False
+    try:
+        wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        wtsapi32.WTSConnectSessionW.argtypes = [
+            wintypes.ULONG, wintypes.ULONG, wintypes.LPCWSTR, wintypes.BOOL
+        ]
+        wtsapi32.WTSConnectSessionW.restype = wintypes.BOOL
+
+        target_console_id = 0xFFFFFFFF
+        try:
+            import win32ts
+            target_console_id = win32ts.WTSGetActiveConsoleSessionId()
+        except Exception:
+            pass
+        if target_console_id in (0xFFFFFFFF, -1):
+            target_console_id = 1
+
+        ok = wtsapi32.WTSConnectSessionW(int(target_console_id), int(source_session_id), "", False)
+        if ok:
+            return True
+    except Exception:
+        pass
+
+    try:
+        tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
+        if os.path.exists(tscon_exe):
+            import subprocess
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+            res = subprocess.run(
+                [tscon_exe, str(source_session_id), "/dest:console"],
+                shell=False,
+                startupinfo=startupinfo,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+                capture_output=True,
+                timeout=3
+            )
+            return res.returncode == 0
+    except Exception:
+        pass
+    return False
+
 def attach_disconnected_session_to_console():
-    """Tren Windows Server, khi ngat MS RDP ma khong log off,
-    session bi chuyen sang Disconnected (khong co display output).
-    Goi tscon <session_id> /dest:console de tra session ve man hinh console."""
+    """Chỉ khi MS RDP thực sự đã đóng cửa sổ (session chuyển sang Disconnected = 4),
+    mới gọi tscon để trả session về màn hình desktop console.
+    TUYỆT ĐỐI không gọi khi RDP đang Active (state == 0) để cả 2 có thể chạy song song."""
     if sys.platform != "win32":
         return
     global _last_tscon_call_time
     now = time.time()
-    if now - _last_tscon_call_time < 10.0:
+    if now - _last_tscon_call_time < 3.0:
         return
     _last_tscon_call_time = now
     try:
@@ -924,8 +970,6 @@ def attach_disconnected_session_to_console():
         if kernel32.ProcessIdToSessionId(kernel32.GetCurrentProcessId(), ctypes.byref(current_sid)):
             sid = current_sid.value
             if sid not in (0, 0xFFFFFFFF):
-                # Chỉ khôi phục console nếu session đã bị ngắt kết nối (Disconnected = 4)
-                # Nếu MS RDP đang active (WTSActive = 0), việc gọi tscon sẽ làm văng người dùng
                 state = None
                 try:
                     import win32ts
@@ -933,11 +977,28 @@ def attach_disconnected_session_to_console():
                 except Exception:
                     pass
                 
-                if state == 4:
-                    tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-                    if os.path.exists(tscon_exe):
-                        import subprocess
-                        subprocess.run(f'"{tscon_exe}" {sid} /dest:console', shell=True, capture_output=True, timeout=2)
+                # CHỈ xử lý khi session thực sự là Disconnected (4)
+                # Nếu RDP đang kết nối (WTSActive = 0), KHÔNG được gọi tscon và KHÔNG gửi disconnect IPC
+                if state != 4:
+                    return
+
+                # Báo Broker/Service để Service (quyền SYSTEM) gọi tscon chắc chắn thành công
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(0.5)
+                    s.connect(("127.0.0.1", 12400))  # BROKER_IPC_PORT
+                    payload = json.dumps({
+                        "role": "session_event",
+                        "kind": "remote_disconnect",
+                        "session": sid,
+                    }) + "\n"
+                    s.sendall(payload.encode("utf-8"))
+                    s.close()
+                except Exception:
+                    pass
+                
+                # Gọi trực tiếp API / tscon không dùng shell=True làm fallback
+                connect_session_to_console(sid)
     except Exception:
         pass
 
@@ -2491,9 +2552,37 @@ class HostMixin:
                         last_vh = ctypes.windll.user32.GetSystemMetrics(79)
                     except Exception:
                         pass
+
+                    last_remote_session = None
+                    try:
+                        if sys.platform == "win32":
+                            last_remote_session = bool(ctypes.windll.user32.GetSystemMetrics(4096))
+                    except Exception:
+                        pass
                         
                     while client_state.get("running", False):
                         try:
+                            if getattr(self, "_remote_disconnect_requested", False):
+                                self._remote_disconnect_requested = False
+                                print("[Host] Nhan tin hieu remote_disconnect: reset capture sang console desktop...")
+                                client_state["force_update"] = True
+                                client_state.pop("prev_sent_img", None)
+                                time.sleep(0.3)
+                                break
+
+                            try:
+                                if sys.platform == "win32":
+                                    cur_remote = bool(ctypes.windll.user32.GetSystemMetrics(4096))
+                                    if last_remote_session is not None and cur_remote != last_remote_session:
+                                        print(f"[Host] SM_REMOTESESSION thay doi ({last_remote_session} -> {cur_remote}). Reset capture sang console...")
+                                        last_remote_session = cur_remote
+                                        client_state["force_update"] = True
+                                        client_state.pop("prev_sent_img", None)
+                                        time.sleep(0.3)
+                                        break
+                                    last_remote_session = cur_remote
+                            except Exception:
+                                pass
                             if not client_state.get("_got_frame"):
                                 _now_w = time.time()
                                 if _now_w - client_state.get("_last_wake_ts", 0) >= 1.0:
@@ -2681,15 +2770,38 @@ class HostMixin:
                                             grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                             if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
                                                 attach_disconnected_session_to_console()
-                                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
-                                                self._capture_origin = origin
-                                                grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
+                                                try:
+                                                    import win32ts
+                                                    c_state = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, win32ts.WTS_CURRENT_SESSION, win32ts.WTSConnectState)
+                                                    if c_state == 4:
+                                                        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                                        self._capture_origin = origin
+                                                        grabbed = bool(
+                                                            frame_bgr is not None 
+                                                            and getattr(frame_bgr, "size", 0)
+                                                            and not _frame_is_nearly_white(frame_bgr)
+                                                            and not _frame_is_nearly_black(frame_bgr)
+                                                        )
+                                                except Exception:
+                                                    pass
                                         except Exception as e:
                                             print(f"[Host] GDI grab fallback failed: {e}")
 
                             if not grabbed or frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
+                                fail_streak = client_state.get("_grab_fail_streak", 0) + 1
+                                client_state["_grab_fail_streak"] = fail_streak
+                                if fail_streak >= 8:  # ~0.4s lien tuc khong bat duoc hinh (RDP vua dong)
+                                    print(f"[Host] Khong bat duoc hinh desktop ({fail_streak} lan). Reset capture sang console...")
+                                    client_state["_grab_fail_streak"] = 0
+                                    attach_disconnected_session_to_console()
+                                    client_state["force_update"] = True
+                                    client_state.pop("prev_sent_img", None)
+                                    time.sleep(0.3)
+                                    break
                                 time.sleep(0.05)
                                 continue
+                            else:
+                                client_state["_grab_fail_streak"] = 0
 
                             if (
                                 not on_winlogon
