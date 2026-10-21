@@ -1582,6 +1582,10 @@ def _open_dxcam_outputs():
             try:
                 if hasattr(output, "attached_to_desktop") and not output.attached_to_desktop:
                     continue
+                # Bỏ qua output có kích thước không hợp lệ (màn hình ma / 0x0)
+                res = getattr(output, "resolution", (0, 0))
+                if not res or res[0] <= 0 or res[1] <= 0:
+                    continue
                 cam = dxcam.create(
                     device_idx=di,
                     output_idx=oi,
@@ -1602,21 +1606,56 @@ def grab_dxcam_virtual_bgr(cams, canvas=None):
     if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
     any_ok = False
-    for cam in cams:
+    bad_cams = []
+    captured_tiles = []
+    for cam in list(cams):
         try:
             tile = cam.grab()
-            if tile is None:
+            if tile is None or getattr(tile, "size", 0) == 0:
                 continue
             try:
                 cam._output.update_desc()
                 rc = cam._output.desc.DesktopCoordinates
                 x, y = int(rc.left) - left0, int(rc.top) - top0
+                orig_pos = (int(rc.left), int(rc.top))
             except Exception:
                 x, y = 0, 0
-            if _clip_tile_onto_canvas(canvas, tile, x, y):
+                orig_pos = (left0, top0)
+
+            tile_is_black = _frame_is_nearly_black(tile)
+            # Nếu màn hình này đen kịt (phantom/inactive) và đã có màn hình khác có nội dung -> bỏ qua
+            if tile_is_black and any_ok:
+                continue
+
+            if _clip_tile_onto_canvas(canvas, tile, x, y, mask_black=any_ok):
                 any_ok = True
+                captured_tiles.append((tile, orig_pos))
         except Exception as e:
             print(f"[Host] dxcam grab failed: {e}")
+            bad_cams.append(cam)
+
+    # Loại bỏ ngay camera bị hỏng để các lần lặp sau không bị khựng delay 500ms
+    if bad_cams:
+        for bc in bad_cams:
+            try:
+                if bc in cams:
+                    cams.remove(bc)
+            except Exception:
+                pass
+            try:
+                bc.release()
+            except Exception:
+                pass
+
+    # Nếu canvas tổng bị đen kịt (do phantom monitor làm loãng), nhưng có tile đơn lẻ nào có hình -> lấy trực tiếp tile đó
+    if any_ok and _frame_is_nearly_black(canvas) and captured_tiles:
+        for tile, (orig_x, orig_y) in captured_tiles:
+            if not _frame_is_nearly_black(tile):
+                canvas = tile
+                h, w = tile.shape[:2]
+                left0, top0 = orig_x, orig_y
+                break
+
     return canvas, w, h, (left0, top0), any_ok
 
 
@@ -1635,19 +1674,50 @@ def grab_virtual_desktop_bgr(sct, canvas=None):
     if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
     parts = mons[1:] if mons and len(mons) > 1 else (mons[:1] if mons else [])
+    
+    # Lọc bỏ các monitor không hợp lệ (width <= 0 hoặc height <= 0)
+    valid_parts = [m for m in parts if m.get("width", 0) > 0 and m.get("height", 0) > 0]
+    if not valid_parts and mons:
+        valid_parts = [mons[0]]
+
     any_ok = False
-    for mon in parts:
+    captured_tiles = []
+    for mon in valid_parts:
         try:
             raw = sct.grab(mon)
             tile = np.array(raw, dtype=np.uint8)
+            if tile is None or getattr(tile, "size", 0) == 0:
+                continue
+
+            tile_is_black = _frame_is_nearly_black(tile)
+            # Nếu màn hình này đen kịt (phantom/inactive) nhưng đã có màn hình khác có nội dung -> bỏ qua không cho đè
+            if tile_is_black and any_ok:
+                continue
+
+            mx = int(mon.get("left", 0)) - left0
+            my = int(mon.get("top", 0)) - top0
             if _clip_tile_onto_canvas(
                 canvas, tile,
-                int(mon.get("left", 0)) - left0,
-                int(mon.get("top", 0)) - top0,
+                mx,
+                my,
+                mask_black=any_ok,
             ):
                 any_ok = True
+                captured_tiles.append((tile, mon))
         except Exception as e:
             print(f"[Host] Monitor grab failed ({mon}): {e}")
+
+    # Nếu canvas tổng bị đen kịt (do virtual screen rộng bao trùm màn ma),
+    # nhưng có monitor đơn lẻ nào có hình -> lấy trực tiếp tile của monitor đó!
+    if any_ok and _frame_is_nearly_black(canvas) and captured_tiles:
+        for tile, mon in captured_tiles:
+            if not _frame_is_nearly_black(tile):
+                canvas = tile
+                h, w = tile.shape[:2]
+                left0 = int(mon.get("left", 0))
+                top0 = int(mon.get("top", 0))
+                break
+
     if not any_ok:
         raise mss.exception.ScreenShotError("all monitor grabs failed")
     return canvas, w, h, (left0, top0)
@@ -2070,9 +2140,13 @@ class HostMixin:
                     print(f"[Host] Win7 GDI handshake size {host_w}x{host_h}")
                 else:
                     with mss.mss() as sct:
-                        monitor = sct.monitors[0]
-                        host_w = monitor['width']
-                        host_h = monitor['height']
+                        monitor = sct.monitors[0] if sct.monitors else {"left": 0, "top": 0, "width": 1280, "height": 720}
+                        host_w = int(monitor.get('width', 0))
+                        host_h = int(monitor.get('height', 0))
+                        if host_w < 1 or host_h < 1:
+                            host_w = int(ctypes.windll.user32.GetSystemMetrics(0)) or 1280
+                            host_h = int(ctypes.windll.user32.GetSystemMetrics(1)) or 720
+                            monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
                         self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
                 import platform
