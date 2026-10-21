@@ -3037,7 +3037,7 @@ class FileCopyClientMixin:
                                 elif skip_all:
                                     continue
                                 else:
-                                    source_info = {"size": f.get("size", 0), "mtime": f.get("mtime", 0)}
+                                    source_info = {"size": f.get("size", 0), "mtime": f.get("mtime", 0), "path": dest_file_path}
                                     try:
                                         dest_stat = os.stat(dest_file_path)
                                         dest_info = {"size": dest_stat.st_size, "mtime": dest_stat.st_mtime, "path": dest_file_path}

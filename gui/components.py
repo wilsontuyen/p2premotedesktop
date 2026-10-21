@@ -218,8 +218,9 @@ class ClassicCopyDialog(tk.Toplevel):
         info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
         info_text1.pack(side=tk.LEFT, fill=tk.X)
         
+        target_loc_path = dest_info.get("path") or source_info.get("path")
         tk.Label(info_text1, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
-        tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+        tk.Label(info_text1, text=format_location_info(target_loc_path), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         tk.Label(info_text1, text=_("Kích thước: {size}").format(size=format_size(source_info.get("size", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         tk.Label(info_text1, text=_("Ngày sửa đổi: {date}").format(date=format_time(source_info.get("mtime", 0))), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
         
