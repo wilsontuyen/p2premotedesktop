@@ -1708,14 +1708,20 @@ def grab_dxcam_virtual_bgr(cams, canvas=None):
             except Exception:
                 pass
 
-    # Nếu canvas tổng bị đen kịt (do phantom monitor làm loãng), nhưng có tile đơn lẻ nào có hình -> lấy trực tiếp tile đó
-    if any_ok and _frame_is_nearly_black(canvas) and captured_tiles:
-        for tile, (orig_x, orig_y) in captured_tiles:
-            if not _frame_is_nearly_black(tile):
-                canvas = tile
-                h, w = tile.shape[:2]
-                left0, top0 = orig_x, orig_y
-                break
+    # Nếu có nhiều màn hình nhưng chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt),
+    # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của màn hình có nội dung đó!
+    if any_ok and captured_tiles:
+        non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
+        if len(non_black) == 1 and len(captured_tiles) > 1:
+            tile, (orig_x, orig_y) = non_black[0]
+            canvas = tile
+            h, w = tile.shape[:2]
+            left0, top0 = orig_x, orig_y
+        elif _frame_is_nearly_black(canvas) and non_black:
+            tile, (orig_x, orig_y) = non_black[0]
+            canvas = tile
+            h, w = tile.shape[:2]
+            left0, top0 = orig_x, orig_y
 
     return canvas, w, h, (left0, top0), any_ok
 
@@ -1768,16 +1774,22 @@ def grab_virtual_desktop_bgr(sct, canvas=None):
         except Exception as e:
             print(f"[Host] Monitor grab failed ({mon}): {e}")
 
-    # Nếu canvas tổng bị đen kịt (do virtual screen rộng bao trùm màn ma),
-    # nhưng có monitor đơn lẻ nào có hình -> lấy trực tiếp tile của monitor đó!
-    if any_ok and _frame_is_nearly_black(canvas) and captured_tiles:
-        for tile, mon in captured_tiles:
-            if not _frame_is_nearly_black(tile):
-                canvas = tile
-                h, w = tile.shape[:2]
-                left0 = int(mon.get("left", 0))
-                top0 = int(mon.get("top", 0))
-                break
+    # Nếu có nhiều màn hình nhưng chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt),
+    # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của monitor có nội dung đó!
+    if any_ok and captured_tiles:
+        non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
+        if len(non_black) == 1 and len(captured_tiles) > 1:
+            tile, mon = non_black[0]
+            canvas = tile
+            h, w = tile.shape[:2]
+            left0 = int(mon.get("left", 0))
+            top0 = int(mon.get("top", 0))
+        elif _frame_is_nearly_black(canvas) and non_black:
+            tile, mon = non_black[0]
+            canvas = tile
+            h, w = tile.shape[:2]
+            left0 = int(mon.get("left", 0))
+            top0 = int(mon.get("top", 0))
 
     if not any_ok:
         raise mss.exception.ScreenShotError("all monitor grabs failed")
@@ -2201,7 +2213,11 @@ class HostMixin:
                     print(f"[Host] Win7 GDI handshake size {host_w}x{host_h}")
                 else:
                     with mss.mss() as sct:
-                        monitor = sct.monitors[0] if sct.monitors else {"left": 0, "top": 0, "width": 1280, "height": 720}
+                        valid_mons = [m for m in sct.monitors[1:] if m.get("width", 0) > 0 and m.get("height", 0) > 0]
+                        if len(valid_mons) == 1:
+                            monitor = valid_mons[0]
+                        else:
+                            monitor = sct.monitors[0] if sct.monitors else {"left": 0, "top": 0, "width": 1280, "height": 720}
                         host_w = int(monitor.get('width', 0))
                         host_h = int(monitor.get('height', 0))
                         if host_w < 1 or host_h < 1:
@@ -2562,27 +2578,35 @@ class HostMixin:
                         
                     while client_state.get("running", False):
                         try:
-                            if getattr(self, "_remote_disconnect_requested", False):
-                                self._remote_disconnect_requested = False
-                                print("[Host] Nhan tin hieu remote_disconnect: reset capture sang console desktop...")
-                                client_state["force_update"] = True
-                                client_state.pop("prev_sent_img", None)
-                                time.sleep(0.3)
-                                break
+                            if client_state.get("_got_frame"):
+                                if getattr(self, "_remote_disconnect_requested", False):
+                                    self._remote_disconnect_requested = False
+                                    print("[Host] Nhan tin hieu remote_disconnect: reset capture sang console desktop...")
+                                    client_state["force_update"] = True
+                                    client_state.pop("prev_sent_img", None)
+                                    time.sleep(0.3)
+                                    break
 
-                            try:
-                                if sys.platform == "win32":
-                                    cur_remote = bool(ctypes.windll.user32.GetSystemMetrics(4096))
-                                    if last_remote_session is not None and cur_remote != last_remote_session:
-                                        print(f"[Host] SM_REMOTESESSION thay doi ({last_remote_session} -> {cur_remote}). Reset capture sang console...")
+                                try:
+                                    if sys.platform == "win32":
+                                        cur_remote = bool(ctypes.windll.user32.GetSystemMetrics(4096))
+                                        if last_remote_session is not None and cur_remote != last_remote_session:
+                                            print(f"[Host] SM_REMOTESESSION thay doi ({last_remote_session} -> {cur_remote}). Reset capture sang console...")
+                                            last_remote_session = cur_remote
+                                            client_state["force_update"] = True
+                                            client_state.pop("prev_sent_img", None)
+                                            time.sleep(0.3)
+                                            break
                                         last_remote_session = cur_remote
-                                        client_state["force_update"] = True
-                                        client_state.pop("prev_sent_img", None)
-                                        time.sleep(0.3)
-                                        break
-                                    last_remote_session = cur_remote
-                            except Exception:
-                                pass
+                                except Exception:
+                                    pass
+                            else:
+                                self._remote_disconnect_requested = False
+                                try:
+                                    if sys.platform == "win32":
+                                        last_remote_session = bool(ctypes.windll.user32.GetSystemMetrics(4096))
+                                except Exception:
+                                    pass
                             if not client_state.get("_got_frame"):
                                 _now_w = time.time()
                                 if _now_w - client_state.get("_last_wake_ts", 0) >= 1.0:
@@ -2714,7 +2738,7 @@ class HostMixin:
                                     if grabbed:
                                         break
                                     time.sleep(0.01)
-                                if grabbed and _frame_is_nearly_black(frame_bgr):
+                                if grabbed and client_state.get("_got_frame") and _frame_is_nearly_black(frame_bgr):
                                     grabbed = False
                                 elif grabbed and on_uac and _frame_is_nearly_white(frame_bgr):
                                     grabbed = False
@@ -2756,7 +2780,7 @@ class HostMixin:
                                                 frame_bgr is not None 
                                                 and getattr(frame_bgr, "size", 0)
                                                 and not _frame_is_nearly_white(frame_bgr)
-                                                and not _frame_is_nearly_black(frame_bgr)
+                                                and not (client_state.get("_got_frame") and _frame_is_nearly_black(frame_bgr))
                                             )
                                             if fb_ok:
                                                 grabbed = True
@@ -2770,34 +2794,33 @@ class HostMixin:
                                             grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                             if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
                                                 attach_disconnected_session_to_console()
-                                                try:
-                                                    import win32ts
-                                                    c_state = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, win32ts.WTS_CURRENT_SESSION, win32ts.WTSConnectState)
-                                                    if c_state == 4:
-                                                        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
-                                                        self._capture_origin = origin
-                                                        grabbed = bool(
-                                                            frame_bgr is not None 
-                                                            and getattr(frame_bgr, "size", 0)
-                                                            and not _frame_is_nearly_white(frame_bgr)
-                                                            and not _frame_is_nearly_black(frame_bgr)
-                                                        )
-                                                except Exception:
-                                                    pass
+                                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                                self._capture_origin = origin
+                                                grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                         except Exception as e:
                                             print(f"[Host] GDI grab fallback failed: {e}")
 
                             if not grabbed or frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
                                 fail_streak = client_state.get("_grab_fail_streak", 0) + 1
                                 client_state["_grab_fail_streak"] = fail_streak
-                                if fail_streak >= 8:  # ~0.4s lien tuc khong bat duoc hinh (RDP vua dong)
-                                    print(f"[Host] Khong bat duoc hinh desktop ({fail_streak} lan). Reset capture sang console...")
-                                    client_state["_grab_fail_streak"] = 0
-                                    attach_disconnected_session_to_console()
-                                    client_state["force_update"] = True
-                                    client_state.pop("prev_sent_img", None)
-                                    time.sleep(0.3)
-                                    break
+                                # CHỈ break khi ĐÃ TỪNG có frame và session thực sự chuyển sang WTSDisconnected (4) do RDP vừa đóng
+                                if fail_streak >= 8 and client_state.get("_got_frame"):
+                                    is_disconnected = False
+                                    try:
+                                        import win32ts
+                                        c_state = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, win32ts.WTS_CURRENT_SESSION, win32ts.WTSConnectState)
+                                        if c_state == win32ts.WTSDisconnected:
+                                            is_disconnected = True
+                                    except Exception:
+                                        pass
+                                    if is_disconnected:
+                                        print(f"[Host] Session WTSDisconnected sau khi RDP dong ({fail_streak} lan). Reset capture sang console...")
+                                        client_state["_grab_fail_streak"] = 0
+                                        attach_disconnected_session_to_console()
+                                        client_state["force_update"] = True
+                                        client_state.pop("prev_sent_img", None)
+                                        time.sleep(0.3)
+                                        break
                                 time.sleep(0.05)
                                 continue
                             else:

@@ -1125,7 +1125,11 @@ def _worker_screen_size():
     try:
         import mss
         with mss.mss() as sct:
-            m = sct.monitors[0]
+            valid_mons = [m for m in sct.monitors[1:] if m.get("width", 0) > 0 and m.get("height", 0) > 0]
+            if len(valid_mons) == 1:
+                m = valid_mons[0]
+            else:
+                m = sct.monitors[0]
             mw, mh = int(m["width"]), int(m["height"])
             if mw > 0 and mh > 0:
                 return mw, mh, dict(m)

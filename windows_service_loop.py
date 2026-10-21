@@ -803,53 +803,45 @@ def _push_session_event(kind, session_id):
 
 def _handle_session_disconnect(session_id):
     """Khi người dùng đóng cửa sổ Microsoft RDP (WTS remote_disconnect),
-    chỉ khi session chuyển sang trạng thái Disconnected (4) thì mới gọi tscon
-    để chuyển sang màn hình desktop console mà không làm văng RDP lúc đang kết nối song song."""
+    chờ 1.5s để tránh can thiệp nhầm vào phiên RDP đang reconnect/kết nối lại,
+    sau đó nếu session thực sự vẫn Disconnected thì mới khôi phục về console desktop."""
     def _worker():
         try:
-            tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-            if not os.path.exists(tscon_exe):
+            # Chờ 1.5s để Windows hoàn tất chuyển đổi trạng thái nếu RDP đang reconnect
+            time.sleep(1.5)
+
+            sid_val = int(session_id)
+            if sid_val in (0, 0xFFFFFFFF, -1):
                 return
-            import subprocess
-            sids = []
+
+            # Kiểm tra xem có phiên RDP nào đang Active hoặc Connected không
             try:
-                sid_val = int(session_id)
-                if sid_val not in (0, 0xFFFFFFFF, -1):
-                    sids.append(sid_val)
-            except Exception:
-                pass
-            # Quét thêm tất cả các session Disconnected có user token
-            try:
-                sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
-                for s in sessions:
-                    sid = s.get("SessionId")
-                    if sid in (0, 0xFFFFFFFF, -1) or sid in sids:
-                        continue
-                    if s.get("State") == win32ts.WTSDisconnected:
-                        try:
-                            h_tok = win32ts.WTSQueryUserToken(sid)
-                            win32api.CloseHandle(h_tok)
-                            sids.append(sid)
-                        except Exception:
-                            pass
+                import ctypes
+                if ctypes.windll.user32.GetSystemMetrics(4096):  # SM_REMOTESESSION
+                    log(f"[Service] SM_REMOTESESSION đang bật, có client RDP đang kết nối. Bỏ qua.")
+                    return
             except Exception:
                 pass
 
-            for target_sid in sids:
-                # Kiểm tra chặt chẽ: chỉ gọi nếu session thực sự đã ngắt kết nối (Disconnected = 4)
-                # Tuyệt đối không gọi nếu session đang Active (RDP đang kết nối song song)!
+            # Kiểm tra trạng thái hiện tại của session
+            cur_state = None
+            try:
+                cur_state = win32ts.WTSQuerySessionInformation(
+                    win32ts.WTS_CURRENT_SERVER_HANDLE, sid_val, win32ts.WTSConnectState
+                )
+            except Exception:
+                pass
+
+            # CHỈ gọi nếu session vẫn đang là Disconnected (4)
+            if cur_state == win32ts.WTSDisconnected:
+                console_id = 0xFFFFFFFF
                 try:
-                    cur_state = win32ts.WTSQuerySessionInformation(
-                        win32ts.WTS_CURRENT_SERVER_HANDLE, target_sid, win32ts.WTSConnectState
-                    )
-                    if cur_state != win32ts.WTSDisconnected:
-                        log(f"[Service] Session {target_sid} có state={cur_state} (không phải Disconnected). Bỏ qua để bảo toàn phiên song song.")
-                        continue
+                    console_id = win32ts.WTSGetActiveConsoleSessionId()
                 except Exception:
                     pass
-
-                log(f"[Service] Đang khôi phục session {target_sid} về console sau khi đóng RDP...")
-                connect_session_to_console(target_sid)
+                if console_id != sid_val:
+                    log(f"[Service] Khôi phục session {sid_val} về console desktop sau khi đóng RDP...")
+                    connect_session_to_console(sid_val)
         except Exception as e:
             log(f"[Service] _handle_session_disconnect lỗi: {e}")
 
