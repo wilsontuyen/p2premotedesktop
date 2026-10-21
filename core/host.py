@@ -2326,6 +2326,7 @@ class HostMixin:
                 if not _is_legacy_windows_host():
                     self.after(0, self.show_host_connection_border)
                 self.wake_display()
+                attach_disconnected_session_to_console()
                 
                 self.active_clients[addr] = client_state
                 

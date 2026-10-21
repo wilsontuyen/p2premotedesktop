@@ -400,6 +400,12 @@ class Broker:
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
         elif kind in ("remote_disconnect", "console_disconnect"):
             self._broadcast_workers({"cmd": "remote_disconnect", "session": sid})
+            if sid not in (None, 0, 0xFFFFFFFF, -1):
+                try:
+                    from core.host import connect_session_to_console
+                    connect_session_to_console(sid)
+                except Exception as e:
+                    print(f"[Broker] connect_session_to_console({sid}) error: {e}")
 
     def _on_power_event(self, info):
         kind = (info.get("kind") or "shutdown").lower()

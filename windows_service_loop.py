@@ -834,14 +834,8 @@ def _handle_session_disconnect(session_id):
 
             # CHỈ gọi nếu session vẫn đang là Disconnected (4)
             if cur_state == win32ts.WTSDisconnected:
-                console_id = 0xFFFFFFFF
-                try:
-                    console_id = win32ts.WTSGetActiveConsoleSessionId()
-                except Exception:
-                    pass
-                if console_id != sid_val:
-                    log(f"[Service] Khôi phục session {sid_val} về console desktop sau khi đóng RDP...")
-                    connect_session_to_console(sid_val)
+                log(f"[Service] Khôi phục session {sid_val} về console desktop sau khi đóng RDP...")
+                connect_session_to_console(sid_val)
         except Exception as e:
             log(f"[Service] _handle_session_disconnect lỗi: {e}")
 
