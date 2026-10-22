@@ -324,6 +324,11 @@ class SavedListMixin:
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
 
         def connect_computer(item):
+            now = time.time()
+            if getattr(self, '_last_saved_connect_time', 0) > now - 0.8:
+                return
+            self._last_saved_connect_time = now
+            print(f"[PCLIST] connect_computer: {item.get('name')} ({item.get('id')})")
             self.partner_id_var.set(item["id"])
             self.partner_pass_var.set(item["password"])
             # Giữ cửa sổ Danh sách Máy tính tiếp tục hiển thị theo yêu cầu người dùng
@@ -362,39 +367,48 @@ class SavedListMixin:
 
         def on_drag_motion(event):
             drag_id = getattr(self, 'drag_card_id', None)
-            if drag_id and not getattr(self, 'auto_scroll_job', None):
+            if not drag_id:
+                return
+
+            # Check threshold (6px) to distinguish single click/mouse jitter from actual dragging
+            start_x = getattr(self, '_drag_start_x', event.x_root)
+            start_y = getattr(self, '_drag_start_y', event.y_root)
+            if not getattr(self, '_is_dragging', False):
+                if abs(event.x_root - start_x) < 6 and abs(event.y_root - start_y) < 6:
+                    return
+                self._is_dragging = True
+
+            if not getattr(self, 'auto_scroll_job', None):
                 check_auto_scroll()
             
-            if drag_id:
-                self._is_dragging = True
-                try:
-                    x, y = event.x_root, event.y_root
-                    target_widget = dialog.winfo_containing(x, y)
-                    target_group = None
-                    if target_widget:
-                        w = target_widget
-                        while w:
-                            if getattr(w, 'is_group_header', False):
-                                target_group = w.group_name
-                                break
-                            if hasattr(w, 'comp_group'):
-                                target_group = w.comp_group
-                                break
-                            if str(w) == str(dialog):
-                                break
-                            parent_str = w.winfo_parent()
-                            if not parent_str: break
-                            w = w._nametowidget(parent_str)
-                    
-                    if scrollable_frame.winfo_exists():
-                        for c in scrollable_frame.winfo_children():
-                            if getattr(c, 'is_group_header', False):
-                                if target_group is not None and c.group_name == target_group:
-                                    c["fg"] = self.btn_color
-                                else:
-                                    c["fg"] = self.text_gray
-                except Exception:
-                    pass
+            try:
+                x, y = event.x_root, event.y_root
+                target_widget = dialog.winfo_containing(x, y)
+                target_group = None
+                if target_widget:
+                    w = target_widget
+                    while w:
+                        if getattr(w, 'is_group_header', False):
+                            target_group = w.group_name
+                            break
+                        if hasattr(w, 'comp_group'):
+                            target_group = w.comp_group
+                            break
+                        if str(w) == str(dialog):
+                            break
+                        parent_str = w.winfo_parent()
+                        if not parent_str: break
+                        w = w._nametowidget(parent_str)
+                
+                if scrollable_frame.winfo_exists():
+                    for c in scrollable_frame.winfo_children():
+                        if getattr(c, 'is_group_header', False):
+                            if target_group is not None and c.group_name == target_group:
+                                c["fg"] = self.btn_color
+                            else:
+                                c["fg"] = self.text_gray
+            except Exception:
+                pass
 
         def on_drop(event):
             if getattr(self, 'auto_scroll_job', None):
@@ -415,11 +429,18 @@ class SavedListMixin:
             was_dragging = getattr(self, '_is_dragging', False)
             self._is_dragging = False
             drag_id = getattr(self, 'drag_card_id', None)
-            if not drag_id: return
+            comp_data = getattr(self, 'drag_comp_data', None)
             self.drag_card_id = None
+            self.drag_comp_data = None
+            self._drag_start_x = None
+            self._drag_start_y = None
+            if not drag_id: return
             
-            # Only process drop if user actually dragged (B1-Motion fired)
-            if not was_dragging: return
+            # If user clicked without dragging, immediately connect to the computer!
+            if not was_dragging:
+                if comp_data:
+                    connect_computer(comp_data)
+                return
             
             x, y = event.x_root, event.y_root
             target_widget = dialog.winfo_containing(x, y)
@@ -720,14 +741,17 @@ class SavedListMixin:
                     def show_context_menu(event, menu=context_menu):
                         menu.tk_popup(event.x_root, event.y_root)
                             
-                    def start_drag(event, c_id=clean_id):
+                    def start_drag(event, c_id=clean_id, c_data=comp):
                         self.drag_card_id = c_id
+                        self.drag_comp_data = c_data
+                        self._drag_start_x = event.x_root
+                        self._drag_start_y = event.y_root
                         self._is_dragging = False
 
                     for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
                         w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
                         w.bind("<ButtonRelease-3>", show_context_menu)
-                        w.bind("<ButtonPress-1>", start_drag)
+                        w.bind("<ButtonPress-1>", lambda e, c_id=clean_id, c_data=comp: start_drag(e, c_id, c_data))
                         w.bind("<B1-Motion>", on_drag_motion)
                         w.bind("<ButtonRelease-1>", on_drop)
                         try:

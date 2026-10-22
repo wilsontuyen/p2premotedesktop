@@ -403,7 +403,9 @@ class Broker:
             if sid not in (None, 0, 0xFFFFFFFF, -1):
                 try:
                     from core.host import connect_session_to_console
-                    connect_session_to_console(sid)
+                    ok = connect_session_to_console(sid)
+                    if ok:
+                        self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
                 except Exception as e:
                     print(f"[Broker] connect_session_to_console({sid}) error: {e}")
 

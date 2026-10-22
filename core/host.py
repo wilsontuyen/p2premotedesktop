@@ -571,7 +571,16 @@ def _host_wts_phase_listener():
             ]
 
         WM_WTSSESSION_CHANGE = 0x02B1
-        names = {5: "logon", 6: "logoff", 7: "lock", 8: "unlock"}
+        names = {
+            1: "console_connect",
+            2: "console_disconnect",
+            3: "remote_connect",
+            4: "remote_disconnect",
+            5: "logon",
+            6: "logoff",
+            7: "lock",
+            8: "unlock",
+        }
 
         def wndproc(hwnd, msg, wparam, lparam):
             if msg == WM_WTSSESSION_CHANGE:
@@ -581,11 +590,25 @@ def _host_wts_phase_listener():
                     _wts_phase("logoff")
                     print(f"[Host] WTS_SESSION_LOGOFF session={int(lparam)} — Signing out, capture loop Winlogon")
                 elif code == 7:
+                    # Kiểm tra xem session có đang Disconnected không (RDP đóng gây lock)
+                    st = None
+                    try:
+                        import win32ts
+                        st = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, int(lparam), win32ts.WTSConnectState)
+                    except Exception:
+                        pass
+                    if st == 4:
+                        print(f"[Host] WTS_SESSION_LOCK nhưng session {int(lparam)} Disconnected -> RDP đóng. Phục hồi console.")
+                        attach_disconnected_session_to_console()
+                        return 0
                     _wts_phase("lock")
                     print(f"[Host] WTS_SESSION_LOCK session={int(lparam)} — LogonUI khóa")
                 elif code in (5, 8):
                     _wts_phase("none")
                     print(f"[Host] WTS {kind} — hết lock/logoff")
+                elif code in (2, 4):  # console_disconnect hoặc remote_disconnect (RDP đóng)
+                    print(f"[Host] WTS {kind} session={int(lparam)} -> RDP đóng. Phục hồi console.")
+                    attach_disconnected_session_to_console()
                 return 0
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
@@ -907,10 +930,29 @@ def _clip_tile_onto_canvas(canvas, tile, x, y, mask_black=False):
 
 _last_tscon_call_time = 0.0
 
+def _get_tscon_path():
+    """Tìm đường dẫn thực tế tới tscon.exe, xử lý chuyển hướng WOW64 trên Windows 64-bit."""
+    sys_root = os.environ.get("SystemRoot", r"C:\Windows")
+    sysnative_tscon = os.path.join(sys_root, "Sysnative", "tscon.exe")
+    if os.path.exists(sysnative_tscon):
+        return sysnative_tscon
+    system32_tscon = os.path.join(sys_root, "System32", "tscon.exe")
+    if os.path.exists(system32_tscon):
+        return system32_tscon
+    return "tscon.exe"
+
 def connect_session_to_console(source_session_id):
     """Kết nối session về console desktop mà không chạy qua cmd.exe / shell=True."""
     if sys.platform != "win32":
         return False
+    try:
+        sid_int = int(source_session_id)
+    except Exception:
+        return False
+    if sid_int in (0, 0xFFFFFFFF, -1):
+        return False
+
+    # 1. Thử WTSConnectSessionW nếu target console khác source session
     try:
         wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
         wtsapi32.WTSConnectSessionW.argtypes = [
@@ -924,24 +966,33 @@ def connect_session_to_console(source_session_id):
             target_console_id = win32ts.WTSGetActiveConsoleSessionId()
         except Exception:
             pass
-        if target_console_id in (0xFFFFFFFF, -1):
-            target_console_id = 1
 
-        ok = wtsapi32.WTSConnectSessionW(int(target_console_id), int(source_session_id), "", False)
-        if ok:
-            return True
+        if target_console_id not in (0xFFFFFFFF, -1, sid_int):
+            ok = wtsapi32.WTSConnectSessionW(int(target_console_id), sid_int, "", False)
+            if ok:
+                return True
     except Exception:
         pass
 
+    # 2. Gọi tscon.exe trực tiếp qua Sysnative / tắt WOW64 redirection
     try:
-        tscon_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tscon.exe")
-        if os.path.exists(tscon_exe):
-            import subprocess
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0  # SW_HIDE
+        tscon_exe = _get_tscon_path()
+        import subprocess
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
+
+        old_val = ctypes.c_void_p()
+        redir_disabled = False
+        try:
+            if hasattr(ctypes.windll.kernel32, "Wow64DisableWow64FsRedirection"):
+                redir_disabled = bool(ctypes.windll.kernel32.Wow64DisableWow64FsRedirection(ctypes.byref(old_val)))
+        except Exception:
+            pass
+
+        try:
             res = subprocess.run(
-                [tscon_exe, str(source_session_id), "/dest:console"],
+                [tscon_exe, str(sid_int), "/dest:console"],
                 shell=False,
                 startupinfo=startupinfo,
                 creationflags=0x08000000,  # CREATE_NO_WINDOW
@@ -949,6 +1000,12 @@ def connect_session_to_console(source_session_id):
                 timeout=3
             )
             return res.returncode == 0
+        finally:
+            if redir_disabled:
+                try:
+                    ctypes.windll.kernel32.Wow64RevertWow64FsRedirection(old_val)
+                except Exception:
+                    pass
     except Exception:
         pass
     return False
@@ -961,7 +1018,7 @@ def attach_disconnected_session_to_console():
         return
     global _last_tscon_call_time
     now = time.time()
-    if now - _last_tscon_call_time < 3.0:
+    if now - _last_tscon_call_time < 1.0:
         return
     _last_tscon_call_time = now
     try:

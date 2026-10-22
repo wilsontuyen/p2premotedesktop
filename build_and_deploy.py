@@ -49,6 +49,13 @@ def main():
         except: pass
 
     log("=== STARTING BUILD AND DEPLOYMENT ===")
+    # Đảm bảo full client build (không phải host-only)
+    flag_file = os.path.join(workspace_dir, "host_build_flag.py")
+    try:
+        with open(flag_file, "w", encoding="utf-8") as f:
+            f.write("HOST_ONLY_BUILD = False\n")
+    except Exception:
+        pass
     # Không tắt app/service đang chạy — build ra dist riêng, không đụng process đang mở.
 
     # Metadata for Anti-Virus (Reduces False Positives)

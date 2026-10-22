@@ -1,1 +1,1 @@
-HOST_ONLY_BUILD = True
+HOST_ONLY_BUILD = False
