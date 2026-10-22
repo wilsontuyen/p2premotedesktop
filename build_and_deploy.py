@@ -72,7 +72,7 @@ def main():
     service_product_name = "P2P Remote Desktop Service"
     service_desc = "Background Service for P2P Remote Desktop"
     nuitka_service_cmd = (
-        f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+        f'"{python_path}" -m nuitka --standalone --windows-console-mode=disable '
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
@@ -90,7 +90,7 @@ def main():
     app_product_name = "P2P Remote Desktop Client"
     app_desc = "Client GUI for P2P Remote Desktop"
     nuitka_cmd = (
-        f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
+        f'"{python_path}" -m nuitka --standalone --windows-console-mode=disable --enable-plugin=tk-inter '
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam --include-module=comtypes '
         f'--no-deployment-flag=excluded-module-usage '

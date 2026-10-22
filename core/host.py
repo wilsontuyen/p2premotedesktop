@@ -590,25 +590,11 @@ def _host_wts_phase_listener():
                     _wts_phase("logoff")
                     print(f"[Host] WTS_SESSION_LOGOFF session={int(lparam)} — Signing out, capture loop Winlogon")
                 elif code == 7:
-                    # Kiểm tra xem session có đang Disconnected không (RDP đóng gây lock)
-                    st = None
-                    try:
-                        import win32ts
-                        st = win32ts.WTSQuerySessionInformation(win32ts.WTS_CURRENT_SERVER_HANDLE, int(lparam), win32ts.WTSConnectState)
-                    except Exception:
-                        pass
-                    if st == 4:
-                        print(f"[Host] WTS_SESSION_LOCK nhưng session {int(lparam)} Disconnected -> RDP đóng. Phục hồi console.")
-                        attach_disconnected_session_to_console()
-                        return 0
                     _wts_phase("lock")
                     print(f"[Host] WTS_SESSION_LOCK session={int(lparam)} — LogonUI khóa")
                 elif code in (5, 8):
                     _wts_phase("none")
                     print(f"[Host] WTS {kind} — hết lock/logoff")
-                elif code in (2, 4):  # console_disconnect hoặc remote_disconnect (RDP đóng)
-                    print(f"[Host] WTS {kind} session={int(lparam)} -> RDP đóng. Phục hồi console.")
-                    attach_disconnected_session_to_console()
                 return 0
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
@@ -966,11 +952,12 @@ def connect_session_to_console(source_session_id):
             target_console_id = win32ts.WTSGetActiveConsoleSessionId()
         except Exception:
             pass
+        if target_console_id in (0xFFFFFFFF, -1):
+            target_console_id = 1
 
-        if target_console_id not in (0xFFFFFFFF, -1, sid_int):
-            ok = wtsapi32.WTSConnectSessionW(int(target_console_id), sid_int, "", False)
-            if ok:
-                return True
+        ok = wtsapi32.WTSConnectSessionW(int(target_console_id), sid_int, "", False)
+        if ok:
+            return True
     except Exception:
         pass
 
@@ -999,7 +986,20 @@ def connect_session_to_console(source_session_id):
                 capture_output=True,
                 timeout=3
             )
-            return res.returncode == 0
+            if res.returncode == 0:
+                return True
+            if target_console_id not in (0xFFFFFFFF, -1, sid_int):
+                res2 = subprocess.run(
+                    [tscon_exe, str(sid_int), f"/dest:{target_console_id}"],
+                    shell=False,
+                    startupinfo=startupinfo,
+                    creationflags=0x08000000,
+                    capture_output=True,
+                    timeout=3
+                )
+                if res2.returncode == 0:
+                    return True
+            return False
         finally:
             if redir_disabled:
                 try:
@@ -1018,7 +1018,7 @@ def attach_disconnected_session_to_console():
         return
     global _last_tscon_call_time
     now = time.time()
-    if now - _last_tscon_call_time < 1.0:
+    if now - _last_tscon_call_time < 3.0:
         return
     _last_tscon_call_time = now
     try:
@@ -1908,6 +1908,11 @@ class HostMixin:
         if sys.platform == "win32":
             set_windows_graphics_effects(True)
             boost_process_priority()
+            try:
+                # Giữ hệ thống và màn hình luôn sẵn sàng trong khi Host đang chờ kết nối
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001 | 0x00000002)
+            except Exception:
+                pass
         global BOUND_PORT
         bound = False
         for port in PORTS_TO_TRY:

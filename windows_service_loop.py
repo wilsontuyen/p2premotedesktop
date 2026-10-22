@@ -313,12 +313,13 @@ def connect_session_to_console(source_session_id):
             target_console_id = win32ts.WTSGetActiveConsoleSessionId()
         except Exception:
             pass
+        if target_console_id in (0xFFFFFFFF, -1):
+            target_console_id = 1
 
-        if target_console_id not in (0xFFFFFFFF, -1, sid_int):
-            ok = wtsapi32.WTSConnectSessionW(int(target_console_id), sid_int, "", False)
-            if ok:
-                log(f"[Service] WTSConnectSessionW thành công: session {sid_int} -> console {target_console_id}")
-                return True
+        ok = wtsapi32.WTSConnectSessionW(int(target_console_id), sid_int, "", False)
+        if ok:
+            log(f"[Service] WTSConnectSessionW thành công: session {sid_int} -> console {target_console_id}")
+            return True
     except Exception as e:
         log(f"[Service] WTSConnectSessionW thất bại ({e}), dùng fallback tscon.exe")
 
@@ -349,8 +350,22 @@ def connect_session_to_console(source_session_id):
                 capture_output=True,
                 timeout=3
             )
-            log(f"[Service] tscon.exe (shell=False): returncode={res.returncode}")
-            return res.returncode == 0
+            log(f"[Service] tscon.exe (shell=False /dest:console): returncode={res.returncode}")
+            if res.returncode == 0:
+                return True
+            if target_console_id not in (0xFFFFFFFF, -1, sid_int):
+                res2 = subprocess.run(
+                    [tscon_exe, str(sid_int), f"/dest:{target_console_id}"],
+                    shell=False,
+                    startupinfo=startupinfo,
+                    creationflags=0x08000000,
+                    capture_output=True,
+                    timeout=3
+                )
+                log(f"[Service] tscon.exe (/dest:{target_console_id}): returncode={res2.returncode}")
+                if res2.returncode == 0:
+                    return True
+            return False
         finally:
             if redir_disabled:
                 try:
@@ -838,27 +853,27 @@ def _push_session_event(kind, session_id):
 
 
 def _handle_session_disconnect(session_id):
-    """Khi người dùng đóng cửa sổ Microsoft RDP (WTS remote_disconnect hoặc console_disconnect),
-    chờ 1s để Windows hoàn tất chuyển đổi trạng thái,
+    """Khi người dùng đóng cửa sổ Microsoft RDP (WTS remote_disconnect),
+    chờ 1.5s để tránh can thiệp nhầm vào phiên RDP đang reconnect/kết nối lại,
     sau đó nếu session thực sự vẫn Disconnected thì mới khôi phục về console desktop."""
     def _worker():
         try:
-            time.sleep(1.0)
+            time.sleep(1.5)
 
             sid_val = int(session_id)
             if sid_val in (0, 0xFFFFFFFF, -1):
                 return
 
-            # Kiểm tra xem có phiên RDP nào khác đang Active hoặc Connected không
+            # Kiểm tra xem có phiên RDP nào đang Active hoặc Connected không
             try:
                 sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
                 for s in sessions:
                     s_id = s.get("SessionId")
                     s_state = s.get("State")
                     s_name = (s.get("WinStationName") or "").lower()
-                    if s_id != sid_val and s_state in (win32ts.WTSActive, win32ts.WTSConnected):
+                    if s_state in (win32ts.WTSActive, win32ts.WTSConnected):
                         if "rdp" in s_name or "tcp" in s_name:
-                            log(f"[Service] Có phiên RDP khác (session {s_id}) đang kết nối. Bỏ qua.")
+                            log(f"[Service] Có phiên RDP (session {s_id}, {s_name}) đang kết nối. Bỏ qua.")
                             return
             except Exception:
                 pass
@@ -964,24 +979,10 @@ def wts_session_notification_thread():
             if code == 6:
                 _push_session_event("logoff", sid)
             elif code == 7:
-                # Kiểm tra xem session có phải đang ở trạng thái Disconnected không
-                # Khi đóng RDP trên Win10/11, Windows thường gửi lock cho session vừa bị disconnect
-                state = None
-                try:
-                    state = win32ts.WTSQuerySessionInformation(
-                        win32ts.WTS_CURRENT_SERVER_HANDLE, sid, win32ts.WTSConnectState
-                    )
-                except Exception:
-                    pass
-                if state == win32ts.WTSDisconnected:
-                    log(f"WTS_SESSION_LOCK nhưng session {sid} đang Disconnected -> RDP đóng. Khôi phục console desktop.")
-                    _handle_session_disconnect(sid)
-                    _push_session_event("remote_disconnect", sid)
-                else:
-                    _push_session_event("lock", sid)
+                _push_session_event("lock", sid)
             elif code in (5, 8):
                 _push_session_event("interactive", sid)
-            elif code in (2, 4):  # 2 = console_disconnect, 4 = remote_disconnect
+            elif code == 4:  # remote_disconnect (CHỈ khi người dùng đóng cửa sổ Ms RDP)
                 _handle_session_disconnect(sid)
                 _push_session_event("remote_disconnect", sid)
             return 0
@@ -1150,24 +1151,6 @@ def main():
                 win32api.CloseHandle(h_token)
             except Exception:
                 pass
-
-            # Kiểm tra trạng thái kết nối của active_session_id
-            active_state = None
-            try:
-                active_state = win32ts.WTSQuerySessionInformation(
-                    win32ts.WTS_CURRENT_SERVER_HANDLE, active_session_id, win32ts.WTSConnectState
-                )
-            except Exception:
-                pass
-
-            # Nếu session có user đã đăng nhập nhưng đang ở trạng thái Disconnected (do vừa đóng RDP)
-            # thì tự động phục hồi session về console desktop ngay lập tức!
-            if is_logged_in and active_state == win32ts.WTSDisconnected:
-                log(f"[Service] Session {active_session_id} có user nhưng đang Disconnected. Khôi phục về console desktop...")
-                ok = connect_session_to_console(active_session_id)
-                if ok:
-                    notify_broker_session_event("interactive", active_session_id)
-                time.sleep(0.3)
 
             # Check if screen is locked (LogonUI is running)
             is_screen_locked = is_logon_ui_running(active_session_id)

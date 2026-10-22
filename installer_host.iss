@@ -48,17 +48,19 @@ Name: "{group}\Uninstall Easy Remote Desktop Host"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop Host"; Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostAgent"" dir=in action=allow program=""{app}\RemoteDesktopHost.exe"" enable=yes profile=any"; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostService"" dir=in action=allow program=""{app}\RemoteDesktopHostService.exe"" enable=yes profile=any"; Flags: runhidden
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopHostAgent"" /tr ""\""{app}\RemoteDesktopHostService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\task_creation.log"" 2>&1"; Flags: runhidden
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -EncodedCommand JAB0ACAAPQAgAEcAZQB0AC0AUwBjAGgAZQBkAHUAbABlAGQAVABhAHMAawAgAC0AVABhAHMAawBOAGEAbQBlACAAJwBFAGEAcwB5AFIAZQBtAG8AdABlAEQAZQBzAGsAdABvAHAASABvAHMAdABBAGcAZQBuAHQAJwAgAC0ARQByAHIAbwByAEEAYwB0AGkAbwBuACAAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQA7ACAAaQBmACAAKAAkAHQAKQAgAHsAIAAkAHQALgBTAGUAdAB0AGkAbgBnAHMALgBEAGkAcwBhAGwAbABvAHcAUwB0AGEAcgB0AEkAZgBPAG4AQgBhAHQAdABlAHIAaQBlAHMAIAA9ACAAJABmAGEAbABzAGUAOwAgACQAdAAuAFMAZQB0AHQAaQBuAGcAcwAuAFMAdABvAHAASQBmAEcAbwBpAG4AZwBPAG4AQgBhAHQAdABlAHIAaQBlAHMAIAA9ACAAJABmAGEAbABzAGUAOwAgACQAdAAuAFMAZQB0AHQAaQBuAGcAcwAuAEUAeABlAGMAdQB0AGkAbwBuAFQAaQBtAGUATABpAG0AaQB0ACAAPQAgACcAUABUADAAUwAnADsAIABTAGUAdAAtAFMAYwBoAGUAZAB1AGwAZQBkAFQAYQBzAGsAIAAtAEkAbgBwAHUAdABPAGIAagBlAGMAdAAgACQAdAAgAH0A"; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$t = Get-ScheduledTask -TaskName 'EasyRemoteDesktopHostAgent' -ErrorAction SilentlyContinue; if ($t) {{ $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }"""; Flags: runhidden
 Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopHostAgent"" > ""{app}\task_run.log"" 2>&1"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/delete /tn ""EasyRemoteDesktopHostAgent"" /f"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/F /IM RemoteDesktopHostService.exe"; Flags: runhidden waituntilterminated

@@ -185,7 +185,7 @@ def main():
 
     log("Building RemoteDesktopHostService via Nuitka (standalone)...")
     service_cmd = (
-        f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+        f'"{python_path}" -m nuitka --standalone --windows-console-mode=disable '
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
