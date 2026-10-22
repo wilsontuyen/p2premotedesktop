@@ -177,6 +177,7 @@ def setup_host_ui(self):
         font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color,
     )
     header.pack(pady=(15, 12))
+    self.header_label = header
 
     panel = tk.Frame(self, bg=self.card_color, bd=0, relief=tk.FLAT)
     self._left_panel = panel

@@ -661,7 +661,11 @@ def E(text):
 
 def setup_windows_ui(self):
     from gui.components import ToolTip
-    if getattr(self, "is_host_only", False):
+    try:
+        from host_build_flag import HOST_ONLY_BUILD
+    except Exception:
+        HOST_ONLY_BUILD = False
+    if HOST_ONLY_BUILD or getattr(self, "is_host_only", False):
         from gui.host_ui import setup_host_ui
         setup_host_ui(self)
         return

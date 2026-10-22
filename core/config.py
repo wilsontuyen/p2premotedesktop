@@ -43,6 +43,12 @@ def is_host_only_mode():
     if "--host" in sys.argv or "--host-only" in sys.argv:
         return True
     try:
+        from host_build_flag import HOST_ONLY_BUILD
+        if HOST_ONLY_BUILD:
+            return True
+    except Exception:
+        pass
+    try:
         name = os.path.basename(sys.executable if getattr(sys, "frozen", False) else sys.argv[0]).lower()
         return ("host" in name) and ("service" not in name)
     except Exception:

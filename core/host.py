@@ -805,18 +805,18 @@ def set_windows_graphics_effects(enabled=True):
     try:
         import ctypes
         # Font Smoothing (ClearType) - LUÔN LUÔN BẬT ĐỂ CHỮ MỊN VÀ SẮC NÉT TRÊN MỌI BẢN WINDOWS (7, 10, 11)
-        # Tuyệt đối không tắt vì sẽ làm font chữ răng cưa, vỡ nét, biến dạng như Windows 95
-        ctypes.windll.user32.SystemParametersInfoW(0x004B, 1, None, 3)  # SPI_SETFONTSMOOTHING = 1
-        ctypes.windll.user32.SystemParametersInfoW(0x200B, 0, ctypes.c_void_p(2), 3)  # SPI_SETFONTSMOOTHINGTYPE = ClearType (2)
+        flag = 0  # Apply in-memory, avoid broadcasting WM_SETTINGCHANGE which can freeze/blank GDI windows on Intel UHD
+        ctypes.windll.user32.SystemParametersInfoW(0x004B, 1, None, flag)  # SPI_SETFONTSMOOTHING = 1
+        ctypes.windll.user32.SystemParametersInfoW(0x200B, 0, ctypes.c_void_p(2), flag)  # SPI_SETFONTSMOOTHINGTYPE = ClearType (2)
         
         # Drag Full Windows
-        ctypes.windll.user32.SystemParametersInfoW(0x0025, 1, None, 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x0025, 1, None, flag)
         
         # Menu Animation
-        ctypes.windll.user32.SystemParametersInfoW(0x1003, 1 if enabled else 0, None, 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x1003, 1 if enabled else 0, None, flag)
         
         # UI Effects
-        ctypes.windll.user32.SystemParametersInfoW(0x103E, 1, None, 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x103E, 1, None, flag)
         
         # Window Animations (iMinAnimate)
         class ANIMATIONINFO(ctypes.Structure):
@@ -824,7 +824,7 @@ def set_windows_graphics_effects(enabled=True):
         info = ANIMATIONINFO()
         info.cbSize = ctypes.sizeof(ANIMATIONINFO)
         info.iMinAnimate = 1 if enabled else 0
-        ctypes.windll.user32.SystemParametersInfoW(0x0049, info.cbSize, ctypes.byref(info), 3)
+        ctypes.windll.user32.SystemParametersInfoW(0x0049, info.cbSize, ctypes.byref(info), flag)
         
         print(f"[Host] Set Windows graphics effects to: {enabled} (ClearType always ON)")
     except Exception as e:
@@ -1026,6 +1026,18 @@ def attach_disconnected_session_to_console():
         current_sid = ctypes.c_ulong()
         if kernel32.ProcessIdToSessionId(kernel32.GetCurrentProcessId(), ctypes.byref(current_sid)):
             sid = current_sid.value
+            if sid in (0, 0xFFFFFFFF):
+                try:
+                    import win32ts
+                    sessions = win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0)
+                    for s in sessions:
+                        s_id = s.get("SessionId")
+                        if s_id not in (0, 0xFFFFFFFF, -1) and s.get("State") in (win32ts.WTSActive, win32ts.WTSConnected, win32ts.WTSDisconnected):
+                            sid = s_id
+                            break
+                except Exception:
+                    pass
+
             if sid not in (0, 0xFFFFFFFF):
                 state = None
                 try:
@@ -1099,6 +1111,14 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
             hdc = user32.GetDC(0)
             if hdc:
                 blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)
+        if not blt_ok:
+            # Re-attach console nếu BitBlt thất bại (thường gặp trên Windows Server khi session bị Disconnected)
+            attach_disconnected_session_to_console()
+            time.sleep(0.1)
+            hdc_retry = user32.GetDC(0)
+            if hdc_retry:
+                blt_ok = gdi32.BitBlt(memdc, 0, 0, w, h, hdc_retry, 0, 0, 0x00CC0020)
+                user32.ReleaseDC(0, hdc_retry)
         if not blt_ok:
             raise RuntimeError("GDI BitBlt failed")
 
@@ -2866,8 +2886,8 @@ class HostMixin:
                             if not grabbed or frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
                                 fail_streak = client_state.get("_grab_fail_streak", 0) + 1
                                 client_state["_grab_fail_streak"] = fail_streak
-                                # CHỈ break khi ĐÃ TỪNG có frame và session thực sự chuyển sang WTSDisconnected (4) do RDP vừa đóng
-                                if fail_streak >= 8 and client_state.get("_got_frame"):
+                                # Phục hồi session console khi WTSDisconnected (kể cả trước hay sau khi đã có frame)
+                                if fail_streak >= 6:
                                     is_disconnected = False
                                     try:
                                         import win32ts
@@ -2877,11 +2897,19 @@ class HostMixin:
                                     except Exception:
                                         pass
                                     if is_disconnected:
-                                        print(f"[Host] Session WTSDisconnected sau khi RDP dong ({fail_streak} lan). Reset capture sang console...")
+                                        print(f"[Host] Session WTSDisconnected ({fail_streak} lần thử). Reset capture sang console...")
                                         client_state["_grab_fail_streak"] = 0
                                         attach_disconnected_session_to_console()
                                         client_state["force_update"] = True
                                         client_state.pop("prev_sent_img", None)
+                                        time.sleep(0.3)
+                                        break
+                                    elif fail_streak >= 15 and not client_state.get("_got_frame"):
+                                        print(f"[Host] Chưa có frame sau {fail_streak} lần thử. Gọi khôi phục console desktop...")
+                                        client_state["_grab_fail_streak"] = 0
+                                        attach_disconnected_session_to_console()
+                                        if hasattr(self, "wake_display"):
+                                            self.wake_display()
                                         time.sleep(0.3)
                                         break
                                 time.sleep(0.05)

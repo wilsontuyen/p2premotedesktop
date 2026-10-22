@@ -396,10 +396,20 @@ class Broker:
             self._broadcast_workers({"cmd": "session_phase", "phase": "logoff"})
         elif kind == "lock":
             self._broadcast_workers({"cmd": "session_phase", "phase": "lock"})
-        elif kind in ("interactive", "logon", "unlock"):
+        elif kind in ("interactive", "logon", "unlock", "connect"):
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
-        elif kind == "remote_disconnect":
+        elif kind == "session_switch":
+            self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
+            self._bump_handoff(f"session_switch to session {sid}")
+        elif kind in ("remote_disconnect", "console_disconnect"):
             self._broadcast_workers({"cmd": "remote_disconnect", "session": sid})
+            if sid not in (None, 0, 0xFFFFFFFF, -1):
+                try:
+                    from core.host import connect_session_to_console
+                    ok = connect_session_to_console(sid)
+                    print(f"[Broker] connect_session_to_console({sid}) -> {ok}")
+                except Exception as e:
+                    print(f"[Broker] connect_session_to_console({sid}) error: {e}")
 
     def _on_power_event(self, info):
         kind = (info.get("kind") or "shutdown").lower()
@@ -497,8 +507,15 @@ class Broker:
         print(f"[Broker] Worker moi active: pid={w.pid} session={w.session} "
               f"desktop={w.desktop} {w.width}x{w.height}"
               + (f" (thay pid={old.pid})" if old else ""))
-        # Khong handoff ngay khi Winlogon dang ky: process moi chua kip gui frame.
-        # Default PrintWindow Signing out; doi data sock Default chet roi moi gan worker moi.
+        # Khi worker moi thuoc session khac (vi du Windows Server chuyen Console sang Ms RDP hoac nguoc lai)
+        # hoac khi logon hoan tat (winlogon -> default): bump handoff ngay de viewer cap nhat data channel sang worker moi.
+        if old and old is not w:
+            if old.session != w.session:
+                print(f"[Broker] Session worker thay doi ({old.session} -> {w.session}). Handoff sang worker moi.")
+                self._bump_handoff(f"session changed {old.session} -> {w.session}")
+            elif old.desktop == "winlogon" and w.desktop == "default":
+                print(f"[Broker] Desktop logon xong ({old.desktop} -> {w.desktop}). Handoff sang default worker.")
+                self._bump_handoff("login completed to default")
         # Giu control socket song; neu worker chet, doc se loi -> danh dau
         try:
             while True:
@@ -671,6 +688,18 @@ class Broker:
 
             if worker is None:
                 worker = self._get_active_worker(timeout=8.0)
+            if worker and getattr(worker, "session", None) not in (None, 0, 0xFFFFFFFF, -1):
+                try:
+                    import win32ts
+                    w_state = win32ts.WTSQuerySessionInformation(
+                        win32ts.WTS_CURRENT_SERVER_HANDLE, int(worker.session), win32ts.WTSConnectState
+                    )
+                    if w_state == win32ts.WTSDisconnected:
+                        print(f"[Broker] Viewer ket noi khi session {worker.session} dang Disconnected. Khoi phuc console ngay...")
+                        from core.host import connect_session_to_console
+                        connect_session_to_console(worker.session)
+                except Exception as e:
+                    print(f"[Broker] Kiem tra session disconnect viewer loi: {e}")
             host_w = (worker.width if worker else 0) or 1920
             host_h = (worker.height if worker else 0) or 1080
             import platform

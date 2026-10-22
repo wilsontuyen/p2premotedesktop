@@ -376,13 +376,21 @@ def connect_session_to_console(source_session_id):
         log(f"[Service] tscon.exe lỗi: {te}")
     return False
 
-def get_active_session_id():
-    """Session tuong tac (khac Session 0).
-    User dang login / Signing out: uu tien WTSActive (session cu con man Signing out).
-    Chua login: WTSGetActiveConsoleSessionId hoac WTSConnected.
-    TUYỆT ĐỐI không gọi connect_session_to_console ở đây để tránh cướp session khi Ms RDP đang kết nối."""
+def get_active_session_id(preferred_sid=None):
+    """Session tương tác (khác Session 0).
+    Ưu tiên:
+    0. preferred_sid nếu hợp lệ và đang Active hoặc Connected.
+    1. Session RDP (WinStationName chứa 'rdp' hoặc 'tcp#') đang Active hoặc Connected/ConnectQuery (Windows Server/Client multi-session).
+    2. Session đang Active (người dùng đang tương tác, console).
+    3. Session Console từ WTSGetActiveConsoleSessionId.
+    4. Session WTSConnected (đang kết nối).
+    5. Session WTSDisconnected có token user.
+    6. Bất kỳ session WTSDisconnected nào còn lại.
+    TUYỆT ĐỐI không gọi connect_session_to_console ở đây để tránh cướp session khi Ms RDP đang kết nối.
+    """
     WTSActive = 0
     WTSConnected = 1
+    WTSConnectQuery = 2
     WTSDisconnected = 4
     invalid = {0xFFFFFFFF, -1, 0}
 
@@ -392,7 +400,31 @@ def get_active_session_id():
     except Exception as e:
         log(f"Lỗi liệt kê các session WTS: {e}")
 
-    # 1. Tìm session đang Active (người dùng đang tương tác)
+    sess_map = {}
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid not in invalid:
+            sess_map[sid] = s
+
+    # 0. Kiểm tra preferred_sid (từ sự kiện WTS connect/logon vừa xảy ra)
+    if preferred_sid is not None and preferred_sid not in invalid:
+        ps = sess_map.get(preferred_sid)
+        if ps and ps.get("State") in (WTSActive, WTSConnected, WTSConnectQuery):
+            return preferred_sid
+
+    # 1. Ưu tiên phiên RDP (Remote Desktop) đang Active hoặc Connected/ConnectQuery
+    # Trên Windows Server, phiên Ms RDP nằm ở Session riêng (ví dụ Session 2, 'RDP-Tcp#0')
+    # trong khi Console (Session 1) vẫn tồn tại. Phải ưu tiên phiên RDP này để bám theo màn hình RDP!
+    for s in sessions:
+        sid = s.get("SessionId")
+        if sid in invalid:
+            continue
+        s_name = (s.get("WinStationName") or "").lower()
+        is_rdp = ("rdp" in s_name or "tcp#" in s_name) and s_name != "rdp-tcp"
+        if is_rdp and s.get("State") in (WTSActive, WTSConnected, WTSConnectQuery):
+            return sid
+
+    # 2. Tìm session đang Active (người dùng đang tương tác trực tiếp ở console)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
@@ -400,24 +432,28 @@ def get_active_session_id():
         if s.get("State") == WTSActive:
             return sid
 
-    # 2. Kiểm tra Console Session nếu có
+    # 3. Kiểm tra Console Session nếu có
     console = 0xFFFFFFFF
     try:
         console = win32ts.WTSGetActiveConsoleSessionId()
     except Exception:
         pass
     if console not in invalid:
-        return console
+        cs = sess_map.get(console)
+        if cs and cs.get("State") in (WTSActive, WTSConnected, WTSConnectQuery, WTSDisconnected):
+            return console
+        elif not cs:
+            return console
 
-    # 3. Kiểm tra session WTSConnected (đang kết nối)
+    # 4. Kiểm tra session WTSConnected (đang kết nối)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
             continue
-        if s.get("State") == WTSConnected:
+        if s.get("State") in (WTSConnected, WTSConnectQuery):
             return sid
 
-    # 4. Session Disconnected có token user (sau khi RDP đóng hoặc user khóa máy)
+    # 5. Session Disconnected có token user (sau khi RDP đóng hoặc user khóa máy)
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
@@ -433,13 +469,14 @@ def get_active_session_id():
             if has_user:
                 return sid
 
-    # 5. Bất kỳ session Disconnected nào còn lại
+    # 6. Bất kỳ session Disconnected nào còn lại
     for s in sessions:
         sid = s.get("SessionId")
         if sid in invalid:
             continue
         if s.get("State") == WTSDisconnected:
             return sid
+
     return 0xFFFFFFFF
 
 def is_logon_ui_running(session_id):
@@ -452,14 +489,17 @@ def is_logon_ui_running(session_id):
         log(f"Lỗi kiểm tra LogonUI: {e}")
     return False
 
-def find_winlogon_pid(session_id):
-    try:
-        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
-        for p in procs:
-            if p[0] == session_id and p[2].lower() == "winlogon.exe":
-                return p[1]
-    except Exception as e:
-        log(f"Lỗi liệt kê các tiến trình: {e}")
+def find_winlogon_pid(session_id, retries=3):
+    for attempt in range(max(1, retries)):
+        try:
+            procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+            for p in procs:
+                if p[0] == session_id and p[2].lower() == "winlogon.exe":
+                    return p[1]
+        except Exception as e:
+            log(f"Lỗi liệt kê các tiến trình: {e}")
+        if attempt < retries - 1:
+            time.sleep(0.2)
     return None
 
 def _is_host_service():
@@ -844,7 +884,7 @@ def _push_session_event(kind, session_id):
         _session_events.append({"kind": kind, "session_id": int(session_id), "ts": time.time()})
     _wake_service.set()
     # Bao worker ngay trong callback WTS — không đợi vòng lặp service (sleep 1s).
-    if kind in ("logoff", "lock", "interactive", "remote_disconnect"):
+    if kind in ("logoff", "lock", "interactive", "connect", "remote_disconnect"):
         notify_broker_session_event(kind, session_id)
     # Signing out: spawn Winlogon ngay, ke ca khi console session dang 0xFFFFFFFF
     # (neu doi vong lap main continue, hu man Signing out).
@@ -980,7 +1020,9 @@ def wts_session_notification_thread():
                 _push_session_event("logoff", sid)
             elif code == 7:
                 _push_session_event("lock", sid)
-            elif code in (5, 8):
+            elif code in (1, 3):  # console_connect (1) hoặc remote_connect (3 - Ms RDP kết nối)
+                _push_session_event("connect", sid)
+            elif code in (5, 8):  # logon (5) hoặc unlock (8)
                 _push_session_event("interactive", sid)
             elif code == 4:  # remote_disconnect (CHỈ khi người dùng đóng cửa sổ Ms RDP)
                 _handle_session_disconnect(sid)
@@ -1087,35 +1129,37 @@ def main():
     last_agent_spawn_ts = 0.0
     last_winlogon_spawn_ts = 0.0
     winlogon_standby_pid = None
+    preferred_session_id = None
 
     while True:
         try:
             if BROKER_MODE:
                 ensure_broker_running()
 
-            active_session_id = get_active_session_id()
+            active_session_id = get_active_session_id(preferred_sid=preferred_session_id)
 
             # Drain WTS TRUOC khi continue (console_disconnect = 0xFFFFFFFF luc Signing out).
             for ev in pop_session_events():
                 kind = ev.get("kind")
+                ev_sid = ev.get("session_id")
+                try:
+                    ev_sid_int = int(ev_sid)
+                except Exception:
+                    ev_sid_int = None
+
                 if kind == "logoff":
                     # Signing out: Default còn sống nhưng UI đã sang Winlogon (thường
                     # session mới). Spawn Winlogon ngay, không đợi mutex Default mất.
                     force_logoff_until = time.time() + 20.0
                     lock_pending_until = 0.0
                     log(
-                        f"WTS_SESSION_LOGOFF session={ev.get('session_id')}: "
+                        f"WTS_SESSION_LOGOFF session={ev_sid_int}: "
                         "spawn Winlogon song song (không kill Default)."
                     )
                     if BROKER_MODE:
                         sids = []
-                        try:
-                            ev_sid = int(ev.get("session_id"))
-                        except Exception:
-                            ev_sid = None
-                        # Session cu truoc, session active (moi) sau — worker moi dang ky last-wins.
-                        if ev_sid not in (None, 0xFFFFFFFF, -1, 0):
-                            sids.append(ev_sid)
+                        if ev_sid_int not in (None, 0xFFFFFFFF, -1, 0):
+                            sids.append(ev_sid_int)
                         if active_session_id not in (None, 0xFFFFFFFF, -1, 0) and active_session_id not in sids:
                             sids.append(active_session_id)
                         for sid in sids:
@@ -1128,14 +1172,27 @@ def main():
                     # Khóa máy: LogonUI, không phải khoảng Signing out.
                     lock_pending_until = time.time() + 8.0
                     force_logoff_until = 0.0
-                    log(f"WTS_SESSION_LOCK session={ev.get('session_id')}: chuyển Winlogon cho màn hình khóa.")
-                elif kind == "interactive":
+                    log(f"WTS_SESSION_LOCK session={ev_sid_int}: chuyển Winlogon cho màn hình khóa.")
+                elif kind in ("interactive", "connect"):
                     force_logoff_until = 0.0
                     lock_pending_until = 0.0
-                    log(f"WTS logon/unlock session={ev.get('session_id')}: hết logoff/lock.")
+                    if ev_sid_int not in (None, 0xFFFFFFFF, -1, 0):
+                        preferred_session_id = ev_sid_int
+                    log(f"WTS {kind} session={ev_sid_int}: bám theo session đăng nhập (preferred={preferred_session_id}).")
                 elif kind == "remote_disconnect":
-                    log(f"WTS remote_disconnect session={ev.get('session_id')}: đảm bảo khôi phục console desktop.")
-                    _handle_session_disconnect(ev.get("session_id"))
+                    log(f"WTS remote_disconnect session={ev_sid_int}: đảm bảo khôi phục console desktop.")
+                    if preferred_session_id == ev_sid_int:
+                        preferred_session_id = None
+                    _handle_session_disconnect(ev_sid_int)
+                elif kind == "console_disconnect":
+                    log(f"WTS console_disconnect session={ev_sid_int}")
+                    if preferred_session_id == ev_sid_int:
+                        preferred_session_id = None
+
+            # Tính lại active_session_id sau khi nhận sự kiện WTS mới
+            active_session_id = get_active_session_id(preferred_sid=preferred_session_id)
+            if preferred_session_id is not None and active_session_id != preferred_session_id:
+                preferred_session_id = None
 
             if active_session_id in (0xFFFFFFFF, -1, 0):
                 # Chua co session console (boot som / console_disconnect) hoac Session 0.
@@ -1162,24 +1219,25 @@ def main():
             target_desktop = "winlogon" if want_winlogon else "default"
 
             if session_changed:
+                log(f"Session ID đổi {last_session_id} -> {active_session_id}. Chuyển capture worker sang session mới.")
                 if BROKER_MODE:
-                    # Worker cũ chết theo session Windows. Không taskkill — broker giữ
-                    # viewer; chỉ quên PID cũ để spawn worker session mới ngay.
-                    # Neu vua spawn Winlogon tren session MOI (LOGOFF), giu PID do.
-                    already_new_winlogon = (
-                        current_agent_pid
-                        and is_process_alive(current_agent_pid)
-                        and agent_mutex_present(active_session_id, "winlogon")
-                    )
-                    log(f"Session ID đổi {last_session_id} -> {active_session_id}. Broker: spawn worker mới (không kill).")
-                    if not already_new_winlogon:
-                        current_agent_pid = None
+                    # Dừng worker của session cũ để nhường chỗ hoàn toàn cho session mới (đặc biệt cần thiết
+                    # trên Windows Server khi Console session cũ vẫn chạy song song với Ms RDP session mới).
+                    old_pid = current_agent_pid
+                    if old_pid and is_process_alive(old_pid):
+                        log(f"Dừng worker session cũ {last_session_id} PID {old_pid} để chuyển sang session {active_session_id}.")
+                        terminate_process_with_pid(old_pid)
+                    current_agent_pid = None
+                    if winlogon_standby_pid and is_process_alive(winlogon_standby_pid):
+                        terminate_process_with_pid(winlogon_standby_pid)
+                        winlogon_standby_pid = None
                     if gui_agent_pid:
                         terminate_process_with_pid(gui_agent_pid)
                         gui_agent_pid = None
                     if clipboard_agent_pid:
                         terminate_process_with_pid(clipboard_agent_pid)
                         clipboard_agent_pid = None
+                    notify_broker_session_event("session_switch", active_session_id)
                 else:
                     log(f"Session ID đổi {last_session_id} -> {active_session_id}. Tắt Agent để chuyển session.")
                     old_pid = current_agent_pid

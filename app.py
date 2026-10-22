@@ -259,7 +259,9 @@ is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+        # Dùng PROCESS_SYSTEM_DPI_AWARE (1) thay vì (2) để tránh lỗi trắng khối giao diện
+        # (white box glitch) do driver Intel UHD (UHD 730 trên Windows Server) gây ra với Tkinter/GDI
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except:
         try:
             ctypes.windll.user32.SetProcessDPIAware()
@@ -1122,6 +1124,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             new_geom = f"{w}x{h}{pos}"
             self.geometry(new_geom)
             self.last_normal_geometry = new_geom
+            self.update_idletasks()
         except Exception as e:
             print(f"[Host] adjust_host_window_size error: {e}")
 
@@ -2823,10 +2826,23 @@ Comment=Remote Desktop P2P AutoStart
             self.state("normal")
         except Exception:
             pass
-        try:
-            self.attributes("-alpha", 1.0)
-        except Exception:
-            pass
+        if getattr(self, "_last_applied_theme", "") == "crystal":
+            try:
+                self.attributes("-alpha", 0.88)
+            except Exception:
+                pass
+        else:
+            try:
+                if sys.platform == "win32":
+                    import ctypes
+                    hwnd = self.winfo_id()
+                    GWL_EXSTYLE = -20
+                    WS_EX_LAYERED = 0x00080000
+                    style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    if style & WS_EX_LAYERED:
+                        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style & ~WS_EX_LAYERED)
+            except Exception:
+                pass
         try:
             self.lift()
             self.attributes("-topmost", True)
