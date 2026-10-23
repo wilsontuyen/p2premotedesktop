@@ -1304,11 +1304,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         def write_transfer_log(direction, file_name, file_size, dest_dir):
             try:
+                from utils.logger import ensure_utf8_bom, safe_write_log_line
                 import datetime
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_line = f"[{now}] {direction} | File: {file_name} | Size: {format_size(file_size)} | To: {dest_dir}\n"
-                with open("transfer.log", "a", encoding="utf-8-sig") as lf:
-                    lf.write(log_line)
+                safe_write_log_line("transfer.log", log_line, "transfer.log")
             except Exception as e:
                 print("Log error:", e)
 

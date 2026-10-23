@@ -59,6 +59,7 @@ from filecopyclient import (
     _is_windows_11,
     _menu_item_counts_as_paste,
     _win10_rmb_paste_click,
+    _is_recent_rmb_paste_click_unified,
     _cursor_in_explorer_command_bar,
     set_global_rmb_pos,
     _file_expected_size,
@@ -432,25 +433,35 @@ class FileCopyHostMixin:
                             paths = paths.get("files") or []
                         metadata = []
                         for f in paths:
-                            if os.path.isfile(f):
-                                metadata.append({
-                                    "name": os.path.basename(f),
-                                    "path": f,
-                                    "size": os.path.getsize(f),
-                                    "mtime": os.path.getmtime(f)
-                                })
-                            elif os.path.isdir(f):
-                                parent_dir = os.path.dirname(f)
-                                for root, _, files in os.walk(f):
-                                    for file in files:
-                                        full_path = os.path.join(root, file)
-                                        rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
-                                        metadata.append({
-                                            "name": rel_path,
-                                            "path": full_path,
-                                            "size": os.path.getsize(full_path),
-                                            "mtime": os.path.getmtime(full_path)
-                                        })
+                            try:
+                                if os.path.isfile(f):
+                                    metadata.append({
+                                        "name": os.path.basename(f),
+                                        "path": f,
+                                        "size": os.path.getsize(f) if os.path.exists(f) else 0,
+                                        "mtime": os.path.getmtime(f) if os.path.exists(f) else 0
+                                    })
+                                elif os.path.isdir(f):
+                                    parent_dir = os.path.dirname(f)
+                                    for root, _, files in os.walk(f):
+                                        for file in files:
+                                            full_path = os.path.join(root, file)
+                                            rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
+                                            sz = 0
+                                            mt = 0
+                                            try:
+                                                sz = os.path.getsize(full_path)
+                                                mt = os.path.getmtime(full_path)
+                                            except Exception:
+                                                pass
+                                            metadata.append({
+                                                "name": rel_path,
+                                                "path": full_path,
+                                                "size": sz,
+                                                "mtime": mt
+                                            })
+                            except Exception as ex_stat:
+                                log_debug(f"[_handle_uppipe_client] Lỗi đọc path {f}: {ex_stat}")
                     else:
                         metadata = json.loads(raw)
                         offer_id = None
@@ -819,9 +830,14 @@ class FileCopyHostMixin:
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
             self._xfer_need_resync = False
-            # Phía gửi không mở dialog tiến trình (phía nhận đã mở dialog tại thư mục đích).
             send_dlg_id = int(paste_id or 0) or my_id
-            show_send_dlg = False
+            show_send_dlg = True
+            try:
+                self.open_paste_progress_dialog(
+                    display_name, total_size, dest_dir=None, reserve_finalize=False, job_id=send_dlg_id, item_kind=item_kind
+                )
+            except Exception as e_dlg:
+                print(f"[FileTransfer] Khong mo duoc dialog tien trinh gui: {e_dlg}")
             if not self._send_file_msg(sock, start_pkt, my_id):
                 print("[FileTransfer] Huy truoc/luc batch_start — dung gui.")
                 if show_send_dlg:
@@ -1059,6 +1075,7 @@ def run_clipboard_agent_mode():
     import time
     import tkinter as tk
     
+    from utils.logger import ensure_utf8_bom, get_log_filepath
     log_path = os.path.join(app_dir, "clipboard_agent.log")
     agent_log = logging.getLogger("clipboard_agent")
     agent_log.setLevel(logging.DEBUG)
@@ -1069,10 +1086,21 @@ def run_clipboard_agent_mode():
         
     formatter = logging.Formatter("[%(asctime)s] [PID %(process)d] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     
-    # Ghi file với UTF-8
-    fh = logging.FileHandler(log_path, encoding="utf-8")
-    fh.setFormatter(formatter)
-    agent_log.addHandler(fh)
+    # Ghi file với UTF-8 BOM, fallback sang TEMP nếu Program Files bị PermissionError
+    fh = None
+    try:
+        ensure_utf8_bom(log_path)
+        fh = logging.FileHandler(log_path, encoding="utf-8-sig")
+    except (PermissionError, OSError):
+        try:
+            log_path = get_log_filepath("clipboard_agent.log")
+            ensure_utf8_bom(log_path)
+            fh = logging.FileHandler(log_path, encoding="utf-8-sig")
+        except Exception:
+            pass
+    if fh is not None:
+        fh.setFormatter(formatter)
+        agent_log.addHandler(fh)
     
     # Chỉ ghi ra console nếu stdout không phải là chính file log đó (tránh lặp 2 dòng trong file)
     is_stdout_log = False
@@ -1194,6 +1222,29 @@ def run_clipboard_agent_mode():
                                                 gui_queue.put(("progress", int(rest)))
                                         except:
                                             pass
+
+                                    elif msg.startswith("START:"):
+                                        rest = msg[6:].strip()
+                                        try:
+                                            parts = rest.split("|")
+                                            disp_name = parts[0] if len(parts) > 0 else ""
+                                            tot_sz = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+                                            dst_dir = parts[2] if len(parts) > 2 and parts[2] else None
+                                            pst_id = int(parts[3]) if len(parts) > 3 and parts[3] else None
+                                            gui_queue.put(("start", (disp_name, tot_sz, dst_dir, pst_id)))
+                                            agent_print(f"[ClipboardAgent] Pipe START: name={disp_name} size={tot_sz} paste_id={pst_id}")
+                                        except Exception as e_start:
+                                            agent_print(f"[ClipboardAgent] Pipe START loi: {e_start}")
+                                    elif msg.startswith("END:"):
+                                        rest = msg[4:].strip()
+                                        pst_id = None
+                                        try:
+                                            if rest:
+                                                pst_id = int(rest)
+                                        except Exception:
+                                            pst_id = None
+                                        gui_queue.put(("end", pst_id))
+                                        agent_print(f"[ClipboardAgent] Pipe END: paste_id={pst_id}")
                                     elif msg.startswith("CANCEL:"):
                                         rest = msg[7:].strip()
                                         pid = None
@@ -2133,9 +2184,10 @@ def run_clipboard_agent_mode():
             log_overwrite_conflict(f"AgentPasteFinish START paste_id={pid} dest={dest_dir!r}")
             while job.get("allow") and not job["conflict_event"].is_set():
                 job["conflict_event"].wait(0.2)
+            dest_dir = job.get("dest") or dest_dir
             log_overwrite_conflict(
                 f"AgentPasteFinish conflict_wait_end paste_id={pid} allow={job.get('allow')} "
-                f"choice={job.get('conflict_choice')!r} conflict_set={job['conflict_event'].is_set()}"
+                f"choice={job.get('conflict_choice')!r} conflict_set={job['conflict_event'].is_set()} dest={dest_dir!r}"
             )
             if (not job.get("allow")) or job.get("conflict_choice") == "cancel":
                 agent_print("[ClipboardAgent] Huy do ghi de / conflict.")
@@ -2581,8 +2633,8 @@ def run_clipboard_agent_mode():
             )
             opener_hwnd = ctypes.windll.user32.GetOpenClipboardWindow()
             fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-            opener_p = (_pid_image_name(_hwnd_process_name(opener_hwnd)[1]) or "").lower() if opener_hwnd else ""
-            fg_p = (_pid_image_name(_hwnd_process_name(fg_hwnd)[1]) or "").lower() if fg_hwnd else ""
+            opener_p = (_hwnd_process_name(opener_hwnd) or "").lower() if opener_hwnd else ""
+            fg_p = (_hwnd_process_name(fg_hwnd) or "").lower() if fg_hwnd else ""
             has_clip_text = bool(ctypes.windll.user32.IsClipboardFormatAvailable(13) or ctypes.windll.user32.IsClipboardFormatAvailable(1))
             is_exp_target = fg_p in _EXPLORER_CLIPBOARD_PROCS or opener_p in _EXPLORER_CLIPBOARD_PROCS
             recent_ctrl = bool(
@@ -2694,12 +2746,14 @@ def run_clipboard_agent_mode():
                         )
                         if _offer_probe_hdrop(_pending_info.get("files")):
                             _agent_dummy_h_active = True
+                            _agent_schedule_rearm(0.25)
                         _schedule_scrub_probe(_agent_cached_explorer_path)
                     else:
-                        agent_print("[ClipboardAgent] Probe Explorer — HDROP rỗng (không dán stub).")
+                        agent_print("[ClipboardAgent] Probe Explorer — probe HDROP.")
                         log_overwrite_conflict("RENDERFORMAT EXIT: BACKGROUND probe")
-                        if _offer_empty_hdrop():
+                        if _offer_probe_hdrop(_pending_info.get("files")):
                             _agent_dummy_h_active = True
+                            _agent_schedule_rearm(0.35)
                     return 0
 
             living = any(
@@ -3274,7 +3328,18 @@ def run_clipboard_agent_mode():
                         pid, nbytes = (val[0] if val else None), (val[1] if len(val) > 1 else 0)
                     else:
                         pid, nbytes = None, val
-                    dlg = active_dialogs.get(pid) if pid is not None else active_dialog
+                    dlg = None
+                    if pid is not None:
+                        dlg = active_dialogs.get(pid)
+                        if dlg is None:
+                            try: dlg = active_dialogs.get(int(pid))
+                            except Exception: pass
+                        if dlg is None:
+                            dlg = active_dialogs.get(str(pid))
+                    if dlg is None:
+                        dlg = active_dialog
+                    if dlg is None and len(active_dialogs) == 1:
+                        dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.update_progress(nbytes)
                         except: pass
@@ -3291,6 +3356,13 @@ def run_clipboard_agent_mode():
                     else:
                         n, pid = val, None
                     dlg = active_dialogs.get(pid) if pid is not None else active_dialog
+                    if dlg is None and pid is not None:
+                        try: dlg = active_dialogs.get(int(pid))
+                        except Exception: pass
+                    if dlg is None and pid is not None:
+                        dlg = active_dialogs.get(str(pid))
+                    if dlg is None and len(active_dialogs) == 1:
+                        dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.begin_finalize(n or 0)
                         except: pass
@@ -3300,6 +3372,13 @@ def run_clipboard_agent_mode():
                     else:
                         n, pid = val, None
                     dlg = active_dialogs.get(pid) if pid is not None else active_dialog
+                    if dlg is None and pid is not None:
+                        try: dlg = active_dialogs.get(int(pid))
+                        except Exception: pass
+                    if dlg is None and pid is not None:
+                        dlg = active_dialogs.get(str(pid))
+                    if dlg is None and len(active_dialogs) == 1:
+                        dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.add_finalize_bytes(n or 0)
                         except: pass
@@ -3338,7 +3417,7 @@ def run_clipboard_agent_mode():
                             except: pass
                             if active_dialog is d:
                                 active_dialog = next(iter(active_dialogs.values()), None)
-                        root.after(0, _close)
+                        root.after(350, _close)
                 elif action == "conflict_check":
                     dest_dir, files, display_name, total_size, paste_id = val
                     job = _agent_jobs.get(paste_id)
@@ -3523,18 +3602,33 @@ def run_clipboard_agent_mode():
 
                     try:
                         if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir):
-                            # Thử lại path Explorer trước khi bỏ qua kiểm tra ghi đè.
-                            for _try in range(6):
-                                try:
-                                    found = query_explorer_folder_path(allow_open_clipboard=False)
-                                    if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
-                                        dest_dir = found
-                                        job["dest"] = found
-                                        agent_print(f"[ClipboardAgent] conflict: lay lai dest={found}")
-                                        break
-                                except Exception:
-                                    pass
-                                time.sleep(0.05)
+                            if _agent_cached_explorer_path and os.path.isdir(_agent_cached_explorer_path) and not _is_transfer_staging_dir(_agent_cached_explorer_path):
+                                dest_dir = _agent_cached_explorer_path
+                                job['dest'] = dest_dir
+                            else:
+                                for _try in range(6):
+                                    try:
+                                        found = query_explorer_folder_path(allow_open_clipboard=False)
+                                        if not found:
+                                            found = query_explorer_folder_path(allow_open_clipboard=True)
+                                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
+                                            dest_dir = found
+                                            job["dest"] = found
+                                            agent_print(f"[ClipboardAgent] conflict: lay lai dest={found}")
+                                            break
+                                    except Exception:
+                                        pass
+                                    time.sleep(0.05)
+                        if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir):
+                            if _agent_cached_explorer_path and os.path.isdir(_agent_cached_explorer_path) and not _is_transfer_staging_dir(_agent_cached_explorer_path):
+                                dest_dir = _agent_cached_explorer_path
+                                job['dest'] = dest_dir
+                            else:
+                                desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+                                if os.path.isdir(desktop_dir):
+                                    dest_dir = desktop_dir
+                                    job['dest'] = dest_dir
+                                    agent_print(f"[ClipboardAgent] conflict: fallback dest=Desktop ({dest_dir})")
                         if not dest_dir or not os.path.isdir(dest_dir) or not files:
                             agent_print(
                                 f"[ClipboardAgent] conflict: khong co dest hop le "
@@ -3544,8 +3638,6 @@ def run_clipboard_agent_mode():
                                 f"NO DIALOG: thieu dest hop le dest={dest_dir!r} "
                                 f"files={len(files or [])} → begin_download (khong hoi)"
                             )
-                            # Không biết đích → không hỏi được; tải vào staging, relocate
-                            # với replace_keys rỗng sẽ không đè file đã có.
                             if not _try_local_repaste():
                                 _begin_download()
                             _done_conflict()
@@ -3808,8 +3900,56 @@ def run_clipboard_agent_mode():
                                 _skip_path(k)
                             return True
 
-                        # Hiện dialog ghi đè trực tiếp trên HOST (máy bị remote).
-                        _ask_on_host()
+                        # Giống host→client: hỏi trên máy client (ClassicCopyDialog GUI trên màn hình viewer).
+                        asked_client = False
+                        try:
+                            ev = job.get("conflict_reply_event") or threading.Event()
+                            job["conflict_reply_event"] = ev
+                            ev.clear()
+                            job["conflict_reply"] = None
+                            job["ow_waiting_client"] = True
+                            with _active_conflict_lock:
+                                _active_conflict_job = job
+                            sent_q = _write_conflict_query_pipe(paste_id, conflicts, has_multiple)
+                            log_overwrite_conflict(
+                                f"CONFLICT_QUERY send={sent_q} paste_id={paste_id} "
+                                f"n={len(conflicts)} names={[c[0] for c in conflicts]}"
+                            )
+                            if sent_q:
+                                asked_client = True
+                                deadline = time.time() + 300.0
+                                while time.time() < deadline:
+                                    if ev.is_set():
+                                        break
+                                    try:
+                                        root.update()
+                                    except Exception:
+                                        pass
+                                    time.sleep(0.03)
+                                data = job.get("conflict_reply")
+                                job["ow_waiting_client"] = False
+                                if _apply_client_reply(data):
+                                    log_overwrite_conflict(
+                                        f"CLIENT reply applied paste_id={paste_id} "
+                                        f"cancelled={cancelled} replace={len(job.get('replace_keys') or [])}"
+                                    )
+                                else:
+                                    log_overwrite_conflict(
+                                        f"CLIENT reply missing/unavailable paste_id={paste_id} → HOST dialog"
+                                    )
+                                    _ask_on_host()
+                            else:
+                                job["ow_waiting_client"] = False
+                                _ask_on_host()
+                        except Exception as e_q:
+                            job["ow_waiting_client"] = False
+                            log_overwrite_conflict(f"CONFLICT_QUERY path loi: {e_q} → HOST dialog")
+                            _ask_on_host()
+                        finally:
+                            with _active_conflict_lock:
+                                if _active_conflict_job is job:
+                                    _active_conflict_job = None
+                            job["ow_waiting_client"] = False
                         if cancelled:
                             job["conflict_choice"] = "cancel"
                             log_overwrite_conflict(f"USER CANCEL paste_id={paste_id}")

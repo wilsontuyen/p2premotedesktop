@@ -208,36 +208,78 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         return
     # In ra stderr (để hiển thị trên terminal hoặc gui.log)
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
-    # Ghi vào file
-    with open("crash.log", "w", encoding="utf-8-sig") as f:
-        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+    # Ghi vào file với UTF-8 BOM
+    try:
+        from utils.logger import ensure_utf8_bom, get_log_filepath
+        crash_path = os.path.join(app_dir, "crash.log")
+        try:
+            ensure_utf8_bom(crash_path)
+            f = open(crash_path, "a", encoding="utf-8-sig")
+        except (PermissionError, OSError):
+            fb_path = get_log_filepath("crash.log")
+            ensure_utf8_bom(fb_path)
+            f = open(fb_path, "a", encoding="utf-8-sig")
+        with f:
+            f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- CRASH TRACEBACK ---\n")
+            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+    except Exception:
+        pass
 
 sys.excepthook = handle_exception
 
 import builtins
+import re
 _orig_print = builtins.print
+_TIMESTAMP_REGEX = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]")
+
 def print_with_timestamp(*args, **kwargs):
-    timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+    """
+    In với tiền tố [YYYY-MM-DD HH:MM:SS] ở đầu mỗi dòng log.
+    Đảm bảo UTF-8 không bao giờ bị lỗi font (không dùng backslashreplace).
+    Flush ngay lập tức để log hiển thị unbuffered trong file.
+    """
+    target_file = kwargs.get('file', sys.stdout)
+    sep = kwargs.get('sep', ' ')
+    end = kwargs.get('end', '\n')
+    now_str = time.strftime("[%Y-%m-%d %H:%M:%S]")
+    
     if args:
-        first_arg = str(args[0])
-        try:
-            _orig_print(*args, **kwargs)
-        except UnicodeEncodeError:
-            try:
-                _orig_print(*(str(a).encode(sys.stdout.encoding or 'ascii', errors='backslashreplace').decode(sys.stdout.encoding or 'ascii', errors='ignore') for a in args), **kwargs)
-            except Exception:
-                pass
-        return
-    msg = " ".join(str(arg) for arg in args)
+        raw_msg = sep.join(str(a) for a in args)
+    else:
+        raw_msg = ""
+        
+    lines = raw_msg.split('\n')
+    formatted_lines = []
+    for line in lines:
+        if line.strip():
+            if _TIMESTAMP_REGEX.match(line.strip()):
+                formatted_lines.append(line)
+            else:
+                formatted_lines.append(f"{now_str} {line}")
+        else:
+            formatted_lines.append(line)
+    final_msg = '\n'.join(formatted_lines)
+    
     try:
-        _orig_print(f"{timestamp} {msg}", **kwargs)
+        _orig_print(final_msg, **kwargs)
     except UnicodeEncodeError:
         try:
-            safe_text = f"{timestamp} {msg}".encode(sys.stdout.encoding or 'ascii', errors='backslashreplace').decode(sys.stdout.encoding or 'ascii', errors='ignore')
-            _orig_print(safe_text, **kwargs)
+            if hasattr(target_file, 'buffer') and target_file.buffer:
+                target_file.buffer.write((final_msg + end).encode('utf-8', errors='replace'))
+            else:
+                _orig_print(final_msg.encode('utf-8', errors='replace').decode('utf-8', errors='ignore'), **kwargs)
         except Exception:
             pass
+    except Exception:
+        pass
+        
+    try:
+        if target_file and hasattr(target_file, 'flush'):
+            target_file.flush()
+    except Exception:
+        pass
 
+builtins.print = print_with_timestamp
 print = print_with_timestamp
 
 # Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
@@ -333,29 +375,19 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             
         # Configure logging and stdout redirection for diagnostics
         try:
+            from utils.logger import ensure_utf8_bom, get_log_filepath
             log_filename = "agent.log" if self.is_headless else "gui.log"
             log_path = os.path.join(app_dir, log_filename)
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            try:
+                ensure_utf8_bom(log_path)
+                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            except (PermissionError, OSError):
+                fallback_path = get_log_filepath(log_filename)
+                ensure_utf8_bom(fallback_path)
+                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
-            
-            # Override built-in print to flush immediately so logs are unbuffered
-            import builtins
-            orig_print = builtins.print
-            def unbuffered_print(*args, **kwargs):
-                try:
-                    orig_print(*args, **kwargs)
-                except UnicodeEncodeError:
-                    try:
-                        target_file = kwargs.get('file', sys.stdout)
-                        enc = getattr(target_file, 'encoding', None) or 'ascii'
-                        orig_print(*(str(a).encode(enc, errors='backslashreplace').decode(enc, errors='ignore') for a in args), **kwargs)
-                    except Exception:
-                        pass
-                try:
-                    sys.stdout.flush()
-                except:
-                    pass
-            builtins.print = unbuffered_print
+        except Exception:
+            pass
             
             mode_name = "headless" if self.is_headless else ("host" if self.is_host_only else "GUI")
             print(f"\n--- App started in {mode_name} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
@@ -3009,8 +3041,15 @@ if __name__ == '__main__':
         
         # Redirect stdout/stderr cho clipboard agent mode
         try:
+            from utils.logger import ensure_utf8_bom, get_log_filepath
             log_path = os.path.join(app_dir, "clipboard_agent.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            try:
+                ensure_utf8_bom(log_path)
+                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            except (PermissionError, OSError):
+                fallback_path = get_log_filepath("clipboard_agent.log")
+                ensure_utf8_bom(fallback_path)
+                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except:
             pass
@@ -3031,8 +3070,15 @@ if __name__ == '__main__':
     # --- Chế độ Broker (Session 0, không Tk): giữ kết nối viewer, proxy tới worker ---
     if "--broker" in sys.argv:
         try:
+            from utils.logger import ensure_utf8_bom, get_log_filepath
             log_path = os.path.join(app_dir, "broker.log")
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            try:
+                ensure_utf8_bom(log_path)
+                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            except (PermissionError, OSError):
+                fallback_path = get_log_filepath("broker.log")
+                ensure_utf8_bom(fallback_path)
+                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except Exception:
             pass

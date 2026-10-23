@@ -23,6 +23,15 @@ class ProgressDialog(tk.Toplevel):
         # owner_hwnd: cửa sổ client sở hữu dialog (GWLP_HWNDPARENT), không phải vùng remote.
         # embed/SetParent chỉ dùng File Manager (cùng toolkit). Clipboard không kẹp pygame.
         self.owner_hwnd = self._toplevel_hwnd(owner_hwnd)
+        if self.owner_hwnd and sys.platform == "win32":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                owner_int = int(self.owner_hwnd)
+                if not user32.IsWindow(owner_int) or not user32.IsWindowVisible(owner_int) or user32.IsIconic(owner_int):
+                    self.owner_hwnd = None
+            except Exception:
+                self.owner_hwnd = None
         self._embed = bool(embed and host_hwnd and sys.platform == "win32")
         parent_mapped = False
         try:
@@ -273,7 +282,10 @@ class ProgressDialog(tk.Toplevel):
             return
         try:
             import ctypes
+            user32 = ctypes.windll.user32
             owner = int(self.owner_hwnd)
+            if not user32.IsWindow(owner) or not user32.IsWindowVisible(owner) or user32.IsIconic(owner):
+                return
             GWLP_HWNDPARENT = -8
             if ctypes.sizeof(ctypes.c_void_p) == 8:
                 ctypes.windll.user32.SetWindowLongPtrW(ctypes.c_void_p(hwnd), GWLP_HWNDPARENT, ctypes.c_void_p(owner))
@@ -288,8 +300,14 @@ class ProgressDialog(tk.Toplevel):
         try:
             import ctypes
             from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            owner = int(self.owner_hwnd)
+            if not user32.IsWindow(owner) or not user32.IsWindowVisible(owner) or user32.IsIconic(owner):
+                return None
             rect = wintypes.RECT()
-            if not ctypes.windll.user32.GetWindowRect(int(self.owner_hwnd), ctypes.byref(rect)):
+            if not user32.GetWindowRect(owner, ctypes.byref(rect)):
+                return None
+            if rect.left <= -10000 or rect.top <= -10000:
                 return None
             return (rect.left, rect.top, rect.right, rect.bottom)
         except Exception:

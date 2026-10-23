@@ -413,13 +413,7 @@ def get_clipboard_files(owner_hwnd=None, retries=1, allow_hdrop=True):
             except Exception:
                 pass
             sidl, fnw = _file_clipboard_formats()
-            if sidl and fn_IsClipboardFormatAvailable(sidl):
-                h = fn_GetClipboardData(sidl)
-                if h:
-                    paths = _usable_file_paths(_paths_from_cida(h))
-            # FileNameW chỉ có 1 file — không đọc trước HDROP (mất copy nhiều file).
-            need_hdrop = allow_hdrop or len(paths) <= 1
-            if need_hdrop and fn_IsClipboardFormatAvailable(CF_HDROP):
+            if allow_hdrop and fn_IsClipboardFormatAvailable(CF_HDROP):
                 hGlobal = fn_GetClipboardData(CF_HDROP)
                 if hGlobal:
                     raw = []
@@ -431,7 +425,25 @@ def get_clipboard_files(owner_hwnd=None, retries=1, allow_hdrop=True):
                             fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
                             raw.append(buffer.value)
                     hdrop_paths = _usable_file_paths(raw)
-                    if len(hdrop_paths) > len(paths):
+                    if hdrop_paths:
+                        paths = hdrop_paths
+            if not paths and sidl and fn_IsClipboardFormatAvailable(sidl):
+                h = fn_GetClipboardData(sidl)
+                if h:
+                    paths = _usable_file_paths(_paths_from_cida(h))
+            if not paths and fn_IsClipboardFormatAvailable(CF_HDROP):
+                hGlobal = fn_GetClipboardData(CF_HDROP)
+                if hGlobal:
+                    raw = []
+                    count = fn_DragQueryFileW(hGlobal, 0xFFFFFFFF, None, 0)
+                    for i in range(count):
+                        length = fn_DragQueryFileW(hGlobal, i, None, 0)
+                        if length > 0:
+                            buffer = ctypes.create_unicode_buffer(length + 1)
+                            fn_DragQueryFileW(hGlobal, i, buffer, length + 1)
+                            raw.append(buffer.value)
+                    hdrop_paths = _usable_file_paths(raw)
+                    if hdrop_paths:
                         paths = hdrop_paths
             if not paths and fnw and fn_IsClipboardFormatAvailable(fnw):
                 h = fn_GetClipboardData(fnw)

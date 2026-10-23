@@ -116,6 +116,7 @@ from filecopyclient import (
     _double_click_ms,
     _cursor_xy,
     check_is_menu_query,
+    _is_recent_rmb_paste_click_unified,
     _file_io_lock,
     _DUMMY_HDROP_PATH,
     _PROBE_STUB_NAME,
@@ -207,9 +208,9 @@ class ClipboardEventListener:
                             kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                             self.manager._lmb_menu_item_kind = kind
                             # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
+                            # Win11: click trên context menu sau RMB (0.12 < age_r < 8.0) và kind != "not_paste" là Paste.
                             if _menu_item_counts_as_paste(kind) or (
-                                (not _is_windows_11())
-                                and kind != "not_paste"
+                                kind != "not_paste"
                                 and 0.12 < age_r < 8.0
                             ):
                                 paste_from_menu = True
@@ -231,8 +232,17 @@ class ClipboardEventListener:
                                 except Exception:
                                     pass
                         else:
-                            # Win11 XAML
-                            chk_kind, _ = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
+                            # Win11 XAML: hit test menu hay fail do XAML island window
+                            chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
+                            rpos = getattr(self.manager, "_rmb_cursor_pos", None)
+                            near_rmb = bool(
+                                rpos
+                                and not getattr(self.manager, "_rmb_is_taskbar", False)
+                                and abs(cx - rpos[0]) <= 360
+                                and abs(cy - rpos[1]) <= 360
+                            )
+                            recent_dbl = bool(getattr(self.manager, "last_dblclick_time", 0.0) and (now - float(getattr(self.manager, "last_dblclick_time", 0.0))) < 0.7)
+                            menu_open = _context_menu_open()
                             if chk_kind == "paste":
                                 paste_from_menu = True
                                 try:
@@ -240,12 +250,19 @@ class ClipboardEventListener:
                                     clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
                                 except Exception:
                                     pass
-                            elif chk_kind == "not_paste":
+                            elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
                                 self.manager._lmb_hit_context_menu = False
                                 self.manager._lmb_menu_item_kind = "not_paste"
+                            elif 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
+                                paste_from_menu = True
+                                self.manager._lmb_hit_context_menu = True
+                                self.manager._lmb_menu_item_kind = "paste"
+                                try:
+                                    from utils.logger import clip_trace
+                                    clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
+                                except Exception:
+                                    pass
                             else:
-                                # TỪ CHỐI ÉP KIỂU: Nếu là unknown, dứt khoát coi là unknown.
-                                # Xóa bỏ hoàn toàn cái bẫy near_rmb ở đây.
                                 self.manager._lmb_hit_context_menu = False
                                 self.manager._lmb_menu_item_kind = "unknown"
 
@@ -774,7 +791,10 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                     owner_hwnd = getattr(self, "pygame_hwnd", None)
                     if not owner_hwnd and self.app:
                         try:
-                            owner_hwnd = int(self.app.winfo_id())
+                            if getattr(self.app, "winfo_viewable", lambda: False)():
+                                owner_hwnd = int(self.app.winfo_id())
+                            else:
+                                owner_hwnd = None
                         except Exception:
                             owner_hwnd = None
                     stack = len([d for d in dialogs.values() if d])
@@ -847,7 +867,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                             except: pass
                             dialogs.pop(k, None)
                         self.active_dialog = next(iter(dialogs.values()), None) if dialogs else None
-                    self.app.after(0, _do_destroy)
+                    self.app.after(350, _do_destroy)
                 elif action == "classic_overwrite_dialog":
                     filename, source_info, dest_info, has_multiple = args
                     finished = {"done": False}
@@ -941,8 +961,23 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
     def _dialog_by_job(self, job_id=None):
         dialogs = getattr(self, "xfer_dialogs", None) or {}
         if job_id is not None:
-            return dialogs.get(job_id)
-        return self.active_dialog
+            dlg = dialogs.get(job_id)
+            if dlg: return dlg
+            try:
+                dlg = dialogs.get(int(job_id))
+                if dlg: return dlg
+            except Exception: pass
+            dlg = dialogs.get(str(job_id))
+            if dlg: return dlg
+        if getattr(self, "active_dialog", None):
+            return self.active_dialog
+        if len(dialogs) == 1:
+            return next(iter(dialogs.values()))
+        return None
+
+    def _send_progress_signal(self, data_type, payload):
+        """Tương thích ngược alias gửi tiến trình xuống pipe."""
+        return self._send_to_pipe(data_type, payload)
 
     def note_paste_gesture(self):
         # Đang hiện dialog ghi đè — click vào dialog không được tính là Paste mới.
@@ -997,7 +1032,14 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         key = job_id if job_id is not None else "_default"
         last = times.get(key, 0)
         if current_time - last >= 0.05:
-            self.gui_queue.put(("update", (sent_bytes, job_id)))
+            if self.app and getattr(self.app, 'is_headless', False):
+                payload = f"{job_id}|{sent_bytes}" if job_id is not None else str(sent_bytes)
+                try:
+                    self._send_to_pipe("PROGRESS", payload)
+                except Exception:
+                    pass
+            else:
+                self.gui_queue.put(("update", (sent_bytes, job_id)))
             times[key] = current_time
 
     def close_dialog(self, job_id=None, reason=None):
@@ -1005,6 +1047,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             print(f"[Clipboard] Dong dialog job_id={job_id} ly_do={reason}")
         if job_id is None:
             self._recv_dialog_open = False
+        if self.app and getattr(self.app, 'is_headless', False):
+            try:
+                self._send_to_pipe("END", str(job_id or ''))
+            except Exception:
+                pass
         self.gui_queue.put(("destroy", job_id))
 
     def begin_dialog_finalize(self, total_bytes=0, job_id=None):
@@ -1654,25 +1701,40 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 
                 metadata = []
                 for f in current_files:
-                    if os.path.isfile(f):
-                        metadata.append({
-                            "name": os.path.basename(f),
-                            "path": f,
-                            "size": os.path.getsize(f),
-                            "mtime": os.path.getmtime(f)
-                        })
-                    elif os.path.isdir(f):
-                        parent_dir = os.path.dirname(f)
-                        for root, _, files in os.walk(f):
-                            for file in files:
-                                full_path = os.path.join(root, file)
-                                rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
-                                metadata.append({
-                                    "name": rel_path,
-                                    "path": full_path,
-                                    "size": os.path.getsize(full_path),
-                                    "mtime": os.path.getmtime(full_path)
-                                })
+                    try:
+                        if os.path.isfile(f):
+                            sz, mt = 0, 0
+                            try:
+                                sz = os.path.getsize(f)
+                                mt = os.path.getmtime(f)
+                            except Exception:
+                                pass
+                            metadata.append({
+                                "name": os.path.basename(f),
+                                "path": f,
+                                "size": sz,
+                                "mtime": mt
+                            })
+                        elif os.path.isdir(f):
+                            parent_dir = os.path.dirname(f)
+                            for root, _, files in os.walk(f):
+                                for file in files:
+                                    full_path = os.path.join(root, file)
+                                    rel_path = os.path.relpath(full_path, parent_dir).replace('\\', '/')
+                                    sz, mt = 0, 0
+                                    try:
+                                        sz = os.path.getsize(full_path)
+                                        mt = os.path.getmtime(full_path)
+                                    except Exception:
+                                        pass
+                                    metadata.append({
+                                        "name": rel_path,
+                                        "path": full_path,
+                                        "size": sz,
+                                        "mtime": mt
+                                    })
+                    except Exception as e_scan:
+                        log_debug(f"[_process_clipboard_change] Lỗi scan path {f}: {e_scan}")
                                 
                 if not metadata: return
                 if metadata:
@@ -1863,12 +1925,14 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             now = time.time()
             last_rf_time = float(getattr(self, "_last_peer_request_files_time", 0.0) or 0.0)
             last_rf_files = getattr(self, "_last_peer_request_files_list", None)
-            if (now - last_rf_time) < 8.0 and files_to_send == last_rf_files:
-                print(f"[FileTransfer] Bo request_files trung lap tu peer tok={tok} (elapsed={now - last_rf_time:.2f}s < 8s).")
+            last_rf_tok = getattr(self, "_last_peer_rf_tok", None)
+            if tok and tok == last_rf_tok and (now - last_rf_time) < 1.5 and files_to_send == last_rf_files:
+                print(f"[FileTransfer] Bo request_files trung lap tu peer tok={tok} (elapsed={now - last_rf_time:.2f}s < 1.5s).")
                 log_debug(f"[request_files] Bo qua goi yeu cau trung lap tok={tok} elapsed={now - last_rf_time:.2f}s")
                 return
             self._last_peer_request_files_time = now
             self._last_peer_request_files_list = files_to_send
+            self._last_peer_rf_tok = tok
             if tok:
                 self._clipboard_paste_id = tok
             if not self._arm_file_xfer("peer_request_files"):
@@ -2001,6 +2065,13 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                     self.open_paste_progress_dialog(
                         name, total_size, dest_dir, job_id=paste_id or xid, item_kind=kind,
                     )
+            else:
+                # Headless mode: Thông báo xuống ClipboardAgent để mở dialog trên desktop của user!
+                start_payload = f"{display_name}|{total_size}|{paste_dest or ''}|{paste_id or xid or ''}"
+                try:
+                    self._send_to_pipe("START", start_payload)
+                except Exception as e_start:
+                    log_debug(f"[batch_start] Gui START xuong agent loi: {e_start}")
             return
 
         elif ptype == "file_start":
@@ -2151,7 +2222,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                         last = float(job.get("last_progress") or 0) if job else getattr(self, "_last_progress_time", 0)
                         if (now - last >= 0.05) or (total and rec >= total):
                             payload = f"{paste_id}|{rec}" if paste_id else str(rec)
-                            self._send_progress_signal("PROGRESS", payload)
+                            self._send_to_pipe("PROGRESS", payload)
                             if job is not None:
                                 job["last_progress"] = now
                             else:

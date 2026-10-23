@@ -72,8 +72,13 @@ class ClassicCopyDialog(tk.Toplevel):
         try:
             if owner_hwnd:
                 self.owner_hwnd = int(owner_hwnd)
+                if sys.platform == "win32":
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    if not user32.IsWindow(self.owner_hwnd) or not user32.IsWindowVisible(self.owner_hwnd) or user32.IsIconic(self.owner_hwnd):
+                        self.owner_hwnd = None
         except Exception:
-            self.owner_hwnd = owner_hwnd
+            self.owner_hwnd = None
         self.resizable(False, False)
         self.configure(bg="#FFFFFF")
         # Không dùng Toplevel.geometry (bị DPI scale) — layout 520x420 bị vỡ, không bấm được.
@@ -353,7 +358,10 @@ class ClassicCopyDialog(tk.Toplevel):
             return
         try:
             import ctypes
+            user32 = ctypes.windll.user32
             owner = int(self.owner_hwnd)
+            if not user32.IsWindow(owner) or not user32.IsWindowVisible(owner) or user32.IsIconic(owner):
+                return
             GWLP_HWNDPARENT = -8
             if ctypes.sizeof(ctypes.c_void_p) == 8:
                 ctypes.windll.user32.SetWindowLongPtrW(

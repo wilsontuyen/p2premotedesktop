@@ -708,13 +708,6 @@ def query_explorer_folder_path(allow_open_clipboard=False):
 
     hwnds_to_check = []
     try:
-        hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
-        if hwnd_clip and not allow_open_clipboard:
-            # Explorer đang Copy/Paste — không enumerate Shell (chuột xoay / mất clipboard).
-            return None
-    except Exception:
-        pass
-    try:
         hwnd_fg = win32gui.GetForegroundWindow()
         if hwnd_fg:
             hwnds_to_check.extend(related_hwnds(hwnd_fg))
@@ -736,6 +729,7 @@ def query_explorer_folder_path(allow_open_clipboard=False):
             seen.add(h)
             ordered.append(h)
 
+    # Kiểm tra Desktop trước khi kiểm tra hwnd_clip vì Desktop chỉ đọc HWND class, không đụng COM/clipboard.
     for hwnd in ordered:
         try:
             class_name = win32gui.GetClassName(hwnd)
@@ -743,6 +737,14 @@ def query_explorer_folder_path(allow_open_clipboard=False):
                 return os.path.join(os.path.expanduser("~"), "Desktop")
         except Exception:
             pass
+
+    try:
+        hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
+        if hwnd_clip and not allow_open_clipboard:
+            # Explorer đang Copy/Paste — không enumerate Shell (chuột xoay / mất clipboard).
+            return None
+    except Exception:
+        pass
 
     explorer_windows = []
     try:
@@ -1456,6 +1458,54 @@ def _win10_rmb_paste_click(
     return False
 
 
+def _is_recent_rmb_paste_click_unified(
+    last_lbutton,
+    last_rbutton,
+    menu_item_kind="",
+    menu_item_name="",
+    last_dblclick=0.0,
+    lmb_on_menu=False,
+    lmb_down=False,
+    menu_visible=False,
+):
+    """Hỗ trợ nhận diện click Paste sau RMB cho cả Windows 10 và Windows 11."""
+    if not _is_windows_11():
+        return _win10_rmb_paste_click(
+            last_lbutton,
+            last_rbutton,
+            menu_item_kind,
+            last_dblclick,
+            lmb_on_menu=lmb_on_menu,
+            lmb_down=lmb_down,
+            menu_visible=menu_visible,
+        )
+    # Windows 11 XAML
+    k = (menu_item_kind or "").strip().lower()
+    if k == "not_paste":
+        # Nếu có tên rõ ràng của mục khác (View, Sort, Refresh, Properties, New...) mới loại bỏ
+        if menu_item_name and menu_item_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+            return False
+    now = time.time()
+    last_l = float(last_lbutton or 0)
+    last_r = float(last_rbutton or 0)
+    if last_l <= last_r or last_r <= 0:
+        return False
+    if last_dblclick and (now - float(last_dblclick)) < 0.7:
+        return False
+    age_l = now - last_l
+    age_r = now - last_r
+    if not (age_l < 3.0 and 0.12 < age_r < 8.0):
+        return False
+    if lmb_on_menu or menu_visible or lmb_down:
+        return True
+    try:
+        if _is_explorer_clipboard_client():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _pid_image_name(pid):
     try:
         return (psutil.Process(int(pid)).name() or "").lower()
@@ -1695,7 +1745,7 @@ def cleanup_probe_stubs():
 
 
 def _is_paste_placeholder(path, expected=None):
-    """File 0 byte / stub probe — không hỏi ghi đè, xóa rồi paste đè."""
+    """File stub probe hoặc file trong thư mục staging tạm — không hỏi ghi đè."""
     if not path or not os.path.lexists(path):
         return False
     try:
@@ -1706,16 +1756,11 @@ def _is_paste_placeholder(path, expected=None):
         parent = os.path.dirname(path)
         if parent and _is_transfer_staging_dir(parent):
             return True
+        if _is_probe_stub_name(path):
+            return True
     except Exception:
         pass
-    if os.path.isdir(path) and not os.path.islink(path):
-        return False
-    if not os.path.isfile(path):
-        return False
-    try:
-        return os.path.getsize(path) == 0
-    except Exception:
-        return True
+    return False
 
 
 def _file_expected_size(meta):
@@ -1849,27 +1894,41 @@ def cleanup_incomplete_named_files(dests, files_meta, extra_paths=None, staging_
 
 
 def _probe_stub_paths(pending_files=None):
-    """Một file 0-byte tên giả để Win11 bật Paste. Không dùng tên file đang copy:
-    Explorer coi HDROP này là danh sách dán và copy stub vào thư mục đích."""
+    """File stub hợp lệ để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
     del pending_files
     try:
         os.makedirs(_PROBE_STUB_DIR, exist_ok=True)
     except Exception:
-        return [_DUMMY_HDROP_PATH]
-    path = os.path.join(_PROBE_STUB_DIR, _PROBE_STUB_NAME)
+        pass
+    path = os.path.join(_PROBE_STUB_DIR, "RemoteDesktop_Paste_Trigger.tmp")
     try:
-        if not os.path.exists(path):
-            with open(path, "ab"):
-                pass
-        _hide_win_path(path)
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            with open(path, "wb") as f:
+                f.write(b"RemoteDesktop clipboard paste trigger stub\r\n")
+        _clear_win_attrs(path)
         return [path]
+    except Exception:
+        pass
+    import tempfile
+    path_fallback = os.path.join(tempfile.gettempdir(), "RemoteDesktop_Paste_Trigger.tmp")
+    try:
+        if not os.path.exists(path_fallback) or os.path.getsize(path_fallback) == 0:
+            with open(path_fallback, "wb") as f:
+                f.write(b"RemoteDesktop clipboard paste trigger stub\r\n")
+        _clear_win_attrs(path_fallback)
+        return [path_fallback]
     except Exception:
         return [_DUMMY_HDROP_PATH]
 
 
 def _is_probe_stub_name(name):
     n = os.path.basename(str(name or "")).lower()
-    return n == _PROBE_STUB_NAME.lower() or n.startswith(".__rd_clipboard_probe")
+    return (
+        n == _PROBE_STUB_NAME.lower()
+        or n.startswith(".__rd_clipboard_probe")
+        or n == "remotedesktop_paste_trigger.tmp"
+        or n == "remotedesktop_paste_trigger"
+    )
 
 
 def _scrub_probe_from_dest(dest_dir):
@@ -1906,8 +1965,12 @@ def _offer_empty_hdrop():
 
 
 def _offer_probe_hdrop(pending_files=None):
-    """Không gắn file thật vào HDROP — Explorer sẽ dán stub vào thư mục đích (lần Paste 2, 3, …)."""
-    del pending_files
+    """Cung cấp HDROP chứa stub file để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
+    stub_files = _probe_stub_paths(pending_files)
+    h = create_hdrop_data(stub_files)
+    if h:
+        fn_SetClipboardData(15, h)
+        return True
     return _offer_empty_hdrop()
 
 
@@ -2140,6 +2203,13 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     if cmd_bar_paste:
         log_debug("[check_is_menu_query] Paste: Win11 command-bar")
         return False
+    # Win10 / Win11: Nhận diện click Paste sau RMB qua unified helper
+    if _is_recent_rmb_paste_click_unified(
+        last_lbutton, last_rbutton, menu_item_kind, "", last_dblclick,
+        lmb_on_menu=lmb_on_menu, lmb_down=lmb_down, menu_visible=menu_visible,
+    ):
+        log_debug(f"[check_is_menu_query] Paste: unified RMB paste click profile={profile} kind={menu_item_kind!r}")
+        return False
     # Race RENDERFORMAT trước mouse-poll — Win11 XAML và Win10 #32768.
     if (
         lmb_down
@@ -2290,6 +2360,31 @@ class FileCopyClientMixin:
                 pass
         try:
             threading.Timer(max(delay_s, 0.5), _go).start()
+        except Exception:
+            pass
+        return True
+
+    def _offer_probe_and_rearm(self, delay_s=0.25):
+        """Cung cấp probe HDROP (để Explorer nhận biết có file và sáng nút/menu Paste) và hẹn giờ rearm delayed."""
+        _offer_probe_hdrop(self.pending_remote_files)
+        self.dummy_h_active = True
+        self._hdrop_materialized = True
+        now = time.time()
+        due = getattr(self, "_empty_rearm_due", 0.0) or 0.0
+        if due > now:
+            return True
+        self._empty_rearm_due = now + max(delay_s, 0.4)
+        def _go():
+            self._empty_rearm_due = 0.0
+            if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+                return
+            try:
+                self._force_delayed_setup = True
+                self.setup_delayed_rendering()
+            except Exception:
+                pass
+        try:
+            threading.Timer(max(delay_s, 0.4), _go).start()
         except Exception:
             pass
         return True
@@ -2764,15 +2859,14 @@ class FileCopyClientMixin:
             clip_trace("[render_format] → MENU (dummy HDROP, chưa tải)", throttle_s=0.5, key="rf_menu")
             if not getattr(self, "_paste_dest_snapshot", None):
                 self.snapshot_paste_dest("menu_query")
-            if _offer_probe_hdrop(self.pending_remote_files):
-                self._offer_empty_and_rearm(0.25, offer=False)
+            self._offer_probe_and_rearm(0.25)
             dest = self.get_active_explorer_path()
             _schedule_scrub_probe(dest)
             return
         elif is_menu in ("BACKGROUND", "PROBE"):
-            log_debug(f"[render_format] Probe/menu Explorer ({is_menu}) — HDROP rỗng (không dán stub 0 byte).")
-            clip_trace(f"[render_format] → {is_menu} (empty HDROP)", throttle_s=1.0, key=f"rf_{is_menu.lower()}")
-            self._offer_empty_and_rearm(0.25)
+            log_debug(f"[render_format] Probe/menu Explorer ({is_menu}) — probe HDROP.")
+            clip_trace(f"[render_format] → {is_menu} (probe HDROP)", throttle_s=1.0, key=f"rf_{is_menu.lower()}")
+            self._offer_probe_and_rearm(0.35)
             return
 
         # is_menu is False (coi là Paste) — vẫn đòi cử chỉ Paste thật để tránh
@@ -2827,6 +2921,21 @@ class FileCopyClientMixin:
                     f"[render_format] gesture_ok via win10 LMB-after-RMB "
                     f"age_r={age_r:.2f} age_l={age_l:.2f} kind={kind!r}"
                 )
+            elif _is_recent_rmb_paste_click_unified(
+                last_l,
+                last_r,
+                menu_item_kind=kind,
+                last_dblclick=getattr(self, "last_dblclick_time", 0.0),
+                lmb_on_menu=bool(getattr(self, "_lmb_hit_context_menu", False)),
+                lmb_down=lmb,
+                menu_visible=_context_menu_open(),
+            ):
+                gesture_ok = True
+                self.note_paste_gesture()
+                clip_trace(
+                    f"[render_format] gesture_ok via unified RMB paste "
+                    f"age_r={age_r:.2f} age_l={age_l:.2f} kind={kind!r}"
+                )
         if not gesture_ok:
             try:
                 user32 = ctypes.windll.user32
@@ -2841,9 +2950,9 @@ class FileCopyClientMixin:
             except Exception:
                 pass
         if not gesture_ok:
-            log_debug("[render_format] Chưa có cử chỉ Paste (Ctrl+V / mục Paste) — không tải file.")
-            clip_trace("[render_format] → no gesture (empty HDROP)", throttle_s=1.0, key="rf_nogesture")
-            self._offer_empty_and_rearm(0.25)
+            log_debug("[render_format] Chưa có cử chỉ Paste (Ctrl+V / mục Paste) — giữ probe HDROP.")
+            clip_trace("[render_format] → no gesture (probe HDROP)", throttle_s=1.0, key="rf_nogesture")
+            self._offer_probe_and_rearm(0.25)
             return
 
         cancel_at = float(getattr(self, "_xfer_cancel_at", 0) or 0)
@@ -2893,6 +3002,14 @@ class FileCopyClientMixin:
                 and (
                     getattr(self, "_lmb_hit_context_menu", False)
                     or getattr(self, "_lmb_menu_item_kind", "") == "paste"
+                    or _is_recent_rmb_paste_click_unified(
+                        getattr(self, "last_lbutton_time", 0),
+                        getattr(self, "last_rbutton_time", 0),
+                        menu_item_kind=getattr(self, "_lmb_menu_item_kind", ""),
+                        last_dblclick=getattr(self, "last_dblclick_time", 0.0),
+                        lmb_on_menu=bool(getattr(self, "_lmb_hit_context_menu", False)),
+                        menu_visible=_context_menu_open(),
+                    )
                 )
             )
         )

@@ -29,6 +29,44 @@ if not app_dir:
 else:
     root_dir = app_dir
 log_file = os.path.join(app_dir, "service.log")
+try:
+    from utils.logger import ensure_utf8_bom
+    ensure_utf8_bom(log_file)
+except Exception:
+    pass
+
+def _write_service_log(target_file, log_line):
+    try:
+        parent = os.path.dirname(target_file)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        need_bom = False
+        if not os.path.exists(target_file) or os.path.getsize(target_file) == 0:
+            need_bom = True
+        else:
+            try:
+                with open(target_file, "rb") as rf:
+                    if rf.read(3) != b"\xef\xbb\xbf":
+                        need_bom = True
+            except Exception:
+                pass
+        if need_bom and os.path.exists(target_file) and os.path.getsize(target_file) > 0:
+            try:
+                with open(target_file, "rb") as rf:
+                    c = rf.read()
+                with open(target_file, "wb") as wf:
+                    wf.write(b"\xef\xbb\xbf" + c)
+                need_bom = False
+            except Exception:
+                pass
+        data = log_line.encode("utf-8")
+        if need_bom:
+            data = b"\xef\xbb\xbf" + data
+        with open(target_file, "ab") as f:
+            f.write(data)
+        return True
+    except Exception:
+        return False
 
 def log(msg):
     try:
@@ -38,8 +76,10 @@ def log(msg):
             print(log_line, end="")
         except:
             pass
-        with open(log_file, "a", encoding="utf-8-sig") as f:
-            f.write(log_line)
+        if not _write_service_log(log_file, log_line):
+            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+            fb_path = os.path.join(temp_dir, "service.log")
+            _write_service_log(fb_path, log_line)
     except:
         pass
 
