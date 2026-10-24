@@ -446,5 +446,6 @@
   "🔄 Làm mới (30s)": "🔄 Refresh (30s)",
   "🔧  Cách khắc phục": "🔧  How to fix",
   "Mở thư mục Log (Logs)": "Open Logs Folder",
-  "Mở thư mục Logs": "Open Logs Folder"
+  "Mở thư mục Logs": "Open Logs Folder",
+  "Đang thử kết nối lại (lần {x}/5)...": "Retrying connection (attempt {x}/5)..."
 }

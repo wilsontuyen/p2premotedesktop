@@ -445,5 +445,6 @@
   "Đang bắt tay xác thực với đối tác...": "Đang bắt tay xác thực với đối tác...",
   "Kết nối thành công! Đang chuyển sang màn hình Host...": "Kết nối thành công! Đang chuyển sang màn hình Host...",
   "Mở thư mục Log (Logs)": "Mở thư mục Log (Logs)",
-  "Mở thư mục Logs": "Mở thư mục Logs"
+  "Mở thư mục Logs": "Mở thư mục Logs",
+  "Đang thử kết nối lại (lần {x}/5)...": "Đang thử kết nối lại (lần {x}/5)..."
 }

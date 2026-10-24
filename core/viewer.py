@@ -348,6 +348,7 @@ def uninstall_keyboard_hook():
 
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
+    cmd_queue = boot_sock_queue
     import sys
     import os
     import time
@@ -541,6 +542,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 for ev in pygame.event.get():
                     if ev.type == pygame.QUIT:
                         outer_running = False
+                        if cmd_queue:
+                            try: cmd_queue.put("CANCEL_CONNECT")
+                            except: pass
                         if reconnect_queue:
                             try: reconnect_queue.put("CANCEL_CONNECT")
                             except: pass
@@ -557,7 +561,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         while True:
                             msg = reconnect_queue.get_nowait()
                             if isinstance(msg, str) and msg.startswith("STATUS|"):
-                                connecting_status = msg.split("|", 1)[1]
+                                new_status = msg.split("|", 1)[1]
+                                if "Đang thử kết nối lại" in new_status or _("Đang thử kết nối lại") in new_status or "lần " in new_status:
+                                    connecting_status = new_status
+                                elif "Đang thử kết nối lại" not in connecting_status and "lần " not in connecting_status:
+                                    connecting_status = new_status
                             elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
                                 msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg
                                 if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
@@ -823,7 +831,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             os.remove(blink_file)
                             blink_frames_remaining = 180 # 3 seconds at 60 FPS
                             if hwnd:
-                                import sys
                                 if sys.platform == "win32":
                                     import ctypes
                                     ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
@@ -1624,12 +1631,24 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     frozen_img = None
                 
-                print("[Client] Disconnected. Requesting reconnect in background..." + (" (session handoff)" if session_handoff else ""))
+                # Flush toàn bộ các message cũ còn tồn đọng trong reconnect_queue
                 try:
-                    reconnect_queue.put("RECONNECT_REQUEST|LOGIN" if session_handoff else "RECONNECT_REQUEST")
-                except: pass
+                    while not reconnect_queue.empty():
+                        reconnect_queue.get_nowait()
+                except Exception:
+                    pass
+
+                req_msg = "RECONNECT_REQUEST|LOGIN" if session_handoff else "RECONNECT_REQUEST|DROP"
+                print(f"[Client] Disconnected. Requesting reconnect in background ({req_msg})...")
+                # Gửi yêu cầu reconnect vào cmd_queue (kênh chuyên dụng lên App chính)
+                if cmd_queue:
+                    try: cmd_queue.put(req_msg)
+                    except Exception as e: print(f"[Client] Failed to put to cmd_queue: {e}")
+                if reconnect_queue:
+                    try: reconnect_queue.put(req_msg)
+                    except: pass
                 
-                status_msg_text = _("Đang thử kết nối lại lần {count}/30...").format(count=1)
+                status_msg_text = _("Đang thử kết nối lại (lần {x}/5)...").format(x=1)
                 
                 while countdown > 0 and outer_running:
                     for event in pygame.event.get():
@@ -1645,13 +1664,28 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     try:
                         while True:
                             new_sock = reconnect_queue.get_nowait()
-                            if isinstance(new_sock, str) and new_sock.startswith("STATUS|"):
-                                status_msg_text = new_sock.split("|", 1)[1]
+                            if isinstance(new_sock, str) and new_sock.startswith("RECONNECT_REQUEST"):
+                                # Viewer lỡ lấy được RECONNECT_REQUEST, trả lại ngay để App chính đọc!
+                                if cmd_queue:
+                                    try: cmd_queue.put(new_sock)
+                                    except: pass
+                                else:
+                                    try: reconnect_queue.put(new_sock)
+                                    except: pass
+                                time.sleep(0.05)
                                 continue
-                            elif new_sock == "FAILED":
-                                print("[Client] Reconnection failed. Closing window.")
-                                outer_running = False
-                                break
+                            elif isinstance(new_sock, str) and new_sock.startswith("STATUS|"):
+                                new_status = new_sock.split("|", 1)[1]
+                                if "Đang thử kết nối lại" in new_status or _("Đang thử kết nối lại") in new_status or "lần " in new_status:
+                                    status_msg_text = new_status
+                                elif not status_msg_text:
+                                    status_msg_text = new_status
+                                continue
+                            elif isinstance(new_sock, str) and (new_sock == "FAILED" or new_sock.startswith("FAILED|")):
+                                fail_reason = new_sock.split("|", 1)[1] if "|" in new_sock else ""
+                                if fail_reason:
+                                    status_msg_text = fail_reason
+                                continue
                             elif isinstance(new_sock, tuple) and new_sock[0] in ("SHARED_SOCK", "CONNECTED"):
                                 print("[Client] Received shared socket. Resuming session!")
                                 if new_sock[0] == "SHARED_SOCK":

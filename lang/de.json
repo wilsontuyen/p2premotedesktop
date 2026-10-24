@@ -445,5 +445,6 @@
   "🔄 Làm mới": "🔄 Aktualisieren",
   "🔄 Làm mới (30s)": "🔄 Aktualisieren (30s)",
   "🔧  Cách khắc phục": "🔧  Lösung",
-  "Mở thư mục Logs": "Protokollordner öffnen"
+  "Mở thư mục Logs": "Protokollordner öffnen",
+  "Đang thử kết nối lại (lần {x}/5)...": "Verbindungsversuch wiederholen (Mal {x}/5)..."
 }

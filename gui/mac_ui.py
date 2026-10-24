@@ -106,8 +106,6 @@ def setup_mac_ui(self):
         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
         file_menu.add_separator()
-        file_menu.add_command(label=_("Mở thư mục Logs"), command=self.open_logs_folder)
-        file_menu.add_separator()
         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label=_("File"), menu=file_menu)
         

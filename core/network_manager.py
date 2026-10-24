@@ -1126,12 +1126,14 @@ class NetworkMixin:
         # Mở ngay cửa sổ Pygame Viewer (1024x768, nền đen, chữ trắng)
         import multiprocessing as mp
         reconnect_queue = mp.Queue()
+        cmd_queue = mp.Queue()
         p = mp.Process(
             target=run_client_viewer_loop,
-            args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, ""),
+            args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, "", cmd_queue),
             daemon=True,
         )
         p.start()
+        p._cmd_queue = cmd_queue
 
         self.active_viewers.append({
             "process": p,
@@ -1205,12 +1207,14 @@ class NetworkMixin:
 
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
+            cmd_queue = mp.Queue()
             p = mp.Process(
                 target=run_client_viewer_loop,
-                args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, ""),
+                args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, "", cmd_queue),
                 daemon=True,
             )
             p.start()
+            p._cmd_queue = cmd_queue
             viewer_pid = p.pid
             viewer_proc = p
             computer_name_override = computer_name
@@ -1223,6 +1227,15 @@ class NetworkMixin:
             })
 
         def notify_status(msg):
+            # Nếu đang ở chế độ reconnect hoặc chu kỳ retry, không gửi các trạng thái chi tiết nội bộ
+            # vào reconnect_queue (để tránh đè mất dòng chữ "Đang thử kết nối lại (lần {x}/5)...")
+            is_retry_status = ("Đang thử kết nối lại" in msg or _("Đang thử kết nối lại") in msg or "lần " in msg)
+            if is_reconnect or retry_count > 0:
+                if is_retry_status and reconnect_queue:
+                    try: reconnect_queue.put(f"STATUS|{msg}")
+                    except: pass
+                return
+
             if reconnect_queue:
                 try: reconnect_queue.put(f"STATUS|{msg}")
                 except: pass
@@ -1239,12 +1252,18 @@ class NetworkMixin:
         cached_res_payload = None
         force_relay = getattr(self, '_current_force_relay', False)
 
-        # ====== BƯỚC 1: Quét mạng LAN để tìm ID (5 lần) ======
+        is_reconnect = bool(reconnect_reason or retry_count > 0)
+        current_attempt = min(5, retry_count + 1)
+        retry_banner = _("Đang thử kết nối lại (lần {x}/5)...").format(x=current_attempt)
+        notify_status(retry_banner)
+
+        # ====== BƯỚC 1: Quét mạng LAN để tìm ID ======
         lan_target = None
         if not force_relay and hasattr(self, 'lan_peers'):
-            for attempt in range(5):
+            scan_rounds = 1 if is_reconnect else 5
+            for attempt in range(scan_rounds):
                 if is_cancelled(): return
-                notify_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
+                notify_status(retry_banner)
                 current_time = time.time()
                 with self.lan_peers_lock:
                     if partner_id in self.lan_peers:
@@ -1254,11 +1273,12 @@ class NetworkMixin:
                 if lan_target:
                     print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN!")
                     break
-                time.sleep(0.5)
+                time.sleep(0.3 if is_reconnect else 0.5)
 
         if lan_target:
             if is_cancelled(): return
-            notify_status(_("Đang thử kết nối LAN trực tiếp..."))
+            if not is_reconnect and retry_count == 0:
+                notify_status(_("Đang thử kết nối LAN trực tiếp..."))
             local_ip = lan_target.get("local_ip", "")
             local_port = lan_target.get("port", 12345)
             ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
@@ -1273,9 +1293,9 @@ class NetworkMixin:
                     if connected or is_cancelled(): break
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1.0)
+                        s.settimeout(1.5)
                         s.connect((try_ip, p_port))
-                        s.settimeout(None)
+                        s.settimeout(2.5)
                         # Handshake
                         socket_passwords[s] = partner_pass
                         import platform
@@ -1285,6 +1305,7 @@ class NetworkMixin:
                         if tmp_res_msg:
                             tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
                             if tmp_res.get("status") in ("ok", "error"):
+                                s.settimeout(None)
                                 sock = s
                                 connected = True
                                 handshake_done = True
@@ -1318,7 +1339,8 @@ class NetworkMixin:
                     if s not in sockets_to_try:
                         sockets_to_try.append(s)
                         
-            notify_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
+            if not is_reconnect:
+                notify_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
             
             from utils.hwid import signaling_lookup_ids
             signaling_success = False
@@ -1332,7 +1354,7 @@ class NetworkMixin:
                     "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
                     "local_port": BOUND_PORT
                 }) + '\n'
-                wait_timeout = 6.0 if target_id == lookup_ids[0] else 2.0
+                wait_timeout = (2.5 if is_reconnect else 6.0) if target_id == lookup_ids[0] else 1.5
                 for s in sockets_to_try:
                     self.pending_connection_info = None
                     try:
@@ -1354,11 +1376,12 @@ class NetworkMixin:
                     break
                     
             if not signaling_success:
-                if reconnect_queue and retry_count < 30 and reconnect_reason:
-                    status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+                if reconnect_queue and retry_count + 1 < 5:
+                    next_attempt = retry_count + 2
+                    status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
                     notify_status(status_msg)
-                    time.sleep(2)
-                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason, computer_name_override, viewer_proc)
+                    time.sleep(1.0)
+                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
                     return
                 notify_status(_("Không thể tìm thấy hoặc đối tác đang Offline."))
                 if reconnect_queue:
@@ -1463,6 +1486,13 @@ class NetworkMixin:
                 connected = False
 
         if not connected:
+            if reconnect_queue and retry_count + 1 < 5:
+                next_attempt = retry_count + 2
+                status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
+                notify_status(status_msg)
+                time.sleep(1.5)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
+                return
             notify_status(_("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
             if reconnect_queue:
                 reconnect_queue.put("FAILED|" + _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
@@ -1544,10 +1574,11 @@ class NetworkMixin:
                 if is_android and not os_release:
                     os_release = "android"
                 
+                probe_status_cb = None if (is_reconnect or retry_count > 0) else notify_status
                 if is_android:
-                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, notify_status)
+                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, probe_status_cb)
                 else:
-                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, notify_status)
+                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, probe_status_cb)
                 if net_class == "high":
                     net_class_viet = _("Tốt (High-speed)")
                 elif net_class == "low":
@@ -1557,14 +1588,16 @@ class NetworkMixin:
                 if is_android or not is_lan_socket(sock):
                     status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
-                    notify_status(status_text)
+                    if not is_reconnect and retry_count == 0:
+                        notify_status(status_text)
                 try:
                     sock.settimeout(None)
                     sock.setblocking(True)
                 except Exception:
                     pass
                     
-                notify_status(_("Kết nối thành công! Đang chuyển sang màn hình Host..."))
+                if not is_reconnect and retry_count == 0:
+                    notify_status(_("Kết nối thành công! Đang chuyển sang màn hình Host..."))
                 if reconnect_queue:
                     try:
                         if viewer_pid and sys.platform == "win32":
@@ -1600,27 +1633,48 @@ class NetworkMixin:
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
 
                 # Kích hoạt giám sát reconnect cho phiên làm việc
-                if viewer_proc and partner_id and partner_pass:
-                    def monitor_reconnect(process, pid, ppass, req_queue):
+                if viewer_proc and partner_id and partner_pass and not getattr(viewer_proc, '_monitor_started', False):
+                    viewer_proc._monitor_started = True
+                    c_queue = getattr(viewer_proc, '_cmd_queue', None)
+                    def monitor_reconnect(process, pid, ppass, req_queue, cmd_q=None):
+                        print(f"[Client Monitor] Started reconnect monitor for {pid}...")
                         while process.is_alive():
                             try:
-                                msg = req_queue.get(timeout=1.0)
+                                msg = None
+                                if cmd_q:
+                                    try:
+                                        msg = cmd_q.get(timeout=0.3)
+                                    except Exception:
+                                        pass
+                                if not msg and req_queue:
+                                    try:
+                                        raw_msg = req_queue.get_nowait()
+                                        if isinstance(raw_msg, str) and (raw_msg.startswith("RECONNECT_REQUEST") or raw_msg == "CANCEL_CONNECT"):
+                                            msg = raw_msg
+                                        else:
+                                            req_queue.put(raw_msg)
+                                            time.sleep(0.1)
+                                    except Exception:
+                                        pass
+                                if not msg:
+                                    continue
+
                                 if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
-                                    reason = "login" if "|LOGIN" in msg else ""
-                                    print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason or 'drop'}")
+                                    reason = "login" if "|LOGIN" in msg else "drop"
+                                    print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason}")
+                                    if reason != "login":
+                                        self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
                                     threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason, computer_name, process), daemon=True).start()
                                 elif msg == "CANCEL_CONNECT":
+                                    print(f"[Client Monitor] Reconnect monitor cancelled for {pid}")
                                     break
-                                else:
-                                    req_queue.put(msg)
-                                    time.sleep(0.5)
-                            except:
+                            except Exception as e:
                                 pass
                         print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
                         alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
                         if not alive_viewers:
                             self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
-                    threading.Thread(target=monitor_reconnect, args=(viewer_proc, partner_id, partner_pass, reconnect_queue), daemon=True).start()
+                    threading.Thread(target=monitor_reconnect, args=(viewer_proc, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
 
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
@@ -1631,14 +1685,15 @@ class NetworkMixin:
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
-            if reconnect_queue and retry_count < 30 and reconnect_reason:
-                status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
+            if reconnect_queue and retry_count + 1 < 5:
+                next_attempt = retry_count + 2
+                status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
                 notify_status(status_msg)
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
-                time.sleep(2)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason, computer_name_override, viewer_proc)
+                time.sleep(1.5)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
                 return
 
             err_str = str(e)
@@ -1662,12 +1717,14 @@ class NetworkMixin:
         try:
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
+            cmd_queue = mp.Queue()
             p = mp.Process(
                 target=run_client_viewer_loop,
-                args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release),
+                args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release, cmd_queue),
                 daemon=True,
             )
             p.start()
+            p._cmd_queue = cmd_queue
             
             # Track active viewer
             self.active_viewers.append({
@@ -1689,25 +1746,46 @@ class NetworkMixin:
                     pass
             threading.Thread(target=wait_and_close, daemon=True).start()
             
-            if partner_id and partner_pass:
-                def monitor_reconnect(process, pid, ppass, req_queue):
+            if partner_id and partner_pass and not getattr(p, '_monitor_started', False):
+                p._monitor_started = True
+                c_queue = getattr(p, '_cmd_queue', None)
+                def monitor_reconnect(process, pid, ppass, req_queue, cmd_q=None):
+                    print(f"[Client Monitor] Started reconnect monitor for {pid}...")
                     while process.is_alive():
                         try:
-                            msg = req_queue.get(timeout=1.0)
+                            msg = None
+                            if cmd_q:
+                                try:
+                                    msg = cmd_q.get(timeout=0.3)
+                                except Exception:
+                                    pass
+                            if not msg and req_queue:
+                                try:
+                                    raw_msg = req_queue.get_nowait()
+                                    if isinstance(raw_msg, str) and (raw_msg.startswith("RECONNECT_REQUEST") or raw_msg == "CANCEL_CONNECT"):
+                                        msg = raw_msg
+                                    else:
+                                        req_queue.put(raw_msg)
+                                        time.sleep(0.1)
+                                except Exception:
+                                    pass
+                            if not msg:
+                                continue
+
                             if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
-                                reason = "login" if "|LOGIN" in msg else ""
-                                print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason or 'drop'}")
+                                reason = "login" if "|LOGIN" in msg else "drop"
+                                print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason}")
                                 if reason != "login":
                                     self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
-                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason), daemon=True).start()
-                            else:
-                                req_queue.put(msg)
-                                time.sleep(0.5)
-                        except:
+                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason, "", process), daemon=True).start()
+                            elif msg == "CANCEL_CONNECT":
+                                print(f"[Client Monitor] Reconnect monitor cancelled for {pid}")
+                                break
+                        except Exception as e:
                             pass
                     print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
                     
-                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue), daemon=True).start()
+                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
             
             self.connect_btn.config(state=tk.NORMAL)
             self.update_status(_("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)"))
