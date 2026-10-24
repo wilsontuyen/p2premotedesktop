@@ -1,11 +1,56 @@
 import os
 import time
 import sys
+import glob
+import shutil
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:
     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_logs_dir():
+    """
+    Trả về đường dẫn thư mục Logs của ứng dụng.
+    Ưu tiên 1: os.path.join(app_dir, "Logs")
+    Fallback: os.path.join(os.environ.get("LOCALAPPDATA", ""), "Easy Remote Desktop", "Logs")
+    Fallback cuối: os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "Easy Remote Desktop", "Logs")
+    Tự động tạo thư mục và kiểm tra quyền ghi.
+    """
+    primary_dir = os.path.join(app_dir, "Logs")
+    candidates = [primary_dir]
+    lad = os.environ.get("LOCALAPPDATA", "")
+    if lad:
+        candidates.append(os.path.join(lad, "Easy Remote Desktop", "Logs"))
+    pd = os.environ.get("PROGRAMDATA", "")
+    if pd:
+        candidates.append(os.path.join(pd, "Easy Remote Desktop", "Logs"))
+    temp = os.environ.get("TEMP", os.path.expanduser("~"))
+    candidates.append(os.path.join(temp, "Easy Remote Desktop", "Logs"))
+
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            test_f = os.path.join(d, ".perm_test")
+            try:
+                with open(test_f, "w", encoding="utf-8") as tf:
+                    tf.write("ok")
+                try:
+                    os.remove(test_f)
+                except Exception:
+                    pass
+                return d
+            except (PermissionError, OSError):
+                continue
+        except Exception:
+            continue
+    return primary_dir
+
+
+def get_log_filepath(filename):
+    """Trả về đường dẫn tuyệt đối của file log nằm trong thư mục Logs của app."""
+    return os.path.join(get_logs_dir(), filename)
 
 
 def ensure_utf8_bom(filepath):
@@ -33,8 +78,9 @@ def ensure_utf8_bom(filepath):
     except Exception:
         pass
 
+
 def safe_write_log_line(filepath, line, fallback_filename=None):
-    """Ghi dòng log vào filepath với UTF-8 BOM, fallback sang TEMP nếu bị PermissionError."""
+    """Ghi dòng log vào filepath với UTF-8 BOM, fallback sang thư mục Logs an toàn nếu gặp lỗi."""
     try:
         ensure_utf8_bom(filepath)
         with open(filepath, "a", encoding="utf-8-sig") as f:
@@ -44,23 +90,76 @@ def safe_write_log_line(filepath, line, fallback_filename=None):
         if fallback_filename:
             try:
                 fb_path = get_log_filepath(fallback_filename)
-                ensure_utf8_bom(fb_path)
-                with open(fb_path, "a", encoding="utf-8-sig") as f:
-                    f.write(line)
-                return True
+                if os.path.abspath(fb_path) != os.path.abspath(filepath):
+                    ensure_utf8_bom(fb_path)
+                    with open(fb_path, "a", encoding="utf-8-sig") as f:
+                        f.write(line)
+                    return True
             except Exception:
                 pass
     except Exception:
         pass
     return False
 
-def get_log_filepath(filename):
-    temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+
+def migrate_legacy_logs():
+    """
+    Tự động di chuyển các file log nằm rải rác ở thư mục gốc app_dir hoặc TEMP cũ
+    vào thư mục Logs tập trung để thư mục app luôn gọn gàng và dễ tìm kiếm.
+    """
     try:
-        os.makedirs(temp_dir, exist_ok=True)
-    except:
+        target_dir = get_logs_dir()
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir, exist_ok=True)
+
+        legacy_names = [
+            "gui.log", "agent.log", "service.log", "clipboard_agent.log",
+            "overwrite_conflict.log", "broker.log", "activity_log.txt",
+            "log.txt", "crash.log", "early_crash.log", "transfer.log",
+            "client_error.log", "host_error.log", "task_creation.log",
+            "task_run.log", "clipboard_debug.log"
+        ]
+
+        # 1. Quét app_dir
+        for fname in legacy_names:
+            src = os.path.join(app_dir, fname)
+            dst = os.path.join(target_dir, fname)
+            if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
+                try:
+                    if not os.path.exists(dst):
+                        shutil.move(src, dst)
+                    else:
+                        # Append nội dung file cũ vào file mới trong Logs
+                        with open(src, "rb") as sf:
+                            old_data = sf.read()
+                        with open(dst, "ab") as df:
+                            df.write(old_data)
+                        os.remove(src)
+                except Exception:
+                    pass
+
+        # Quét các file clipboard_debug_*.log ở app_dir
+        for src in glob.glob(os.path.join(app_dir, "clipboard_debug_*.log")):
+            dst = os.path.join(target_dir, os.path.basename(src))
+            if os.path.abspath(src) != os.path.abspath(dst):
+                try:
+                    shutil.move(src, dst)
+                except Exception:
+                    pass
+
+        # 2. Quét TEMP cũ (RemoteDesktopTransfers)
+        old_temp = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+        if os.path.exists(old_temp) and os.path.isdir(old_temp):
+            for src in glob.glob(os.path.join(old_temp, "*.log")) + glob.glob(os.path.join(old_temp, "*.txt")):
+                dst = os.path.join(target_dir, os.path.basename(src))
+                if os.path.abspath(src) != os.path.abspath(dst):
+                    try:
+                        shutil.move(src, dst)
+                    except Exception:
+                        pass
+    except Exception:
         pass
-    return os.path.join(temp_dir, filename)
+
 
 def log_file_transfer(filename, file_size):
     try:
@@ -80,6 +179,7 @@ def log_file_transfer(filename, file_size):
     except Exception as e:
         print(f"[Log] Lỗi ghi log.txt: {e}")
 
+
 def log_debug(msg):
     try:
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
@@ -94,7 +194,7 @@ _clip_trace_last = {}  # key -> (monotonic_ts, count_suppressed)
 
 
 def clip_trace(msg, throttle_s=0.0, key=None):
-    """Ghi clipboard_agent.log (TEMP + LOCALAPPDATA). throttle_s>0 gộp log trùng."""
+    """Ghi log vào Logs/clipboard_agent.log. throttle_s>0 gộp log trùng."""
     try:
         k = key
         if k is None and throttle_s > 0:
@@ -114,23 +214,8 @@ def clip_trace(msg, throttle_s=0.0, key=None):
         pass
 
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [PID {os.getpid()}] {msg}\n"
-    paths = []
-    try:
-        paths.append(get_log_filepath("clipboard_agent.log"))
-    except Exception:
-        pass
-    try:
-        lad = os.environ.get("LOCALAPPDATA", "")
-        if lad:
-            paths.append(os.path.join(lad, "Easy Remote Desktop", "clipboard_agent.log"))
-    except Exception:
-        pass
-    written = False
-    for filepath in paths:
-        if not filepath:
-            continue
-        if safe_write_log_line(filepath, line, "clipboard_agent.log"):
-            written = True
+    filepath = get_log_filepath("clipboard_agent.log")
+    written = safe_write_log_line(filepath, line, "clipboard_agent.log")
     try:
         print(f"[ClipTrace] {msg}")
     except Exception:
@@ -139,7 +224,7 @@ def clip_trace(msg, throttle_s=0.0, key=None):
 
 
 def log_overwrite_conflict(msg, tag="OW"):
-    """Log riêng overwrite dialog / client→host paste."""
+    """Ghi log riêng overwrite dialog / client→host paste vào Logs/overwrite_conflict.log."""
     try:
         import socket as _socket
         host = _socket.gethostname()
@@ -149,31 +234,8 @@ def log_overwrite_conflict(msg, tag="OW"):
         f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [PID {os.getpid()}] "
         f"[host={host}] [{tag}] {msg}\n"
     )
-    paths = []
-    try:
-        paths.append(get_log_filepath("overwrite_conflict.log"))
-    except Exception:
-        pass
-    try:
-        lad = os.environ.get("LOCALAPPDATA", "")
-        if lad:
-            paths.append(os.path.join(lad, "Easy Remote Desktop", "overwrite_conflict.log"))
-    except Exception:
-        pass
-    try:
-        pd = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-        if pd:
-            paths.append(os.path.join(pd, "Easy Remote Desktop", "overwrite_conflict.log"))
-    except Exception:
-        pass
-    try:
-        paths.append(os.path.join(app_dir, "overwrite_conflict.log"))
-    except Exception:
-        pass
-    for filepath in paths:
-        if not filepath:
-            continue
-        safe_write_log_line(filepath, line, "overwrite_conflict.log")
+    filepath = get_log_filepath("overwrite_conflict.log")
+    safe_write_log_line(filepath, line, "overwrite_conflict.log")
     try:
         print(f"[OW] {msg}")
     except Exception:
@@ -187,10 +249,11 @@ def log_overwrite_conflict(msg, tag="OW"):
 def log_activity(msg):
     try:
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
-        filepath = os.path.join(app_dir, "activity_log.txt")
+        filepath = get_log_filepath("activity_log.txt")
         safe_write_log_line(filepath, f"{timestamp} - {msg}\n", "activity_log.txt")
     except Exception as e:
         print(f"[Log] Lỗi ghi activity_log.txt: {e}")
+
 
 def _format_size_log(size_bytes):
     """Format dung lượng file cho log."""
@@ -203,9 +266,10 @@ def _format_size_log(size_bytes):
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
 
+
 def log_file_activity(action, filename, file_size, source_dir="", dest_dir="", status="Thành công"):
     """
-    Ghi log chi tiết cho hoạt động truyền/nhận file.
+    Ghi log chi tiết cho hoạt động truyền/nhận file vào Logs/activity_log.txt.
     Format: [ngày giờ] - action | File: filename | Size: dung_lượng | Nguồn: source_dir | Đích: dest_dir | Trạng thái: status
     """
     try:
@@ -220,8 +284,7 @@ def log_file_activity(action, filename, file_size, source_dir="", dest_dir="", s
             f"Đích: {dest_str} | Trạng thái: {status}\n"
         )
         
-        filepath = os.path.join(app_dir, "activity_log.txt")
+        filepath = get_log_filepath("activity_log.txt")
         safe_write_log_line(filepath, log_line, "activity_log.txt")
     except Exception as e:
         print(f"[Log] Lỗi ghi activity_log.txt: {e}")
-

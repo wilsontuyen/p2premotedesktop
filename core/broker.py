@@ -40,6 +40,7 @@ import threading
 
 import core.config
 from core.config import LAN_APP_SIGNATURE, LAN_DISCOVERY_PORT, LAN_BEACON_INTERVAL
+from core.i18n import _
 from network.socket_utils import send_msg, recv_msg, recv_exact, socket_passwords, APP_KEY, force_close_socket, _get_socket_send_lock
 from network.crypto import decrypt_payload
 
@@ -669,7 +670,7 @@ class Broker:
                 try:
                     send_msg(conn, json.dumps({
                         "status": "error",
-                        "message": "Sai mat khau ket noi hoac du lieu khong hop le!"
+                        "message": _("Sai mật khẩu kết nối hoặc dữ liệu không hợp lệ!")
                     }).encode("utf-8"), APP_KEY)
                 except Exception:
                     pass
@@ -679,7 +680,7 @@ class Broker:
             if client_pass not in candidates:
                 print("[Broker] handshake: sai mat khau.")
                 try:
-                    send_msg(conn, json.dumps({"status": "error", "message": "Sai mat khau"}).encode("utf-8"), APP_KEY)
+                    send_msg(conn, json.dumps({"status": "error", "message": _("Sai mật khẩu kết nối!")}).encode("utf-8"), APP_KEY)
                 except Exception:
                     pass
                 conn.close(); return

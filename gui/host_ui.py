@@ -85,6 +85,8 @@ def setup_host_ui(self):
     menubar = tk.Menu(self)
 
     file_menu = tk.Menu(menubar, tearoff=0)
+    file_menu.add_command(label=_("Mở thư mục Logs"), command=self.open_logs_folder)
+    file_menu.add_separator()
     file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
     menubar.add_cascade(label=_("File"), menu=file_menu)
 

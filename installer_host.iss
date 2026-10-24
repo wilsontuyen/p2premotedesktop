@@ -36,6 +36,7 @@ vietnamese.RunProgram=Chạy Easy Remote Desktop Host
 
 [Dirs]
 Name: "{app}"; Permissions: users-modify
+Name: "{app}\Logs"; Permissions: users-modify
 
 [Files]
 Source: "dist_nuitka_host\app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -53,9 +54,9 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Easy
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostAgent"" dir=in action=allow program=""{app}\RemoteDesktopHost.exe"" enable=yes profile=any"; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostService"" dir=in action=allow program=""{app}\RemoteDesktopHostService.exe"" enable=yes profile=any"; Flags: runhidden
-Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopHostAgent"" /tr ""\""{app}\RemoteDesktopHostService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\task_creation.log"" 2>&1"; Flags: runhidden
+Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopHostAgent"" /tr ""\""{app}\RemoteDesktopHostService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\Logs\task_creation.log"" 2>&1"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$t = Get-ScheduledTask -TaskName 'EasyRemoteDesktopHostAgent' -ErrorAction SilentlyContinue; if ($t) {{ $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }"""; Flags: runhidden
-Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopHostAgent"" > ""{app}\task_run.log"" 2>&1"; Flags: runhidden
+Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopHostAgent"" > ""{app}\Logs\task_run.log"" 2>&1"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
 Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 

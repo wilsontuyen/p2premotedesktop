@@ -7,8 +7,9 @@ else:
 import traceback
 import os
 try:
-    import tempfile
-    crash_log_path = os.path.join(tempfile.gettempdir(), "early_crash.log")
+    from utils.logger import get_log_filepath, migrate_legacy_logs
+    migrate_legacy_logs()
+    crash_log_path = get_log_filepath("early_crash.log")
     _f = open(crash_log_path, "w", encoding="utf-8-sig", buffering=1)
     sys.stderr = _f
     sys.stdout = _f
@@ -211,15 +212,9 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     # Ghi vào file với UTF-8 BOM
     try:
         from utils.logger import ensure_utf8_bom, get_log_filepath
-        crash_path = os.path.join(app_dir, "crash.log")
-        try:
-            ensure_utf8_bom(crash_path)
-            f = open(crash_path, "a", encoding="utf-8-sig")
-        except (PermissionError, OSError):
-            fb_path = get_log_filepath("crash.log")
-            ensure_utf8_bom(fb_path)
-            f = open(fb_path, "a", encoding="utf-8-sig")
-        with f:
+        crash_path = get_log_filepath("crash.log")
+        ensure_utf8_bom(crash_path)
+        with open(crash_path, "a", encoding="utf-8-sig") as f:
             f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- CRASH TRACEBACK ---\n")
             traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
     except Exception:
@@ -373,18 +368,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         # Tạm ẩn cửa sổ trắng trong lúc khởi tạo giao diện
         self.withdraw()
             
-        # Configure logging and stdout redirection for diagnostics
         try:
             from utils.logger import ensure_utf8_bom, get_log_filepath
             log_filename = "agent.log" if self.is_headless else "gui.log"
-            log_path = os.path.join(app_dir, log_filename)
-            try:
-                ensure_utf8_bom(log_path)
-                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
-            except (PermissionError, OSError):
-                fallback_path = get_log_filepath(log_filename)
-                ensure_utf8_bom(fallback_path)
-                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
+            log_path = get_log_filepath(log_filename)
+            ensure_utf8_bom(log_path)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except Exception:
             pass
@@ -2835,6 +2824,7 @@ Comment=Remote Desktop P2P AutoStart
             
             menu = pystray.Menu(
                 item(_('Hiện (Show)'), self.show_gui_from_tray, default=True),
+                item(_('Mở thư mục Logs'), self.open_logs_folder),
                 item(_('Thoát (Exit)'), self.exit_from_tray)
             )
             
@@ -2847,6 +2837,20 @@ Comment=Remote Desktop P2P AutoStart
 
 
 
+
+    def open_logs_folder(self, icon=None, item=None):
+        from utils.logger import get_logs_dir
+        import subprocess
+        logs_dir = get_logs_dir()
+        try:
+            if sys.platform == "win32":
+                os.startfile(logs_dir)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", logs_dir])
+            else:
+                subprocess.run(["xdg-open", logs_dir])
+        except Exception as e:
+            print(f"Error opening logs folder: {e}")
 
     def show_gui_from_tray(self, icon=None, item=None):
         self.after(0, self._restore_window)
@@ -3042,14 +3046,9 @@ if __name__ == '__main__':
         # Redirect stdout/stderr cho clipboard agent mode
         try:
             from utils.logger import ensure_utf8_bom, get_log_filepath
-            log_path = os.path.join(app_dir, "clipboard_agent.log")
-            try:
-                ensure_utf8_bom(log_path)
-                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
-            except (PermissionError, OSError):
-                fallback_path = get_log_filepath("clipboard_agent.log")
-                ensure_utf8_bom(fallback_path)
-                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
+            log_path = get_log_filepath("clipboard_agent.log")
+            ensure_utf8_bom(log_path)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except:
             pass
@@ -3071,14 +3070,9 @@ if __name__ == '__main__':
     if "--broker" in sys.argv:
         try:
             from utils.logger import ensure_utf8_bom, get_log_filepath
-            log_path = os.path.join(app_dir, "broker.log")
-            try:
-                ensure_utf8_bom(log_path)
-                sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
-            except (PermissionError, OSError):
-                fallback_path = get_log_filepath("broker.log")
-                ensure_utf8_bom(fallback_path)
-                sys.stdout = open(fallback_path, "a", encoding="utf-8-sig", buffering=1)
+            log_path = get_log_filepath("broker.log")
+            ensure_utf8_bom(log_path)
+            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
             sys.stderr = sys.stdout
         except Exception:
             pass

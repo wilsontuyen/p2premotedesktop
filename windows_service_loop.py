@@ -27,12 +27,12 @@ if not app_dir:
         app_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         app_dir = os.path.dirname(os.path.abspath(__file__))
-log_file = os.path.join(app_dir, "service.log")
 try:
-    from utils.logger import ensure_utf8_bom
+    from utils.logger import get_log_filepath, ensure_utf8_bom
+    log_file = get_log_filepath("service.log")
     ensure_utf8_bom(log_file)
 except Exception:
-    pass
+    log_file = os.path.join(app_dir, "Logs", "service.log")
 
 try:
     from os_utils.windows_system import boost_process_priority, ensure_task_battery_support
@@ -171,9 +171,13 @@ def log(msg):
         except:
             pass
         if not _write_service_log(log_file, log_line):
-            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
-            fb_path = os.path.join(temp_dir, "service.log")
-            _write_service_log(fb_path, log_line)
+            try:
+                from utils.logger import get_log_filepath
+                fb_path = get_log_filepath("service.log")
+                if os.path.abspath(fb_path) != os.path.abspath(log_file):
+                    _write_service_log(fb_path, log_line)
+            except Exception:
+                pass
     except:
         pass
 

@@ -110,56 +110,6 @@ def _parse_files_pipe_payload(paths_str):
 
 CLIPBOARD_PIPE_NAME = r"\\.\pipe\RemoteDesktopClipboardPipe"
 
-def create_named_pipe_with_everyone_dacl():
-    """
-    Tạo Named Pipe Server với Security Descriptor cho phép nhóm Everyone 
-    có quyền Read/Write. TUYỆT ĐỐI KHÔNG truyền None vào Security Attributes.
-    """
-    import win32pipe
-    import win32file
-    import win32security
-    import ntsecuritycon as con
-    
-    # Tạo Security Descriptor với DACL cho Everyone
-    sd = win32security.SECURITY_DESCRIPTOR()
-    sd.Initialize()
-    
-    # Tạo DACL
-    dacl = win32security.ACL()
-    dacl.Initialize()
-    
-    # Lấy SID của nhóm "Everyone"
-    everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid)
-    
-    # Thêm quyền Read/Write cho Everyone
-    dacl.AddAccessAllowedAce(
-        win32security.ACL_REVISION,
-        con.FILE_GENERIC_READ | con.FILE_GENERIC_WRITE,
-        everyone_sid
-    )
-    
-    sd.SetSecurityDescriptorDacl(True, dacl, False)
-    
-    # Tạo Security Attributes
-    sa = win32security.SECURITY_ATTRIBUTES()
-    sa.bInheritHandle = False
-    sa.SECURITY_DESCRIPTOR = sd
-    
-    # Tạo Named Pipe
-    pipe_handle = win32pipe.CreateNamedPipe(
-        CLIPBOARD_PIPE_NAME,
-        win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
-        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
-        4,       # Số instance tối đa
-        10 * 1024 * 1024,    # Output buffer size (10MB)
-        10 * 1024 * 1024,    # Input buffer size (10MB)
-        0,       # Default timeout
-        sa       # Security Attributes với DACL cho Everyone
-    )
-    
-    return pipe_handle
-
-
 def _low_il_everyone_sa():
     """SECURITY_ATTRIBUTES: Everyone + Mandatory Label Low — user Medium IL ghi được."""
     import win32security
@@ -177,6 +127,31 @@ def _low_il_everyone_sa():
         sd.SetSecurityDescriptorDacl(True, None, False)
         sa.SECURITY_DESCRIPTOR = sd
     return sa
+
+
+def create_named_pipe_with_everyone_dacl():
+    """
+    Tạo Named Pipe Server với Security Descriptor cho phép nhóm Everyone 
+    và các tiến trình ở Medium/Low IL (Session 1 User) kết nối được tới pipe 
+    do SYSTEM (Session 0) tạo. TUYỆT ĐỐI KHÔNG truyền None vào Security Attributes.
+    """
+    import win32pipe
+    
+    sa = _low_il_everyone_sa()
+    
+    # Tạo Named Pipe với PIPE_UNLIMITED_INSTANCES
+    pipe_handle = win32pipe.CreateNamedPipe(
+        CLIPBOARD_PIPE_NAME,
+        win32pipe.PIPE_ACCESS_OUTBOUND,                    # Server chỉ ghi (outbound)
+        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,  # Message mode, blocking
+        win32pipe.PIPE_UNLIMITED_INSTANCES,                # Cho phép kết nối không giới hạn
+        10 * 1024 * 1024,    # Output buffer size (10MB)
+        10 * 1024 * 1024,    # Input buffer size (10MB)
+        0,                   # Default timeout
+        sa                   # Security Attributes với Low IL + Everyone DACL
+    )
+    
+    return pipe_handle
 
 
 def _create_user_signalable_event(name):
@@ -565,6 +540,10 @@ class FileCopyHostMixin:
                     continue
                 log_debug("[_down_pipe_loop] Đang chờ Clipboard Agent kết nối...")
                 try:
+                    log_overwrite_conflict("HOST_HEADLESS DownPipe WAITING for agent to connect...")
+                except Exception:
+                    pass
+                try:
                     win32pipe.ConnectNamedPipe(pipe_handle, None)
                 except Exception as ce:
                     err = getattr(ce, "winerror", 0) or (ce.args[0] if ce.args else 0)
@@ -605,6 +584,10 @@ class FileCopyHostMixin:
                         break
             except Exception as e:
                 log_debug(f"[_down_pipe_loop] {e}")
+                try:
+                    log_overwrite_conflict(f"HOST_HEADLESS DownPipe LOOP EXCEPTION: {e}")
+                except Exception:
+                    pass
             finally:
                 if pipe_handle is not None and pipe_handle != -1:
                     try:
@@ -1074,7 +1057,7 @@ def run_clipboard_agent_mode():
     import tkinter as tk
     
     from utils.logger import ensure_utf8_bom, get_log_filepath
-    log_path = os.path.join(app_dir, "clipboard_agent.log")
+    log_path = get_log_filepath("clipboard_agent.log")
     agent_log = logging.getLogger("clipboard_agent")
     agent_log.setLevel(logging.DEBUG)
     
@@ -1084,18 +1067,12 @@ def run_clipboard_agent_mode():
         
     formatter = logging.Formatter("[%(asctime)s] [PID %(process)d] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     
-    # Ghi file với UTF-8 BOM, fallback sang TEMP nếu Program Files bị PermissionError
     fh = None
     try:
         ensure_utf8_bom(log_path)
         fh = logging.FileHandler(log_path, encoding="utf-8-sig")
-    except (PermissionError, OSError):
-        try:
-            log_path = get_log_filepath("clipboard_agent.log")
-            ensure_utf8_bom(log_path)
-            fh = logging.FileHandler(log_path, encoding="utf-8-sig")
-        except Exception:
-            pass
+    except Exception:
+        pass
     if fh is not None:
         fh.setFormatter(formatter)
         agent_log.addHandler(fh)
@@ -1136,6 +1113,8 @@ def run_clipboard_agent_mode():
             pipe_handle = None
             try:
                 agent_print(f"[ClipboardAgent] Đang chờ kết nối tới Pipe: {pipe_name}")
+                _last_err_logged = None
+                _err_count = 0
                 while True:
                     try:
                         pipe_handle = win32file.CreateFile(
@@ -1148,7 +1127,17 @@ def run_clipboard_agent_mode():
                             None
                         )
                         break
-                    except Exception:
+                    except Exception as ex:
+                        err = getattr(ex, 'winerror', 0) or (ex.args[0] if ex.args else 0)
+                        if err != 2:  # 2 = ERROR_FILE_NOT_FOUND (pipe server chưa tạo)
+                            if err != _last_err_logged or _err_count % 100 == 0:
+                                _last_err_logged = err
+                                agent_print(f"[ClipboardAgent] CreateFile Pipe loi (winerror={err}): {ex}")
+                                try:
+                                    log_overwrite_conflict(f"AGENT PIPE CreateFile FAIL winerror={err}: {ex}")
+                                except Exception:
+                                    pass
+                        _err_count += 1
                         time.sleep(0.05)
 
                 agent_print(f"[ClipboardAgent] Đã kết nối thành công tới Pipe.")

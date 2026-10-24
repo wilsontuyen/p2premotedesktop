@@ -2261,7 +2261,14 @@ _cleanup_stale_transfers()
 class FileCopyClientMixin:
     """Mixin: nhận file từ host khi paste trên client."""
 
+    def _is_headless_host_process(self):
+        """Host headless (service worker): paste client→host do Clipboard Agent xử lý, không phải process này."""
+        return bool(self.app and getattr(self.app, "is_headless", False))
+
     def setup_delayed_rendering(self):
+        if self._is_headless_host_process():
+            log_debug("[setup_delayed_rendering] Bỏ qua — headless host (Clipboard Agent giữ delayed CF_HDROP).")
+            return
         log_debug(f"[setup_delayed_rendering] Bắt đầu. self.listener={self.listener}")
         force = getattr(self, "_force_delayed_setup", False)
         if not force:
@@ -2391,6 +2398,8 @@ class FileCopyClientMixin:
 
     def _ensure_delayed_for_gesture(self):
         """Trước Paste thật: nếu HDROP đã materialize, đăng ký lại delayed (SendMessage)."""
+        if self._is_headless_host_process():
+            return
         if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
             return
         try:
@@ -2407,6 +2416,8 @@ class FileCopyClientMixin:
             pass
 
     def _execute_setup_delayed_rendering(self):
+        if self._is_headless_host_process():
+            return
         if not self.listener or not self.listener.hwnd:
             log_debug("[_execute_setup_delayed_rendering] Lỗi: hwnd chưa sẵn sàng.")
             return
@@ -2815,6 +2826,17 @@ class FileCopyClientMixin:
 
     def render_format(self, fmt_id):
         if fmt_id != 15: # CF_HDROP
+            return
+        if self._is_headless_host_process():
+            # Không tự tải / hỏi ghi đè trong headless — trả HDROP rỗng nếu lỡ còn delayed cũ.
+            try:
+                log_overwrite_conflict("HOST_HEADLESS render_format ignored (paste thuộc Clipboard Agent)")
+            except Exception:
+                pass
+            try:
+                _offer_empty_hdrop()
+            except Exception:
+                pass
             return
 
         pending = self.pending_remote_files or []
