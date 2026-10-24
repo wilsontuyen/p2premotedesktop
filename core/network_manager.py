@@ -1083,61 +1083,155 @@ class NetworkMixin:
         if not partner_pass:
             self.show_custom_error(_("Lỗi"), _("Vui lòng nhập mật khẩu đối tác!"))
             return
-            
-        self.update_status(_("Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ..."))
-        self.connect_btn.config(state=tk.DISABLED)
+
+        if partner_id == getattr(self, "my_id_clean", ""):
+            self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)"))
+            return
+
+        # Dọn dẹp tiến trình viewer đã thoát
+        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
         
-        # Lưu biến UI vào thuộc tính thông thường để thread chạy ngầm đọc (Tránh lỗi Tcl deadlock khi đọc biến UI từ thread khác)
+        # Kiểm tra xem đã có cửa sổ nào đang kết nối tới partner_id này chưa
+        for v in self.active_viewers:
+            if v.get("partner_id") == partner_id:
+                print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
+                import tempfile
+                blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
+                try:
+                    with open(blink_file, "w") as f:
+                        f.write("1")
+                except Exception as write_err:
+                    print(f"[Client] Failed to write blink signal: {write_err}")
+                return
+
+        # Tìm tên máy từ danh sách máy đã lưu
+        computer_name = ""
+        if hasattr(self, 'load_saved_computers'):
+            try:
+                saved_comps = self.load_saved_computers()
+                for c in saved_comps:
+                    if c.get("id", "").replace(" ", "") == partner_id:
+                        computer_name = c.get("name", "")
+                        break
+            except Exception:
+                pass
+        if not computer_name:
+            computer_name = f"ID: {partner_id}"
+
+        # Lưu biến UI force_relay
         self._current_force_relay = False
         if hasattr(self, 'force_relay_var'):
             self._current_force_relay = self.force_relay_var.get()
-            
-        # Connect inside background thread to prevent UI freezing
+
+        # Mở ngay cửa sổ Pygame Viewer (1024x768, nền đen, chữ trắng)
+        import multiprocessing as mp
+        reconnect_queue = mp.Queue()
+        p = mp.Process(
+            target=run_client_viewer_loop,
+            args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, ""),
+            daemon=True,
+        )
+        p.start()
+
+        self.active_viewers.append({
+            "process": p,
+            "computer_name": computer_name,
+            "zalo_phone": "",
+            "partner_id": partner_id
+        })
+
+        # Nút kết nối vẫn ở trạng thái NORMAL để có thể mở nhiều máy cùng lúc
+        self.connect_btn.config(state=tk.NORMAL)
+
         def run_connect():
             try:
-                self.connect_to_partner(partner_id, partner_pass)
+                self.connect_to_partner(
+                    partner_id,
+                    partner_pass,
+                    reconnect_queue=reconnect_queue,
+                    retry_count=0,
+                    viewer_pid=p.pid,
+                    reconnect_reason="",
+                    computer_name_override=computer_name,
+                    viewer_proc=p
+                )
             except Exception as e:
                 import traceback
-                try:
-                    with open(r"C:\Apps\P2P\crash_connect.log", "a") as f:
-                        f.write(traceback.format_exc() + "\n")
-                except:
-                    pass
-                print(f"[Client] Background thread crashed: {e}")
-        
+                print(f"[Client] Background connect thread crashed: {e}")
+                if reconnect_queue:
+                    try: reconnect_queue.put(f"FAILED|{e}")
+                    except: pass
+
         threading.Thread(target=run_connect, daemon=True).start()
-    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None, reconnect_reason=""):
+
+    def connect_to_partner(self, partner_id, partner_pass, reconnect_queue=None, retry_count=0, viewer_pid=None, reconnect_reason="", computer_name_override="", viewer_proc=None):
         if self._is_host_only_app():
             return
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            self.update_status(_("Kết nối bị hủy."))
+            if reconnect_queue:
+                try: reconnect_queue.put("FAILED|" + _("Bạn không thể kết nối tới chính bạn :-)"))
+                except: pass
             return
-            
-        # Clean up dead viewer processes first
-        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
-        
-        # Check if we already have an active connection to this partner_id
-        existing_viewer = None
-        for v in self.active_viewers:
-            if v.get("partner_id") == partner_id:
-                existing_viewer = v
-                break
-                
-        if existing_viewer and reconnect_queue is None:
-            print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
-            self.update_status(_("Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...").format(partner_id=partner_id))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            # Write blink signal file
-            import tempfile
-            blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
-            try:
-                with open(blink_file, "w") as f:
-                    f.write("1")
-            except Exception as write_err:
-                print(f"[Client] Failed to write blink signal: {write_err}")
-            return
+
+        # Nếu được gọi trực tiếp mà chưa có reconnect_queue (fallback):
+        if reconnect_queue is None:
+            self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+            for v in self.active_viewers:
+                if v.get("partner_id") == partner_id:
+                    print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
+                    import tempfile
+                    blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{partner_id}.tmp")
+                    try:
+                        with open(blink_file, "w") as f:
+                            f.write("1")
+                    except Exception:
+                        pass
+                    return
+
+            computer_name = computer_name_override
+            if not computer_name and hasattr(self, 'load_saved_computers'):
+                try:
+                    saved_comps = self.load_saved_computers()
+                    for c in saved_comps:
+                        if c.get("id", "").replace(" ", "") == partner_id:
+                            computer_name = c.get("name", "")
+                            break
+                except Exception:
+                    pass
+            if not computer_name:
+                computer_name = f"ID: {partner_id}"
+
+            import multiprocessing as mp
+            reconnect_queue = mp.Queue()
+            p = mp.Process(
+                target=run_client_viewer_loop,
+                args=(None, 1024, 768, computer_name, False, partner_id, reconnect_queue, partner_pass, False, ""),
+                daemon=True,
+            )
+            p.start()
+            viewer_pid = p.pid
+            viewer_proc = p
+            computer_name_override = computer_name
+
+            self.active_viewers.append({
+                "process": p,
+                "computer_name": computer_name,
+                "zalo_phone": "",
+                "partner_id": partner_id
+            })
+
+        def notify_status(msg):
+            if reconnect_queue:
+                try: reconnect_queue.put(f"STATUS|{msg}")
+                except: pass
+
+        def is_cancelled():
+            if viewer_proc and not viewer_proc.is_alive():
+                print(f"[Client] Viewer process closed by user, cancelling connect to {partner_id}")
+                return True
+            return False
 
         sock = None
         connected = False
@@ -1149,39 +1243,38 @@ class NetworkMixin:
         lan_target = None
         if not force_relay and hasattr(self, 'lan_peers'):
             for attempt in range(5):
-                self.update_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
+                if is_cancelled(): return
+                notify_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
                 current_time = time.time()
                 with self.lan_peers_lock:
-                    # Do not clean up old peers here to preserve them for Wake-on-LAN
                     if partner_id in self.lan_peers:
-                        p = self.lan_peers[partner_id]
-                        if current_time - p.get("last_seen", 0) < 15:
-                            lan_target = p
-                
+                        p_peer = self.lan_peers[partner_id]
+                        if current_time - p_peer.get("last_seen", 0) < 15:
+                            lan_target = p_peer
                 if lan_target:
                     print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN!")
                     break
-                
-                time.sleep(0.5) # Đợi 0.5s giữa các lần tìm
+                time.sleep(0.5)
 
         if lan_target:
-            self.update_status(_("Đang thử kết nối LAN trực tiếp..."))
+            if is_cancelled(): return
+            notify_status(_("Đang thử kết nối LAN trực tiếp..."))
             local_ip = lan_target.get("local_ip", "")
             local_port = lan_target.get("port", 12345)
             ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
             ports_to_try = [local_port]
-            for p in [12345, 12346, 12347, 12348]:
-                if p not in ports_to_try:
-                    ports_to_try.append(p)
+            for p_port in [12345, 12346, 12347, 12348]:
+                if p_port not in ports_to_try:
+                    ports_to_try.append(p_port)
             
             for try_ip in ips_to_try:
-                if connected: break
-                for p in ports_to_try:
-                    if connected: break
+                if connected or is_cancelled(): break
+                for p_port in ports_to_try:
+                    if connected or is_cancelled(): break
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         s.settimeout(1.0)
-                        s.connect((try_ip, p))
+                        s.connect((try_ip, p_port))
                         s.settimeout(None)
                         # Handshake
                         socket_passwords[s] = partner_pass
@@ -1196,26 +1289,24 @@ class NetworkMixin:
                                 connected = True
                                 handshake_done = True
                                 cached_res_payload = tmp_res
-                                print(f"[Client] Connected & Handshaked via LAN Direct: {try_ip}:{p}")
+                                print(f"[Client] Connected & Handshaked via LAN Direct: {try_ip}:{p_port}")
                                 break
                         if not connected:
                             force_close_socket(s)
                     except Exception as e:
-                        try:
-                            with open(r"C:\Apps\P2P\lan_debug.log", "a") as f:
-                                f.write(f"LAN connect to {try_ip}:{p} failed: {e}\n")
-                        except: pass
                         try: s.close()
                         except: pass
-        
+
         # ====== BƯỚC 2: Hỏi Signaling Server (nếu LAN thất bại hoặc không tìm thấy) ======
         public_ip, port = None, None
         specific_host = getattr(self, 'current_signaling_host', None)
         
         if not connected:
+            if is_cancelled(): return
             if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-                self.update_status(_("Chưa kết nối Máy chủ Tín hiệu!"))
-                self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng.")))
+                notify_status(_("Chưa kết nối Máy chủ Tín hiệu!"))
+                if reconnect_queue:
+                    reconnect_queue.put("FAILED|" + _("Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng."))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
 
@@ -1227,12 +1318,13 @@ class NetworkMixin:
                     if s not in sockets_to_try:
                         sockets_to_try.append(s)
                         
-            self.update_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
+            notify_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
             
             from utils.hwid import signaling_lookup_ids
             signaling_success = False
             lookup_ids = signaling_lookup_ids(partner_id)
             for target_id in lookup_ids:
+                if is_cancelled(): return
                 req = json.dumps({
                     "action": "connect_request",
                     "target": target_id,
@@ -1251,6 +1343,7 @@ class NetworkMixin:
                         
                     remain = wait_timeout
                     while remain > 0 and self.pending_connection_info is None:
+                        if is_cancelled(): return
                         time.sleep(0.2)
                         remain -= 0.2
                         
@@ -1261,19 +1354,16 @@ class NetworkMixin:
                     break
                     
             if not signaling_success:
-                if reconnect_queue and retry_count < 30:
+                if reconnect_queue and retry_count < 30 and reconnect_reason:
                     status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
-                    try: reconnect_queue.put(f"STATUS|{status_msg}")
-                    except: pass
+                    notify_status(status_msg)
                     time.sleep(2)
-                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason)
+                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason, computer_name_override, viewer_proc)
                     return
-                self.update_status(_("Sẵn sàng kết nối"))
-                if not reconnect_queue:
-                    self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Không thể tìm thấy hoặc đối tác đang Offline.")))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                notify_status(_("Không thể tìm thấy hoặc đối tác đang Offline."))
                 if reconnect_queue:
-                    reconnect_queue.put("FAILED")
+                    reconnect_queue.put("FAILED|" + _("Không thể tìm thấy hoặc đối tác đang Offline."))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 return
                 
             if len(self.pending_connection_info) >= 4:
@@ -1285,20 +1375,23 @@ class NetworkMixin:
 
         # ====== BƯỚC 3: Đục lỗ Tường lửa (TCP Hole Punching) 10 lần ======
         if not connected and not force_relay and public_ip and port:
+            if is_cancelled(): return
             skip_hole_punch = False
             if hasattr(self, 'current_ip') and self.current_ip == public_ip:
                 print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
                 skip_hole_punch = True
             
             if not skip_hole_punch:
-                self.update_status(_("Đang đục lỗ Tường lửa tới {ip}:{port}...").format(ip=public_ip, port=port))
+                notify_status(_("Đang đục lỗ Tường lửa tới {ip}:{port}...").format(ip=public_ip, port=port))
                 
                 if getattr(self, 'server_socket', None):
                     try: self.server_socket.close()
                     except: pass
                 
                 for attempt in range(10):
-                    self.update_status(_("Đang đục lỗ Tường lửa lần {n}/10...").format(n=attempt + 1))
+                    if is_cancelled():
+                        break
+                    notify_status(_("Đang đục lỗ Tường lửa lần {n}/10...").format(n=attempt + 1))
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     try: s.bind(('0.0.0.0', BOUND_PORT))
@@ -1337,8 +1430,9 @@ class NetworkMixin:
 
         # ====== BƯỚC 4: Server Trung Chuyển (Relay) Fallback ======
         if not connected:
+            if is_cancelled(): return
             display_host = specific_host or 'Relay'
-            self.update_status(_("Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
+            notify_status(_("Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
             try:
                 relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
                 relay_req = json.dumps({
@@ -1364,13 +1458,14 @@ class NetworkMixin:
                 time.sleep(1.5)
                 sock = s
                 connected = True
-                self.update_status(_("Đã kết nối qua Relay Server!"))
+                notify_status(_("Đã kết nối qua Relay Server! Đang bắt tay..."))
             except Exception as e:
                 connected = False
 
         if not connected:
-            self.update_status(_("Sẵn sàng kết nối"))
-            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối"), _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại).")))
+            notify_status(_("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
+            if reconnect_queue:
+                reconnect_queue.put("FAILED|" + _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock: force_close_socket(sock)
             return
@@ -1378,7 +1473,6 @@ class NetworkMixin:
         # ======================================================================
         # Hoàn tất kết nối và handshake
         # ======================================================================
-        # Tắt Nagle's algorithm (TCP_NODELAY) để giảm độ trễ tối đa cho cả đo tốc độ và điều khiển
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception as e:
@@ -1387,11 +1481,9 @@ class NetworkMixin:
             tune_socket_for_lan_bulk(sock)
         sock.settimeout(15.0)
             
-        # Cấu hình TCP Keep-Alive bảo vệ kết nối khỏi bị đóng bởi Firewall/Router
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             if sys.platform == "win32":
-                # 1s/1s trên LAN + spawn viewer process dễ RST (Win7 đặc biệt)
                 ka = (1, 10000, 2000) if is_lan_socket(sock) else (1, 1000, 1000)
                 sock.ioctl(socket.SIOC_KEEPALIVE_VALS, ka)
         except Exception as e:
@@ -1399,9 +1491,11 @@ class NetworkMixin:
             
         try:
             if not handshake_done:
-                # Register the socket password
+                if is_cancelled():
+                    force_close_socket(sock)
+                    return
+                notify_status(_("Đang bắt tay xác thực với đối tác..."))
                 socket_passwords[sock] = partner_pass
-                # Send handshake password
                 import platform
                 handshake = json.dumps({
                     "password": partner_pass,
@@ -1410,11 +1504,11 @@ class NetworkMixin:
                 }).encode('utf-8')
                 send_msg(sock, handshake, partner_pass)
                 
-                # Read verification response (allow APP_KEY fallback to receive error messages)
                 res_msg = recv_msg(sock, [partner_pass, APP_KEY])
                 if not res_msg:
-                    self.update_status(_("Sẵn sàng kết nối"))
-                    self.after(0, lambda: self.show_custom_error(_("Lỗi"), _("Đối tác ngắt kết nối đột ngột!")))
+                    notify_status(_("Đối tác ngắt kết nối đột ngột!"))
+                    if reconnect_queue:
+                        reconnect_queue.put("FAILED|" + _("Đối tác ngắt kết nối đột ngột!"))
                     self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                     force_close_socket(sock)
                     return
@@ -1428,12 +1522,13 @@ class NetworkMixin:
                 host_h = res.get("height")
                 computer_name = res.get("computer_name", "")
                 
-                # Replace with saved name from list to make it easier to identify the host
-                if hasattr(self, 'load_saved_computers'):
+                if computer_name_override:
+                    original_name = computer_name
+                    computer_name = f"{computer_name_override} | {original_name}" if original_name else computer_name_override
+                elif hasattr(self, 'load_saved_computers'):
                     try:
                         saved_comps = self.load_saved_computers()
                         for c in saved_comps:
-                            # The saved ID might contain spaces (e.g. "123 456 789 012")
                             if c.get("id", "").replace(" ", "") == partner_id:
                                 if c.get("name"):
                                     original_name = computer_name
@@ -1449,12 +1544,10 @@ class NetworkMixin:
                 if is_android and not os_release:
                     os_release = "android"
                 
-                # Android: giữ đúng 2 vòng speed-test như bản trước refactor.
-                # LAN PC: bỏ đo (tránh flood JPEG + nhân socket). WAN PC: 1 vòng nhanh.
                 if is_android:
-                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, self.update_status)
+                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, notify_status)
                 else:
-                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, self.update_status)
+                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, notify_status)
                 if net_class == "high":
                     net_class_viet = _("Tốt (High-speed)")
                 elif net_class == "low":
@@ -1464,23 +1557,20 @@ class NetworkMixin:
                 if is_android or not is_lan_socket(sock):
                     status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
                     print(f"[Client] {status_text}")
-                    self.update_status(status_text)
+                    notify_status(status_text)
                 try:
                     sock.settimeout(None)
                     sock.setblocking(True)
                 except Exception:
                     pass
                     
-                # Pygame window sẽ mở đúng với độ phân giải thật của host. 
-                # (Kích thước ảnh thực tế truyền qua mạng vẫn sẽ được nén lại bởi dyn_scale ở phía Host)
-                self.update_status(_("Kết nối thành công! Đang khởi động màn hình..."))
+                notify_status(_("Kết nối thành công! Đang chuyển sang màn hình Host..."))
                 if reconnect_queue:
                     try:
                         if viewer_pid and sys.platform == "win32":
                             sock_data = sock.share(viewer_pid)
-                            reconnect_queue.put(("SHARED_SOCK", sock_data))
+                            reconnect_queue.put(("CONNECTED", ("SHARED_SOCK", sock_data), host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name))
                             
-                            # Keep socket alive so child process can call WSASocket before it closes
                             def delayed_reconnect_close():
                                 try:
                                     import psutil
@@ -1495,43 +1585,68 @@ class NetworkMixin:
                             threading.Thread(target=delayed_reconnect_close, daemon=True).start()
                             
                         else:
-                            reconnect_queue.put(sock)
+                            reconnect_queue.put(("CONNECTED", sock, host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name))
                     except Exception as e:
                         print(f"Failed to put socket in reconnect queue: {e}")
-                        reconnect_queue.put("FAILED")
+                        reconnect_queue.put("FAILED|" + str(e))
                         force_close_socket(sock)
                         socket_passwords.pop(sock, None)
+                        return
                 else:
                     self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android, os_release)
+
+                # Cập nhật trạng thái App chính
+                self.after(0, lambda: self.update_status(_("Đã kết nối"), is_success=True))
+                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+
+                # Kích hoạt giám sát reconnect cho phiên làm việc
+                if viewer_proc and partner_id and partner_pass:
+                    def monitor_reconnect(process, pid, ppass, req_queue):
+                        while process.is_alive():
+                            try:
+                                msg = req_queue.get(timeout=1.0)
+                                if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
+                                    reason = "login" if "|LOGIN" in msg else ""
+                                    print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason or 'drop'}")
+                                    threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason, computer_name, process), daemon=True).start()
+                                elif msg == "CANCEL_CONNECT":
+                                    break
+                                else:
+                                    req_queue.put(msg)
+                                    time.sleep(0.5)
+                            except:
+                                pass
+                        print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
+                        alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+                        if not alive_viewers:
+                            self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
+                    threading.Thread(target=monitor_reconnect, args=(viewer_proc, partner_id, partner_pass, reconnect_queue), daemon=True).start()
+
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
-                self.update_status(_("Bị từ chối kết nối"))
+                notify_status(_("Bị từ chối kết nối: ") + msg)
                 if reconnect_queue:
-                    reconnect_queue.put("FAILED")
-                self.after(0, lambda: self.show_custom_error(_("Từ chối kết nối"), _("Kết nối bị từ chối:\n{msg}").format(msg=msg)))
+                    reconnect_queue.put("FAILED|" + _("Kết nối bị từ chối:\n{msg}").format(msg=msg))
                 self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
-            if reconnect_queue and retry_count < 30:
+            if reconnect_queue and retry_count < 30 and reconnect_reason:
                 status_msg = _("Đang thử kết nối lại lần {count}/30...").format(count=retry_count + 1)
-                try: reconnect_queue.put(f"STATUS|{status_msg}")
-                except: pass
+                notify_status(status_msg)
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
                 time.sleep(2)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason)
+                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason, computer_name_override, viewer_proc)
                 return
 
-            self.update_status(_("Sẵn sàng kết nối"))
+            err_str = str(e)
+            if "10054" in err_str:
+                err_str = "Kết nối bị ngắt đột ngột bởi máy đích hoặc Relay Server (WinError 10054)."
+            notify_status(_("Lỗi xác thực handshake:\n{err}").format(err=err_str))
             if reconnect_queue:
-                reconnect_queue.put("FAILED")
-            else:
-                err_str = str(e)
-                if "10054" in err_str:
-                    err_str = "Kết nối bị ngắt đột ngột bởi máy đích hoặc Relay Server (WinError 10054)."
-                self.after(0, lambda err=err_str: self.show_custom_error(_("Lỗi bắt tay"), _("Lỗi xác thực handshake:\n{err}").format(err=err)))
+                reconnect_queue.put("FAILED|" + _("Lỗi xác thực handshake:\n{err}").format(err=err_str))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             if sock:
                 force_close_socket(sock)

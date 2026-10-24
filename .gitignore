@@ -54,6 +54,10 @@ test_clipboard_copy.txt
 # Agent folder
 .agents/
 
+# Test folder
+/test/
+test/
+
 # Window configs
 window_config.json
 

@@ -656,6 +656,9 @@ class FileCopyHostMixin:
                 self._clip_sync_timer = t
                 return
             if files:
+                probe_dir_abs = os.path.abspath(_PROBE_STUB_DIR).lower()
+                if any(os.path.abspath(f).lower().startswith(probe_dir_abs) or _is_probe_stub_name(f) for f in files):
+                    return
                 fp = tuple(os.path.abspath(f).lower() for f in files)
                 last_fp = getattr(self, "_last_sent_file_fp", None)
                 last_seq = getattr(self, "_last_sent_file_seq", None)
@@ -830,14 +833,9 @@ class FileCopyHostMixin:
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
             self._xfer_need_resync = False
+            # Phía gửi không mở dialog tiến trình (phía nhận đã mở dialog tại thư mục đích).
             send_dlg_id = int(paste_id or 0) or my_id
-            show_send_dlg = True
-            try:
-                self.open_paste_progress_dialog(
-                    display_name, total_size, dest_dir=None, reserve_finalize=False, job_id=send_dlg_id, item_kind=item_kind
-                )
-            except Exception as e_dlg:
-                print(f"[FileTransfer] Khong mo duoc dialog tien trinh gui: {e_dlg}")
+            show_send_dlg = False
             if not self._send_file_msg(sock, start_pkt, my_id):
                 print("[FileTransfer] Huy truoc/luc batch_start — dung gui.")
                 if show_send_dlg:
@@ -3900,56 +3898,14 @@ def run_clipboard_agent_mode():
                                 _skip_path(k)
                             return True
 
-                        # Giống host→client: hỏi trên máy client (ClassicCopyDialog GUI trên màn hình viewer).
-                        asked_client = False
+                        # Hiện dialog ghi đè trực tiếp trên HOST (máy bị remote) — user đang nhìn
+                        # màn hình host qua viewer. KHÔNG đi vòng CONFLICT_QUERY → client: nếu gói
+                        # không tới viewer, agent chờ 300s mà không có dialog nào (bug d9bcc39).
                         try:
-                            ev = job.get("conflict_reply_event") or threading.Event()
-                            job["conflict_reply_event"] = ev
-                            ev.clear()
-                            job["conflict_reply"] = None
-                            job["ow_waiting_client"] = True
-                            with _active_conflict_lock:
-                                _active_conflict_job = job
-                            sent_q = _write_conflict_query_pipe(paste_id, conflicts, has_multiple)
-                            log_overwrite_conflict(
-                                f"CONFLICT_QUERY send={sent_q} paste_id={paste_id} "
-                                f"n={len(conflicts)} names={[c[0] for c in conflicts]}"
-                            )
-                            if sent_q:
-                                asked_client = True
-                                deadline = time.time() + 300.0
-                                while time.time() < deadline:
-                                    if ev.is_set():
-                                        break
-                                    try:
-                                        root.update()
-                                    except Exception:
-                                        pass
-                                    time.sleep(0.03)
-                                data = job.get("conflict_reply")
-                                job["ow_waiting_client"] = False
-                                if _apply_client_reply(data):
-                                    log_overwrite_conflict(
-                                        f"CLIENT reply applied paste_id={paste_id} "
-                                        f"cancelled={cancelled} replace={len(job.get('replace_keys') or [])}"
-                                    )
-                                else:
-                                    log_overwrite_conflict(
-                                        f"CLIENT reply missing/unavailable paste_id={paste_id} → HOST dialog"
-                                    )
-                                    _ask_on_host()
-                            else:
-                                job["ow_waiting_client"] = False
-                                _ask_on_host()
-                        except Exception as e_q:
-                            job["ow_waiting_client"] = False
-                            log_overwrite_conflict(f"CONFLICT_QUERY path loi: {e_q} → HOST dialog")
                             _ask_on_host()
-                        finally:
-                            with _active_conflict_lock:
-                                if _active_conflict_job is job:
-                                    _active_conflict_job = None
-                            job["ow_waiting_client"] = False
+                        except Exception as e_host:
+                            log_overwrite_conflict(f"HOST dialog loi: {e_host}")
+                            cancelled = True
                         if cancelled:
                             job["conflict_choice"] = "cancel"
                             log_overwrite_conflict(f"USER CANCEL paste_id={paste_id}")

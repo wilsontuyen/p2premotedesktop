@@ -19,6 +19,7 @@ from PIL import ImageTk
 from gui.components import ProgressDialog
 from utils.clipboard_api import get_clipboard_text
 import socket
+import queue
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, CLIPBOARD_PKT_TYPES
 
 from core.i18n import _
@@ -347,7 +348,13 @@ def uninstall_keyboard_hook():
 
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
-    global client_switching_desktop_countdown, client_host_computer_name_override
+    import sys
+    import os
+    import time
+    import ctypes
+    import queue
+    import json
+    global client_switching_desktop_countdown, client_host_computer_name_override, client_host_resolution
     
     try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
     except: pass
@@ -403,6 +410,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             pass
 
         outer_running = True
+        exit_due_to_disconnect = False
         
         # Initialize Pygame once outside the loop
         import os
@@ -412,23 +420,47 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         pygame.key.set_repeat(500, 50)
         ensure_session_socket_blocking(sock)
         
-        info = pygame.display.Info()
-        client_max_w = info.current_w - 100
-        client_max_h = info.current_h - 100
-        
-        ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
-        
-        # [Tùy chỉnh Android] Thu nhỏ màn hình mặc định nếu là thiết bị di động (màn hình dọc)
-        if host_h > host_w:
-            max_portrait_height = min(900, client_max_h) # Giới hạn chiều cao tối đa khoảng 900px
-            if host_h * ratio > max_portrait_height:
-                ratio = max_portrait_height / host_h
-                
-        window_w = int(host_w * ratio)
-        window_h = int(host_h * ratio)
-        
-        window_w = max(100, min(window_w, 3840))
-        window_h = max(100, min(window_h, 2160))
+        # Lấy kích thước thực của màn hình Desktop máy Client (trước khi tạo bất kỳ cửa sổ nào)
+        client_desktop_w = 1920
+        client_desktop_h = 1080
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                w = ctypes.windll.user32.GetSystemMetrics(0)
+                h = ctypes.windll.user32.GetSystemMetrics(1)
+                if w > 100 and h > 100:
+                    client_desktop_w = w
+                    client_desktop_h = h
+            except Exception:
+                pass
+        if client_desktop_w == 1920:
+            try:
+                info = pygame.display.Info()
+                if info.current_w > 100 and info.current_h > 100:
+                    client_desktop_w = info.current_w
+                    client_desktop_h = info.current_h
+            except Exception:
+                pass
+
+        if sock is None:
+            window_w, window_h = 1024, 768
+        else:
+            client_max_w = client_desktop_w - 100
+            client_max_h = client_desktop_h - 100
+            
+            ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
+            
+            # [Tùy chỉnh Android] Thu nhỏ màn hình mặc định nếu là thiết bị di động (màn hình dọc)
+            if host_h > host_w:
+                max_portrait_height = min(900, client_max_h) # Giới hạn chiều cao tối đa khoảng 900px
+                if host_h * ratio > max_portrait_height:
+                    ratio = max_portrait_height / host_h
+                    
+            window_w = int(host_w * ratio)
+            window_h = int(host_h * ratio)
+            
+            window_w = max(100, min(window_w, 3840))
+            window_h = max(100, min(window_h, 2160))
         
         try:
             screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
@@ -479,10 +511,162 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         except:
             try: btn_font = pygame.font.SysFont("Arial", 12, bold=True)
             except: btn_font = pygame.font.Font(None, 20)
+
+        try: title_font = pygame.font.SysFont(font_names, 24, bold=True)
+        except:
+            try: title_font = pygame.font.SysFont("Arial", 24, bold=True)
+            except: title_font = pygame.font.Font(None, 32)
+
+        try: status_font = pygame.font.SysFont(font_names, 18)
+        except:
+            try: status_font = pygame.font.SysFont("Arial", 18)
+            except: status_font = pygame.font.Font(None, 24)
+
+        try: sub_font = pygame.font.SysFont(font_names, 13)
+        except:
+            try: sub_font = pygame.font.SysFont("Arial", 13)
+            except: sub_font = pygame.font.Font(None, 18)
             
         clock = pygame.time.Clock()
         button_map = {1: 'left', 2: 'middle', 3: 'right'}
         toolbar_collapsed = False
+
+        # Vòng lặp chờ kết nối ban đầu trong cửa sổ 1024x768 nền đen chữ trắng
+        if sock is None:
+            connecting_status = _("Đang khởi tạo kết nối...")
+            connecting_error = None
+            connecting_done = False
+
+            while outer_running and not connecting_done:
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        outer_running = False
+                        if reconnect_queue:
+                            try: reconnect_queue.put("CANCEL_CONNECT")
+                            except: pass
+                        break
+                    elif ev.type == pygame.VIDEORESIZE:
+                        window_w, window_h = ev.w, ev.h
+                        screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+
+                if not outer_running:
+                    break
+
+                if reconnect_queue:
+                    try:
+                        while True:
+                            msg = reconnect_queue.get_nowait()
+                            if isinstance(msg, str) and msg.startswith("STATUS|"):
+                                connecting_status = msg.split("|", 1)[1]
+                            elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
+                                msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg
+                                if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
+                                    sock = socket.fromshare(sock_item[1])
+                                elif hasattr(sock_item, 'fileno'):
+                                    sock = sock_item
+                                ensure_session_socket_blocking(sock)
+                                if partner_pass:
+                                    socket_passwords[sock] = partner_pass
+                                
+                                host_w = int(real_w or 1280)
+                                host_h = int(real_h or 720)
+                                is_domain = is_dom
+                                is_android = is_andr
+                                globals()['client_host_is_android'] = bool(is_android)
+                                globals()['client_host_os_release'] = os_rel if os_rel else ("android" if is_android else "10")
+                                if comp_n:
+                                    computer_name = comp_n
+                                    pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=computer_name))
+
+                                # Chuyển kích thước cửa sổ theo kích thước thực tế của Host
+                                client_max_w = client_desktop_w - 100
+                                client_max_h = client_desktop_h - 100
+                                ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
+                                if host_h > host_w:
+                                    max_portrait_height = min(900, client_max_h)
+                                    if host_h * ratio > max_portrait_height:
+                                        ratio = max_portrait_height / host_h
+                                window_w = int(host_w * ratio)
+                                window_h = int(host_h * ratio)
+                                window_w = max(100, min(window_w, 3840))
+                                window_h = max(100, min(window_h, 2160))
+                                screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                                try:
+                                    hwnd = pygame.display.get_wm_info().get("window")
+                                    if hwnd and sys.platform == "win32":
+                                        pos_x = max(0, (client_desktop_w - window_w) // 2)
+                                        pos_y = max(0, (client_desktop_h - window_h) // 2)
+                                        ctypes.windll.user32.SetWindowPos(hwnd, 0, pos_x, pos_y, window_w, window_h, 0x0040)
+                                except Exception:
+                                    pass
+                                if hwnd and clipboard_sync_manager:
+                                    clipboard_sync_manager.pygame_hwnd = hwnd
+                                connecting_done = True
+                                break
+                            elif isinstance(msg, str) and (msg.startswith("FAILED|") or msg == "FAILED"):
+                                connecting_error = msg.split("|", 1)[1] if "|" in msg else _("Không thể kết nối tới đối tác.")
+                                break
+                    except (queue.Empty, Exception):
+                        pass
+
+                if connecting_error:
+                    screen.fill((0, 0, 0))
+                    h_title = computer_name or (_("Máy đối tác: ") + str(partner_id))
+                    t_surf = title_font.render(h_title, True, (255, 255, 255))
+                    t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 60))
+                    screen.blit(t_surf, t_rect)
+
+                    e_surf = status_font.render(connecting_error, True, (255, 90, 90))
+                    e_rect = e_surf.get_rect(center=(window_w // 2, window_h // 2))
+                    screen.blit(e_surf, e_rect)
+
+                    hint_surf = sub_font.render(_("Cửa sổ sẽ tự đóng sau vài giây..."), True, (150, 150, 150))
+                    hint_rect = hint_surf.get_rect(center=(window_w // 2, window_h // 2 + 50))
+                    screen.blit(hint_surf, hint_rect)
+                    pygame.display.flip()
+
+                    err_start = time.time()
+                    while time.time() - err_start < 3.5:
+                        for ev in pygame.event.get():
+                            if ev.type in (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                                break
+                        time.sleep(0.05)
+                    outer_running = False
+                    break
+
+                if connecting_done:
+                    break
+
+                # Vẽ màn hình chờ kết nối (Nền đen, chữ trắng)
+                screen.fill((0, 0, 0))
+
+                # 1. Tên máy Host ở phía trên
+                h_title = computer_name or (_("Máy đối tác: ") + str(partner_id))
+                t_surf = title_font.render(h_title, True, (255, 255, 255))
+                t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 50))
+                screen.blit(t_surf, t_rect)
+
+                if partner_id and partner_id not in h_title:
+                    id_surf = sub_font.render(f"ID: {partner_id}", True, (180, 180, 180))
+                    id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 18))
+                    screen.blit(id_surf, id_rect)
+
+                # 2. Dòng trạng thái hiện tại to, rõ ràng ở giữa màn hình
+                st_surf = status_font.render(connecting_status, True, (255, 255, 255))
+                st_rect = st_surf.get_rect(center=(window_w // 2, window_h // 2 + 25))
+                screen.blit(st_surf, st_rect)
+
+                # 3. Gợi ý nhỏ bên dưới
+                hint_surf = sub_font.render(_("Nhấn X để hủy kết nối"), True, (110, 110, 110))
+                hint_rect = hint_surf.get_rect(center=(window_w // 2, window_h - 35))
+                screen.blit(hint_surf, hint_rect)
+
+                pygame.display.flip()
+                clock.tick(30)
+
+        if not outer_running or sock is None:
+            uninstall_keyboard_hook()
+            return
         
         while outer_running:
             exit_due_to_disconnect = True
@@ -531,7 +715,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 clipboard_sync_manager.add_socket(sock)
             # We moved pygame init outside
             
-            import queue
             import collections
             # Queue riêng cho sự kiện quan trọng (click, key, scroll) - KHÔNG bao giờ bị drop
             critical_queue = queue.Queue()
@@ -644,7 +827,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     pass
      
-                global client_host_resolution
                 if client_host_resolution is not None:
                     new_host_w, new_host_h = client_host_resolution
                     client_host_resolution = None
@@ -652,15 +834,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         print(f"[Client] Host resolution changed from {host_w}x{host_h} to {new_host_w}x{new_host_h}")
                         host_w, host_h = new_host_w, new_host_h
                         
-                        import sys
-                        if sys.platform == "win32":
-                            import ctypes
-                            client_max_w = ctypes.windll.user32.GetSystemMetrics(0) - 100
-                            client_max_h = ctypes.windll.user32.GetSystemMetrics(1) - 100
-                        else:
-                            info = pygame.display.Info()
-                            client_max_w = info.current_w - 100 if info.current_w > 100 else 1000
-                            client_max_h = info.current_h - 100 if info.current_h > 100 else 1000
+                        client_max_w = client_desktop_w - 100
+                        client_max_h = client_desktop_h - 100
                         
                         ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
                         window_w = int(host_w * ratio)
@@ -1053,6 +1228,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         w, h = frame_to_draw.size
                         if w <= 0 or h <= 0:
                             raise ValueError("empty frame size")
+                        if (w != host_w or h != host_h) and w > 100 and h > 100:
+                            client_host_resolution = (w, h)
                         surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                         if w == window_w and h == window_h:
                             scaled_surf = surf
@@ -1465,9 +1642,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 print("[Client] Reconnection failed. Closing window.")
                                 outer_running = False
                                 break
-                            elif isinstance(new_sock, tuple) and new_sock[0] == "SHARED_SOCK":
+                            elif isinstance(new_sock, tuple) and new_sock[0] in ("SHARED_SOCK", "CONNECTED"):
                                 print("[Client] Received shared socket. Resuming session!")
-                                sock = socket.fromshare(new_sock[1])
+                                if new_sock[0] == "SHARED_SOCK":
+                                    sock = socket.fromshare(new_sock[1])
+                                else:
+                                    sock_item = new_sock[1]
+                                    if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
+                                        sock = socket.fromshare(sock_item[1])
+                                    elif hasattr(sock_item, 'fileno'):
+                                        sock = sock_item
+                                    if len(new_sock) > 3 and new_sock[2] and new_sock[3]:
+                                        host_w, host_h = int(new_sock[2]), int(new_sock[3])
                                 ensure_session_socket_blocking(sock)
                                 if partner_pass:
                                     socket_passwords[sock] = partner_pass

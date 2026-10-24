@@ -121,6 +121,7 @@ from filecopyclient import (
     _DUMMY_HDROP_PATH,
     _PROBE_STUB_NAME,
     _PROBE_STUB_DIR,
+    _is_probe_stub_name,
     _is_taskbar_or_taskmgr_at_point,
     _is_taskbar_or_taskmgr_hwnd,
 )
@@ -1674,12 +1675,19 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                     time.sleep(0.05)
                     current_files = get_clipboard_files(retries=1)
             if current_files:
-                # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers (để tránh vòng lặp clipboard)
+                # Bỏ qua nếu có bất kỳ file nào nằm trong thư mục tạm RemoteDesktopTransfers / probe stub (để tránh vòng lặp clipboard)
                 temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
                 temp_dir_abs = os.path.abspath(temp_dir).lower()
                 headless_dir_abs = os.path.abspath(HEADLESS_TRANSFER_DIR).lower()
-                if any(os.path.abspath(f).lower().startswith(temp_dir_abs) or os.path.abspath(f).lower().startswith(headless_dir_abs) for f in current_files):
-                    log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm (tránh lặp clipboard).")
+                probe_dir_abs = os.path.abspath(_PROBE_STUB_DIR).lower()
+                if any(
+                    os.path.abspath(f).lower().startswith(temp_dir_abs)
+                    or os.path.abspath(f).lower().startswith(headless_dir_abs)
+                    or os.path.abspath(f).lower().startswith(probe_dir_abs)
+                    or _is_probe_stub_name(f)
+                    for f in current_files
+                ):
+                    log_debug("[_process_clipboard_change] Bỏ qua vì phát hiện tệp tin trong thư mục tạm/probe stub (tránh lặp clipboard).")
                     return
                     
                 with self.lock:
