@@ -429,7 +429,7 @@
     "Đổi tên": "Umbenennen",
     "Đổi tên nhóm": "Gruppe umbenennen",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "Punching fehlgeschlagen. Leite über Relay-Server um...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Perforation/LAN-Fehler. Es wird versucht, eine Verbindung über den Relay-Server ({host}) herzustellen ...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Perforation fehlgeschlagen. Es wird versucht, eine Verbindung über den Relay-Server ({host}) herzustellen ...",
     "Ổ đĩa": "Laufwerk",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "P2P Remote Desktop Anwendung läuft im System-Tray",
     "Ứng dụng dùng cổng": "Anwendung verwendet Port",

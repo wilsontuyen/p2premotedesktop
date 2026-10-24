@@ -429,7 +429,7 @@
     "Đổi tên": "Rename",
     "Đổi tên nhóm": "Rename group",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "Punching failed. Redirecting through Relay Server...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Hole punch/LAN failed. Trying Relay Server ({host})...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Hole punch failed. Trying Relay Server ({host})...",
     "Ổ đĩa": "Drive",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "P2P Remote Desktop application is running in system tray",
     "Ứng dụng dùng cổng": "Application using port",

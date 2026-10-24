@@ -1432,7 +1432,7 @@ class NetworkMixin:
         if not connected:
             if is_cancelled(): return
             display_host = specific_host or 'Relay'
-            notify_status(_("Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
+            notify_status(_("Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
             try:
                 relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
                 relay_req = json.dumps({

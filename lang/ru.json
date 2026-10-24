@@ -429,7 +429,7 @@
     "Đổi tên": "Переименовать",
     "Đổi tên nhóm": "Переименовать группу",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "Сбой перфорации. Перенаправление через Relay-сервер...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Перфорация/сбой локальной сети. Пытаюсь подключиться через сервер ретрансляции ({host})...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Перфорация не удалась. Пытаюсь подключиться через сервер ретрансляции ({host})...",
     "Ổ đĩa": "Диск",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "Приложение P2P Remote Desktop работает в системном трее",
     "Ứng dụng dùng cổng": "Приложение использует порт",

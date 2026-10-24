@@ -429,7 +429,7 @@
     "Đổi tên": "이름 변경",
     "Đổi tên nhóm": "그룹 이름 변경",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "홀 펀칭 실패. Relay 서버로 리다이렉트 중...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "천공/LAN 오류. 릴레이 서버({host})를 통해 연결을 시도 중...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "천공 실패. 릴레이 서버({host})를 통해 연결을 시도 중...",
     "Ổ đĩa": "드라이브",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "P2P 원격 데스크톱 애플리케이션이 시스템 트레이에서 실행 중입니다",
     "Ứng dụng dùng cổng": "애플리케이션 점유 포트",

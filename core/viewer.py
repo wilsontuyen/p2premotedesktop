@@ -594,9 +594,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 try:
                                     hwnd = pygame.display.get_wm_info().get("window")
                                     if hwnd and sys.platform == "win32":
-                                        pos_x = max(0, (client_desktop_w - window_w) // 2)
-                                        pos_y = max(0, (client_desktop_h - window_h) // 2)
-                                        ctypes.windll.user32.SetWindowPos(hwnd, 0, pos_x, pos_y, window_w, window_h, 0x0040)
+                                        # Chỉ DỊCH CHUYỂN cửa sổ (SWP_NOSIZE) để căn giữa, KHÔNG đổi kích thước.
+                                        # Nếu truyền window_w/window_h vào SetWindowPos thì đó là kích thước NGOÀI
+                                        # (gồm viền + thanh tiêu đề) -> vùng client nhỏ hơn window_w x window_h ->
+                                        # frame bị co giãn (smoothscale/scale) mỗi lần vẽ nên hình bị mờ.
+                                        import ctypes.wintypes as _wt
+                                        _rc = _wt.RECT()
+                                        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(_rc))
+                                        outer_w = _rc.right - _rc.left
+                                        outer_h = _rc.bottom - _rc.top
+                                        pos_x = max(0, (client_desktop_w - outer_w) // 2)
+                                        pos_y = max(0, (client_desktop_h - outer_h) // 2)
+                                        # SWP_NOSIZE(0x0001) | SWP_NOZORDER(0x0004) | SWP_SHOWWINDOW(0x0040)
+                                        ctypes.windll.user32.SetWindowPos(hwnd, 0, pos_x, pos_y, 0, 0, 0x0001 | 0x0004 | 0x0040)
                                 except Exception:
                                     pass
                                 if hwnd and clipboard_sync_manager:

@@ -429,7 +429,7 @@
     "Đổi tên": "重命名",
     "Đổi tên nhóm": "重命名分组",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "打洞失败。正在重定向通过 Relay 服务器...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "穿孔/LAN 故障。尝试通过中继服务器 ({host}) 连接...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "穿孔失败。尝试通过中继服务器 ({host}) 连接...",
     "Ổ đĩa": "驱动器",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "P2P 远程桌面应用程序正在系统托盘运行",
     "Ứng dụng dùng cổng": "应用程序占用端口",

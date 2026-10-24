@@ -429,7 +429,7 @@
     "Đổi tên": "名前を変更",
     "Đổi tên nhóm": "グループ名を変更",
     "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "打通失敗。Relay サーバー経由にリダイレクト中...",
-    "Đục lỗ/LAN thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "穴あき/LAN 障害。中継サーバー ({host}) 経由で接続しようとしています...",
+    "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "打通失敗。中継サーバー ({host}) 経由で接続しようとしています...",
     "Ổ đĩa": "ドライブ",
     "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "P2P リモートデスクトップがシステムトレイで実行中です",
     "Ứng dụng dùng cổng": "アプリケーションが使用中のポート",
