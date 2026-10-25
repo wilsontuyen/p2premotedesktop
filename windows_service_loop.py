@@ -811,6 +811,10 @@ def spawn_clipboard_agent(session_id):
             log(f"Khởi chạy Clipboard Agent thất bại toàn diện: {e}")
             try: win32api.CloseHandle(h_token_dup)
             except: pass
+        finally:
+            if h_user_token:
+                try: win32api.CloseHandle(h_user_token)
+                except: pass
     return None
 
 
@@ -1432,21 +1436,22 @@ def main():
                     log(f"Clipboard Agent với PID {clipboard_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                     clipboard_agent_pid = None
 
-                clipboard_agent_running = False
-                mutex_name_global_cb = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
-                mutex_name_session_cb = f"Session\\{active_session_id}\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
-                mutex_name_bno_cb = f"Session\\{active_session_id}\\BaseNamedObjects\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
-                
-                for m_name in (mutex_name_global_cb, mutex_name_bno_cb, mutex_name_session_cb):
-                    try:
-                        h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
-                        win32api.CloseHandle(h_mutex)
-                        clipboard_agent_running = True
-                        break
-                    except Exception as e:
-                        if getattr(e, 'winerror', 0) != 2:
+                clipboard_agent_running = bool(clipboard_agent_pid and is_process_alive(clipboard_agent_pid))
+                if not clipboard_agent_running:
+                    mutex_name_global_cb = f"Global\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                    mutex_name_session_cb = f"Session\\{active_session_id}\\AntigravityP2PClipboardAgentMutex_{active_session_id}"
+                    
+                    for m_name in (mutex_name_global_cb, mutex_name_session_cb):
+                        try:
+                            h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+                            win32api.CloseHandle(h_mutex)
                             clipboard_agent_running = True
                             break
+                        except Exception as e:
+                            err = getattr(e, 'winerror', 0)
+                            if err == 5: # ERROR_ACCESS_DENIED means mutex exists in user namespace
+                                clipboard_agent_running = True
+                                break
                             
                 if not clipboard_agent_running:
                     log(f"Không tìm thấy Mutex của Clipboard Agent cho session {active_session_id}. Đang khởi chạy.")

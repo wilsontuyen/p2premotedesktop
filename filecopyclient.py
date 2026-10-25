@@ -2266,7 +2266,26 @@ class FileCopyClientMixin:
         return bool(self.app and getattr(self.app, "is_headless", False))
 
     def setup_delayed_rendering(self):
-        if self._is_headless_host_process():
+        from core.config import is_agent_process
+        if not is_agent_process:
+            agent_h = getattr(self, "_agent_hwnd", None)
+            if not agent_h:
+                try:
+                    from filecopyhost import read_shared_agent_hwnd
+                    agent_h = read_shared_agent_hwnd()
+                    if agent_h:
+                        self._agent_hwnd = agent_h
+                except Exception:
+                    pass
+            if agent_h:
+                try:
+                    ctypes.windll.user32.PostMessageW(
+                        ctypes.c_void_p(agent_h), 0x0400 + 201, 1, 0
+                    )
+                except Exception:
+                    pass
+                return
+        if self._is_headless_host_process() and getattr(self, "_agent_hwnd", None):
             log_debug("[setup_delayed_rendering] Bỏ qua — headless host (Clipboard Agent giữ delayed CF_HDROP).")
             return
         log_debug(f"[setup_delayed_rendering] Bắt đầu. self.listener={self.listener}")
@@ -2397,9 +2416,47 @@ class FileCopyClientMixin:
         return True
 
     def _ensure_delayed_for_gesture(self):
-        """Trước Paste thật: nếu HDROP đã materialize, đăng ký lại delayed (SendMessage)."""
-        if self._is_headless_host_process():
+        from core.config import is_agent_process
+        if not is_agent_process:
+            agent_h = getattr(self, "_agent_hwnd", None)
+            if not agent_h:
+                try:
+                    from filecopyhost import read_shared_agent_hwnd
+                    agent_h = read_shared_agent_hwnd()
+                    if agent_h:
+                        self._agent_hwnd = agent_h
+                except Exception:
+                    pass
+            if agent_h:
+                self.dummy_h_active = False
+                self._hdrop_materialized = False
+                self._force_delayed_setup = True
+                try:
+                    ctypes.windll.user32.PostMessageW(
+                        ctypes.c_void_p(agent_h), 0x0400 + 201, 1, 0
+                    )
+                except Exception:
+                    pass
+                return
+        if self._is_headless_host_process() and getattr(self, "_agent_hwnd", None):
             return
+        if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+            try:
+                from filecopyhost import read_shared_pending_offer
+                shared_offer = read_shared_pending_offer()
+                if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                    flist = shared_offer.get("names") or [
+                        f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                        for f in (shared_offer.get("files") or [])
+                    ]
+                    self.pending_remote_files = list(flist)
+                    self.pending_total_size = int(shared_offer.get("total_size", 0))
+                    self.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                    self._reoffer_files = list(flist)
+                    self._allow_delayed = True
+                    self._force_delayed_setup = True
+            except Exception:
+                pass
         if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
             return
         try:
@@ -3005,6 +3062,16 @@ class FileCopyClientMixin:
             
         if getattr(self, "_conflict_ui_active", False):
             log_debug("[render_format] Đang hiện dialog ghi đè — HDROP rỗng.")
+            self._offer_empty_and_rearm(0.25)
+            return
+
+        cb = getattr(self, "_agent_paste_callback", None)
+        if callable(cb):
+            dest = self.get_active_explorer_path()
+            try:
+                cb("render_format", dest)
+            except Exception:
+                pass
             self._offer_empty_and_rearm(0.25)
             return
 
@@ -3716,39 +3783,71 @@ class FileCopyClientMixin:
                    f"cache={getattr(self,'cached_explorer_path',None)} "
                    f"last={getattr(self,'_last_good_explorer_path',None)}")
 
-        if self.app and getattr(self.app, "is_headless", False):
+        total_size = sum((f.get("size", 0) if isinstance(f, dict) else 0) for f in files)
+        item_kind, display_name = _copy_batch_kind_and_name(files, _("Tệp tin"))
+        msg_dict = {
+            "display_name": display_name,
+            "item_kind": item_kind,
+            "total_size": total_size,
+            "files": files,
+            "names": names,
+            "offer_id": oid,
+        }
+        # Luôn ghi Shared Pending Offer vào thư mục toàn cục cho bất kỳ tiến trình Host nào
+        try:
+            from filecopyhost import write_shared_pending_offer
+            write_shared_pending_offer(msg_dict)
+        except Exception as swe:
+            log_debug(f"[_apply_file_offer] write_shared_pending_offer loi: {swe}")
+
+        # Đánh thức Clipboard Agent bằng PostMessage nếu có Agent đang chạy
+        ag_h = None
+        try:
+            from filecopyhost import read_shared_agent_hwnd
+            ag_h = read_shared_agent_hwnd()
+            if ag_h:
+                self._agent_hwnd = ag_h
+                ctypes.windll.user32.PostMessageW(
+                    ctypes.c_void_p(ag_h), 0x0400 + 201, 0, 0
+                )
+        except Exception:
+            pass
+
+        if self._is_headless_host_process():
             # Đừng đổi target_save_dir / clear done khi đang tải paste khác.
             if not getattr(self, "_xfer_jobs", None):
                 self.target_save_dir = HEADLESS_TRANSFER_DIR
                 self.batch_paths = []
                 self.transfer_done_event.clear()
-            total_size = sum((f.get("size", 0) if isinstance(f, dict) else 0) for f in files)
-            item_kind, display_name = _copy_batch_kind_and_name(files, _("Tệp tin"))
-            msg_dict = {
-                "display_name": display_name,
-                "item_kind": item_kind,
-                "total_size": total_size,
-                "files": files,
-                "offer_id": oid,
-            }
             log_overwrite_conflict(
                 f"HOST_HEADLESS SEND PENDING offer={oid} display={display_name!r} "
-                f"size={total_size} n={len(files)} names={names} → agent pipe"
+                f"size={total_size} n={len(files)} names={names} → agent pipe & shared file (agent_h={bool(ag_h)})"
             )
             self._send_to_pipe("PENDING", json.dumps(msg_dict))
+            if ag_h:
+                return
+            log_overwrite_conflict(
+                f"HOST_HEADLESS fallback direct delayed setup offer={oid} (agent_h not found)"
+            )
+            self.setup_delayed_rendering()
+            if not clipboard_has_file_formats():
+                log_debug("[_apply_file_offer] CF_HDROP chưa có sau setup — thử lại.")
+                self._force_delayed_setup = True
+                self.setup_delayed_rendering()
             return
 
         log_overwrite_conflict(
             f"{'CLIENT_VIEWER' if getattr(self, 'pygame_hwnd', None) else 'HOST_GUI'} "
-            f"apply offer={oid} n={len(files)} names={names} (delayed CF_HDROP, not agent PENDING)"
+            f"apply offer={oid} n={len(files)} names={names} (agent_h={bool(ag_h)})"
         )
         temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
         self.target_save_dir = temp_dir
-        self.setup_delayed_rendering()
-        if not clipboard_has_file_formats():
-            log_debug("[_apply_file_offer] CF_HDROP chưa có sau setup — thử lại.")
-            self._force_delayed_setup = True
+        if not ag_h:
             self.setup_delayed_rendering()
+            if not clipboard_has_file_formats():
+                log_debug("[_apply_file_offer] CF_HDROP chưa có sau setup — thử lại.")
+                self._force_delayed_setup = True
+                self.setup_delayed_rendering()
 
     def _paste_dest_for_job(self, job):
         """Chỉ lấy dest đã gắn vào job / paste_id — không đọc cached_explorer_path sống."""

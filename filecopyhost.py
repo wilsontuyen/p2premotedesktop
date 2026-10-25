@@ -160,6 +160,295 @@ def _create_user_signalable_event(name):
     return win32event.CreateEvent(_low_il_everyone_sa(), True, False, name)
 
 
+def _open_or_create_user_signalable_event(name):
+    import win32event, win32con
+    try:
+        return win32event.OpenEvent(win32con.EVENT_ALL_ACCESS, False, name)
+    except Exception:
+        return _create_user_signalable_event(name)
+
+
+_cached_global_shared_dir = None
+
+def get_global_shared_dir():
+    """
+    Trả về thư mục chia sẻ IPC dùng chung giữa SYSTEM (Session 0/1) và User thường (Session 1).
+    Tuyệt đối không dùng get_logs_dir() vì get_logs_dir() trả về thư mục riêng theo từng user profile!
+    """
+    global _cached_global_shared_dir
+    if _cached_global_shared_dir and os.path.isdir(_cached_global_shared_dir):
+        return _cached_global_shared_dir
+
+    candidates = []
+    pd = os.environ.get("PROGRAMDATA") or os.environ.get("ALLUSERSPROFILE") or r"C:\ProgramData"
+    candidates.append(os.path.join(pd, "Easy Remote Desktop", "IPC"))
+
+    pub = os.environ.get("PUBLIC") or r"C:\Users\Public"
+    candidates.append(os.path.join(pub, "EasyRemoteDesktop", "IPC"))
+
+    try:
+        from utils.logger import app_dir
+        candidates.append(os.path.join(app_dir, "Logs"))
+    except Exception:
+        pass
+
+    try:
+        from utils.logger import get_logs_dir
+        candidates.append(get_logs_dir())
+    except Exception:
+        pass
+
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            test_f = os.path.join(d, ".perm_test")
+            with open(test_f, "w", encoding="utf-8") as tf:
+                tf.write("ok")
+            try:
+                os.remove(test_f)
+            except Exception:
+                pass
+            _cached_global_shared_dir = d
+            return d
+        except Exception:
+            continue
+
+    _cached_global_shared_dir = candidates[0]
+    return _cached_global_shared_dir
+
+
+def get_shared_pending_offer_file():
+    return os.path.join(get_global_shared_dir(), "pending_remote_offer.json")
+
+
+def get_shared_agent_hwnd_file():
+    return os.path.join(get_global_shared_dir(), "shared_agent_hwnd.txt")
+
+
+def write_shared_pending_offer(msg_dict):
+    try:
+        import json, tempfile, win32event
+        dirs_to_write = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_write:
+                dirs_to_write.append(ld)
+        except Exception:
+            pass
+
+        written_any = False
+        for dirpath in dirs_to_write:
+            try:
+                os.makedirs(dirpath, exist_ok=True)
+                fpath = os.path.join(dirpath, "pending_remote_offer.json")
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=dirpath, suffix=".tmp")
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    json.dump(msg_dict, f, ensure_ascii=False)
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+                shutil.move(tmp_path, fpath)
+                written_any = True
+            except Exception:
+                pass
+
+        try:
+            h_evt = _open_or_create_user_signalable_event(r"Global\AntigravityP2P_PendingOffer_Event")
+            if h_evt:
+                win32event.SetEvent(h_evt)
+                win32event.CloseHandle(h_evt)
+        except Exception:
+            pass
+        from utils.logger import log_overwrite_conflict
+        log_overwrite_conflict(f"WRITE SHARED OFFER OK: dirs={dirs_to_write} offer={msg_dict.get('offer_id')}")
+        return written_any
+    except Exception as e:
+        try:
+            from utils.logger import log_overwrite_conflict
+            log_overwrite_conflict(f"WRITE SHARED OFFER FAIL: {e}")
+        except Exception:
+            pass
+        return False
+
+
+def read_shared_pending_offer(max_age_s=86400.0):
+    try:
+        import json
+        dirs_to_check = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir, app_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_check:
+                dirs_to_check.append(ld)
+            ad_logs = os.path.join(app_dir, "Logs")
+            if ad_logs not in dirs_to_check:
+                dirs_to_check.append(ad_logs)
+            pub = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "EasyRemoteDesktop", "IPC")
+            if pub not in dirs_to_check:
+                dirs_to_check.append(pub)
+            pd = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Easy Remote Desktop", "IPC")
+            if pd not in dirs_to_check:
+                dirs_to_check.append(pd)
+        except Exception:
+            pass
+
+        best_data = None
+        best_mtime = 0.0
+
+        for d in dirs_to_check:
+            fpath = os.path.join(d, "pending_remote_offer.json")
+            if not os.path.exists(fpath):
+                continue
+            try:
+                mt = os.path.getmtime(fpath)
+                if time.time() - mt > max_age_s:
+                    continue
+                if mt > best_mtime:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict) and (data.get("files") or data.get("names")):
+                        best_data = data
+                        best_mtime = mt
+            except Exception:
+                pass
+
+        if best_data:
+            return best_data
+    except Exception:
+        pass
+    return None
+
+
+def write_shared_agent_hwnd(hwnd):
+    dirs_to_write = [get_global_shared_dir()]
+    try:
+        from utils.logger import get_logs_dir
+        ld = get_logs_dir()
+        if ld not in dirs_to_write:
+            dirs_to_write.append(ld)
+    except Exception:
+        pass
+    for d in dirs_to_write:
+        try:
+            os.makedirs(d, exist_ok=True)
+            fpath = os.path.join(d, "shared_agent_hwnd.txt")
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(str(int(hwnd)))
+        except Exception:
+            pass
+
+
+def read_shared_agent_hwnd():
+    try:
+        dirs_to_check = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir, app_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_check:
+                dirs_to_check.append(ld)
+            ad_logs = os.path.join(app_dir, "Logs")
+            if ad_logs not in dirs_to_check:
+                dirs_to_check.append(ad_logs)
+            pub = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "EasyRemoteDesktop", "IPC")
+            if pub not in dirs_to_check:
+                dirs_to_check.append(pub)
+            pd = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Easy Remote Desktop", "IPC")
+            if pd not in dirs_to_check:
+                dirs_to_check.append(pd)
+        except Exception:
+            pass
+
+        for d in dirs_to_check:
+            fpath = os.path.join(d, "shared_agent_hwnd.txt")
+            if not os.path.exists(fpath):
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    val = int(f.read().strip())
+                if val and ctypes.windll.user32.IsWindow(ctypes.c_void_p(val)):
+                    return val
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def write_shared_paste_request(payload):
+    try:
+        import json, win32event
+        dirs_to_write = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_write:
+                dirs_to_write.append(ld)
+        except Exception:
+            pass
+
+        tok = int((payload or {}).get("paste_id") or 0)
+        for d in dirs_to_write:
+            try:
+                os.makedirs(d, exist_ok=True)
+                fpath = os.path.join(d, f"paste_req_{tok}.json")
+                with open(fpath, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+            except Exception:
+                pass
+        try:
+            h_evt = _open_or_create_user_signalable_event(r"Global\AntigravityP2P_PasteRequest_Event")
+            if h_evt:
+                win32event.SetEvent(h_evt)
+                win32event.CloseHandle(h_evt)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def read_shared_paste_requests():
+    reqs = []
+    try:
+        import json, glob
+        dirs_to_check = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_check:
+                dirs_to_check.append(ld)
+            pub = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "EasyRemoteDesktop", "IPC")
+            if pub not in dirs_to_check:
+                dirs_to_check.append(pub)
+            pd = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Easy Remote Desktop", "IPC")
+            if pd not in dirs_to_check:
+                dirs_to_check.append(pd)
+        except Exception:
+            pass
+
+        seen_toks = set()
+        for d in dirs_to_check:
+            pattern = os.path.join(d, "paste_req_*.json")
+            for fpath in glob.glob(pattern):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        tok = data.get("paste_id")
+                        if tok not in seen_toks:
+                            seen_toks.add(tok)
+                            reqs.append((fpath, data))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return reqs
+
+
+
 
 class _KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [
@@ -232,10 +521,55 @@ def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
 class FileCopyHostMixin:
     """Mixin: gửi file / agent paste trên host."""
 
+    def _shared_paste_request_watcher(self):
+        import win32event, time
+        h_evt = None
+        try:
+            h_evt = _open_or_create_user_signalable_event(r"Global\AntigravityP2P_PasteRequest_Event")
+        except Exception:
+            pass
+        while True:
+            try:
+                if h_evt:
+                    win32event.WaitForSingleObject(h_evt, 400)
+                    win32event.ResetEvent(h_evt)
+                else:
+                    time.sleep(0.4)
+                reqs = read_shared_paste_requests()
+                for fpath, data in reqs:
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+                    files_req = data.get("files") or []
+                    tok = int(data.get("paste_id") or 0)
+                    dest_dir = data.get("dest_dir") or ""
+                    if files_req and tok:
+                        now = time.time()
+                        last_req_time = getattr(self, "_last_request_files_time", 0)
+                        last_tok = getattr(self, "_last_request_files_tok", None)
+                        if tok == last_tok and (now - last_req_time) < 1.0:
+                            continue
+                        self._last_request_files_time = now
+                        self._last_request_files_tok = tok
+                        self._last_request_files_list = files_req
+                        log_debug(f"[SharedPasteRequestWatcher] Kích hoạt tải paste_id={tok} n={len(files_req)} dest={dest_dir}")
+                        self._allow_file_xfer = True
+                        self._send_cancelled = False
+                        self._receive_cancelled = False
+                        threading.Thread(
+                            target=self.request_pending_files,
+                            args=(files_req, tok),
+                            daemon=True,
+                        ).start()
+            except Exception as e:
+                time.sleep(1.0)
+
     def _start_uppipe_server(self):
         import win32pipe, win32file
         import time
         print(r"[Clipboard] UpPipe server bat dau (\\.\pipe\RemoteDesktopClipboardUpPipe).")
+        threading.Thread(target=self._shared_paste_request_watcher, daemon=True, name="SharedPasteReqWatcher").start()
         while True:
             try:
                 sa = _low_il_everyone_sa()
@@ -1190,6 +1524,18 @@ def run_clipboard_agent_mode():
                                                     files = info.get("files")
                                                     if isinstance(files, list):
                                                         _pending_info["files"] = [dict(f) if isinstance(f, dict) else f for f in files]
+                                                flist = _pending_info.get("files") or []
+                                                try:
+                                                    from os_utils.windows_clipboard import clipboard_sync_manager
+                                                    if clipboard_sync_manager:
+                                                        clipboard_sync_manager.pending_remote_files = list(flist)
+                                                        clipboard_sync_manager._reoffer_files = list(flist)
+                                                        clipboard_sync_manager._allow_delayed = True
+                                                        clipboard_sync_manager._force_delayed_setup = True
+                                                        clipboard_sync_manager.meta_arrival_time = time.time()
+                                                        clipboard_sync_manager._expect_repaste_until = time.time() + 86400.0
+                                                except Exception:
+                                                    pass
                                             except Exception:
                                                 pass
                                             gui_queue.put(("pending", info))
@@ -1834,6 +2180,7 @@ def run_clipboard_agent_mode():
                             threading.Thread(
                                 target=_agent_trigger_paste,
                                 args=("menu_paste",),
+                                kwargs={"dest_override": _agent_cached_explorer_path},
                                 daemon=True,
                                 name="AgentMenuPasteTrigger",
                             ).start()
@@ -1990,12 +2337,21 @@ def run_clipboard_agent_mode():
                 "dest_dir": dest_dir or "",
                 "paste_id": int(paste_id or 0),
             }
+            write_shared_paste_request(payload)
             msg = "REQUEST_FILES|" + json.dumps(payload)
             win32file.WriteFile(pipe_handle, msg.encode('utf-8'))
             win32file.CloseHandle(pipe_handle)
             agent_print(f"[ClipboardAgent] Đã gửi REQUEST_FILES paste_id={paste_id}.")
         except Exception as e:
-            agent_print(f"[ClipboardAgent] Lỗi gửi REQUEST_FILES: {e}")
+            agent_print(f"[ClipboardAgent] Lỗi gửi REQUEST_FILES qua Pipe: {e}")
+            try:
+                write_shared_paste_request({
+                    "files": files_to_request or [],
+                    "dest_dir": dest_dir or "",
+                    "paste_id": int(paste_id or 0),
+                })
+            except Exception:
+                pass
 
     def _write_conflict_query_pipe(paste_id, conflicts, has_multiple):
         """Gửi CONFLICT_QUERY lên host → client hiện ClassicCopyDialog."""
@@ -2098,6 +2454,22 @@ def run_clipboard_agent_mode():
                 return
         else:
             _agent_allow_delayed = True
+        if not _pending_info:
+            info = read_shared_pending_offer()
+            if info:
+                _pending_info.clear()
+                _pending_info.update(info)
+                flist = _pending_info.get("files") or []
+                try:
+                    from os_utils.windows_clipboard import clipboard_sync_manager
+                    if clipboard_sync_manager:
+                        clipboard_sync_manager.pending_remote_files = list(flist)
+                        clipboard_sync_manager._reoffer_files = list(flist)
+                        clipboard_sync_manager._allow_delayed = True
+                        clipboard_sync_manager._force_delayed_setup = True
+                except Exception:
+                    pass
+                agent_print(f"[ClipboardAgent] Nạp _pending_info từ shared file: {len(flist)} files.")
         if not _pending_info:
             agent_print("[ClipboardAgent] Không có pending_info, bỏ qua setup delayed rendering.")
             return
@@ -2354,7 +2726,7 @@ def run_clipboard_agent_mode():
             except Exception as e_fin:
                 agent_print(f"[ClipboardAgent] Loi cleanup finally: {e_fin}")
 
-    def _agent_trigger_paste(source="render_format"):
+    def _agent_trigger_paste(source="render_format", dest_override=None):
         """Kích hoạt dán file (từ WM_RENDERFORMAT hoặc LMB context menu Paste)."""
         nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id
         nonlocal _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_last_paste_start
@@ -2382,6 +2754,24 @@ def run_clipboard_agent_mode():
                 f"same_gesture={same_gesture} gesture_id={_agent_paste_gesture_id} "
                 f"consumed={_agent_consumed_gesture_id}"
             )
+
+            if not _pending_info:
+                info = read_shared_pending_offer()
+                if info and isinstance(info, dict):
+                    _pending_info.clear()
+                    _pending_info.update(info)
+                    _agent_allow_delayed = True
+                    flist = _pending_info.get("files") or []
+                    try:
+                        from os_utils.windows_clipboard import clipboard_sync_manager
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.pending_remote_files = list(flist)
+                            clipboard_sync_manager._reoffer_files = list(flist)
+                            clipboard_sync_manager._allow_delayed = True
+                            clipboard_sync_manager._force_delayed_setup = True
+                    except Exception:
+                        pass
+                    agent_print(f"[ClipboardAgent] TRIGGER_PASTE nap _pending_info tu shared file: {len(flist)} files.")
 
             if not _pending_info or not _agent_allow_delayed:
                 log_overwrite_conflict(
@@ -2450,13 +2840,23 @@ def run_clipboard_agent_mode():
 
             try:
                 # Chốt dest Explorer ngay lúc Paste (tránh cache cũ / staging).
-                try:
-                    found = query_explorer_folder_path(allow_open_clipboard=False)
-                    if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
-                        _agent_cached_explorer_path = found
-                except Exception:
-                    pass
+                if dest_override and os.path.isdir(dest_override) and not _is_transfer_staging_dir(dest_override):
+                    _agent_cached_explorer_path = dest_override
+                else:
+                    try:
+                        found = query_explorer_folder_path(allow_open_clipboard=False)
+                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
+                            _agent_cached_explorer_path = found
+                    except Exception:
+                        pass
                 paste_dest = _agent_cached_explorer_path
+                if not paste_dest or not os.path.isdir(paste_dest) or _is_transfer_staging_dir(paste_dest):
+                    desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
+                    if os.path.isdir(desktop):
+                        paste_dest = desktop
+                    else:
+                        paste_dest = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+                    _agent_cached_explorer_path = paste_dest
                 info = {
                     "display_name": _pending_info.get("display_name", "Files"),
                     "item_kind": _pending_info.get("item_kind") or "file",
@@ -2545,10 +2945,30 @@ def run_clipboard_agent_mode():
         nonlocal _agent_last_paste_finish_time, _agent_lmb_menu_item_name
 
         if msg == WM_USER_SETUP_DELAYED:
+            if wparam == 1:
+                _agent_force_delayed_setup = True
+            if not _pending_info:
+                info = read_shared_pending_offer()
+                if info and isinstance(info, dict):
+                    _pending_info.clear()
+                    _pending_info.update(info)
+                    flist = _pending_info.get("files") or []
+                    _agent_clip_seq_at_pending = get_clipboard_sequence_number()
+                    _agent_allow_delayed = True
+                    _agent_force_delayed_setup = True
+                    try:
+                        from os_utils.windows_clipboard import clipboard_sync_manager
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.pending_remote_files = list(flist)
+                            clipboard_sync_manager._reoffer_files = list(flist)
+                            clipboard_sync_manager._allow_delayed = True
+                            clipboard_sync_manager._force_delayed_setup = True
+                    except Exception:
+                        pass
             if not _agent_force_delayed_setup and _agent_user_clipboard_wins():
                 _yield_clipboard_to_user("setup skipped")
                 return 0
-            if (_agent_allow_delayed or _agent_force_delayed_setup) and _pending_info:
+            if _agent_allow_delayed or _agent_force_delayed_setup:
                 _execute_agent_delayed_rendering(hwnd)
             return 0
 
@@ -2653,6 +3073,24 @@ def run_clipboard_agent_mode():
                 if _cursor_in_explorer_command_bar() and (time.time() - (_agent_last_lbutton_time or 0)) < 2.0:
                     recent_paste_click = True
             is_user_paste = recent_ctrl or recent_paste_click
+
+            if not _pending_info:
+                info = read_shared_pending_offer()
+                if info and isinstance(info, dict):
+                    _pending_info.clear()
+                    _pending_info.update(info)
+                    _agent_allow_delayed = True
+                    flist = _pending_info.get("files") or []
+                    try:
+                        from os_utils.windows_clipboard import clipboard_sync_manager
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.pending_remote_files = list(flist)
+                            clipboard_sync_manager._reoffer_files = list(flist)
+                            clipboard_sync_manager._allow_delayed = True
+                            clipboard_sync_manager._force_delayed_setup = True
+                    except Exception:
+                        pass
+                    agent_print(f"[ClipboardAgent] RENDERFORMAT nap _pending_info tu shared file: {len(flist)} files.")
 
             if _pending_info and not _agent_allow_delayed:
                 log_overwrite_conflict(
@@ -2840,6 +3278,61 @@ def run_clipboard_agent_mode():
 
         return ctypes.windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
+    def _bridge_paste_trigger(source="menu_paste", dest=None):
+        nonlocal _agent_paste_gesture_id, _agent_consumed_gesture_id, _agent_lmb_hit_context_menu
+        nonlocal _agent_lmb_menu_item_kind, _agent_last_lbutton_time, _agent_last_ctrl_v_time
+        nonlocal _agent_cached_explorer_path, _agent_last_menu_paste_trigger_time
+        nonlocal _agent_suppress_render_until, _agent_allow_delayed
+        now = time.time()
+        _agent_paste_gesture_id += 1
+        _agent_suppress_render_until = 0.0
+        if not _pending_info:
+            info = read_shared_pending_offer()
+            if info:
+                _pending_info.clear()
+                _pending_info.update(info)
+                flist = _pending_info.get("files") or []
+                try:
+                    from os_utils.windows_clipboard import clipboard_sync_manager
+                    if clipboard_sync_manager:
+                        clipboard_sync_manager.pending_remote_files = list(flist)
+                except Exception:
+                    pass
+        if _pending_info:
+            _agent_allow_delayed = True
+        if source in ("ctrl_v", "shift_ins"):
+            _agent_last_ctrl_v_time = now
+        else:
+            _agent_last_lbutton_time = now
+            _agent_lmb_hit_context_menu = True
+            _agent_lmb_menu_item_kind = "paste"
+        if dest and os.path.isdir(dest) and not _is_transfer_staging_dir(dest):
+            _agent_cached_explorer_path = dest
+        try:
+            from utils.logger import log_overwrite_conflict
+            log_overwrite_conflict(
+                f"BRIDGE PASTE TRIGGER source={source!r} dest={dest!r} "
+                f"gesture={_agent_paste_gesture_id}/{_agent_consumed_gesture_id} "
+                f"pending={bool(_pending_info)}"
+            )
+        except Exception:
+            pass
+        if not _pending_info:
+            info = read_shared_pending_offer()
+            if info:
+                _pending_info.clear()
+                _pending_info.update(info)
+        if _pending_info:
+            if now - float(_agent_last_menu_paste_trigger_time or 0) >= 0.5:
+                _agent_last_menu_paste_trigger_time = now
+                threading.Thread(
+                    target=_agent_trigger_paste,
+                    args=(source,),
+                    kwargs={"dest_override": dest},
+                    daemon=True,
+                    name="AgentBridgedPasteTrigger",
+                ).start()
+
     def _create_agent_window():
         """Tạo hidden Win32 window cho agent, chạy trong luồng riêng với message loop."""
         nonlocal _agent_hwnd
@@ -2896,12 +3389,23 @@ def run_clipboard_agent_mode():
             None, None, wc.hInstance, None
         )
         _agent_hwnd = hwnd
+        write_shared_agent_hwnd(hwnd)
         agent_print(f"[ClipboardAgent] Window ẩn đã tạo. HWND={hwnd}")
+        try:
+            from os_utils.windows_clipboard import clipboard_sync_manager
+            if clipboard_sync_manager:
+                clipboard_sync_manager._agent_hwnd = hwnd
+                clipboard_sync_manager._agent_paste_callback = _bridge_paste_trigger
+                agent_print(f"[ClipboardAgent] Bridge registered with clipboard_sync_manager (hwnd={hwnd})")
+        except Exception as e:
+            agent_print(f"[ClipboardAgent] Bridge register error: {e}")
         try:
             add_ok = user32.AddClipboardFormatListener(ctypes.c_void_p(hwnd))
             agent_print(f"[ClipboardAgent] AddClipboardFormatListener={add_ok}")
         except Exception as e:
             agent_print(f"[ClipboardAgent] AddClipboardFormatListener lỗi: {e}")
+        if _pending_info and _agent_allow_delayed:
+            user32.PostMessageW(ctypes.c_void_p(hwnd), WM_USER_SETUP_DELAYED, 0, 0)
 
         def _stamp_ctrl_v():
             nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active, _agent_allow_delayed, _agent_suppress_render_until
@@ -3221,6 +3725,18 @@ def run_clipboard_agent_mode():
                         files = info.get("files")
                         if isinstance(files, list):
                             _pending_info["files"] = [dict(f) if isinstance(f, dict) else f for f in files]
+                    try:
+                        flist = _pending_info.get("files") or []
+                        from os_utils.windows_clipboard import clipboard_sync_manager
+                        if clipboard_sync_manager:
+                            clipboard_sync_manager.pending_remote_files = list(flist)
+                            clipboard_sync_manager._reoffer_files = list(flist)
+                            clipboard_sync_manager._allow_delayed = True
+                            clipboard_sync_manager._force_delayed_setup = True
+                            clipboard_sync_manager.meta_arrival_time = time.time()
+                            clipboard_sync_manager._expect_repaste_until = time.time() + 86400.0
+                    except Exception:
+                        pass
                     _agent_clip_seq_at_pending = get_clipboard_sequence_number()
                     # Copy mới từ client luôn cập nhật delayed clipboard (file 2, 3, n).
                     _agent_force_delayed_setup = True
@@ -3251,7 +3767,14 @@ def run_clipboard_agent_mode():
                             WM_USER_SETUP_DELAYED, 0, 0
                         )
                     elif not _agent_hwnd:
-                        agent_print("[ClipboardAgent] HWND chưa sẵn sàng, bỏ qua PENDING.")
+                        agent_print("[ClipboardAgent] HWND chưa sẵn sàng, lên lịch thử lại setup.")
+                        def _retry_setup():
+                            if _agent_hwnd and _agent_allow_delayed:
+                                ctypes.windll.user32.PostMessageW(
+                                    ctypes.c_void_p(_agent_hwnd),
+                                    WM_USER_SETUP_DELAYED, 0, 0
+                                )
+                        root.after(100, _retry_setup)
                 elif action == "pipe_cancel":
                     agent_print("[ClipboardAgent] Nhận tín hiệu CANCEL từ Pipe. Đang hủy...")
                     trigger_cancel(val)
@@ -3976,8 +4499,35 @@ def run_clipboard_agent_mode():
         _in_poll_gui_queue = False
         root.after(50, poll_gui_queue)
 
+    def _shared_pending_watcher_loop():
+        import win32event
+        h_evt = None
+        try:
+            h_evt = _open_or_create_user_signalable_event(r"Global\AntigravityP2P_PendingOffer_Event")
+        except Exception:
+            pass
+        last_applied_offer_id = None
+        while True:
+            try:
+                if h_evt:
+                    win32event.WaitForSingleObject(h_evt, 300)
+                    win32event.ResetEvent(h_evt)
+                else:
+                    time.sleep(0.3)
+                info = read_shared_pending_offer()
+                if info and isinstance(info, dict):
+                    oid = info.get("offer_id")
+                    if oid != last_applied_offer_id:
+                        last_applied_offer_id = oid
+                        gui_queue.put(("pending", info))
+                        agent_print(f"[ClipboardAgent] Shared pending offer phát hiện từ file (offer={oid}).")
+            except Exception as e:
+                time.sleep(0.5)
+
     t = threading.Thread(target=pipe_listener_loop, daemon=True)
     t.start()
+    t2 = threading.Thread(target=_shared_pending_watcher_loop, daemon=True, name="SharedPendingWatcher")
+    t2.start()
     
     poll_gui_queue()
     root.mainloop()

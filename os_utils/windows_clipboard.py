@@ -275,10 +275,38 @@ class ClipboardEventListener:
                                 except Exception:
                                     pass
                             else:
+                                if not getattr(self.manager, "pending_remote_files", None):
+                                    try:
+                                        from filecopyhost import read_shared_pending_offer
+                                        shared_offer = read_shared_pending_offer()
+                                        if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                                            flist = shared_offer.get("names") or [
+                                                f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                                                for f in (shared_offer.get("files") or [])
+                                            ]
+                                            self.manager.pending_remote_files = list(flist)
+                                            self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
+                                            self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                                            self.manager._reoffer_files = list(flist)
+                                            self.manager._allow_delayed = True
+                                            self.manager._force_delayed_setup = True
+                                    except Exception:
+                                        pass
                                 self.manager._lmb_hit_context_menu = True
                                 self.manager._lmb_menu_item_kind = "paste"
                                 self.manager.note_paste_gesture()
                                 self.manager.snapshot_paste_dest("menu_paste")
+                                dest = (
+                                    getattr(self.manager, "_paste_dest_snapshot", None)
+                                    or getattr(self.manager, "cached_explorer_path", None)
+                                    or getattr(self.manager, "_last_good_explorer_path", None)
+                                )
+                                cb = getattr(self.manager, "_agent_paste_callback", None)
+                                if callable(cb):
+                                    try:
+                                        cb("menu_paste", dest)
+                                    except Exception:
+                                        pass
                                 try:
                                     self.manager._ensure_delayed_for_gesture()
                                 except Exception:
@@ -312,6 +340,26 @@ class ClipboardEventListener:
                             # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
                             self.manager.snapshot_paste_dest("rmb", sync=True)
                         pend = getattr(self.manager, "pending_remote_files", None) or []
+                        if not pend:
+                            try:
+                                from filecopyhost import read_shared_pending_offer
+                                shared_offer = read_shared_pending_offer()
+                                if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                                    flist = shared_offer.get("names") or [
+                                        f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                                        for f in (shared_offer.get("files") or [])
+                                    ]
+                                    self.manager.pending_remote_files = list(flist)
+                                    self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
+                                    self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                                    self.manager._reoffer_files = list(flist)
+                                    self.manager._allow_delayed = True
+                                    self.manager._force_delayed_setup = True
+                                    self.manager.meta_arrival_time = time.time()
+                                    self.manager._expect_repaste_until = time.time() + 86400.0
+                                    pend = self.manager.pending_remote_files
+                            except Exception:
+                                pass
                         try:
                             from utils.logger import clip_trace
                             clip_trace(
@@ -367,9 +415,39 @@ class ClipboardEventListener:
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_exp = _is_explorer_clipboard_client()
                         if is_exp and not has_text:
+                            if not getattr(self.manager, "pending_remote_files", None):
+                                try:
+                                    from filecopyhost import read_shared_pending_offer
+                                    shared_offer = read_shared_pending_offer()
+                                    if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                                        flist = shared_offer.get("names") or [
+                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                                            for f in (shared_offer.get("files") or [])
+                                        ]
+                                        self.manager.pending_remote_files = list(flist)
+                                        self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
+                                        self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                                        self.manager._reoffer_files = list(flist)
+                                        self.manager._allow_delayed = True
+                                        self.manager._force_delayed_setup = True
+                                        self.manager.meta_arrival_time = time.time()
+                                        self.manager._expect_repaste_until = time.time() + 86400.0
+                                except Exception:
+                                    pass
                             self.manager.last_ctrl_v_time = time.time()
                             self.manager.note_paste_gesture()
                             self.manager.snapshot_paste_dest("ctrl_v")
+                            dest = (
+                                getattr(self.manager, "_paste_dest_snapshot", None)
+                                or getattr(self.manager, "cached_explorer_path", None)
+                                or getattr(self.manager, "_last_good_explorer_path", None)
+                            )
+                            cb = getattr(self.manager, "_agent_paste_callback", None)
+                            if callable(cb):
+                                try:
+                                    cb("ctrl_v", dest)
+                                except Exception:
+                                    pass
                             try:
                                 self.manager._ensure_delayed_for_gesture()
                             except Exception:
@@ -384,9 +462,39 @@ class ClipboardEventListener:
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_exp = _is_explorer_clipboard_client()
                         if is_exp and not has_text:
+                            if not getattr(self.manager, "pending_remote_files", None):
+                                try:
+                                    from filecopyhost import read_shared_pending_offer
+                                    shared_offer = read_shared_pending_offer()
+                                    if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                                        flist = shared_offer.get("names") or [
+                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                                            for f in (shared_offer.get("files") or [])
+                                        ]
+                                        self.manager.pending_remote_files = list(flist)
+                                        self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
+                                        self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                                        self.manager._reoffer_files = list(flist)
+                                        self.manager._allow_delayed = True
+                                        self.manager._force_delayed_setup = True
+                                        self.manager.meta_arrival_time = time.time()
+                                        self.manager._expect_repaste_until = time.time() + 86400.0
+                                except Exception:
+                                    pass
                             self.manager.last_ctrl_v_time = time.time()
                             self.manager.note_paste_gesture()
                             self.manager.snapshot_paste_dest("shift_ins")
+                            dest = (
+                                getattr(self.manager, "_paste_dest_snapshot", None)
+                                or getattr(self.manager, "cached_explorer_path", None)
+                                or getattr(self.manager, "_last_good_explorer_path", None)
+                            )
+                            cb = getattr(self.manager, "_agent_paste_callback", None)
+                            if callable(cb):
+                                try:
+                                    cb("shift_ins", dest)
+                                except Exception:
+                                    pass
                             try:
                                 self.manager._ensure_delayed_for_gesture()
                             except Exception:
