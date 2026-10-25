@@ -1255,7 +1255,8 @@ class NetworkMixin:
         is_reconnect = bool(reconnect_reason or retry_count > 0)
         current_attempt = min(5, retry_count + 1)
         retry_banner = _("Đang thử kết nối lại (lần {x}/5)...").format(x=current_attempt)
-        notify_status(retry_banner)
+        if is_reconnect:
+            notify_status(retry_banner)
 
         # ====== BƯỚC 1: Quét mạng LAN để tìm ID ======
         lan_target = None
@@ -1263,7 +1264,10 @@ class NetworkMixin:
             scan_rounds = 1 if is_reconnect else 5
             for attempt in range(scan_rounds):
                 if is_cancelled(): return
-                notify_status(retry_banner)
+                if is_reconnect:
+                    notify_status(retry_banner)
+                else:
+                    notify_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
                 current_time = time.time()
                 with self.lan_peers_lock:
                     if partner_id in self.lan_peers:

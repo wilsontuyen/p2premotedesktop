@@ -561,11 +561,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         while True:
                             msg = reconnect_queue.get_nowait()
                             if isinstance(msg, str) and msg.startswith("STATUS|"):
-                                new_status = msg.split("|", 1)[1]
-                                if "Đang thử kết nối lại" in new_status or _("Đang thử kết nối lại") in new_status or "lần " in new_status:
-                                    connecting_status = new_status
-                                elif "Đang thử kết nối lại" not in connecting_status and "lần " not in connecting_status:
-                                    connecting_status = new_status
+                                connecting_status = msg.split("|", 1)[1]
                             elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
                                 msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg
                                 if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
