@@ -1,8 +1,8 @@
-\# Tuyên bố Miễn trừ Trách nhiệm
+# Tuyên bố Miễn trừ Trách nhiệm
 
 
 
-\## Tiếng Việt
+## Tiếng Việt
 
 
 
@@ -18,13 +18,13 @@ năng vận hành không bị gián đoạn, không có lỗi của phần mềm
 
 Trong mọi trường hợp, tác giả sẽ không chịu trách nhiệm cho bất kỳ tổn thất, thiệt hại nào, bao gồm nhưng không giới hạn:
 
-\- Mất mát hoặc hỏng hóc dữ liệu
+- Mất mát hoặc hỏng hóc dữ liệu
 
-\- Gián đoạn hoạt động, mất cơ hội kinh doanh
+- Gián đoạn hoạt động, mất cơ hội kinh doanh
 
-\- Hỏng hóc thiết bị, phần cứng, phần mềm
+- Hỏng hóc thiết bị, phần cứng, phần mềm
 
-\- Tổn thất tài chính hoặc chi phí phát sinh
+- Tổn thất tài chính hoặc chi phí phát sinh
 
 
 
@@ -34,11 +34,11 @@ Phát sinh trực tiếp hoặc gián tiếp từ việc cài đặt, sử dụn
 
 Người dùng tự chịu mọi rủi ro và trách nhiệm khi sử dụng phần mềm, bao gồm:
 
-\- Tự bảo mật dữ liệu, hệ thống và mạng của mình
+- Tự bảo mật dữ liệu, hệ thống và mạng của mình
 
-\- Tự đảm bảo việc sử dụng tuân thủ quy định pháp luật địa phương
+- Tự đảm bảo việc sử dụng tuân thủ quy định pháp luật địa phương
 
-\- Tự kiểm tra và đánh giá sự phù hợp trước khi áp dụng vào thực tế
+- Tự kiểm tra và đánh giá sự phù hợp trước khi áp dụng vào thực tế
 
 
 
@@ -46,7 +46,7 @@ Người dùng tự chịu mọi rủi ro và trách nhiệm khi sử dụng ph�
 
 
 
-\## English
+## English
 
 
 
