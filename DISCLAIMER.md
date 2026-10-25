@@ -6,23 +6,17 @@
 
 
 
-Phần mềm này được chia sẻ hoàn toàn miễn phí dưới dạng \*\*"như hiện có" (As Is)\*\*
-
-nhằm mục đích tham khảo, học tập và phát triển cá nhân.
+Phần mềm này được chia sẻ hoàn toàn miễn phí dưới dạng \*\*"như hiện có" (As Is)\*\* nhằm mục đích tham khảo, học tập và phát triển cá nhân.
 
 
 
-Tác giả không đưa ra bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý, bao gồm nhưng
-
-không giới hạn ở tính phù hợp cho mục đích cụ thể, tính thương mại, hoặc khả
+Tác giả không đưa ra bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý, bao gồm nhưng không giới hạn ở tính phù hợp cho mục đích cụ thể, tính thương mại, hoặc khả
 
 năng vận hành không bị gián đoạn, không có lỗi của phần mềm.
 
 
 
-Trong mọi trường hợp, tác giả sẽ không chịu trách nhiệm cho bất kỳ tổn thất,
-
-thiệt hại nào, bao gồm nhưng không giới hạn:
+Trong mọi trường hợp, tác giả sẽ không chịu trách nhiệm cho bất kỳ tổn thất, thiệt hại nào, bao gồm nhưng không giới hạn:
 
 \- Mất mát hoặc hỏng hóc dữ liệu
 
@@ -34,9 +28,7 @@ thiệt hại nào, bao gồm nhưng không giới hạn:
 
 
 
-Phát sinh trực tiếp hoặc gián tiếp từ việc cài đặt, sử dụng hoặc tham khảo
-
-phần mềm này — ngay cả khi đã được thông báo về khả năng thiệt hại đó.
+Phát sinh trực tiếp hoặc gián tiếp từ việc cài đặt, sử dụng hoặc tham khảo phần mềm này — ngay cả khi đã được thông báo về khả năng thiệt hại đó.
 
 
 
@@ -58,37 +50,17 @@ Người dùng tự chịu mọi rủi ro và trách nhiệm khi sử dụng ph�
 
 
 
-This software is provided for free on an \*\*"As Is"\*\* basis for reference,
-
-educational and personal development purposes.
+This software is provided for free on an \*\*"As Is"\*\* basis for reference, educational and personal development purposes.
 
 
 
-The author makes no warranties, express or implied, including but not
-
-limited to merchantability, fitness for a particular purpose, or
-
-uninterrupted, error-free operation of the software.
+The author makes no warranties, express or implied, including but not limited to merchantability, fitness for a particular purpose, or uninterrupted, error-free operation of the software.
 
 
 
-In no event shall the author be liable for any loss or damage, including
-
-but not limited to data loss, business interruption, hardware or software
-
-failure, financial loss, or costs arising directly or indirectly from
-
-the installation, use, or reference to this software — even if advised
-
-of the possibility of such damage.
+In no event shall the author be liable for any loss or damage, including but not limited to data loss, business interruption, hardware or software failure, financial loss, or costs arising directly or indirectly from the installation, use, or reference to this software — even if advised of the possibility of such damage.
 
 
 
-Users assume all risks and responsibilities associated with the use of
-
-this software, including securing their own systems and data, ensuring
-
-compliance with applicable local laws, and evaluating suitability before
-
-practical application.
+Users assume all risks and responsibilities associated with the use of this software, including securing their own systems and data, ensuring compliance with applicable local laws, and evaluating suitability before practical application.
 
