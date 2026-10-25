@@ -10,8 +10,7 @@ Phần mềm này được chia sẻ hoàn toàn miễn phí dưới dạng \*\*
 
 
 
-Tác giả không đưa ra bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý, bao gồm nhưng không giới hạn ở tính phù hợp cho mục đích cụ thể, tính thương mại, hoặc khả
-
+Tác giả không đưa ra bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý, bao gồm nhưng không giới hạn ở tính phù hợp cho mục đích cụ thể, tính thương mại, hoặc khả 
 năng vận hành không bị gián đoạn, không có lỗi của phần mềm.
 
 
