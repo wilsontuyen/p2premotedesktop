@@ -95,6 +95,7 @@ from filecopyclient import (
     _pid_image_name,
     _hwnd_process_name,
     _cursor_over_current_process,
+    _is_current_process_foreground,
     _is_explorer_clipboard_client,
     _cursor_in_explorer_command_bar,
     _retry_remove_path,
@@ -189,8 +190,9 @@ class ClipboardEventListener:
                 if self.manager:
                     now = time.time()
                     was = getattr(self.manager, "_lmb_held", False)
-                    self.manager.last_lbutton_time = now
-                    on_self = _cursor_over_current_process()
+                    on_self = _cursor_over_current_process() or _is_current_process_foreground()
+                    if not on_self:
+                        self.manager.last_lbutton_time = now
                     hit_menu = False
                     if not was:
                         prev_t = getattr(self.manager, "_prev_lbutton_time", 0.0)
@@ -200,72 +202,79 @@ class ClipboardEventListener:
                             self.manager.last_dblclick_time = now
                         self.manager._prev_lbutton_time = now
                         self.manager._prev_lbutton_pos = (cx, cy)
-                        hit_menu = (not on_self) and (not getattr(self.manager, "_rmb_is_taskbar", False)) and (not _is_taskbar_or_taskmgr_at_point((cx, cy))) and _cursor_over_context_menu()
-                        paste_from_menu = False
-                        last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
-                        age_r = now - last_r
-                        if hit_menu:
-                            self.manager._lmb_hit_context_menu = True
-                            kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
-                            self.manager._lmb_menu_item_kind = kind
-                            # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
-                            # Win11: click trên context menu sau RMB (0.12 < age_r < 8.0) và kind != "not_paste" là Paste.
-                            if _menu_item_counts_as_paste(kind) or (
-                                kind != "not_paste"
-                                and 0.12 < age_r < 8.0
-                            ):
-                                paste_from_menu = True
-                                try:
-                                    from utils.logger import clip_trace
-                                    clip_trace(
-                                        f"[LMB menu] profile={_shell_menu_profile()} "
-                                        f"kind={kind!r} name={name!r} → paste gesture"
-                                    )
-                                except Exception:
-                                    pass
-                            else:
-                                try:
-                                    from utils.logger import clip_trace
-                                    clip_trace(
-                                        f"[LMB menu] profile={_shell_menu_profile()} "
-                                        f"kind={kind!r} name={name!r} → not paste"
-                                    )
-                                except Exception:
-                                    pass
+                        if on_self:
+                            # Chuột click trên Viewer/UI của chính app — không bao giờ là click context menu của Explorer
+                            self.manager._lmb_hit_context_menu = False
+                            self.manager._lmb_menu_item_kind = "not_paste"
+                            hit_menu = False
+                            paste_from_menu = False
                         else:
-                            # Win11 XAML: hit test menu hay fail do XAML island window
-                            chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
-                            rpos = getattr(self.manager, "_rmb_cursor_pos", None)
-                            near_rmb = bool(
-                                rpos
-                                and not getattr(self.manager, "_rmb_is_taskbar", False)
-                                and abs(cx - rpos[0]) <= 360
-                                and abs(cy - rpos[1]) <= 360
-                            )
-                            recent_dbl = bool(getattr(self.manager, "last_dblclick_time", 0.0) and (now - float(getattr(self.manager, "last_dblclick_time", 0.0))) < 0.7)
-                            menu_open = _context_menu_open()
-                            if chk_kind == "paste":
-                                paste_from_menu = True
-                                try:
-                                    from utils.logger import clip_trace
-                                    clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
-                                except Exception:
-                                    pass
-                            elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
-                                self.manager._lmb_hit_context_menu = False
-                                self.manager._lmb_menu_item_kind = "not_paste"
-                            elif 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
-                                paste_from_menu = True
+                            hit_menu = (not getattr(self.manager, "_rmb_is_taskbar", False)) and (not _is_taskbar_or_taskmgr_at_point((cx, cy))) and _cursor_over_context_menu()
+                            paste_from_menu = False
+                            last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
+                            age_r = now - last_r
+                            if hit_menu:
                                 self.manager._lmb_hit_context_menu = True
-                                self.manager._lmb_menu_item_kind = "paste"
-                                try:
-                                    from utils.logger import clip_trace
-                                    clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
-                                except Exception:
-                                    pass
+                                kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
+                                self.manager._lmb_menu_item_kind = kind
+                                # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
+                                # Win11: click trên context menu sau RMB (0.12 < age_r < 8.0) và kind != "not_paste" là Paste.
+                                if _menu_item_counts_as_paste(kind) or (
+                                    kind != "not_paste"
+                                    and 0.12 < age_r < 8.0
+                                ):
+                                    paste_from_menu = True
+                                    try:
+                                        from utils.logger import clip_trace
+                                        clip_trace(
+                                            f"[LMB menu] profile={_shell_menu_profile()} "
+                                            f"kind={kind!r} name={name!r} → paste gesture"
+                                        )
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        from utils.logger import clip_trace
+                                        clip_trace(
+                                            f"[LMB menu] profile={_shell_menu_profile()} "
+                                            f"kind={kind!r} name={name!r} → not paste"
+                                        )
+                                    except Exception:
+                                        pass
                             else:
-                                self.manager._lmb_hit_context_menu = False
-                                self.manager._lmb_menu_item_kind = "unknown"
+                                # Win11 XAML: hit test menu hay fail do XAML island window
+                                chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
+                                rpos = getattr(self.manager, "_rmb_cursor_pos", None)
+                                near_rmb = bool(
+                                    rpos
+                                    and not getattr(self.manager, "_rmb_is_taskbar", False)
+                                    and abs(cx - rpos[0]) <= 360
+                                    and abs(cy - rpos[1]) <= 360
+                                )
+                                recent_dbl = bool(getattr(self.manager, "last_dblclick_time", 0.0) and (now - float(getattr(self.manager, "last_dblclick_time", 0.0))) < 0.7)
+                                menu_open = _context_menu_open()
+                                if chk_kind == "paste":
+                                    paste_from_menu = True
+                                    try:
+                                        from utils.logger import clip_trace
+                                        clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
+                                    except Exception:
+                                        pass
+                                elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+                                    self.manager._lmb_hit_context_menu = False
+                                    self.manager._lmb_menu_item_kind = "not_paste"
+                                elif 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
+                                    paste_from_menu = True
+                                    self.manager._lmb_hit_context_menu = True
+                                    self.manager._lmb_menu_item_kind = "paste"
+                                    try:
+                                        from utils.logger import clip_trace
+                                        clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
+                                    except Exception:
+                                        pass
+                                else:
+                                    self.manager._lmb_hit_context_menu = False
+                                    self.manager._lmb_menu_item_kind = "unknown"
 
                         if paste_from_menu:
                             if getattr(self.manager, "_conflict_ui_active", False):
@@ -275,6 +284,7 @@ class ClipboardEventListener:
                                 except Exception:
                                     pass
                             else:
+                                is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                                 if not getattr(self.manager, "pending_remote_files", None):
                                     try:
                                         from filecopyhost import read_shared_pending_offer
@@ -302,7 +312,12 @@ class ClipboardEventListener:
                                     or getattr(self.manager, "_last_good_explorer_path", None)
                                 )
                                 cb = getattr(self.manager, "_agent_paste_callback", None)
-                                if callable(cb):
+                                if is_client:
+                                    try:
+                                        self.manager.execute_client_paste(dest, reason="menu_paste")
+                                    except Exception as e:
+                                        log_debug(f"[LMB] execute_client_paste loi: {e}")
+                                elif callable(cb):
                                     try:
                                         cb("menu_paste", dest)
                                     except Exception:
@@ -319,47 +334,54 @@ class ClipboardEventListener:
             if user32.GetAsyncKeyState(0x02) & 0x8000:
                 if self.manager:
                     was_rmb = getattr(self.manager, "_rmb_held", False)
-                    self.manager.last_rbutton_time = time.time()
+                    on_self_r = _cursor_over_current_process() or _is_current_process_foreground()
+                    if not on_self_r:
+                        self.manager.last_rbutton_time = time.time()
                     self.manager._lmb_hit_context_menu = False
                     self.manager._lmb_menu_item_kind = ""
                     self.manager._rmb_held = True
                     if not was_rmb:
-                        cxy = None
-                        try:
-                            cxy = _cursor_xy()
-                        except Exception:
-                            cxy = None
-                        if cxy and _is_taskbar_or_taskmgr_at_point(cxy):
-                            self.manager._rmb_is_taskbar = True
+                        if on_self_r:
+                            self.manager._rmb_is_taskbar = False
                             self.manager._rmb_cursor_pos = None
                         else:
-                            self.manager._rmb_is_taskbar = False
-                            self.manager._rmb_cursor_pos = cxy
-                            if cxy:
-                                set_global_rmb_pos(cxy)
-                            # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
-                            self.manager.snapshot_paste_dest("rmb", sync=True)
-                        pend = getattr(self.manager, "pending_remote_files", None) or []
-                        if not pend:
+                            cxy = None
                             try:
-                                from filecopyhost import read_shared_pending_offer
-                                shared_offer = read_shared_pending_offer()
-                                if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                                    flist = shared_offer.get("names") or [
-                                        f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                                        for f in (shared_offer.get("files") or [])
-                                    ]
-                                    self.manager.pending_remote_files = list(flist)
-                                    self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
-                                    self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
-                                    self.manager._reoffer_files = list(flist)
-                                    self.manager._allow_delayed = True
-                                    self.manager._force_delayed_setup = True
-                                    self.manager.meta_arrival_time = time.time()
-                                    self.manager._expect_repaste_until = time.time() + 86400.0
-                                    pend = self.manager.pending_remote_files
+                                cxy = _cursor_xy()
                             except Exception:
-                                pass
+                                cxy = None
+                            if cxy and _is_taskbar_or_taskmgr_at_point(cxy):
+                                self.manager._rmb_is_taskbar = True
+                                self.manager._rmb_cursor_pos = None
+                            else:
+                                self.manager._rmb_is_taskbar = False
+                                self.manager._rmb_cursor_pos = cxy
+                                if cxy:
+                                    set_global_rmb_pos(cxy)
+                                # Chốt path sync trước khi Explorer mở clipboard vẽ menu Paste.
+                                self.manager.snapshot_paste_dest("rmb", sync=True)
+                            pend = getattr(self.manager, "pending_remote_files", None) or []
+                            is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
+                            if not pend:
+                                try:
+                                    from filecopyhost import read_shared_pending_offer
+                                    shared_offer = read_shared_pending_offer()
+                                    if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
+                                        flist = shared_offer.get("names") or [
+                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+                                            for f in (shared_offer.get("files") or [])
+                                        ]
+                                        self.manager.pending_remote_files = list(flist)
+                                        self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
+                                        self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
+                                        self.manager._reoffer_files = list(flist)
+                                        self.manager._allow_delayed = True
+                                        self.manager._force_delayed_setup = True
+                                        self.manager.meta_arrival_time = time.time()
+                                        self.manager._expect_repaste_until = time.time() + 86400.0
+                                        pend = self.manager.pending_remote_files
+                                except Exception:
+                                    pass
                         try:
                             from utils.logger import clip_trace
                             clip_trace(
@@ -370,14 +392,7 @@ class ClipboardEventListener:
                             )
                         except Exception:
                             pass
-                        # Menu sắp mở — cần delayed CF_HDROP để Explorer bật Paste.
-                        if pend or getattr(self.manager, "_hdrop_materialized", False) or getattr(
-                            self.manager, "dummy_h_active", False
-                        ):
-                            try:
-                                self.manager._ensure_delayed_for_gesture()
-                            except Exception:
-                                pass
+
             else:
                 if self.manager:
                     self.manager._rmb_held = False
@@ -412,10 +427,12 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_ctrl_v_held", False):
+                        on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_exp = _is_explorer_clipboard_client()
-                        if is_exp and not has_text:
-                            if not getattr(self.manager, "pending_remote_files", None):
+                        if (not on_self_k) and is_exp and not has_text:
+                            is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
+                            if not is_client and not getattr(self.manager, "pending_remote_files", None):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -443,7 +460,12 @@ class ClipboardEventListener:
                                 or getattr(self.manager, "_last_good_explorer_path", None)
                             )
                             cb = getattr(self.manager, "_agent_paste_callback", None)
-                            if callable(cb):
+                            if is_client:
+                                try:
+                                    self.manager.execute_client_paste(dest, reason="ctrl_v")
+                                except Exception as e:
+                                    log_debug(f"[Ctrl+V] execute_client_paste loi: {e}")
+                            elif callable(cb):
                                 try:
                                     cb("ctrl_v", dest)
                                 except Exception:
@@ -459,10 +481,12 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_shift_ins_held", False):
+                        on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_exp = _is_explorer_clipboard_client()
-                        if is_exp and not has_text:
-                            if not getattr(self.manager, "pending_remote_files", None):
+                        if (not on_self_k) and is_exp and not has_text:
+                            is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
+                            if not is_client and not getattr(self.manager, "pending_remote_files", None):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -490,7 +514,12 @@ class ClipboardEventListener:
                                 or getattr(self.manager, "_last_good_explorer_path", None)
                             )
                             cb = getattr(self.manager, "_agent_paste_callback", None)
-                            if callable(cb):
+                            if is_client:
+                                try:
+                                    self.manager.execute_client_paste(dest, reason="shift_ins")
+                                except Exception as e:
+                                    log_debug(f"[Shift+Ins] execute_client_paste loi: {e}")
+                            elif callable(cb):
                                 try:
                                     cb("shift_ins", dest)
                                 except Exception:
@@ -530,7 +559,19 @@ class ClipboardEventListener:
         WM_SET_CLIP_TEXT = 0x0400 + 102
         
         if msg == WM_CLIPBOARDUPDATE:
-            log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE")
+            if is_own_clipboard_write():
+                return 0
+
+            seq = get_clipboard_sequence_number()
+            last_seq = getattr(self, "_last_wndproc_seq", 0)
+            if seq and seq == last_seq:
+                return 0
+            self._last_wndproc_seq = seq
+
+            now = time.time()
+            if now - getattr(self, "_last_wndproc_log_time", 0.0) > 2.0:
+                self._last_wndproc_log_time = now
+                log_debug(f"[WndProc] Nhận WM_CLIPBOARDUPDATE (seq={seq})")
             try:
                 time.sleep(0.05)
                 u32 = ctypes.windll.user32
@@ -1036,10 +1077,14 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 log_debug(f"[process_gui_queue] Lỗi: {e}")
 
     def add_socket(self, sock):
-        if not ENABLE_CLIPBOARD_SYNC: return
+        if not ENABLE_CLIPBOARD_SYNC or not sock: return
         with self.lock:
+            # Loại bỏ các socket đã đóng khỏi active_sockets
+            self.active_sockets = {s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0}
             self.active_sockets.add(sock)
-            self.sock = sock
+            # Với Client hoặc khi socket cũ không còn sống, cập nhật self.sock sang socket mới
+            if getattr(self, "is_client", False) or not self.sock or getattr(self.sock, 'fileno', lambda: -1)() < 0:
+                self.sock = sock
             self._xfer_sock_gen = getattr(self, "_xfer_sock_gen", 0) + 1
         try:
             role = "HOST_HEADLESS" if (self.app and getattr(self.app, "is_headless", False)) else "CLIENT"
@@ -1051,14 +1096,16 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             pass
 
     def remove_socket(self, sock):
-        if not ENABLE_CLIPBOARD_SYNC: return
+        if not ENABLE_CLIPBOARD_SYNC or not sock: return
         with self.lock:
             if sock in self.active_sockets:
-                self.active_sockets.remove(sock)
-            if self.sock == sock:
-                self.sock = list(self.active_sockets)[0] if self.active_sockets else None
-            # Also clean up socket passwords
+                self.active_sockets.discard(sock)
             socket_passwords.pop(sock, None)
+            peer_roles.pop(sock, None)
+            if self.sock == sock or (self.sock and getattr(self.sock, 'fileno', lambda: -1)() < 0):
+                # Chọn socket còn sống khác trong active_sockets
+                alive = [s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0]
+                self.sock = alive[0] if alive else None
         try:
             role = "HOST_HEADLESS" if (self.app and getattr(self.app, "is_headless", False)) else "CLIENT"
             log_overwrite_conflict(
@@ -1372,16 +1419,22 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         )
 
     def _live_xfer_sock(self):
-        sock = getattr(self, "sock", None)
-        if sock is not None:
-            return sock
-        try:
-            socks = list(self.active_sockets or [])
-            if socks:
-                return socks[0]
-        except Exception:
-            pass
-        return None
+        with self.lock:
+            # Loại bỏ socket chết khỏi active_sockets
+            dead = {s for s in self.active_sockets if getattr(s, "fileno", lambda: -1)() < 0}
+            for d in dead:
+                self.active_sockets.discard(d)
+                socket_passwords.pop(d, None)
+                if self.sock == d:
+                    self.sock = None
+            if self.sock is not None and getattr(self.sock, "fileno", lambda: -1)() >= 0:
+                return self.sock
+            alive = [s for s in self.active_sockets if getattr(s, "fileno", lambda: -1)() >= 0]
+            if alive:
+                self.sock = alive[0]
+                return self.sock
+            self.sock = None
+            return None
 
     def _xfer_dialog_status(self, my_id, status):
         jobs = getattr(self, "_xfer_jobs", None) or {}
@@ -1579,7 +1632,8 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         
         try:
             if hasattr(self, 'batch_display_name'):
-                log_activity(_("Truyền file: ") + str(self.batch_display_name) + _(" - Thất bại"))
+                action_str = _("Nhận file: ") if getattr(self, "is_client", False) else _("Truyền file: ")
+                log_activity(action_str + str(self.batch_display_name) + _(" - Thất bại"))
         except: pass
 
         # Báo viewer dừng NGAY — không return sớm trước bước này.
@@ -1959,7 +2013,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             aborted = getattr(self, "_aborted_xfer_ids", None) or set()
             jobs = getattr(self, "_xfer_jobs", None) or {}
             stale = (xid is not None and xid in aborted) or not self._xfer_packet_ok(packet, ptype)
-            if (
+            if ptype == "batch_start":
+                # batch_start mới đến: tự động arm cho phiên nhận này (tránh bị coi là stale do disarm phiên cũ)
+                self._allow_file_xfer = True
+                self._receive_cancelled = False
+            elif (
                 not stale
                 and not getattr(self, "_allow_file_xfer", False)
                 and xid not in jobs

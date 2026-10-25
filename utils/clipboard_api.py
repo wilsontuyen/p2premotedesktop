@@ -152,7 +152,7 @@ def setup_clipboard_exclusions():
         if cf_exclude: set_clipboard_dword_format(cf_exclude, 1)
         if cf_history: set_clipboard_dword_format(cf_history, 0)
         if cf_cloud: set_clipboard_dword_format(cf_cloud, 0)
-        if cf_drop_effect: set_clipboard_dword_format(cf_drop_effect, 5) # DROPEFFECT_COPY
+        if cf_drop_effect: set_clipboard_dword_format(cf_drop_effect, 1) # DROPEFFECT_COPY = 1
     except Exception as e:
         msg = f"[setup_clipboard_exclusions] Lỗi: {e}"
         if is_agent_process: print(f"[ClipboardAgent] {msg}", flush=True)
@@ -199,6 +199,7 @@ def should_preserve_user_clipboard(our_hwnd=None):
         return False
     try:
         user32 = ctypes.windll.user32
+        user32.GetClipboardOwner.restype = wintypes.HWND
         owner = user32.GetClipboardOwner()
         if our_hwnd and owner and int(owner) == int(our_hwnd):
             return False
@@ -225,10 +226,13 @@ def _clipboard_owned_by_sync_window():
     như một lần Paste giả và tải file trước khi user dán."""
     try:
         user32 = ctypes.windll.user32
+        user32.GetClipboardOwner.restype = wintypes.HWND
         owner = user32.GetClipboardOwner()
         if not owner:
             return False
         cls_buffer = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetClassNameW.restype = ctypes.c_int
         user32.GetClassNameW(owner, cls_buffer, 256)
         return cls_buffer.value in _SYNC_CLIPBOARD_WND_CLASSES
     except Exception:

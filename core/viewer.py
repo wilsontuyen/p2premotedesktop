@@ -224,6 +224,11 @@ def client_receiver_thread(sock, password):
             if _non_windows_close_is_shutdown():
                 print(f"[Client] Non-Windows host socket error: {e}. Treating as host shutdown.")
                 client_host_did_shutdown = True
+            if clipboard_sync_manager and sock:
+                try:
+                    clipboard_sync_manager.remove_socket(sock)
+                except Exception:
+                    pass
             client_running = False
             break
 
@@ -356,6 +361,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     import queue
     import json
     global client_switching_desktop_countdown, client_host_computer_name_override, client_host_resolution
+    if clipboard_sync_manager:
+        clipboard_sync_manager.is_client = True
     
     try: log_activity(_("Bắt đầu điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
     except: pass
@@ -476,6 +483,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         try: hwnd = pygame.display.get_wm_info().get("window")
         except: pass
         if hwnd and clipboard_sync_manager:
+            clipboard_sync_manager.is_client = True
             clipboard_sync_manager.pygame_hwnd = hwnd
         import tempfile
         blink_file = ""
@@ -614,6 +622,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 except Exception:
                                     pass
                                 if hwnd and clipboard_sync_manager:
+                                    clipboard_sync_manager.is_client = True
                                     clipboard_sync_manager.pygame_hwnd = hwnd
                                 connecting_done = True
                                 break
@@ -718,6 +727,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 pass
             ensure_session_socket_blocking(sock)
             if clipboard_sync_manager:
+                clipboard_sync_manager.is_client = True
                 clipboard_sync_manager.register_app(hidden_root)
             
             # Start receiver thread
@@ -726,6 +736,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
             # Gắn kết socket vào trình quản lý Event Listener của Clipboard
             if clipboard_sync_manager:
+                clipboard_sync_manager.is_client = True
                 clipboard_sync_manager.add_socket(sock)
             # We moved pygame init outside
             
@@ -878,7 +889,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         try: hwnd = pygame.display.get_wm_info().get("window")
                         except: pass
                         if hwnd:
-                            if clipboard_sync_manager: clipboard_sync_manager.pygame_hwnd = hwnd
+                            if clipboard_sync_manager:
+                                clipboard_sync_manager.is_client = True
+                                clipboard_sync_manager.pygame_hwnd = hwnd
                             install_keyboard_hook(hwnd, send_event)
 
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
@@ -1760,6 +1773,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             
         uninstall_keyboard_hook()
         # pygame.quit() # Bỏ qua để tránh deadlock SetParent với Tkinter thread
+        if clipboard_sync_manager and sock:
+            try:
+                clipboard_sync_manager.remove_socket(sock)
+            except Exception:
+                pass
         try: log_activity(_("Ngừng điều khiển ID ") + str(partner_id) + " (" + str(computer_name) + ")")
         except: pass
         import os

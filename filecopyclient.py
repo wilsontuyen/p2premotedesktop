@@ -1575,7 +1575,7 @@ def _is_taskbar_or_taskmgr_at_point(pt):
 
 
 def _cursor_over_current_process():
-    """Chuột đang trên cửa sổ process này (dialog tiến trình) — không phải click Paste Explorer."""
+    """Chuột đang trên cửa sổ process này (viewer, dialog tiến trình) — không phải click Paste Explorer."""
     user32 = ctypes.windll.user32
 
     class POINT(ctypes.Structure):
@@ -1591,7 +1591,40 @@ def _cursor_over_current_process():
             return False
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        return int(pid.value) == int(os.getpid())
+        if int(pid.value) == int(os.getpid()):
+            return True
+        try:
+            from core.clipboard_agent import clipboard_sync_manager
+            py_h = getattr(clipboard_sync_manager, "pygame_hwnd", None)
+            if py_h and (hwnd == py_h or user32.IsChild(py_h, hwnd)):
+                return True
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return False
+
+
+def _is_current_process_foreground():
+    """Cửa sổ foreground thuộc process này (Viewer hoặc Main App GUI)."""
+    user32 = ctypes.windll.user32
+    try:
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        hwnd_fg = user32.GetForegroundWindow()
+        if not hwnd_fg:
+            return False
+        pid_fg = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd_fg, ctypes.byref(pid_fg))
+        if int(pid_fg.value) == int(os.getpid()):
+            return True
+        try:
+            from core.clipboard_agent import clipboard_sync_manager
+            py_h = getattr(clipboard_sync_manager, "pygame_hwnd", None)
+            if py_h and (hwnd_fg == py_h or user32.IsChild(py_h, hwnd_fg)):
+                return True
+        except Exception:
+            pass
+        return False
     except Exception:
         return False
 
@@ -1758,6 +1791,15 @@ def _is_paste_placeholder(path, expected=None):
             return True
         if _is_probe_stub_name(path):
             return True
+        if expected is not None:
+            try:
+                exp_sz = int(expected)
+                if exp_sz > 1024:
+                    cur_sz = os.path.getsize(path)
+                    if cur_sz <= 1024:
+                        return True
+            except Exception:
+                pass
     except Exception:
         pass
     return False
@@ -1895,11 +1937,30 @@ def cleanup_incomplete_named_files(dests, files_meta, extra_paths=None, staging_
 
 def _probe_stub_paths(pending_files=None):
     """File stub hợp lệ để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
-    del pending_files
     try:
         os.makedirs(_PROBE_STUB_DIR, exist_ok=True)
     except Exception:
         pass
+    stubs = []
+    if pending_files:
+        for f in pending_files:
+            fname = f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
+            if not fname:
+                continue
+            fname = os.path.basename(fname).strip()
+            if not fname:
+                continue
+            p = os.path.join(_PROBE_STUB_DIR, fname)
+            try:
+                if not os.path.exists(p) or os.path.getsize(p) == 0:
+                    with open(p, "wb") as fp:
+                        fp.write(b"\x00")
+                _clear_win_attrs(p)
+                stubs.append(p)
+            except Exception:
+                pass
+    if stubs:
+        return stubs
     path = os.path.join(_PROBE_STUB_DIR, "RemoteDesktop_Paste_Trigger.tmp")
     try:
         if not os.path.exists(path) or os.path.getsize(path) == 0:
@@ -1969,8 +2030,13 @@ def _offer_probe_hdrop(pending_files=None):
     stub_files = _probe_stub_paths(pending_files)
     h = create_hdrop_data(stub_files)
     if h:
-        fn_SetClipboardData(15, h)
-        return True
+        res = fn_SetClipboardData(15, h)
+        err = ctypes.GetLastError()
+        log_debug(f"[_offer_probe_hdrop] SetClipboardData(15) returned {res}, GetLastError: {err}, files={stub_files}")
+        if res:
+            return True
+        else:
+            fn_GlobalFree(h)
     return _offer_empty_hdrop()
 
 
@@ -2087,6 +2153,15 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     """
     user32 = ctypes.windll.user32
     from ctypes import wintypes
+
+    # Nếu chuột hoặc foreground window đang ở trên Viewer / App của chúng ta,
+    # người dùng chưa hề chuyển sang Explorer để Paste -> coi mọi probe là BACKGROUND
+    if _cursor_over_current_process():
+        log_debug("[check_is_menu_query] BACKGROUND: con trỏ chuột đang trên Viewer/App")
+        return "BACKGROUND"
+    if _is_current_process_foreground():
+        log_debug("[check_is_menu_query] BACKGROUND: foreground là Viewer/App")
+        return "BACKGROUND"
 
     try:
         user32.GetOpenClipboardWindow.restype = wintypes.HWND
@@ -2265,9 +2340,13 @@ class FileCopyClientMixin:
         """Host headless (service worker): paste client→host do Clipboard Agent xử lý, không phải process này."""
         return bool(self.app and getattr(self.app, "is_headless", False))
 
+    def _is_client_viewer(self):
+        """Viewer phía Client kết nối tới Host: tự xử lý delayed rendering trực tiếp trên cửa sổ listener."""
+        return bool(getattr(self, "pygame_hwnd", None) or getattr(self, "is_client", False))
+
     def setup_delayed_rendering(self):
         from core.config import is_agent_process
-        if not is_agent_process:
+        if not is_agent_process and not self._is_client_viewer():
             agent_h = getattr(self, "_agent_hwnd", None)
             if not agent_h:
                 try:
@@ -2391,33 +2470,19 @@ class FileCopyClientMixin:
         return True
 
     def _offer_probe_and_rearm(self, delay_s=0.25):
-        """Cung cấp probe HDROP (để Explorer nhận biết có file và sáng nút/menu Paste) và hẹn giờ rearm delayed."""
+        """Cung cấp probe HDROP để Explorer nhận biết có file và sáng nút/menu Paste.
+        KHÔNG tự động hẹn giờ EmptyClipboard() / setup_delayed_rendering() vì sẽ gây
+        vòng lặp BACKGROUND <-> EmptyClipboard làm mất định dạng trên Clipboard.
+        Delayed rendering sẽ được thiết lập lại khi có cử chỉ phím/chuột mới (RMB / Ctrl+V / apply offer)."""
         _offer_probe_hdrop(self.pending_remote_files)
         self.dummy_h_active = True
         self._hdrop_materialized = True
-        now = time.time()
-        due = getattr(self, "_empty_rearm_due", 0.0) or 0.0
-        if due > now:
-            return True
-        self._empty_rearm_due = now + max(delay_s, 0.4)
-        def _go():
-            self._empty_rearm_due = 0.0
-            if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
-                return
-            try:
-                self._force_delayed_setup = True
-                self.setup_delayed_rendering()
-            except Exception:
-                pass
-        try:
-            threading.Timer(max(delay_s, 0.4), _go).start()
-        except Exception:
-            pass
+        self._empty_rearm_due = 0.0
         return True
 
     def _ensure_delayed_for_gesture(self):
         from core.config import is_agent_process
-        if not is_agent_process:
+        if not is_agent_process and not self._is_client_viewer():
             agent_h = getattr(self, "_agent_hwnd", None)
             if not agent_h:
                 try:
@@ -2440,7 +2505,7 @@ class FileCopyClientMixin:
                 return
         if self._is_headless_host_process() and getattr(self, "_agent_hwnd", None):
             return
-        if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+        if not self._is_client_viewer() and not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
             try:
                 from filecopyhost import read_shared_pending_offer
                 shared_offer = read_shared_pending_offer()
@@ -2458,6 +2523,8 @@ class FileCopyClientMixin:
             except Exception:
                 pass
         if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+            return
+        if clipboard_has_file_formats():
             return
         try:
             if self._user_clipboard_wins():
@@ -2510,24 +2577,46 @@ class FileCopyClientMixin:
         log_debug("[_execute_setup_delayed_rendering] OpenClipboard thành công. Đang EmptyClipboard...")
         self.ignore_destroy_clipboard = True
         try:
-            user32.EmptyClipboard()
-        finally:
-            self.ignore_destroy_clipboard = False
+            try:
+                user32.EmptyClipboard()
+            finally:
+                self.ignore_destroy_clipboard = False
+                
+            # Thiết lập các format loại trừ Clipboard History và Cloud Clipboard
+            try:
+                setup_clipboard_exclusions()
+            except Exception as e_ex:
+                log_debug(f"[_execute_setup_delayed_rendering] setup_clipboard_exclusions loi: {e_ex}")
             
-        # Thiết lập các format loại trừ Clipboard History và Cloud Clipboard
-        setup_clipboard_exclusions()
-        
-        res = fn_SetClipboardData(15, None) # CF_HDROP với delayed rendering (None handle)
-        if res:
-            global last_clipboard_set_time
-            last_clipboard_set_time = time.time()
-        err = ctypes.GetLastError()
-        log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP trả về: {res}, GetLastError: {err}")
-        user32.CloseClipboard()
+            # Cung cấp ngay stub HDROP mang đúng tên file thật để Windows Explorer (kể cả Win 11 XAML)
+            # nhận diện đối tượng file và bật sáng đèn icon/menu Paste 100% ngay tức thì.
+            stub_files = _probe_stub_paths(self.pending_remote_files)
+            h = create_hdrop_data(stub_files) if stub_files else None
+            if h:
+                res = fn_SetClipboardData(15, h)
+                err = ctypes.GetLastError()
+                log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP (active stub) trả về: {res}, GetLastError: {err}, files={stub_files}")
+                if not res:
+                    fn_GlobalFree(h)
+                    res = fn_SetClipboardData(15, None)
+                    err = ctypes.GetLastError()
+                    log_debug(f"[_execute_setup_delayed_rendering] Fallback SetClipboardData CF_HDROP (None): {res}, GetLastError: {err}")
+            else:
+                res = fn_SetClipboardData(15, None)
+                err = ctypes.GetLastError()
+                log_debug(f"[_execute_setup_delayed_rendering] SetClipboardData CF_HDROP (None) trả về: {res}, GetLastError: {err}")
+            if res:
+                global last_clipboard_set_time
+                last_clipboard_set_time = time.time()
+        finally:
+            user32.CloseClipboard()
         mark_own_clipboard_write()
         self._hdrop_materialized = False
         self.dummy_h_active = False
-        print("[Clipboard] Đã thiết lập delayed rendering (CF_HDROP) trên Clipboard và loại trừ Clipboard History.")
+        try:
+            print("[Clipboard] Da thiet lap delayed rendering (CF_HDROP) tren Clipboard.")
+        except Exception:
+            pass
 
     def lost_ownership(self):
         if getattr(self, 'ignore_destroy_clipboard', False):
@@ -2536,7 +2625,7 @@ class FileCopyClientMixin:
         self._allow_delayed = False
         print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
         # Viewer còn mở + còn offer host→client: user copy local → nhả offer ngay.
-        if getattr(self, "pygame_hwnd", None) and (
+        if self._is_client_viewer() and (
             self.pending_remote_files or getattr(self, "_reoffer_files", None)
         ):
             try:
@@ -2898,6 +2987,22 @@ class FileCopyClientMixin:
 
         pending = self.pending_remote_files or []
         if not pending:
+            reoff = getattr(self, "_reoffer_files", None)
+            if reoff:
+                self.pending_remote_files = list(reoff)
+                pending = self.pending_remote_files
+            else:
+                try:
+                    from filecopyhost import read_shared_pending_offer
+                    so = read_shared_pending_offer()
+                    if so and (so.get("files") or so.get("names")):
+                        fl = so.get("files") or [{"name": n} for n in so.get("names", [])]
+                        self.pending_remote_files = list(fl)
+                        self._reoffer_files = list(fl)
+                        pending = self.pending_remote_files
+                except Exception:
+                    pass
+        if not pending:
             # Vẫn log — Paste không có offer thì clipboard_agent.log trước đây “im thin thít”.
             clip_trace(
                 f"[render_format] ENTER no-pending profile={_shell_menu_profile()} "
@@ -2914,6 +3019,23 @@ class FileCopyClientMixin:
         last_r = getattr(self, 'last_rbutton_time', 0.0)
         meta_time = getattr(self, 'meta_arrival_time', 0.0)
         last_ctrl_v = getattr(self, 'last_ctrl_v_time', 0.0)
+
+        # Lọc bỏ cử chỉ phím chuột diễn ra trước khi nhận offer file từ host
+        if meta_time > 0:
+            if last_l and last_l < meta_time - 0.05:
+                last_l = 0.0
+            if last_r and last_r < meta_time - 0.05:
+                last_r = 0.0
+            if last_ctrl_v and last_ctrl_v < meta_time - 0.05:
+                last_ctrl_v = 0.0
+
+        # Nếu chuột hoặc foreground window là Viewer/App, người dùng chưa chuyển sang Explorer để Paste
+        if _cursor_over_current_process() or _is_current_process_foreground():
+            log_debug("[render_format] Bỏ qua vì chuột hoặc foreground đang ở Viewer/App (chưa Paste).")
+            clip_trace("[render_format] → ON_APP (probe HDROP, chưa paste)", throttle_s=0.5, key="rf_on_app")
+            self._offer_probe_and_rearm(0.35)
+            return
+
         is_menu = check_is_menu_query(
             last_l, last_r, meta_time, last_ctrl_v,
             expect_repaste=time.time() < getattr(self, "_expect_repaste_until", 0),
@@ -3066,7 +3188,7 @@ class FileCopyClientMixin:
             return
 
         cb = getattr(self, "_agent_paste_callback", None)
-        if callable(cb):
+        if not self._is_client_viewer() and callable(cb):
             dest = self.get_active_explorer_path()
             try:
                 cb("render_format", dest)
@@ -3109,36 +3231,68 @@ class FileCopyClientMixin:
             return
             
         dest_dir = self.get_active_explorer_path()
+        return self.execute_client_paste(dest_dir, reason="render_format")
+
+    def execute_client_paste(self, dest_dir=None, reason="gesture"):
+        """Kích hoạt tải file từ Host về Client khi có hành động Paste (Ctrl+V hoặc click Paste menu)."""
+        now = time.time()
+        last_start = getattr(self, "_last_client_paste_start_time", 0.0) or 0.0
+        if now - last_start < 0.6:
+            log_debug(f"[execute_client_paste] Debounce skip ({reason}, dt={now - last_start:.2f}s)")
+            return
+
+        pending = self.pending_remote_files or getattr(self, "_reoffer_files", None) or []
+        if not pending:
+            try:
+                from filecopyhost import read_shared_pending_offer
+                so = read_shared_pending_offer()
+                if so and (so.get("files") or so.get("names")):
+                    fl = so.get("files") or [{"name": n} for n in so.get("names", [])]
+                    self.pending_remote_files = list(fl)
+                    self._reoffer_files = list(fl)
+                    pending = self.pending_remote_files
+            except Exception:
+                pass
+        if not pending:
+            log_debug(f"[execute_client_paste] Bỏ qua: Không có pending files ({reason})")
+            return
+
+        if not dest_dir or not os.path.isdir(dest_dir):
+            dest_dir = self.get_active_explorer_path()
+        if not dest_dir or not os.path.isdir(dest_dir):
+            log_debug(f"[execute_client_paste] Không tìm thấy thư mục đích ({reason})")
+            return
+
+        self._last_client_paste_start_time = now
         living = bool(getattr(self, "_xfer_jobs", None))
         self.is_rendering = True
         self._expect_repaste_until = 0.0
         self._rearm_delayed_after_render = False
         self._clipboard_paste_id = getattr(self, "_clipboard_paste_id", 0) + 1
         self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
-        self._last_paste_start = time.time()
+        self._last_paste_start = now
         paste_tok = int(getattr(self, "_clipboard_paste_id", 0) or 0)
-        clip_trace(f"[render_format] PASTE START paste_id={paste_tok} dest_before_lock={dest_dir!r} living={living}")
+        clip_trace(f"[execute_client_paste] PASTE START paste_id={paste_tok} dest_before_lock={dest_dir!r} reason={reason} living={living}")
         dest_dir = self._lock_paste_dest(dest_dir, paste_tok) or dest_dir
         if not dest_dir:
-            print("[Clipboard] Paste host→client: KHÔNG có thư mục đích — bỏ qua (tránh dán theo folder sau này).")
-            clip_trace("[render_format] ABORT no dest — empty HDROP")
+            print("[Clipboard] Paste host→client: KHÔNG có thư mục đích — bỏ qua.")
+            clip_trace("[execute_client_paste] ABORT no dest — empty HDROP")
             self._offer_empty_and_rearm(0.25)
             self.is_rendering = False
             return
-        print(f"[Clipboard] Paste host→client vào: {dest_dir} (song song dialog={living})")
-        clip_trace(f"[render_format] PASTE GO paste_id={paste_tok} locked_dest={dest_dir}")
-        self._arm_file_xfer("gui_paste")
+        print(f"[Clipboard] Paste host→client vào: {dest_dir} (reason={reason}, song song dialog={living})")
+        clip_trace(f"[execute_client_paste] PASTE GO paste_id={paste_tok} locked_dest={dest_dir}")
+        self._arm_file_xfer(f"gui_paste_{reason}")
         self.transfer_in_progress = True
         try:
-            print("[Clipboard] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
-            log_debug("[render_format] Nhận WM_RENDERFORMAT. Đang bắt đầu kiểm tra tệp tin ghi đè...")
+            print(f"[Clipboard] Bắt đầu tải file ({reason}). Đang kiểm tra tệp tin ghi đè...")
+            log_debug(f"[execute_client_paste] Bắt đầu tải file ({reason}). Đang kiểm tra tệp tin ghi đè...")
             
             item_kind, display_name = _copy_batch_kind_and_name(self.pending_remote_files, _("Tệp tin"))
             total_size = sum(f.get("size", 0) for f in self.pending_remote_files)
-            log_debug(f"[render_format] Thư mục đích phát hiện: {dest_dir}")
-            clip_trace(f"[render_format] paste {item_kind}/{display_name} size={total_size} dest={dest_dir}")
+            log_debug(f"[execute_client_paste] Thư mục đích: {dest_dir}, file={display_name}, size={total_size}")
+            clip_trace(f"[execute_client_paste] paste {item_kind}/{display_name} size={total_size} dest={dest_dir}")
             
-            # Event riêng từng paste — không clear event của paste đang chạy.
             done_ev = threading.Event()
             pd = getattr(self, "_paste_done", None)
             if pd is None:
@@ -3148,18 +3302,20 @@ class FileCopyClientMixin:
             if not living:
                 self.transfer_done_event.clear()
 
-            # Unblock Explorer ngay (empty HDROP) — tải nền vào thư mục đã LOCK lúc Paste.
-            empty_now = create_hdrop_data([])
-            if empty_now:
-                self.ignore_destroy_clipboard = True
-                try:
-                    res0 = fn_SetClipboardData(15, empty_now)
-                    if not res0:
-                        fn_GlobalFree(empty_now)
-                    log_debug(f"[render_format] Unblock Explorer empty HDROP res={res0} dest={dest_dir}")
-                    clip_trace(f"[render_format] empty HDROP SetClipboardData res={res0} (Explorer may ding)")
-                finally:
-                    self.ignore_destroy_clipboard = False
+            try:
+                empty_now = create_hdrop_data([])
+                if empty_now:
+                    self.ignore_destroy_clipboard = True
+                    try:
+                        res0 = fn_SetClipboardData(15, empty_now)
+                        if not res0:
+                            fn_GlobalFree(empty_now)
+                        log_debug(f"[execute_client_paste] Unblock Explorer empty HDROP res={res0} dest={dest_dir}")
+                    finally:
+                        self.ignore_destroy_clipboard = False
+            except Exception:
+                pass
+
             _schedule_scrub_probe(dest_dir)
             files_for_job = [dict(f) if isinstance(f, dict) else f for f in (self.pending_remote_files or [])]
             dest_for_job = dest_dir  # frozen — không đọc lại cache sau khi user đổi folder
@@ -3440,6 +3596,8 @@ class FileCopyClientMixin:
                     _open_progress_if_needed(files_to_download)
             
                     # Yêu cầu truyền file thực tế từ đối tác
+                    self._allow_file_xfer = True
+                    self._receive_cancelled = False
                     self.request_pending_files(files_to_download, paste_id=paste_tok)
             
                     # Chờ batch_end của paste_id này (không dùng event chung).
@@ -3677,23 +3835,42 @@ class FileCopyClientMixin:
 
     def request_pending_files(self, files=None, paste_id=None):
         files_req = list(files) if files else list(self.pending_remote_files or [])
-        if not files_req or not self.sock:
+        target_sock = self._live_xfer_sock()
+        if not files_req or not target_sock:
+            log_debug(f"[request_pending_files] Bỏ qua: files={len(files_req)}, live_sock={bool(target_sock)}")
             return
-        if not getattr(self, "_allow_file_xfer", False):
-            print("[FileTransfer] Bo request_pending_files (allow_file_xfer=False).")
-            return
+        self._allow_file_xfer = True
+        self._receive_cancelled = False
         try:
             pid = int(paste_id) if paste_id is not None else int(getattr(self, "_clipboard_paste_id", 0) or 0)
         except Exception:
             pid = 0
         if pid in (getattr(self, "_cancelled_paste_ids", None) or set()):
             print(f"[FileTransfer] Bo request_pending_files paste_id={pid} (blacklist Huy).")
+            log_debug(f"[request_pending_files] Bỏ qua paste_id={pid} do nằm trong blacklist Hủy.")
             return
-        send_msg(self.sock, json.dumps({
+
+        payload = json.dumps({
             "type": "request_files",
             "files": files_req,
             "paste_id": pid,
-        }).encode('utf-8'))
+        }).encode('utf-8')
+
+        ok = send_msg(target_sock, payload)
+        if not ok:
+            # Thử gửi qua các active_sockets khác nếu có
+            for alt_sock in list(getattr(self, "active_sockets", []) or []):
+                if alt_sock != target_sock and getattr(alt_sock, "fileno", lambda: -1)() >= 0:
+                    if send_msg(alt_sock, payload):
+                        ok = True
+                        self.sock = alt_sock
+                        break
+        log_debug(f"[request_pending_files] Đã gửi request_files: ok={ok} paste_id={pid} files={len(files_req)}")
+        try:
+            from utils.logger import clip_trace
+            clip_trace(f"[request_pending_files] sent request_files ok={ok} paste_id={pid} n={len(files_req)}")
+        except Exception:
+            pass
 
     def _enqueue_file_offer(self, files, offer_id=None):
         """Hàng đợi copy file (RAM). Áp từng offer; nếu xếp hàng thì lấy cái mới nhất."""
@@ -3772,6 +3949,20 @@ class FileCopyClientMixin:
         if fp != last_fp:
             self._repaste_local_by_name = {}
         self.meta_arrival_time = time.time()
+        # Vô hiệu hóa và xóa sạch mọi cử chỉ phím/chuột cũ trước khi nhận offer mới này
+        self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
+        try:
+            self._clear_paste_gesture_flags(0.5)
+        except Exception:
+            pass
+        self.last_ctrl_v_time = 0.0
+        self.last_lbutton_time = 0.0
+        self.last_rbutton_time = 0.0
+        self.last_dblclick_time = 0.0
+        self._lmb_hit_context_menu = False
+        self._lmb_menu_item_kind = ""
+        self._paste_dest_snapshot = None
+        self._paste_dest_frozen = False
         self._allow_delayed = True
         self._force_delayed_setup = True
         self._expect_repaste_until = time.time() + 86400.0
@@ -3793,7 +3984,8 @@ class FileCopyClientMixin:
             "names": names,
             "offer_id": oid,
         }
-        # Luôn ghi Shared Pending Offer vào thư mục toàn cục cho bất kỳ tiến trình Host nào
+
+        # Luôn ghi Shared Pending Offer vào thư mục toàn cục (cho cả Client lẫn Host)
         try:
             from filecopyhost import write_shared_pending_offer
             write_shared_pending_offer(msg_dict)
@@ -3812,6 +4004,15 @@ class FileCopyClientMixin:
                 )
         except Exception:
             pass
+
+        if self._is_client_viewer():
+            log_overwrite_conflict(
+                f"CLIENT_VIEWER apply offer={oid} n={len(files)} names={names} (direct delayed setup)"
+            )
+            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+            self.target_save_dir = temp_dir
+            self.setup_delayed_rendering()
+            return
 
         if self._is_headless_host_process():
             # Đừng đổi target_save_dir / clear done khi đang tải paste khác.
@@ -3837,8 +4038,7 @@ class FileCopyClientMixin:
             return
 
         log_overwrite_conflict(
-            f"{'CLIENT_VIEWER' if getattr(self, 'pygame_hwnd', None) else 'HOST_GUI'} "
-            f"apply offer={oid} n={len(files)} names={names} (agent_h={bool(ag_h)})"
+            f"HOST_GUI apply offer={oid} n={len(files)} names={names} (agent_h={bool(ag_h)})"
         )
         temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
         self.target_save_dir = temp_dir

@@ -955,7 +955,7 @@ class FileCopyHostMixin:
             except Exception:
                 pass
 
-        is_client = bool(getattr(self, "pygame_hwnd", None))
+        is_client = bool(getattr(self, "pygame_hwnd", None) or getattr(self, "is_client", False))
 
         def _pass(g=gen, tries=0):
             if g != getattr(self, "_clip_sync_gen", 0):
@@ -1189,9 +1189,18 @@ class FileCopyHostMixin:
                 if self._send_should_stop(my_id):
                     log_debug(f"[_process_send_requests] Truyền tải bị hủy ngang.")
                     break
-                filepath = f["path"]
-                filename = f["name"]
-                file_size = f["size"]
+                if isinstance(f, dict):
+                    filepath = f.get("path") or f.get("name")
+                    filename = f.get("name") or os.path.basename(filepath or "")
+                    file_size = f.get("size", 0)
+                elif isinstance(f, str):
+                    filepath = f
+                    filename = os.path.basename(f)
+                    file_size = os.path.getsize(f) if os.path.exists(f) else 0
+                else:
+                    continue
+                if not filepath or not filename:
+                    continue
                 
                 log_debug(f"[_process_send_requests] Kiểm tra filepath: {filepath}")
                 if not os.path.exists(filepath):
@@ -1769,6 +1778,9 @@ def run_clipboard_agent_mode():
     _agent_conflict_skip = set()
 
     _agent_allow_delayed = True
+    _agent_send_clip_timer = None
+    _agent_send_clip_gen = 0
+    _agent_last_sent_text = None
     _agent_clip_seq_at_pending = None
     _agent_force_delayed_setup = False
     _agent_paste_coalesce_until = 0.0
@@ -2051,9 +2063,11 @@ def run_clipboard_agent_mode():
     def _yield_clipboard_to_user(reason=""):
         """User copy local — đừng EmptyClipboard/delayed HDROP (mất copy, chuột xoay)."""
         nonlocal _agent_allow_delayed
+        was_holding = _agent_allow_delayed or bool(_pending_info)
         _agent_allow_delayed = False
         _pending_info.clear()
-        agent_print(f"[ClipboardAgent] Nha clipboard cho user ({reason}).")
+        if was_holding:
+            agent_print(f"[ClipboardAgent] Nhả clipboard cho user ({reason}).")
 
     def _agent_user_clipboard_wins():
         if not should_preserve_user_clipboard(_agent_hwnd):
@@ -2099,6 +2113,8 @@ def run_clipboard_agent_mode():
             if not force and seq and seq == _agent_last_copied_seq:
                 return
             fp = tuple(os.path.abspath(f).lower() for f in files)
+            if _agent_last_copied_fp and fp == _agent_last_copied_fp and seq and seq == _agent_last_copied_seq:
+                return
             _agent_last_copied_seq = seq
             _agent_last_copied_fp = fp
             # Copy local trên host → nhả PENDING client→host còn sót (tránh Paste nhầm).
@@ -2184,7 +2200,7 @@ def run_clipboard_agent_mode():
                                 daemon=True,
                                 name="AgentMenuPasteTrigger",
                             ).start()
-                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
+                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not clipboard_has_file_formats():
                         if not is_paste:
                             _agent_dummy_h_active = False
                             ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -2216,9 +2232,7 @@ def run_clipboard_agent_mode():
                                 _agent_cached_explorer_path = p
                         except Exception:
                             pass
-                    if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
-                        _agent_dummy_h_active = False
-                        ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
+
                 if user32.GetAsyncKeyState(0x0D) & 0x8000: # Enter
                     if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
@@ -2999,13 +3013,27 @@ def run_clipboard_agent_mode():
                 return 0
             if should_preserve_user_clipboard(hwnd):
                 _yield_clipboard_to_user("local clipboard")
-            def _send_clipboard():
-                import time
-                time.sleep(0.35)
+
+            nonlocal _agent_send_clip_timer, _agent_send_clip_gen, _agent_last_sent_text
+            _agent_send_clip_gen += 1
+            my_gen = _agent_send_clip_gen
+            if _agent_send_clip_timer is not None:
+                try:
+                    _agent_send_clip_timer.cancel()
+                except Exception:
+                    pass
+
+            def _send_clipboard(g=my_gen):
+                nonlocal _agent_last_sent_text
+                if g != _agent_send_clip_gen:
+                    return
                 if _is_rendering or is_own_clipboard_write():
                     return
-                if should_preserve_user_clipboard(_agent_hwnd):
-                    _yield_clipboard_to_user("local clipboard poll")
+                if not should_preserve_user_clipboard(_agent_hwnd):
+                    return
+                if _agent_allow_delayed and _pending_info:
+                    return
+                _yield_clipboard_to_user("local clipboard poll")
                 files = get_clipboard_files(retries=3)
                 if files:
                     if _paths_are_probe_or_xfer(files):
@@ -3014,20 +3042,25 @@ def run_clipboard_agent_mode():
                     _agent_emit_copied_files(force=True)
                     return
                 text = get_clipboard_text()
-                if text:
+                if text and text != _agent_last_sent_text:
                     _yield_clipboard_to_user("local text")
                     try:
                         import win32pipe, win32file, json
                         pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
                         win32pipe.WaitNamedPipe(pipe_name, 5000)
                         pipe_handle = win32file.CreateFile(pipe_name, win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, 0, None)
-                        msg = "COPIED_TEXT|" + json.dumps(text)
-                        win32file.WriteFile(pipe_handle, msg.encode('utf-8'))
+                        msg_payload = "COPIED_TEXT|" + json.dumps(text)
+                        win32file.WriteFile(pipe_handle, msg_payload.encode('utf-8'))
                         win32file.CloseHandle(pipe_handle)
+                        _agent_last_sent_text = text
                         agent_print("[ClipboardAgent] Đã gửi COPIED_TEXT cho Service.")
                     except Exception as e:
                         agent_print(f"Failed to send COPIED_TEXT: {e}")
-            threading.Thread(target=_send_clipboard, daemon=True).start()
+
+            t = threading.Timer(0.35, _send_clipboard)
+            t.daemon = True
+            _agent_send_clip_timer = t
+            t.start()
             return 0
 
         if msg == WM_RENDERFORMAT and wparam == CF_HDROP:
@@ -3129,7 +3162,6 @@ def run_clipboard_agent_mode():
                     log_overwrite_conflict("RENDERFORMAT EXIT: suppress_after_finish_or_rearm")
                     if _offer_empty_hdrop():
                         _agent_dummy_h_active = True
-                        _agent_schedule_rearm(0.25)
                     return 0
             else:
                 _agent_suppress_render_until = 0.0
@@ -3171,14 +3203,12 @@ def run_clipboard_agent_mode():
                         )
                         if _offer_probe_hdrop(_pending_info.get("files")):
                             _agent_dummy_h_active = True
-                            _agent_schedule_rearm(0.25)
                         _schedule_scrub_probe(_agent_cached_explorer_path)
                     else:
                         agent_print("[ClipboardAgent] Probe Explorer — probe HDROP.")
                         log_overwrite_conflict("RENDERFORMAT EXIT: BACKGROUND probe")
                         if _offer_probe_hdrop(_pending_info.get("files")):
                             _agent_dummy_h_active = True
-                            _agent_schedule_rearm(0.35)
                     return 0
 
             living = any(
@@ -3253,7 +3283,6 @@ def run_clipboard_agent_mode():
                     log_overwrite_conflict("RENDERFORMAT EXIT: after_cancel no new paste")
                     if _offer_empty_hdrop():
                         _agent_dummy_h_active = True
-                        _agent_schedule_rearm(0.25)
                     return 0
 
             log_overwrite_conflict(
@@ -3490,10 +3519,15 @@ def run_clipboard_agent_mode():
 
     def _agent_text_poll_loop():
         last_seq = 0
+        last_sent_text = None
         while True:
             time.sleep(0.4)
             try:
                 if _is_rendering or is_own_clipboard_write():
+                    continue
+                if not should_preserve_user_clipboard(_agent_hwnd):
+                    continue
+                if _agent_allow_delayed and _pending_info:
                     continue
                 seq = get_clipboard_sequence_number()
                 if not seq or seq == last_seq:
@@ -3505,7 +3539,7 @@ def run_clipboard_agent_mode():
                     agent_print("[ClipboardAgent] Poll: đã gửi COPIED_FILES.")
                     continue
                 text = get_clipboard_text()
-                if not text:
+                if not text or text == last_sent_text:
                     last_seq = seq
                     continue
                 _yield_clipboard_to_user("local text poll")
@@ -3517,6 +3551,7 @@ def run_clipboard_agent_mode():
                     win32file.WriteFile(pipe_handle, ("COPIED_TEXT|" + json.dumps(text)).encode("utf-8"))
                     win32file.CloseHandle(pipe_handle)
                     last_seq = seq
+                    last_sent_text = text
                     agent_print("[ClipboardAgent] Poll: đã gửi COPIED_TEXT.")
                 except Exception:
                     pass

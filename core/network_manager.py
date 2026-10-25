@@ -1228,7 +1228,7 @@ class NetworkMixin:
 
         def notify_status(msg):
             # Nếu đang ở chế độ reconnect hoặc chu kỳ retry, không gửi các trạng thái chi tiết nội bộ
-            # vào reconnect_queue (để tránh đè mất dòng chữ "Đang thử kết nối lại (lần {x}/5)...")
+            # vào reconnect_queue (để tránh đè mất dòng chữ "Đang thử kết nối lại (lần {x}/10)...")
             is_retry_status = ("Đang thử kết nối lại" in msg or _("Đang thử kết nối lại") in msg or "lần " in msg)
             if is_reconnect or retry_count > 0:
                 if is_retry_status and reconnect_queue:
@@ -1253,8 +1253,8 @@ class NetworkMixin:
         force_relay = getattr(self, '_current_force_relay', False)
 
         is_reconnect = bool(reconnect_reason or retry_count > 0)
-        current_attempt = min(5, retry_count + 1)
-        retry_banner = _("Đang thử kết nối lại (lần {x}/5)...").format(x=current_attempt)
+        current_attempt = min(10, retry_count + 1)
+        retry_banner = _("Đang thử kết nối lại (lần {x}/10)...").format(x=current_attempt)
         if is_reconnect:
             notify_status(retry_banner)
 
@@ -1380,9 +1380,9 @@ class NetworkMixin:
                     break
                     
             if not signaling_success:
-                if reconnect_queue and retry_count + 1 < 5:
+                if reconnect_queue and retry_count + 1 < 10:
                     next_attempt = retry_count + 2
-                    status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
+                    status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
                     notify_status(status_msg)
                     time.sleep(1.0)
                     self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
@@ -1490,9 +1490,9 @@ class NetworkMixin:
                 connected = False
 
         if not connected:
-            if reconnect_queue and retry_count + 1 < 5:
+            if reconnect_queue and retry_count + 1 < 10:
                 next_attempt = retry_count + 2
-                status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
+                status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
                 notify_status(status_msg)
                 time.sleep(1.5)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
@@ -1689,9 +1689,9 @@ class NetworkMixin:
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
         except Exception as e:
-            if reconnect_queue and retry_count + 1 < 5:
+            if reconnect_queue and retry_count + 1 < 10:
                 next_attempt = retry_count + 2
-                status_msg = _("Đang thử kết nối lại (lần {x}/5)...").format(x=next_attempt)
+                status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
                 notify_status(status_msg)
                 if sock:
                     force_close_socket(sock)

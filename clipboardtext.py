@@ -103,16 +103,23 @@ class ClipboardTextMixin:
         self._reoffer_files = None
         self._allow_delayed = False
         if self._forward_clipboard_text(current_text):
-            log_debug(f"[Clipboard] Phát hiện text clipboard mới locally: {current_text[:50]}...")
+            if "traceback" in current_text.lower() or "error" in current_text.lower():
+                log_debug(f"[Clipboard] Phát hiện text clipboard (chứa lỗi):\n{current_text[:1000]}")
+            else:
+                log_debug(f"[Clipboard] Phát hiện text clipboard mới locally: {current_text[:100]}...")
             print("[Clipboard] Đang gửi text clipboard sang đối tác...")
             return True
         return False
 
     def _forward_clipboard_text(self, text):
-        """Gửi text clipboard sang viewer/host. Cùng nội dung copy lần 2 vẫn gửi (theo sequence)."""
+        """Gửi text clipboard sang viewer/host. Tránh vòng lặp phản xạ (ping-pong)."""
         if not text or not self.active_sockets:
             return False
         if is_own_clipboard_write():
+            return False
+        if text == getattr(self, "_last_received_text", None):
+            return False
+        if text == getattr(self, "last_sent_text", None):
             return False
         seq = get_clipboard_sequence_number()
         if seq and seq == getattr(self, "_last_sent_clip_seq", 0):
@@ -137,11 +144,12 @@ class ClipboardTextMixin:
         return sent
 
     def _apply_remote_clipboard_text(self, text):
-        """Ghi CF_UNICODETEXT trên thread của clipboard listener.
-
-        ClipPkt gọi OpenClipboard(Tk hwnd) từ thread khác → fail, clipboard trống,
-        Ctrl+V trên Host chỉ ding một tiếng.
-        """
+        """Ghi CF_UNICODETEXT trên thread của clipboard listener."""
+        if not text:
+            return
+        if text == getattr(self, "last_sent_text", None) or text == getattr(self, "_last_received_text", None):
+            return
+        self._last_received_text = text
         self.pending_remote_files = []
         self._reoffer_files = None
         self.dummy_h_active = False
@@ -190,7 +198,10 @@ class ClipboardTextMixin:
     def handle_clipboard_text_packet(self, packet):
         """Nhận clipboard_text từ peer → ghi local (hoặc pipe agent khi headless)."""
         text = packet.get("text", "") if isinstance(packet, dict) else ""
-        log_debug(f"[handle_clipboard_text_packet] Nhận clipboard_text: {str(text)[:50]}...")
+        if "traceback" in str(text).lower() or "error" in str(text).lower():
+            log_debug(f"[handle_clipboard_text_packet] Nhận clipboard_text (chứa lỗi):\n{str(text)[:1000]}")
+        else:
+            log_debug(f"[handle_clipboard_text_packet] Nhận clipboard_text: {str(text)[:100]}...")
         print("[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
         self.last_received_text = text
         if self.app and getattr(self.app, "is_headless", False):
