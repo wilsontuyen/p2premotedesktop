@@ -351,6 +351,14 @@ def uninstall_keyboard_hook():
             pass
         _keyboard_hook_thread_id = None
 
+def format_id_groups(pid):
+    """Tách ID thành từng nhóm 3 số cách nhau bởi dấu cách (ví dụ: '685 271 099 843')."""
+    s = str(pid or "").strip()
+    digits = "".join(c for c in s if c.isdigit())
+    if digits and len(digits) == len(s.replace(" ", "")):
+        return " ".join(digits[i:i+3] for i in range(0, len(digits), 3))
+    return s
+
 # Client Main View Pygame Loop
 def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
     cmd_queue = boot_sock_queue
@@ -531,6 +539,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             try: status_font = pygame.font.SysFont("Arial", 18)
             except: status_font = pygame.font.Font(None, 24)
 
+        try: id_font = pygame.font.SysFont(font_names, 16)
+        except:
+            try: id_font = pygame.font.SysFont("Arial", 16)
+            except: id_font = pygame.font.Font(None, 22)
+
         try: sub_font = pygame.font.SysFont(font_names, 13)
         except:
             try: sub_font = pygame.font.SysFont("Arial", 13)
@@ -634,17 +647,32 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
                 if connecting_error:
                     screen.fill((0, 0, 0))
-                    h_title = computer_name or (_("Máy đối tác: ") + str(partner_id))
-                    t_surf = title_font.render(h_title, True, (255, 255, 255))
-                    t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 60))
-                    screen.blit(t_surf, t_rect)
+                    formatted_partner_id = format_id_groups(partner_id)
+                    h_title = computer_name or (_("Máy đối tác: ") + (formatted_partner_id or str(partner_id)))
+                    if h_title.startswith("ID: "):
+                        h_title = f"ID: {format_id_groups(h_title[4:].strip())}"
+                    raw_pid = str(partner_id or "").replace(" ", "")
+                    has_id_in_title = bool(raw_pid and (raw_pid in h_title.replace(" ", "")))
+
+                    if not has_id_in_title and partner_id:
+                        t_surf = title_font.render(h_title, True, (255, 255, 255))
+                        t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 70))
+                        screen.blit(t_surf, t_rect)
+
+                        id_surf = id_font.render(f"ID: {formatted_partner_id}", True, (200, 200, 200))
+                        id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 36))
+                        screen.blit(id_surf, id_rect)
+                    else:
+                        t_surf = title_font.render(h_title, True, (255, 255, 255))
+                        t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 60))
+                        screen.blit(t_surf, t_rect)
 
                     e_surf = status_font.render(connecting_error, True, (255, 90, 90))
-                    e_rect = e_surf.get_rect(center=(window_w // 2, window_h // 2))
+                    e_rect = e_surf.get_rect(center=(window_w // 2, window_h // 2 + 5))
                     screen.blit(e_surf, e_rect)
 
                     hint_surf = sub_font.render(_("Cửa sổ sẽ tự đóng sau vài giây..."), True, (150, 150, 150))
-                    hint_rect = hint_surf.get_rect(center=(window_w // 2, window_h // 2 + 50))
+                    hint_rect = hint_surf.get_rect(center=(window_w // 2, window_h // 2 + 55))
                     screen.blit(hint_surf, hint_rect)
                     pygame.display.flip()
 
@@ -664,14 +692,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 screen.fill((0, 0, 0))
 
                 # 1. Tên máy Host ở phía trên
-                h_title = computer_name or (_("Máy đối tác: ") + str(partner_id))
+                formatted_partner_id = format_id_groups(partner_id)
+                h_title = computer_name or (_("Máy đối tác: ") + (formatted_partner_id or str(partner_id)))
+                if h_title.startswith("ID: "):
+                    h_title = f"ID: {format_id_groups(h_title[4:].strip())}"
                 t_surf = title_font.render(h_title, True, (255, 255, 255))
                 t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 50))
                 screen.blit(t_surf, t_rect)
 
-                if partner_id and partner_id not in h_title:
-                    id_surf = sub_font.render(f"ID: {partner_id}", True, (180, 180, 180))
-                    id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 18))
+                raw_pid = str(partner_id or "").replace(" ", "")
+                if partner_id and raw_pid not in h_title.replace(" ", ""):
+                    id_surf = id_font.render(f"ID: {formatted_partner_id}", True, (200, 200, 200))
+                    id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 16))
                     screen.blit(id_surf, id_rect)
 
                 # 2. Dòng trạng thái hiện tại to, rõ ràng ở giữa màn hình
@@ -1657,7 +1689,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     try: reconnect_queue.put(req_msg)
                     except: pass
                 
-                status_msg_text = _("Đang thử kết nối lại (lần {x}/5)...").format(x=1)
+                status_msg_text = _("Đang thử kết nối lại (lần {x}/10)...").format(x=1)
                 
                 while countdown > 0 and outer_running:
                     for event in pygame.event.get():

@@ -726,7 +726,10 @@ class SavedListMixin:
                     dot_lbl = tk.Label(info_frame, text="●", font=(APP_FONT_NAME, 13, "bold"), fg=dot_color, bg=self.card_color)
                     dot_lbl.pack(side=tk.LEFT, padx=(0, 5))
 
-                    id_lbl = tk.Label(info_frame, text=f"ID: {comp['id']}", font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color, anchor=tk.E)
+                    raw_cid = str(comp.get('id', '')).strip()
+                    c_digits = "".join(c for c in raw_cid if c.isdigit())
+                    disp_cid = " ".join(c_digits[i:i+3] for i in range(0, len(c_digits), 3)) if (c_digits and len(c_digits) == len(raw_cid.replace(" ", ""))) else raw_cid
+                    id_lbl = tk.Label(info_frame, text=f"ID: {disp_cid}", font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color, anchor=tk.E)
                     id_lbl.pack(side=tk.RIGHT, padx=(0, 10))
 
                     name_lbl = tk.Label(info_frame, text=comp["name"], font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)

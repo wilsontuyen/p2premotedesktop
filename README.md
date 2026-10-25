@@ -1,66 +1,153 @@
-# Chương trình Điều khiển Máy tính từ xa P2P (TeamViewer P2P Clone)
+<div align="center">
+================================================================================
 
-Ứng dụng điều khiển máy tính từ xa kết nối trực tiếp **Client-Client (Peer-to-Peer)** qua mạng Internet hoặc mạng LAN, sử dụng **Python/Tkinter**, công nghệ **HWID (Hardware ID)** và giao thức **TCP**.
+# 💻 P2P REMOTE DESKTOP 💻
 
-Phiên bản này được trang bị khả năng **tự động dò tìm cổng mở (Port auto-fallback)** trên danh sách cổng phổ biến là `443`, `80` và `9999`, kết hợp với giao diện **Tkinter GUI (Dark Mode)** sang trọng và các phím tắt sao chép/dán siêu tiện lợi.
+## 🖥️ Easy Remote Desktop 🖥️
 
----
+(Cập nhật: 23/10/2026)
 
-## Các tính năng nổi bật:
-1. **Dò tìm cổng thông minh (Dynamic Port Fallback):** Khi mở ứng dụng, Host sẽ tự động quét và lắng nghe trên cổng đầu tiên khả dụng trong danh sách: **`443` -> `80` -> `9999`**. Việc dùng cổng `443` hoặc `80` (cổng HTTP/HTTPS tiêu chuẩn) giúp kết nối dễ dàng đi xuyên qua Firewall của Router/Nhà mạng mà không lo bị chặn!
-2. **Hệ thống danh bạ động Serverless (IP:Port Registry):** Host sẽ tự động đăng ký chuỗi `Public_IP:Cổng_đã_mở` lên máy chủ danh bạ động trực tuyến miễn phí (`keyvalue.immanuel.co`). Client khi nhập ID đối tác sẽ tự phân giải ra IP và Cổng chính xác để kết nối. **Hoàn toàn tự động, không cần cài đặt server riêng!**
-3. **ID cố định bằng phần cứng (HWID):** Tự động băm thông tin `CPUID` và `HDD Serial` để tạo ra một mã ID 9 số (ví dụ: `190 645 377`) cố định, duy nhất cho máy tính của bạn.
-4. **Copy & Paste Siêu Tiện Lợi:**
-   * Tích hợp các nút **Sao chép nhanh (📋)** bên cạnh ID và Mật khẩu của bạn để gửi cho đối tác chỉ với 1 click.
-   * Tích hợp **Menu chuột phải (Right-click Context Menu)** đầy đủ các tính năng: *Cắt (Cut), Sao chép (Copy), Dán (Paste), Chọn tất cả (Select All)* trên các ô nhập ID đối tác và mật khẩu đối tác.
-   * Hỗ trợ đầy đủ phím tắt hệ thống: `Ctrl+C`, `Ctrl+V`, `Ctrl+X`, `Ctrl+A`.
-5. **Mật khẩu bảo mật:** Tự động tạo ngẫu nhiên mật khẩu 4 chữ số mỗi lần mở ứng dụng (có nút bấm đổi mật khẩu `↻`).
-6. **Co giãn màn hình (Resizable Window):** Cửa sổ Pygame hiển thị màn hình đối tác có khả năng co giãn thoải mái và tự động scale tọa độ chuột/bàn phím chính xác.
+================================================================================
+</div>
 
----
+MÔ TẢ DỰ ÁN
+----------
+Ứng dụng điều khiển máy tính từ xa kết nối trực tiếp Peer-to-Peer (P2P)
+qua mạng Internet hoặc mạng LAN, xây dựng bằng Python / Tkinter.
+Khi kết nối P2P không thành công, hệ thống tự chuyển sang chế độ Relay
+thông qua signaling server để đảm bảo luôn kết nối được.
 
-## 1. Cài đặt các thư viện cần thiết (Nếu chạy từ Source Code)
 
-Mở Command Prompt (cmd) hoặc PowerShell trên Windows và chạy lệnh sau để cài đặt các thư viện:
+TÍNH NĂNG CHÍNH
+---------------
+- Kết nối P2P trực tiếp: dữ liệu truyền thẳng giữa 2 máy, nhanh & bảo mật
+- Signaling Server tích hợp: không phụ thuộc dịch vụ bên thứ ba, tự quản lý
+- Relay tự động dự phòng: tự chuyển tiếp khi P2P đục lỗ không thành công
+- Mã hóa ChaCha20-Poly1305: toàn bộ gói tin được mã hóa trước khi gửi
+- ID cố định bằng HWID: mã 12 số dựa phần cứng, không đổi mỗi lần mở máy
+- Tự động dò cổng, hỗ trợ nhiều cổng làm việc đồng thời
+- Truyền tệp & đồng bộ bảng tạm: copy/paste 2 chiều giữa 2 máy
+- Hỗ trợ Windows 7/10/11, Linux (Ubuntu), thử nghiệm trên Android
+- Đóng gói file .exe độc lập: không cần cài Python để chạy
 
-```bash
+
+
+CẤU TRÚC DỰ ÁN
+--------------
+```text
+p2premotedesktop/
+├── core/
+│   └── Xử lý chụp màn hình, nén, điều khiển chuột/bàn phím
+├── network/
+│   ├── Kết nối mạng, signaling, P2P hole punching
+│   ├── signaling_server.py
+│   │   └── Server đăng ký, tìm đường & relay
+│   └── signaling_client.py
+│       └── Phía khách kết nối signaling
+├── gui/
+│   └── Giao diện người dùng Tkinter (Dark Mode)
+├── conversations/
+│   └── Xử lý phiên, clipboard, truyền tệp
+├── os_utils/
+│   └── Tương tác hệ thống, quyền UAC, dịch vụ Windows
+├── lang/
+│   └── Đa ngôn ngữ (Tiếng Việt, Anh, ...)
+├── linux_deploy/
+│   └── Script triển khai trên Linux
+├── pyinstaller/
+│   └── Cấu hình đóng gói file thực thi
+├── app.py
+│   └── Điểm vào chính ứng dụng
+├── requirements.txt
+│   └── Thư viện phụ thuộc
+├── signaling_server.ini
+│   └── Cấu hình signaling server
+└── server.ini
+   └── (dự phòng) Cấu hình signaling server
+
+```
+
+CÀI ĐẶT MÔI TRƯỜNG
+-----------------
 python -m pip install -r requirements.txt
-```
 
----
 
-## 2. Hướng dẫn chạy chương trình
-
-### Cách 1: Chạy trực tiếp từ file chạy độc lập `.exe` (Đã được đóng gói sẵn)
-Bạn chỉ cần mở thư mục **`dist`** và kích đúp chuột vào file **`RemoteDesktopP2P.exe`**. Bạn có thể gửi file này sang bất kỳ máy tính Windows khác để chạy mà không cần cài đặt thêm bất cứ thứ gì!
-
-### Cách 2: Chạy từ mã nguồn Python
-Chạy lệnh dưới đây trên terminal:
-```bash
+KHỞI CHẠY
+----------
+Cách 1: Chạy từ mã nguồn
+ # Khởi động ứng dụng (Host hoặc Client)
 python app.py
-```
 
----
+ # (Tùy chọn) Tự chạy Signaling Server riêng
+python signaling_server.py
 
-## 3. Hướng dẫn cấu hình cổng mạng kết nối qua Internet
+Cách 2: Dùng file .exe đã đóng gói
+Mở thư mục dist/, chạy RemoteDesktopP2P.exe
+Không cần cài đặt thêm gì.
 
-Vì ứng dụng hoạt động theo cơ chế **P2P trực tiếp giữa 2 máy** (không đi qua server trung gian để bảo mật dữ liệu tuyệt đối và tốc độ truyền hình ảnh nhanh nhất), máy **Host** (máy bị điều khiển) cần đảm bảo cổng lắng nghe được mở:
 
-### Bước 1: Xem cổng đang hoạt động của ứng dụng
-* Khi mở ứng dụng ở máy Host, hãy nhìn vào **Thanh trạng thái** ở dưới cùng. Nó sẽ hiển thị cổng mà ứng dụng đã liên kết thành công, ví dụ: `Trạng thái: Đăng ký thành công (Cổng 443)! Sẵn sàng kết nối.` hoặc `Cổng 80`, `Cổng 9999`.
+CÁCH HOẠT ĐỘNG
+--------------
+1. Signaling Server
+- Mặc định lắng nghe tại 0.0.0.0:8765
+- Cấu hình trong: signaling_server.ini / server.ini
+- Chức năng:
++ Nhận đăng ký ID -> Địa chỉ kết nối từ máy Host
++ Chuyển tiếp thông tin IP:Cổng giữa Client và Host
++ Tự tạo kênh Relay khi P2P không thành công
 
-### Bước 2: Mở cổng (Port Forwarding) trên Router của máy HOST (Máy bị điều khiển)
-1. Truy cập vào trang cấu hình Router nhà bạn (thường là `192.168.1.1` hoặc `192.168.0.1`).
-2. Tìm tới mục **Port Forwarding**, **Virtual Server**, hoặc **NAT Server**.
-3. Thêm một quy tắc (Rule) mới tương ứng với cổng hiển thị trên thanh trạng thái (ví dụ: cổng `443` hoặc `80` hoặc `9999`):
-   * **Internal Port (Cổng trong):** [Cổng hiển thị trên thanh trạng thái, ví dụ: 443]
-   * **External Port (Cổng ngoài):** [Cổng hiển thị trên thanh trạng thái, ví dụ: 443]
-   * **Protocol (Giao thức):** `TCP`
-   * **IP Address:** Địa chỉ IP nội bộ của máy Host (Xem bằng cách gõ `ipconfig` trong cmd, ví dụ: `192.168.1.15`).
-4. Lưu cấu hình.
+Ví dụ file signaling_server.ini:
+[server]
+host = 0.0.0.0
+port = 8765
 
-### Bước 3: Cho phép cổng trên Firewall (Tường lửa) của máy HOST
-1. Mở **Windows Defender Firewall** trên máy Host.
-2. Chọn **Advanced Settings** -> **Inbound Rules** -> **New Rule**.
-3. Chọn **Port** -> Chọn **TCP** và điền cổng **Specific local ports** tương ứng (ví dụ: `443` hoặc `80` hoặc `9999`).
-4. Chọn **Allow the connection** và lưu tên rule là `Remote Desktop Host`.
+[Log]
+checkonline = 1
+all = 1
+
+2. Quy trình kết nối
+Máy Host       ---- đăng ký ID --------> Signaling Server
+
+Máy Client     ---- tìm ID ------------> Signaling Server
+
+Signaling Server -- trả IP:Cổng -------> Client & Host
+
+Client <=======================================> Host
+(Kết nối P2P trực tiếp)
+
+Nếu P2P thất bại:
+Client -----------> Relay trên Server -----------> Host
+
+3. Bảo mật
+- Toàn bộ gói tin mã hóa bằng ChaCha20-Poly1305
+- Khóa suy ra từ mật khẩu phiên + hằng số ứng dụng
+- Mật khẩu phiên tự tạo ngẫu nhiên mỗi lần khởi động
+
+
+TRIỂN KHAI SERVER RIÊNG
+-----------------------
+1. Tải signaling_server.py lên VPS
+2. Tạo file signaling_server.ini với cấu hình phù hợp
+3. Chạy: python signaling_server.py
+4. Cập nhật địa chỉ server trong cấu hình ứng dụng về IP/Domain của VPS
+
+
+LƯU Ý QUAN TRỌNG
+----------------
+- KHÔNG dùng dịch vụ bên thứ ba nào
+Toàn bộ logic tự xử lý trong code
+- KHÔNG có server keyvalue.immanuel.co hay tương tự trong code
+- Signaling Server chỉ đóng vai trò sổ địa chỉ và relay dự phòng
+- Nội dung màn hình đi trực tiếp khi P2P thành công
+- Khi triển khai chính thức, đổi APP_KEY trong code thành chuỗi bí mật riêng
+
+
+THÔNG TIN DỰ ÁN
+---------------
+Ngôn ngữ: Python (~98%) + Kotlin (hỗ trợ Android)
+Cập nhật: Tháng 10/2026
+Nguồn: https://github.com/wilsontuyen/p2premotedesktop
+Nguồn: https://github.com/wilsontuyen/p2premotedesktop  
+Đang phát triển: http://www.vietmirc.com/index.html
+================================================================================
+📄 **Tuyên bố miễn trừ trách nhiệm:** Xem chi tiết tại [DISCLAIMER.md](DISCLAIMER.md)

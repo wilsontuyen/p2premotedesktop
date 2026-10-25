@@ -1116,7 +1116,9 @@ class NetworkMixin:
             except Exception:
                 pass
         if not computer_name:
-            computer_name = f"ID: {partner_id}"
+            clean_digits = "".join(c for c in str(partner_id or "") if c.isdigit())
+            disp_id = " ".join(clean_digits[i:i+3] for i in range(0, len(clean_digits), 3)) if (clean_digits and len(clean_digits) == len(str(partner_id).replace(" ", ""))) else partner_id
+            computer_name = f"ID: {disp_id}"
 
         # Lưu biến UI force_relay
         self._current_force_relay = False
@@ -1203,7 +1205,9 @@ class NetworkMixin:
                 except Exception:
                     pass
             if not computer_name:
-                computer_name = f"ID: {partner_id}"
+                clean_digits = "".join(c for c in str(partner_id or "") if c.isdigit())
+                disp_id = " ".join(clean_digits[i:i+3] for i in range(0, len(clean_digits), 3)) if (clean_digits and len(clean_digits) == len(str(partner_id).replace(" ", ""))) else partner_id
+                computer_name = f"ID: {disp_id}"
 
             import multiprocessing as mp
             reconnect_queue = mp.Queue()
@@ -1250,7 +1254,9 @@ class NetworkMixin:
         connected = False
         handshake_done = False
         cached_res_payload = None
+        conn_mode_info = None
         force_relay = getattr(self, '_current_force_relay', False)
+        specific_host = getattr(self, 'current_signaling_host', None)
 
         is_reconnect = bool(reconnect_reason or retry_count > 0)
         current_attempt = min(10, retry_count + 1)
@@ -1258,9 +1264,103 @@ class NetworkMixin:
         if is_reconnect:
             notify_status(retry_banner)
 
+        # ====== BƯỚC 0: Thử kết nối lại siêu tốc bằng thông số phiên gần nhất (Fast-Path Reconnect) ======
+        # Nếu trước đó đã kết nối thành công (LAN / Direct WAN / Relay), ưu tiên thử ngay thông số cũ
+        # để bỏ qua thời gian quét mạng và đục lỗ không cần thiết.
+        p_key = str(partner_id).replace(" ", "")
+        cached_conn = getattr(self, 'last_connected_peers', {}).get(p_key)
+        if is_reconnect and cached_conn and retry_count < 5 and not is_cancelled():
+            c_mode = cached_conn.get("mode")
+            if c_mode == "lan" and not force_relay:
+                c_ip = cached_conn.get("ip")
+                c_port = cached_conn.get("port", 12345)
+                ports_to_try = [c_port]
+                for p_port in [12345, 12346, 12347, 12348]:
+                    if p_port not in ports_to_try:
+                        ports_to_try.append(p_port)
+                print(f"[FastReconnect] Ưu tiên thử kết nối nhanh LAN gần nhất: {c_ip}:{ports_to_try}")
+                for p_port in ports_to_try:
+                    if connected or is_cancelled(): break
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(1.0)
+                        s.connect((c_ip, p_port))
+                        s.settimeout(2.0)
+                        socket_passwords[s] = partner_pass
+                        import platform
+                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+                        send_msg(s, hs_data, partner_pass)
+                        tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
+                        if tmp_res_msg:
+                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                            if tmp_res.get("status") in ("ok", "error"):
+                                s.settimeout(None)
+                                sock = s
+                                connected = True
+                                handshake_done = True
+                                cached_res_payload = tmp_res
+                                conn_mode_info = {"mode": "lan", "ip": c_ip, "port": p_port}
+                                print(f"[FastReconnect] Thành công kết nối lại LAN trực tiếp: {c_ip}:{p_port}")
+                                break
+                        if not connected:
+                            force_close_socket(s)
+                    except Exception:
+                        try: s.close()
+                        except: pass
+
+            elif c_mode == "direct" and not force_relay:
+                c_ip = cached_conn.get("ip")
+                c_port = cached_conn.get("port")
+                if c_ip and c_port:
+                    print(f"[FastReconnect] Ưu tiên thử kết nối nhanh Direct WAN gần nhất: {c_ip}:{c_port}")
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(1.5)
+                        s.connect((c_ip, c_port))
+                        s.settimeout(None)
+                        sock = s
+                        connected = True
+                        conn_mode_info = {"mode": "direct", "ip": c_ip, "port": c_port}
+                        print(f"[FastReconnect] Thành công kết nối lại Direct WAN: {c_ip}:{c_port}")
+                    except Exception:
+                        force_close_socket(s)
+
+            elif c_mode == "relay":
+                r_host = cached_conn.get("relay_host") or specific_host or (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else None)
+                if r_host:
+                    print(f"[FastReconnect] Phiên trước dùng Relay -> Nhảy thẳng tới kết nối Relay ({r_host})...")
+                    try:
+                        relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
+                        relay_req = json.dumps({
+                            "action": "relay_request",
+                            "target": partner_id,
+                            "session_id": relay_session_id,
+                            "relay_host": r_host
+                        }) + '\n'
+                        with self.signaling_lock:
+                            if getattr(self, 'primary_signaling_socket', None):
+                                send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
+                            else:
+                                raise Exception("Chưa kết nối tới Signaling Server!")
+
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(4.0)
+                        s.connect((r_host, core.config.SIGNALING_SERVER_PORT))
+                        s.settimeout(None)
+                        header = f"RELAY_CLIENT:{relay_session_id}\n"
+                        s.sendall(header.encode('utf-8'))
+                        time.sleep(1.0)
+                        sock = s
+                        connected = True
+                        conn_mode_info = {"mode": "relay", "relay_host": r_host}
+                        print(f"[FastReconnect] Thành công kết nối lại qua Relay: {r_host}")
+                    except Exception as e:
+                        print(f"[FastReconnect] Thử Relay nhanh thất bại ({e}), tiếp tục quy trình dò tìm đầy đủ...")
+                        connected = False
+
         # ====== BƯỚC 1: Quét mạng LAN để tìm ID ======
         lan_target = None
-        if not force_relay and hasattr(self, 'lan_peers'):
+        if not connected and not force_relay and hasattr(self, 'lan_peers'):
             scan_rounds = 1 if is_reconnect else 5
             for attempt in range(scan_rounds):
                 if is_cancelled(): return
@@ -1279,7 +1379,7 @@ class NetworkMixin:
                     break
                 time.sleep(0.3 if is_reconnect else 0.5)
 
-        if lan_target:
+        if not connected and lan_target:
             if is_cancelled(): return
             if not is_reconnect and retry_count == 0:
                 notify_status(_("Đang thử kết nối LAN trực tiếp..."))
@@ -1314,6 +1414,7 @@ class NetworkMixin:
                                 connected = True
                                 handshake_done = True
                                 cached_res_payload = tmp_res
+                                conn_mode_info = {"mode": "lan", "ip": try_ip, "port": p_port}
                                 print(f"[Client] Connected & Handshaked via LAN Direct: {try_ip}:{p_port}")
                                 break
                         if not connected:
@@ -1384,7 +1485,7 @@ class NetworkMixin:
                     next_attempt = retry_count + 2
                     status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
                     notify_status(status_msg)
-                    time.sleep(1.0)
+                    time.sleep(4)
                     self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
                     return
                 notify_status(_("Không thể tìm thấy hoặc đối tác đang Offline."))
@@ -1429,6 +1530,7 @@ class NetworkMixin:
                         s.settimeout(None)
                         connected = True
                         sock = s
+                        conn_mode_info = {"mode": "direct", "ip": public_ip, "port": port}
                         print(f"[Client] Hole punch successful!")
                         break
                     except Exception:
@@ -1485,6 +1587,7 @@ class NetworkMixin:
                 time.sleep(1.5)
                 sock = s
                 connected = True
+                conn_mode_info = {"mode": "relay", "relay_host": host_to_connect}
                 notify_status(_("Đã kết nối qua Relay Server! Đang bắt tay..."))
             except Exception as e:
                 connected = False
@@ -1494,7 +1597,7 @@ class NetworkMixin:
                 next_attempt = retry_count + 2
                 status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
                 notify_status(status_msg)
-                time.sleep(1.5)
+                time.sleep(4)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
                 return
             notify_status(_("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
@@ -1552,6 +1655,13 @@ class NetworkMixin:
                 res = cached_res_payload
                 
             if res.get("status") == "ok":
+                if not hasattr(self, 'last_connected_peers'):
+                    self.last_connected_peers = {}
+                p_key = str(partner_id).replace(" ", "")
+                if 'conn_mode_info' in locals() and conn_mode_info:
+                    self.last_connected_peers[p_key] = conn_mode_info
+                    print(f"[Client] Đã lưu thông số kết nối gần nhất cho {p_key}: {conn_mode_info}")
+
                 host_w = res.get("width")
                 host_h = res.get("height")
                 computer_name = res.get("computer_name", "")
@@ -1696,7 +1806,7 @@ class NetworkMixin:
                 if sock:
                     force_close_socket(sock)
                     socket_passwords.pop(sock, None)
-                time.sleep(1.5)
+                time.sleep(4)
                 self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
                 return
 

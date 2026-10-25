@@ -1,4 +1,4 @@
-; *** Inno Setup version 6.5.0+ Vietnamese messages ***
+﻿; *** Inno Setup version 6.5.0+ Vietnamese messages ***
 ;
 ; Vietnamese translation by memecoder (memecoder17@gmail.com)
 ; Last modification date: 2023-10-26
@@ -6,7 +6,7 @@
 [LangOptions]
 LanguageName=Tiếng Việt
 LanguageID=$042A
-LanguageCodePage=1258
+LanguageCodePage=0
 ; If the language you are translating to requires special font faces or
 ; sizes, uncomment any of the following entries and change them accordingly.
 ;DialogFontName=

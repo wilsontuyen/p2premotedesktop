@@ -155,15 +155,6 @@ def main():
         except Exception as e:
             log(f"Failed to copy lang directory: {e}")
 
-    # Make zip archive
-    log("Creating RemoteDesktopP2P.zip archive...")
-    zip_path = os.path.join(workspace_dir, "RemoteDesktopP2P")
-    try:
-        shutil.make_archive(zip_path, 'zip', app_dist_dir)
-        log("Archive created successfully.")
-    except Exception as e:
-        log(f"Warning: Failed to create zip archive: {e}")
-
     # Build Inno Setup Installer
     log("Building Installer via Inno Setup...")
     iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
