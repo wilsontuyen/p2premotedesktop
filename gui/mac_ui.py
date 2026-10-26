@@ -158,6 +158,13 @@ def setup_mac_ui(self):
             )
         options_menu.add_separator()
         
+        # Submenu: Logs
+        logs_menu = tk.Menu(options_menu, tearoff=0)
+        logs_menu.add_command(label=_("Mở thư mục Logs"), command=self.open_logs_folder)
+        logs_menu.add_command(label=_("Xóa Logs..."), command=self.clear_logs_action)
+        logs_menu.add_command(label=_("Xóa tệp tạm..."), command=self.clear_temp_action)
+        options_menu.add_cascade(label=_("Nhật ký (Logs)"), menu=logs_menu)
+        options_menu.add_separator()
         
         # Submenu: Language
         lang_menu = tk.Menu(options_menu, tearoff=0)

@@ -446,5 +446,14 @@
   "Kết nối thành công! Đang chuyển sang màn hình Host...": "Kết nối thành công! Đang chuyển sang màn hình Host...",
   "Mở thư mục Log (Logs)": "Mở thư mục Log (Logs)",
   "Mở thư mục Logs": "Mở thư mục Logs",
-  "Đang thử kết nối lại (lần {x}/5)...": "Đang thử kết nối lại (lần {x}/5)..."
+  "Đang thử kết nối lại (lần {x}/5)...": "Đang thử kết nối lại (lần {x}/5)...",
+  "Nhật ký (Logs)": "Nhật ký (Logs)",
+  "Xóa Logs...": "Xóa Logs...",
+  "Xóa tệp tạm...": "Xóa tệp tạm...",
+  "Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?": "Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?",
+  "Đã xóa thành công các file nhật ký ({count} mục).": "Đã xóa thành công các file nhật ký ({count} mục).",
+  "Không thể xóa logs:": "Không thể xóa logs:",
+  "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?": "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?",
+  "Đã xóa thành công các tệp tạm ({count} mục).": "Đã xóa thành công các tệp tạm ({count} mục).",
+  "Không thể xóa tệp tạm:": "Không thể xóa tệp tạm:"
 }

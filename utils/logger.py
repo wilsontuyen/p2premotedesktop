@@ -114,7 +114,7 @@ def migrate_legacy_logs():
 
         legacy_names = [
             "gui.log", "agent.log", "service.log", "clipboard_agent.log",
-            "overwrite_conflict.log", "broker.log", "activity_log.txt",
+            "overwrite_conflict.log", "broker.log", "activity.log", "activity_log.txt",
             "log.txt", "crash.log", "early_crash.log", "transfer.log",
             "client_error.log", "host_error.log", "task_creation.log",
             "task_run.log", "clipboard_debug.log"
@@ -138,6 +138,22 @@ def migrate_legacy_logs():
                 except Exception:
                     pass
 
+        # Di chuyển / gộp activity_log.txt cũ thành activity.log trong target_dir
+        old_act = os.path.join(target_dir, "activity_log.txt")
+        new_act = os.path.join(target_dir, "activity.log")
+        if os.path.exists(old_act):
+            try:
+                if not os.path.exists(new_act):
+                    shutil.move(old_act, new_act)
+                else:
+                    with open(old_act, "rb") as sf:
+                        old_data = sf.read()
+                    with open(new_act, "ab") as df:
+                        df.write(old_data)
+                    os.remove(old_act)
+            except Exception:
+                pass
+
         # Quét các file clipboard_debug_*.log ở app_dir
         for src in glob.glob(os.path.join(app_dir, "clipboard_debug_*.log")):
             dst = os.path.join(target_dir, os.path.basename(src))
@@ -159,6 +175,161 @@ def migrate_legacy_logs():
                         pass
     except Exception:
         pass
+
+
+def cleanup_old_debug_logs(max_keep=10):
+    """
+    Hàm tiện ích dọn dẹp thủ công các file clipboard_debug_*.log và file tạm rác tmp*.tmp.
+    Chỉ chạy khi được gọi chủ động (không tự động xóa trong runtime để bảo toàn log xem lỗi).
+    """
+    try:
+        candidate_dirs = set()
+        active_logs = get_logs_dir()
+        if active_logs:
+            candidate_dirs.add(os.path.abspath(active_logs))
+        
+        primary_dir = os.path.join(app_dir, "Logs")
+        if os.path.exists(primary_dir):
+            candidate_dirs.add(os.path.abspath(primary_dir))
+            
+        lad = os.environ.get("LOCALAPPDATA", "")
+        if lad:
+            user_logs = os.path.join(lad, "Easy Remote Desktop", "Logs")
+            if os.path.exists(user_logs):
+                candidate_dirs.add(os.path.abspath(user_logs))
+
+        current_pid = os.getpid()
+        current_pid_file = f"clipboard_debug_{current_pid}.log"
+
+        for d in candidate_dirs:
+            if not os.path.exists(d) or not os.path.isdir(d):
+                continue
+            
+            # 1. Dọn dẹp clipboard_debug_*.log
+            debug_files = glob.glob(os.path.join(d, "clipboard_debug_*.log"))
+            if len(debug_files) > max_keep:
+                debug_files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+                files_to_remove = debug_files[:-max_keep]
+                for fpath in files_to_remove:
+                    if os.path.basename(fpath) == current_pid_file:
+                        continue
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+            
+            # 2. Dọn dẹp file tạm tmp*.tmp cũ (nếu có)
+            for tmp_file in glob.glob(os.path.join(d, "tmp*.tmp")):
+                try:
+                    if (time.time() - os.path.getmtime(tmp_file)) > 1800:
+                        os.remove(tmp_file)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def clear_temp_files():
+    """
+    Xóa toàn bộ các tệp tạm (*.tmp) trong thư mục Logs.
+    Trả về số lượng tệp tạm đã xóa.
+    """
+    cleaned_count = 0
+    try:
+        candidate_dirs = set()
+        active_logs = get_logs_dir()
+        if active_logs:
+            candidate_dirs.add(os.path.abspath(active_logs))
+        
+        primary_dir = os.path.join(app_dir, "Logs")
+        if os.path.exists(primary_dir):
+            candidate_dirs.add(os.path.abspath(primary_dir))
+            
+        lad = os.environ.get("LOCALAPPDATA", "")
+        if lad:
+            user_logs = os.path.join(lad, "Easy Remote Desktop", "Logs")
+            if os.path.exists(user_logs):
+                candidate_dirs.add(os.path.abspath(user_logs))
+
+        for d in candidate_dirs:
+            if not os.path.exists(d) or not os.path.isdir(d):
+                continue
+
+            for tmp_file in glob.glob(os.path.join(d, "*.tmp")):
+                try:
+                    os.remove(tmp_file)
+                    cleaned_count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return cleaned_count
+
+
+def clear_all_logs():
+    """
+    Dọn dẹp và làm sạch toàn bộ các file nhật ký (*.log và *.txt) trong thư mục Logs theo yêu cầu người dùng:
+    - Xóa các file *.log (hoặc làm rỗng về 0 bytes nếu file đang được tiến trình mở)
+    - Xóa các file *.txt trong Logs (log.txt...)
+    Trả về số lượng file nhật ký đã được dọn dẹp.
+    """
+    cleaned_count = 0
+    try:
+        candidate_dirs = set()
+        active_logs = get_logs_dir()
+        if active_logs:
+            candidate_dirs.add(os.path.abspath(active_logs))
+        
+        primary_dir = os.path.join(app_dir, "Logs")
+        if os.path.exists(primary_dir):
+            candidate_dirs.add(os.path.abspath(primary_dir))
+            
+        lad = os.environ.get("LOCALAPPDATA", "")
+        if lad:
+            user_logs = os.path.join(lad, "Easy Remote Desktop", "Logs")
+            if os.path.exists(user_logs):
+                candidate_dirs.add(os.path.abspath(user_logs))
+
+        current_pid = os.getpid()
+        current_pid_file = f"clipboard_debug_{current_pid}.log"
+
+        for d in candidate_dirs:
+            if not os.path.exists(d) or not os.path.isdir(d):
+                continue
+
+            # 1. Xử lý các file *.log
+            for fpath in glob.glob(os.path.join(d, "*.log")):
+                try:
+                    if os.path.basename(fpath) == current_pid_file:
+                        ensure_utf8_bom(fpath)
+                        with open(fpath, "w", encoding="utf-8-sig") as f:
+                            f.write("")
+                    else:
+                        try:
+                            os.remove(fpath)
+                        except (PermissionError, OSError):
+                            ensure_utf8_bom(fpath)
+                            with open(fpath, "w", encoding="utf-8-sig") as f:
+                                f.write("")
+                    cleaned_count += 1
+                except Exception:
+                    pass
+
+            # 2. Xử lý các file *.txt (log.txt, ...)
+            for fpath in glob.glob(os.path.join(d, "*.txt")):
+                try:
+                    try:
+                        os.remove(fpath)
+                    except (PermissionError, OSError):
+                        ensure_utf8_bom(fpath)
+                        with open(fpath, "w", encoding="utf-8-sig") as f:
+                            f.write("")
+                    cleaned_count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return cleaned_count
 
 
 def log_file_transfer(filename, file_size):
@@ -249,10 +420,10 @@ def log_overwrite_conflict(msg, tag="OW"):
 def log_activity(msg):
     try:
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
-        filepath = get_log_filepath("activity_log.txt")
-        safe_write_log_line(filepath, f"{timestamp} - {msg}\n", "activity_log.txt")
+        filepath = get_log_filepath("activity.log")
+        safe_write_log_line(filepath, f"{timestamp} - {msg}\n", "activity.log")
     except Exception as e:
-        print(f"[Log] Lỗi ghi activity_log.txt: {e}")
+        print(f"[Log] Lỗi ghi activity.log: {e}")
 
 
 def _format_size_log(size_bytes):
@@ -269,7 +440,7 @@ def _format_size_log(size_bytes):
 
 def log_file_activity(action, filename, file_size, source_dir="", dest_dir="", status="Thành công"):
     """
-    Ghi log chi tiết cho hoạt động truyền/nhận file vào Logs/activity_log.txt.
+    Ghi log chi tiết cho hoạt động truyền/nhận file vào Logs/activity.log.
     Format: [ngày giờ] - action | File: filename | Size: dung_lượng | Nguồn: source_dir | Đích: dest_dir | Trạng thái: status
     """
     try:
@@ -284,7 +455,7 @@ def log_file_activity(action, filename, file_size, source_dir="", dest_dir="", s
             f"Đích: {dest_str} | Trạng thái: {status}\n"
         )
         
-        filepath = get_log_filepath("activity_log.txt")
-        safe_write_log_line(filepath, log_line, "activity_log.txt")
+        filepath = get_log_filepath("activity.log")
+        safe_write_log_line(filepath, log_line, "activity.log")
     except Exception as e:
-        print(f"[Log] Lỗi ghi activity_log.txt: {e}")
+        print(f"[Log] Lỗi ghi activity.log: {e}")

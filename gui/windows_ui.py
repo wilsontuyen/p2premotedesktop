@@ -772,8 +772,6 @@ def setup_windows_ui(self):
         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
         file_menu.add_separator()
-        file_menu.add_command(label=_("Mở thư mục Logs"), command=self.open_logs_folder)
-        file_menu.add_separator()
         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label=_("File"), menu=file_menu)
         
@@ -824,6 +822,14 @@ def setup_windows_ui(self):
                 label=_("Sửa lỗi quyền macOS..."),
                 command=self.fix_mac_permissions
             )
+        options_menu.add_separator()
+        
+        # Submenu: Logs
+        logs_menu = tk.Menu(options_menu, tearoff=0)
+        logs_menu.add_command(label=_("Mở thư mục Logs"), command=self.open_logs_folder)
+        logs_menu.add_command(label=_("Xóa Logs..."), command=self.clear_logs_action)
+        logs_menu.add_command(label=_("Xóa tệp tạm..."), command=self.clear_temp_action)
+        options_menu.add_cascade(label=_("Nhật ký (Logs)"), menu=logs_menu)
         options_menu.add_separator()
         
         

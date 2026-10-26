@@ -447,5 +447,14 @@
   "🔧  Cách khắc phục": "🔧  How to fix",
   "Mở thư mục Log (Logs)": "Open Logs Folder",
   "Mở thư mục Logs": "Open Logs Folder",
-  "Đang thử kết nối lại (lần {x}/5)...": "Retrying connection (attempt {x}/5)..."
+  "Đang thử kết nối lại (lần {x}/5)...": "Retrying connection (attempt {x}/5)...",
+  "Nhật ký (Logs)": "Logs",
+  "Xóa Logs...": "Clear Logs...",
+  "Xóa tệp tạm...": "Clear Temp Files...",
+  "Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?": "Are you sure you want to delete all log files (*.log, *.txt) in the Logs folder?",
+  "Đã xóa thành công các file nhật ký ({count} mục).": "Successfully deleted log files ({count} items).",
+  "Không thể xóa logs:": "Unable to clear logs:",
+  "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?": "Are you sure you want to delete temporary files (*.tmp) in the Logs folder?",
+  "Đã xóa thành công các tệp tạm ({count} mục).": "Successfully deleted temporary files ({count} items).",
+  "Không thể xóa tệp tạm:": "Unable to clear temp files:"
 }

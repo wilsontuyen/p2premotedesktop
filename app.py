@@ -2824,7 +2824,6 @@ Comment=Remote Desktop P2P AutoStart
             
             menu = pystray.Menu(
                 item(_('Hiện (Show)'), self.show_gui_from_tray, default=True),
-                item(_('Mở thư mục Logs'), self.open_logs_folder),
                 item(_('Thoát (Exit)'), self.exit_from_tray)
             )
             
@@ -2851,6 +2850,46 @@ Comment=Remote Desktop P2P AutoStart
                 subprocess.run(["xdg-open", logs_dir])
         except Exception as e:
             print(f"Error opening logs folder: {e}")
+
+    def clear_logs_action(self):
+        from tkinter import messagebox
+        from core.i18n import _
+        from utils.logger import clear_all_logs
+
+        confirm = messagebox.askyesno(
+            _("Xác nhận"),
+            _("Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?"),
+            parent=self
+        )
+        if not confirm:
+            return
+
+        try:
+            cleaned = clear_all_logs()
+            msg = _("Đã xóa thành công các file nhật ký ({count} mục).").replace("{count}", str(cleaned))
+            messagebox.showinfo(_("Thông báo"), msg, parent=self)
+        except Exception as e:
+            messagebox.showerror(_("Lỗi"), f"{_('Không thể xóa logs:')} {e}", parent=self)
+
+    def clear_temp_action(self):
+        from tkinter import messagebox
+        from core.i18n import _
+        from utils.logger import clear_temp_files
+
+        confirm = messagebox.askyesno(
+            _("Xác nhận"),
+            _("Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?"),
+            parent=self
+        )
+        if not confirm:
+            return
+
+        try:
+            cleaned = clear_temp_files()
+            msg = _("Đã xóa thành công các tệp tạm ({count} mục).").replace("{count}", str(cleaned))
+            messagebox.showinfo(_("Thông báo"), msg, parent=self)
+        except Exception as e:
+            messagebox.showerror(_("Lỗi"), f"{_('Không thể xóa tệp tạm:')} {e}", parent=self)
 
     def show_gui_from_tray(self, icon=None, item=None):
         self.after(0, self._restore_window)

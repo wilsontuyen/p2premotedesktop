@@ -290,10 +290,11 @@ class ClipboardEventListener:
                                         from filecopyhost import read_shared_pending_offer
                                         shared_offer = read_shared_pending_offer()
                                         if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                                            flist = shared_offer.get("names") or [
-                                                f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                                                for f in (shared_offer.get("files") or [])
-                                            ]
+                                            raw_files = shared_offer.get("files")
+                                            if raw_files and isinstance(raw_files, list):
+                                                flist = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_files]
+                                            else:
+                                                flist = [{"name": n} for n in (shared_offer.get("names") or [])]
                                             self.manager.pending_remote_files = list(flist)
                                             self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
                                             self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
@@ -367,10 +368,11 @@ class ClipboardEventListener:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
                                     if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                                        flist = shared_offer.get("names") or [
-                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                                            for f in (shared_offer.get("files") or [])
-                                        ]
+                                        raw_files = shared_offer.get("files")
+                                        if raw_files and isinstance(raw_files, list):
+                                            flist = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_files]
+                                        else:
+                                            flist = [{"name": n} for n in (shared_offer.get("names") or [])]
                                         self.manager.pending_remote_files = list(flist)
                                         self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
                                         self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
@@ -437,10 +439,11 @@ class ClipboardEventListener:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
                                     if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                                        flist = shared_offer.get("names") or [
-                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                                            for f in (shared_offer.get("files") or [])
-                                        ]
+                                        raw_files = shared_offer.get("files")
+                                        if raw_files and isinstance(raw_files, list):
+                                            flist = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_files]
+                                        else:
+                                            flist = [{"name": n} for n in (shared_offer.get("names") or [])]
                                         self.manager.pending_remote_files = list(flist)
                                         self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
                                         self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
@@ -491,10 +494,11 @@ class ClipboardEventListener:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
                                     if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                                        flist = shared_offer.get("names") or [
-                                            f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                                            for f in (shared_offer.get("files") or [])
-                                        ]
+                                        raw_files = shared_offer.get("files")
+                                        if raw_files and isinstance(raw_files, list):
+                                            flist = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_files]
+                                        else:
+                                            flist = [{"name": n} for n in (shared_offer.get("names") or [])]
                                         self.manager.pending_remote_files = list(flist)
                                         self.manager.pending_total_size = int(shared_offer.get("total_size", 0))
                                         self.manager.pending_file_count = int(shared_offer.get("file_count", len(flist)))
@@ -1594,10 +1598,15 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         cur = self._coerce_paste_id(paste_id)
         if all_jobs is None:
             all_jobs = cur is None
+        if cur is not None and cur > 0:
+            self._note_cancelled_paste_id(cur)
+        elif all_jobs and (getattr(self, "transfer_in_progress", False) or getattr(self, "_xfer_jobs", None)):
+            fallback_id = int(getattr(self, "_clipboard_paste_id", 0) or 0)
+            if fallback_id:
+                self._note_cancelled_paste_id(fallback_id)
+                cur = fallback_id
         if cur is None:
             cur = int(getattr(self, "_clipboard_paste_id", 0) or 0)
-        if cur:
-            self._note_cancelled_paste_id(cur)
         self._disarm_file_xfer("Huy", cancelled_paste_id=cur, all_jobs=all_jobs)
         self._maybe_send_cancel_ack()
         if all_jobs:
@@ -1908,6 +1917,14 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                                 
                 if not metadata: return
                 if metadata:
+                    if not hasattr(self, "_host_copied_files_by_name"):
+                        self._host_copied_files_by_name = {}
+                    for m in metadata:
+                        if isinstance(m, dict) and m.get("name") and m.get("path"):
+                            self._host_copied_files_by_name[m["name"]] = m["path"]
+                            self._host_copied_files_by_name[os.path.basename(m["name"])] = m["path"]
+                            self._host_copied_files_by_name[os.path.normcase(m["name"])] = m["path"]
+                            self._host_copied_files_by_name[os.path.normcase(os.path.basename(m["name"]))] = m["path"]
                     # Client viewer: copy file local → nhả offer Paste host→client còn sót.
                     if getattr(self, "pygame_hwnd", None) and (
                         self.pending_remote_files or getattr(self, "_reoffer_files", None)

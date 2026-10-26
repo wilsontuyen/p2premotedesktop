@@ -2510,10 +2510,11 @@ class FileCopyClientMixin:
                 from filecopyhost import read_shared_pending_offer
                 shared_offer = read_shared_pending_offer()
                 if shared_offer and (shared_offer.get("names") or shared_offer.get("files")):
-                    flist = shared_offer.get("names") or [
-                        f.get("name") if isinstance(f, dict) else os.path.basename(str(f))
-                        for f in (shared_offer.get("files") or [])
-                    ]
+                    raw_files = shared_offer.get("files")
+                    if raw_files and isinstance(raw_files, list):
+                        flist = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_files]
+                    else:
+                        flist = [{"name": n} for n in (shared_offer.get("names") or [])]
                     self.pending_remote_files = list(flist)
                     self.pending_total_size = int(shared_offer.get("total_size", 0))
                     self.pending_file_count = int(shared_offer.get("file_count", len(flist)))
@@ -2996,7 +2997,11 @@ class FileCopyClientMixin:
                     from filecopyhost import read_shared_pending_offer
                     so = read_shared_pending_offer()
                     if so and (so.get("files") or so.get("names")):
-                        fl = so.get("files") or [{"name": n} for n in so.get("names", [])]
+                        raw_f = so.get("files")
+                        if raw_f and isinstance(raw_f, list):
+                            fl = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_f]
+                        else:
+                            fl = [{"name": n} for n in (so.get("names") or [])]
                         self.pending_remote_files = list(fl)
                         self._reoffer_files = list(fl)
                         pending = self.pending_remote_files
@@ -3247,7 +3252,11 @@ class FileCopyClientMixin:
                 from filecopyhost import read_shared_pending_offer
                 so = read_shared_pending_offer()
                 if so and (so.get("files") or so.get("names")):
-                    fl = so.get("files") or [{"name": n} for n in so.get("names", [])]
+                    raw_f = so.get("files")
+                    if raw_f and isinstance(raw_f, list):
+                        fl = [dict(f) if isinstance(f, dict) else {"name": str(f)} for f in raw_f]
+                    else:
+                        fl = [{"name": n} for n in (so.get("names") or [])]
                     self.pending_remote_files = list(fl)
                     self._reoffer_files = list(fl)
                     pending = self.pending_remote_files
@@ -3643,6 +3652,9 @@ class FileCopyClientMixin:
                                     break
                             except Exception:
                                 pass
+                    if not job_paths and files_to_download:
+                        log_debug("[render_format] Không nhận được file nào từ đối tác (job_paths rỗng).")
+                        succeeded = False
                     if succeeded and job_paths:
                         meta = list(files_to_download or [])
                         if not meta:
