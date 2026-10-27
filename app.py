@@ -1035,8 +1035,20 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         else:
             formatted = clean_val
         
+        # Tự động điền mật khẩu nếu ID khớp với "Danh sách máy tính đã lưu"
+        def _try_autofill_saved_password(cid):
+            if len(cid) in (9, 12) and hasattr(self, 'partner_pass_var') and hasattr(self, 'load_saved_computers'):
+                try:
+                    saved = self.load_saved_computers()
+                    matched = next((c for c in saved if "".join(ch for ch in c.get('id', '') if ch.isdigit()) == cid or c.get('id', '').replace(' ', '') == cid), None)
+                    if matched and matched.get('password'):
+                        self.partner_pass_var.set(matched['password'])
+                except Exception:
+                    pass
+
         # Only update if the value actually changed
         if current_val == formatted:
+            _try_autofill_saved_password(clean_val)
             return
         
         # Count digits before cursor in the current (unformatted) string
@@ -1056,6 +1068,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.partner_id_var.trace_remove("write", self.id_trace_id)
         self.partner_id_var.set(formatted)
         self.id_trace_id = self.partner_id_var.trace_add("write", self.format_partner_id)
+        _try_autofill_saved_password(clean_val)
         
         # Restore cursor position
         if new_cursor is not None:
@@ -1427,10 +1440,35 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def save_lan_peers(self):
         lan_file = "lan_peers.json"
         try:
+            from datetime import datetime
+            import hashlib
             with open(lan_file, 'w', encoding='utf-8') as f:
                 with self.lan_peers_lock:
-                    json.dump(self.lan_peers, f, ensure_ascii=False, indent=4)
-        except:
+                    dump_data = {}
+                    for k, v in self.lan_peers.items():
+                        v_copy = dict(v)
+                        # 1. Format last_seen sang chuỗi ngày giờ full YYYY-MM-DD HH:MM:SS
+                        ls = v_copy.get("last_seen")
+                        if isinstance(ls, (int, float)):
+                            v_copy["last_seen"] = datetime.fromtimestamp(ls).strftime("%Y-%m-%d %H:%M:%S")
+                        elif not isinstance(ls, str) or "-" not in str(ls) or ":" not in str(ls):
+                            v_copy["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                        # 2. Mã hóa MD5 cho saved_password, tuyệt đối không để plaintext
+                        spw = str(v_copy.get("saved_password") or "").strip()
+                        if spw:
+                            if not (len(spw) == 32 and all(c in "0123456789abcdefABCDEF" for c in spw)):
+                                v_copy["saved_password"] = hashlib.md5(spw.encode('utf-8')).hexdigest()
+                        else:
+                            v_copy["saved_password"] = ""
+
+                        # 3. Đảm bảo saved_id luôn có ID (không bị rỗng)
+                        if not v_copy.get("saved_id"):
+                            v_copy["saved_id"] = v_copy.get("hwid") or k
+
+                        dump_data[k] = v_copy
+                    json.dump(dump_data, f, ensure_ascii=False, indent=4)
+        except Exception:
             pass
 
 

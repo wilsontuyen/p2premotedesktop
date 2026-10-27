@@ -128,7 +128,17 @@ def is_private_ip(ip):
         ip = ip[7:]
     try:
         addr = ipaddress.ip_address(ip)
-        return bool(addr.is_private or addr.is_loopback or addr.is_link_local)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            return True
+        # VPN overlay ranges: Hamachi (25.0.0.0/8), Radmin (26.0.0.0/8), Tailscale (100.64.0.0/10)
+        if addr.version == 4:
+            octs = [int(x) for x in ip.split('.')]
+            if len(octs) == 4:
+                if octs[0] in (25, 26):
+                    return True
+                if octs[0] == 100 and (64 <= octs[1] <= 127):
+                    return True
+        return False
     except Exception:
         return False
 

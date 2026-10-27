@@ -2240,8 +2240,8 @@ class HostMixin:
                     print(f"[Host Service] Failed to reload fixed password from XML during handshake: {e}")
 
             # Register the socket with candidate passwords so recv_msg can decrypt client's handshake
-            socket_passwords[conn] = [self.my_password, self.fixed_password]
-            msg = recv_msg(conn, [self.my_password, self.fixed_password])
+            socket_passwords[conn] = [self.my_password, self.fixed_password, APP_KEY]
+            msg = recv_msg(conn, [self.my_password, self.fixed_password, APP_KEY])
             if not msg:
                 print("[Host] Failed to decrypt handshake. Sending error using APP_KEY.")
                 try:
@@ -2258,6 +2258,32 @@ class HostMixin:
                 return
                 
             data = json.loads(msg.decode('utf-8'))
+
+            # Check if this is a LAN / VPN discovery probe
+            if data.get("action") == "probe":
+                try:
+                    import platform
+                    from core.config import LAN_APP_SIGNATURE
+                    pong_data = json.dumps({
+                        "status": "ok",
+                        "type": "probe_pong",
+                        "sig": LAN_APP_SIGNATURE,
+                        "hwid": getattr(self, "my_id_clean", ""),
+                        "computer_name": platform.node(),
+                        "os": platform.system(),
+                        "port": BOUND_PORT,
+                        "local_ip": getattr(self, 'local_ip', ""),
+                        "macs": getattr(self, 'my_macs', "")
+                    }).encode('utf-8')
+                    send_msg(conn, pong_data, APP_KEY)
+                except Exception as probe_err:
+                    print(f"[Host] Probe response error: {probe_err}")
+                time.sleep(0.1)
+                try: force_close_socket(conn)
+                except: pass
+                socket_passwords.pop(conn, None)
+                return
+
             client_pass = data.get("password")
             
             password_valid = False

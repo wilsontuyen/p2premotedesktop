@@ -131,8 +131,8 @@ def main():
     shorten_openblas_dll(app_dist_dir)
     log_dist_size(app_dist_dir, "Full app.dist")
 
-    # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
-    files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt"]
+    # Copy icons, install.bat, uninstall.bat, readme.txt, disclaimer, and saved_computers.xml to app.dist
+    files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt", "saved_computers.xml"]
     for file_name in files_to_copy:
         src = os.path.join(workspace_dir, file_name)
         dst = os.path.join(app_dist_dir, file_name)

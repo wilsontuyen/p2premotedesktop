@@ -767,7 +767,7 @@ def setup_windows_ui(self):
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
-        file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+        file_menu.add_command(label=E(_("Quét mạng LAN & VPN (Discovery)")), command=self.show_lan_computers_dialog)
         file_menu.add_separator()
         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
@@ -964,6 +964,21 @@ def setup_windows_ui(self):
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
         self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
         
+        # Tự động điền mật khẩu ngay khi gõ xong hoặc rời khỏi ô nhập ID đối tác
+        def on_p_id_check_autofill(event=None):
+            clean_id = "".join(c for c in self.partner_id_var.get() if c.isdigit())
+            if len(clean_id) in (9, 12) and hasattr(self, 'load_saved_computers'):
+                try:
+                    saved = self.load_saved_computers()
+                    matched = next((c for c in saved if "".join(ch for ch in c.get('id', '') if ch.isdigit()) == clean_id or c.get('id', '').replace(' ', '') == clean_id), None)
+                    if matched and matched.get('password'):
+                        self.partner_pass_var.set(matched['password'])
+                except Exception:
+                    pass
+
+        self.entry_p_id.bind("<FocusOut>", on_p_id_check_autofill)
+        self.entry_p_id.bind("<KeyRelease>", on_p_id_check_autofill)
+
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
         self.entry_p_id.bind("<KP_Enter>", lambda event: self.click_connect())
@@ -982,8 +997,8 @@ def setup_windows_ui(self):
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
-        # LAN Discovery button - Quét máy trong mạng nội bộ
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        # LAN / VPN Discovery button - Quét máy trong mạng nội bộ và VPN
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN & VPN")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
