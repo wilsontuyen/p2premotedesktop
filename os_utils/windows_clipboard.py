@@ -217,10 +217,13 @@ class ClipboardEventListener:
                                 self.manager._lmb_hit_context_menu = True
                                 kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 self.manager._lmb_menu_item_kind = kind
-                                # Win10: chữ Paste nếu đọc được; unknown trên #32768 sau RMB vẫn là RMP.
-                                # Win11: click trên context menu sau RMB (0.12 < age_r < 8.0) và kind != "not_paste" là Paste.
+                                is_explicit_not_paste = (
+                                    kind == "not_paste"
+                                    and name
+                                    and name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "")
+                                )
                                 if _menu_item_counts_as_paste(kind) or (
-                                    kind != "not_paste"
+                                    not is_explicit_not_paste
                                     and 0.12 < age_r < 8.0
                                 ):
                                     paste_from_menu = True
@@ -242,8 +245,6 @@ class ClipboardEventListener:
                                     except Exception:
                                         pass
                             else:
-                                # Win11 XAML: hit test menu hay fail do XAML island window
-                                chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 rpos = getattr(self.manager, "_rmb_cursor_pos", None)
                                 near_rmb = bool(
                                     rpos
@@ -252,26 +253,35 @@ class ClipboardEventListener:
                                     and abs(cy - rpos[1]) <= 360
                                 )
                                 recent_dbl = bool(getattr(self.manager, "last_dblclick_time", 0.0) and (now - float(getattr(self.manager, "last_dblclick_time", 0.0))) < 0.7)
-                                menu_open = _context_menu_open()
-                                if chk_kind == "paste":
-                                    paste_from_menu = True
+                                menu_open = False
+                                if 0.12 < age_r < 8.0:
                                     try:
-                                        from utils.logger import clip_trace
-                                        clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
+                                        menu_open = _context_menu_open()
                                     except Exception:
-                                        pass
-                                elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
-                                    self.manager._lmb_hit_context_menu = False
-                                    self.manager._lmb_menu_item_kind = "not_paste"
-                                elif 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
-                                    paste_from_menu = True
-                                    self.manager._lmb_hit_context_menu = True
-                                    self.manager._lmb_menu_item_kind = "paste"
-                                    try:
-                                        from utils.logger import clip_trace
-                                        clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
-                                    except Exception:
-                                        pass
+                                        menu_open = False
+
+                                if 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
+                                    # Win11 XAML: chỉ hit test khi vừa RMB và nằm trong vùng menu
+                                    chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=rpos)
+                                    if chk_kind == "paste":
+                                        paste_from_menu = True
+                                        try:
+                                            from utils.logger import clip_trace
+                                            clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
+                                        except Exception:
+                                            pass
+                                    elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+                                        self.manager._lmb_hit_context_menu = False
+                                        self.manager._lmb_menu_item_kind = "not_paste"
+                                    else:
+                                        paste_from_menu = True
+                                        self.manager._lmb_hit_context_menu = True
+                                        self.manager._lmb_menu_item_kind = "paste"
+                                        try:
+                                            from utils.logger import clip_trace
+                                            clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
+                                        except Exception:
+                                            pass
                                 else:
                                     self.manager._lmb_hit_context_menu = False
                                     self.manager._lmb_menu_item_kind = "unknown"
@@ -1344,7 +1354,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
     def _cleanup_partial_incoming(self):
         """Đóng handle và xóa file dở (cancel / drain stale) — tránh .exe nửa file + lá chắn UAC."""
         extra = []
-        for filename, transfer in list(getattr(self, "incoming_transfers", {}) or {}).items():
+        for filename, transfer in list((getattr(self, "incoming_transfers", {}) or {}).items()):
             if transfer.get("handle"):
                 try:
                     transfer["handle"].close()

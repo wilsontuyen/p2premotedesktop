@@ -1142,7 +1142,7 @@ def _evaluate_win11_paste_geometry(px, py, rc):
 
     # Menu quá lùn hoặc quá hẹp thì không phải menu hợp lệ
     if height < 100 or width < 50:
-        return "not_paste"
+        return "unknown"
 
     frac_y = (py - top) / float(height) if height > 0 else 0
     offset_top = py - top
@@ -1161,13 +1161,14 @@ def _evaluate_win11_paste_geometry(px, py, rc):
     # 2. TEXT PASTE DỌC
     # =====================================================================
     # Trạng thái Paste hiện dưới dạng chữ ở giữa menu (dưới Refresh, trên New)
-    if 0.36 <= frac_y <= 0.48:
+    # Mở rộng dải nhận diện 0.18 - 0.65 để thích ứng nhiều shell extensions khác nhau
+    if 0.18 <= frac_y <= 0.65:
         return "paste"
 
     # =====================================================================
-    # 3. TẤT CẢ CÁC VÙNG KHÁC (View, Sort by, Group by, New, v.v...)
+    # 3. CÁC VÙNG KHÁC TRÊN MENU XAML: trả về unknown để cho phép RMB fallback
     # =====================================================================
-    return "not_paste"
+    return "unknown"
 
 
 def _has_file_in_clipboard():
@@ -1179,13 +1180,15 @@ def _has_file_in_clipboard():
 
 
 _GLOBAL_RMB_POS = None  # (rx, ry)
+_GLOBAL_RMB_TIME = 0.0
 
 
 def set_global_rmb_pos(cxy):
-    global _GLOBAL_RMB_POS
+    global _GLOBAL_RMB_POS, _GLOBAL_RMB_TIME
     if cxy and len(cxy) >= 2:
         try:
             _GLOBAL_RMB_POS = (int(cxy[0]), int(cxy[1]))
+            _GLOBAL_RMB_TIME = time.time()
         except Exception:
             pass
 
@@ -1354,7 +1357,9 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
         # 3. Trạng thái 3 (Tối hậu): Mất Handle VÀ Cache rỗng -> Dùng mỏ neo RMB
         if geo_kind == "unknown" and not root:
             pos = rmb_pos or _GLOBAL_RMB_POS
-            if pos:
+            rmb_t = float(_GLOBAL_RMB_TIME or 0.0)
+            # Chỉ xét mỏ neo RMB nếu RMB diễn ra gần đây (< 8.0 giây)
+            if pos and (time.time() - rmb_t) < 8.0:
                 rx, ry = pos[0], pos[1]
                 dx = px - rx
                 dy = py - ry
@@ -1370,15 +1375,22 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
                         clip_trace(f"[Win11 Fallback] RMB Anchor exact hit: dx={dx}, dy={dy} -> PASTE")
                     except Exception:
                         pass
-                else:
-                    geo_kind = "not_paste"
+                # Nếu không trúng anchor và không có root -> giữ geo_kind = "unknown", KHÔNG phán not_paste
 
         # Áp dụng kết quả hình học
-        if geo_kind in ("paste", "not_paste"):
-            kind = geo_kind
-            text = text or f"[xaml-pos-{geo_kind}]"
+        if geo_kind == "paste":
+            kind = "paste"
+            text = text or "[xaml-pos-paste]"
             try:
-                log_debug(f"[menu-item] by-position -> {geo_kind}")
+                log_debug(f"[menu-item] by-position -> paste")
+            except Exception:
+                pass
+            return kind, text
+        elif geo_kind == "not_paste" and (root or _get_cached_menu_rects()):
+            kind = "not_paste"
+            text = text or "[xaml-pos-not_paste]"
+            try:
+                log_debug(f"[menu-item] by-position -> not_paste")
             except Exception:
                 pass
             return kind, text
@@ -1386,16 +1398,21 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
     if kind == "unknown" and _xaml_click_is_show_more_strip(pt, root):
         kind = "not_paste"
         text = text or "[show-more-strip]"
+        try:
+            log_debug(f"[menu-item] name={text!r} kind={kind}")
+        except Exception:
+            pass
     elif kind == "unknown":
         if _is_windows_11() and root:
-            kind = "not_paste"
-            text = text or "[xaml-not-paste]"
+            kind = "unknown"
+            text = text or "[xaml-item]"
         else:
             kind = "unknown"
-    try:
-        log_debug(f"[menu-item] name={text!r} kind={kind}")
-    except Exception:
-        pass
+    if kind not in ("unknown", ""):
+        try:
+            log_debug(f"[menu-item] name={text!r} kind={kind}")
+        except Exception:
+            pass
     return kind, text
 
 
@@ -2723,6 +2740,8 @@ class FileCopyClientMixin:
     def _unlock_paste_dest(self):
         was = getattr(self, "_paste_dest_dir", None)
         self._paste_dest_frozen = False
+        self._paste_dest_dir = None
+        self._paste_dest_snapshot = None
         clip_trace(f"[unlock_paste_dest] was_dest={was}")
 
     def _explorer_path_cacher_loop(self):

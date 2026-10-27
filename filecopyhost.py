@@ -1978,6 +1978,12 @@ def run_clipboard_agent_mode():
             and (now - _agent_context_menu_seen_at) < 0.7
             and not menu_open
         )
+        if not (0.12 < age_r < 8.0 and not recent_dbl and (menu_open or menu_just_closed or near_rmb)):
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = ""
+            _agent_lmb_menu_item_name = ""
+            return False
+
         chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
         _agent_lmb_menu_item_name = chk_name
         if chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
