@@ -184,7 +184,7 @@ def setup_host_ui(self):
         self, text=_("P2P REMOTE HOST"),
         font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color,
     )
-    header.pack(pady=(15, 12))
+    header.pack(fill=tk.X, padx=18, pady=(15, 12))
     self.header_label = header
 
     panel = tk.Frame(self, bg=self.card_color, bd=0, relief=tk.FLAT)
@@ -195,12 +195,12 @@ def setup_host_ui(self):
         panel, text=_("CHO PHÉP ĐIỀU KHIỂN"),
         font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color,
     )
-    lbl_allow.pack(pady=(14, 10))
+    lbl_allow.pack(fill=tk.X, pady=(14, 10))
 
     tk.Label(
         panel, text=_("Mã ID của bạn:"),
         font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color,
-    ).pack(anchor=tk.W, padx=18)
+    ).pack(fill=tk.X, anchor=tk.W, padx=18)
 
     id_frame = tk.Frame(panel, bg=self.card_color)
     self._id_frame = id_frame
@@ -223,7 +223,7 @@ def setup_host_ui(self):
     tk.Label(
         panel, text=_("Mật khẩu kết nối:"),
         font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color,
-    ).pack(anchor=tk.W, padx=18)
+    ).pack(fill=tk.X, anchor=tk.W, padx=18)
 
     pass_frame = tk.Frame(panel, bg=self.card_color)
     self._pass_frame = pass_frame
@@ -254,7 +254,7 @@ def setup_host_ui(self):
     self.fixed_pass_indicator = tk.Label(
         panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color,
     )
-    self.fixed_pass_indicator.pack(anchor=tk.W, padx=18, pady=0)
+    self.fixed_pass_indicator.pack(fill=tk.X, anchor=tk.W, padx=18, pady=0)
     self.update_fixed_password_indicator()
 
     copy_all_btn = create_flat_button(
@@ -286,7 +286,7 @@ def setup_host_ui(self):
         bd=0,
         anchor=tk.W,
     )
-    startup_chk.pack(anchor=tk.W, padx=16, pady=(0, 8))
+    startup_chk.pack(fill=tk.X, anchor=tk.W, padx=16, pady=(0, 8))
 
     # Stubs only — real Tk Entry/Button steal OLE clipboard and break remote paste.
     class _HostUiStub:
@@ -312,3 +312,33 @@ def setup_host_ui(self):
         self.setup_tray_icon()
         if hasattr(self, "adjust_host_window_size"):
             self.adjust_host_window_size()
+
+        def _on_host_ui_expose(e=None):
+            if hasattr(self, "apply_anti_white_box_styles"):
+                self.apply_anti_white_box_styles()
+            if hasattr(self, "force_repaint"):
+                self.force_repaint()
+
+        try:
+            self.bind("<FocusIn>", _on_host_ui_expose, add="+")
+            self.bind("<Visibility>", _on_host_ui_expose, add="+")
+            self.bind("<Map>", _on_host_ui_expose, add="+")
+            panel.bind("<Enter>", _on_host_ui_expose, add="+")
+        except Exception:
+            pass
+
+        def _periodic_host_refresh():
+            try:
+                if self.state() != "withdrawn" and self.state() != "iconic":
+                    if hasattr(self, "apply_anti_white_box_styles"):
+                        self.apply_anti_white_box_styles()
+                    if hasattr(self, "force_repaint"):
+                        self.force_repaint()
+            except Exception:
+                pass
+            try:
+                self.after(2000, _periodic_host_refresh)
+            except Exception:
+                pass
+
+        self.after(300, _periodic_host_refresh)

@@ -803,6 +803,11 @@ def set_windows_graphics_effects(enabled=True):
     if sys.platform != "win32":
         return
     try:
+        if _is_server_or_remote_session():
+            return
+    except Exception:
+        pass
+    try:
         import ctypes
         # Font Smoothing (ClearType) - LUÔN LUÔN BẬT ĐỂ CHỮ MỊN VÀ SẮC NÉT TRÊN MỌI BẢN WINDOWS (7, 10, 11)
         flag = 0  # Apply in-memory, avoid broadcasting WM_SETTINGCHANGE which can freeze/blank GDI windows on Intel UHD
@@ -2008,7 +2013,7 @@ class HostMixin:
         return vx, vy, vw, vh
 
     def show_host_connection_border(self):
-        if sys.platform != "win32":
+        if sys.platform != "win32" or _is_legacy_windows_host() or _is_server_or_remote_session():
             return
         try:
             self.hide_host_connection_border()
@@ -2036,30 +2041,40 @@ class HostMixin:
             try:
                 import ctypes
                 tk_hwnd = win.winfo_id()
+
+                # Get host window HWNDs to strictly exclude from transparent/toolwindow styling
+                host_hwnds = set()
+                try:
+                    host_hwnds.add(self.winfo_id())
+                except Exception:
+                    pass
+                try:
+                    hf = int(self.frame(), 16)
+                    if hf:
+                        host_hwnds.add(hf)
+                except Exception:
+                    pass
                 
-                # Collect ALL unique HWNDs in the parent chain
-                # On Win10, Tkinter creates a wrapper frame that shows on taskbar
+                # Collect ALL unique HWNDs of the BORDER window only (never the host window)
                 hwnds_to_style = set()
-                hwnds_to_style.add(tk_hwnd)
+                if tk_hwnd not in host_hwnds:
+                    hwnds_to_style.add(tk_hwnd)
                 
                 parent = ctypes.windll.user32.GetParent(tk_hwnd)
-                if parent:
+                if parent and parent not in host_hwnds and parent != ctypes.windll.user32.GetDesktopWindow():
                     hwnds_to_style.add(parent)
                 
                 GA_ROOT = 2
                 root = ctypes.windll.user32.GetAncestor(tk_hwnd, GA_ROOT)
-                if root and root != ctypes.windll.user32.GetDesktopWindow():
+                if root and root not in host_hwnds and root != ctypes.windll.user32.GetDesktopWindow():
                     hwnds_to_style.add(root)
                 
-                GA_ROOTOWNER = 3
-                root_owner = ctypes.windll.user32.GetAncestor(tk_hwnd, GA_ROOTOWNER)
-                if root_owner and root_owner != ctypes.windll.user32.GetDesktopWindow():
-                    hwnds_to_style.add(root_owner)
+                # NOTE: Never add GA_ROOTOWNER because owner is the host window (self)!
                 
                 try:
                     frame_id = win.wm_frame()
                     fh = int(frame_id, 0) if isinstance(frame_id, str) else int(frame_id)
-                    if fh:
+                    if fh and fh not in host_hwnds:
                         hwnds_to_style.add(fh)
                 except:
                     pass
@@ -2076,7 +2091,7 @@ class HostMixin:
                 SWP_NOACTIVATE = 0x0010
                 HWND_TOPMOST = -1
                 
-                pos_hwnd = root if (root and root != ctypes.windll.user32.GetDesktopWindow()) else tk_hwnd
+                pos_hwnd = root if (root and root not in host_hwnds and root != ctypes.windll.user32.GetDesktopWindow()) else tk_hwnd
                 try:
                     dpi = int(ctypes.windll.user32.GetDpiForWindow(pos_hwnd))
                     if dpi > 0:
@@ -2084,7 +2099,7 @@ class HostMixin:
                 except Exception:
                     pass
                 
-                # Apply WS_EX_TOOLWINDOW on ALL HWNDs to guarantee taskbar hiding
+                # Apply WS_EX_TOOLWINDOW only on border HWNDs to guarantee taskbar hiding
                 for hwnd in hwnds_to_style:
                     style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     new_style = (style & ~WS_EX_APPWINDOW) | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
@@ -2109,7 +2124,7 @@ class HostMixin:
                     ctypes.windll.gdi32.DeleteObject(inner)
                 
                 _apply_frame_rgn(tk_hwnd)
-                if root and root != tk_hwnd and root != ctypes.windll.user32.GetDesktopWindow():
+                if root and root != tk_hwnd and root not in host_hwnds and root != ctypes.windll.user32.GetDesktopWindow():
                     _apply_frame_rgn(root)
                     
             except Exception as rgn_err:
@@ -2173,11 +2188,12 @@ class HostMixin:
             except Exception:
                 pass
 
-            # 3. Gửi lệnh bật nguồn màn hình SC_MONITORPOWER = 0xF170, -1 = power on
-            try:
-                ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, -1)
-            except Exception:
-                pass
+            # 3. Gửi lệnh bật nguồn màn hình SC_MONITORPOWER = 0xF170, -1 = power on (bỏ qua trên Server/RDP)
+            if not _is_server_or_remote_session():
+                try:
+                    ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, -1)
+                except Exception:
+                    pass
 
             # 4. Gắn input desktop nếu có thể để phím/chuột gửi đúng desktop đang hoạt động
             try:
@@ -2404,11 +2420,18 @@ class HostMixin:
                     except: pass
                 
                 # Hiển thị thông báo và viền đỏ sau khi test xong
-                self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
-                if not _is_legacy_windows_host():
+                try:
+                    _is_host_app = bool(HOST_ONLY_BUILD or getattr(self, "is_host_only", False))
+                except Exception:
+                    _is_host_app = False
+                if not _is_host_app and not _is_server_or_remote_session():
+                    self.after(0, lambda: self.show_custom_info(_("Kết nối từ xa"), msg_text, auto_close_sec=15))
+                if not _is_legacy_windows_host() and not _is_server_or_remote_session():
                     self.after(0, self.show_host_connection_border)
                 self.wake_display()
                 attach_disconnected_session_to_console()
+                if hasattr(self, "force_repaint"):
+                    self.after(100, self.force_repaint)
                 
                 self.active_clients[addr] = client_state
                 

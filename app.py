@@ -795,6 +795,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             # Hiển thị lại cửa sổ chính sau khi UI đã được khởi tạo xong
             if not self.is_headless:
                 self.deiconify()
+                self.apply_anti_white_box_styles()
+                self.force_repaint()
                 self.after(250, self.maybe_show_disclaimer)
                 if not getattr(self, "is_host_only", False):
                     self.after(1000, self._start_saved_status_bg)
@@ -863,6 +865,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         if sys.platform != "win32":
             return
         import win32event, win32security
+        from os_utils.windows_system import get_session_id, get_desktop_name
         session_id = get_session_id()
         desktop_name = get_desktop_name()
         restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
@@ -1146,8 +1149,105 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             self.geometry(new_geom)
             self.last_normal_geometry = new_geom
             self.update_idletasks()
+            self.apply_anti_white_box_styles()
+            self.force_repaint()
         except Exception as e:
             print(f"[Host] adjust_host_window_size error: {e}")
+
+    def apply_anti_white_box_styles(self):
+        """Thiết lập WS_CLIPCHILDREN, WS_CLIPSIBLINGS và Class Brush màu tối cho HWND.
+        Ngăn chặn Windows GDI xóa nền trắng (white box glitch) trên Windows Server / Intel UHD / RDP."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+
+            GWL_STYLE = -16
+            WS_CLIPCHILDREN = 0x02000000
+            WS_CLIPSIBLINGS = 0x04000000
+            GCLP_HBRBACKGROUND = -10
+
+            hwnds = []
+            try:
+                hwnds.append(self.winfo_id())
+            except Exception:
+                pass
+            try:
+                fh = int(self.frame(), 16)
+                if fh and fh not in hwnds:
+                    hwnds.append(fh)
+            except Exception:
+                pass
+
+            # Thu thập HWND của tất cả child frames
+            for child in self.winfo_children():
+                try:
+                    cid = child.winfo_id()
+                    if cid and cid not in hwnds:
+                        hwnds.append(cid)
+                    for sub in child.winfo_children():
+                        try:
+                            sid = sub.winfo_id()
+                            if sid and sid not in hwnds:
+                                hwnds.append(sid)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            if not getattr(self, "_anti_white_bg_brush", None):
+                hex_bg = getattr(self, "bg_color", "#1E1E24").lstrip("#")
+                if len(hex_bg) == 6:
+                    r = int(hex_bg[0:2], 16)
+                    g = int(hex_bg[2:4], 16)
+                    b = int(hex_bg[4:6], 16)
+                    self._anti_white_bg_brush = gdi32.CreateSolidBrush(r | (g << 8) | (b << 16))
+                else:
+                    self._anti_white_bg_brush = gdi32.CreateSolidBrush(0x00241E1E)
+            bg_brush = self._anti_white_bg_brush
+
+            for h in hwnds:
+                try:
+                    cur_style = user32.GetWindowLongW(ctypes.c_void_p(h), GWL_STYLE)
+                    new_style = cur_style | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+                    if new_style != cur_style:
+                        user32.SetWindowLongW(ctypes.c_void_p(h), GWL_STYLE, new_style)
+
+                    # Đổi class brush sang màu tối để nếu có WM_ERASEBKGND cũng không bao giờ bị màu trắng
+                    if hasattr(user32, "SetClassLongPtrW"):
+                        user32.SetClassLongPtrW(ctypes.c_void_p(h), GCLP_HBRBACKGROUND, ctypes.c_void_p(bg_brush))
+                    else:
+                        user32.SetClassLongW(ctypes.c_void_p(h), GCLP_HBRBACKGROUND, ctypes.c_void_p(bg_brush))
+                except Exception:
+                    pass
+        except Exception as e:
+            pass
+
+    def force_repaint(self):
+        """Ép Windows GDI vẽ lại toàn bộ cửa sổ (bỏ hoàn toàn RDW_ERASE để không xóa nền trắng)."""
+        try:
+            self.update_idletasks()
+            if sys.platform == "win32":
+                import ctypes
+                user32 = ctypes.windll.user32
+                # TUYỆT ĐỐI KHÔNG DÙNG RDW_ERASE (0x0004) vì sẽ xóa nền bằng White Brush gây ra mảng trắng!
+                # RDW_INVALIDATE (0x0001) | RDW_ALLCHILDREN (0x0080) | RDW_UPDATENOW (0x0100) = 0x0181
+                RDW_FLAGS = 0x0181
+                hwnd = self.winfo_id()
+                if hwnd:
+                    user32.InvalidateRect(ctypes.c_void_p(hwnd), None, False)
+                    user32.RedrawWindow(ctypes.c_void_p(hwnd), None, None, RDW_FLAGS)
+                try:
+                    fh = int(self.frame(), 16)
+                    if fh and fh != hwnd:
+                        user32.InvalidateRect(ctypes.c_void_p(fh), None, False)
+                        user32.RedrawWindow(ctypes.c_void_p(fh), None, None, RDW_FLAGS)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def load_window_position(self):
         # Force Tkinter to calculate proper font/widget scales based on physical DPI
@@ -2343,6 +2443,7 @@ Comment=Remote Desktop P2P AutoStart
         
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)
+        self.force_repaint()
 
 
     def show_custom_error(self, title, message, parent=None):
