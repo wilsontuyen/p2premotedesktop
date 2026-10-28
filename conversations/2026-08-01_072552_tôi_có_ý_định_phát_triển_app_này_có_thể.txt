@@ -1,0 +1,1634 @@
+========== USER ==========
+tôi có ý định phát triển app này có thể chạy trên iOS như trên Android
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\app.py
+  toolAction: Viewing app.py
+  toolSummary: Viewing app.py
+[Action: list_dir]
+  DirectoryPath: d:\Data\AG\remote_desktop
+  toolAction: Listing directory contents
+  toolSummary: Listing directory contents
+
+========== MODEL ==========
+Created At: 2026-08-01T00:25:58Z
+Completed At: 2026-08-01T00:25:58Z
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 3879
+Total Bytes: 174589
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import sys
+2: if sys.platform == "darwin":
+3:     APP_FONT_NAME = "Helvetica"
+4: else:
+5:     APP_FONT_NAME = "Segoe UI"
+6: 
+7: import traceback
+8: import os
+9: try:
+10:     import tempfile
+11:     crash_log_path = os.path.join(tempfile.gettempdir(), "early_crash.log")
+12:     _f = open(crash_log_path, "w", encoding="utf-8", buffering=1)
+13:     sys.stderr = _f
+14:     sys.stdout = _f
+15:     print("Bắt đầu khởi chạy ứng dụng...")
+16: except:
+17:     pass
+18: 
+19: from core.config import *
+20: 
+21: import platform
+22: 
+23: _is_old_win = platform.release() in ["7", "8", "8.1"]
+24: EMOJI_FONT = (APP_FONT_NAME, 9)
+25: EMOJI_FONT_BOLD = (APP_FONT_NAME, 9, "bold")
+26: EMOJI_FONT_LARGE = (APP_FONT_NAME, 12, "bold")
+27: EMOJI_FONT_10 = (APP_FONT_NAME, 10)
+28: EMOJI_FONT_8_BOLD = (APP_FONT_NAME, 8, "bold")
+29: 
+30: 
+31: def E(text):
+32:     import sys
+33:     if sys.platform == "darwin":
+34:         return text
+35:     if sys.platform != "win32" or platform.release() in ["7", "8", "8.1"]:
+36:         mapping = {
+37:             "📋": "❐", "📁": "≡", "📡": "⌂", "🔧": "¤",
+38:             "🔄": "↻", "🔍": "⌕", "➕": "+", "❌": "X"
+39:         }
+40:         for k, v in mapping.items():
+41:             text = text.replace(k, v)
+42:     return text
+43: 
+44: from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
+45: 
+46: import socket
+47: import logging
+48: 
+49: print("==== RUNNING APP VERSION: MAC_DEBUG_101 ====")
+50: 
+51: import threading
+52: import json
+53: import struct
+54: import time
+55: import mss
+56: # pyrefly: ignore [missing-import]
+57: from PIL import Image, ImageDraw, ImageTk
+58: try:
+59:     if sys.platform == "darwin":
+60:         raise Exception("Disabled on macOS to prevent Tkinter runloop crash")
+61:     # pyrefly: ignore [missing-import]
+62:     import pystray
+63:     # pyrefly: ignore [missing-import]
+64:     from pystray import MenuItem as item
+65: except Exception as e:
+66:     print(f"Warning: pystray could not be loaded: {e}")
+67:     pystray = None
+68:     item = None
+69: 
+70: import random
+71: import subprocess
+72: import base64
+73: import ctypes
+74: if sys.platform == "win32":
+75:     from ctypes import wintypes
+76: import hashlib
+77: from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+78: import urllib.request
+79: import urllib.parse
+80: 
+81: _is_child = False
+82: if "--headless" in sys.argv or "--clipboard-agent" in sys.argv:
+83:     _is_child = True
+84: else:
+85:     for arg in sys.argv:
+86:         if "multiprocessing" in arg or arg == "-c":
+87:             _is_child = True
+88:             break
+89: if _is_child and sys.platform == "darwin":
+90:     try:
+91:         import ctypes
+92:         objc = ctypes.cdll.LoadLibrary('/usr/lib/libobjc.A.dylib')
+93:         objc.objc_getClass.restype = ctypes.c_void_p
+94:         objc.sel_registerName.restype = ctypes.c_void_p
+95:         msgSend = objc.objc_msgSend
+96:         msgSend.restype = ctypes.c_void_p
+97:         msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+98:         NSApplication = objc.objc_getClass(b'NSApplication')
+99:         sharedApplication = objc.sel_registerName(b'sharedApplication')
+100:         app = msgSend(NSApplication, sharedApplication)
+101:         setActivationPolicy = objc.sel_registerName(b'setActivationPolicy:')
+102:         msgSend_policy = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int)(msgSend)
+103:         msgSend_policy(app, setActivationPolicy, 2)
+104:     except Exception:
+105:         pass
+106: 
+107: import tkinter as tk
+108: import sys
+109: if sys.platform == 'darwin':
+110:     try:
+111:         from tkmacosx import Button as MacButton
+112:         class CustomMacButton(MacButton):
+113:             def __init__(self, master=None, cnf={}, **kw):
+114:                 if 'borderless' not in kw:
+115:                     kw['borderless'] = 1
+116:                 if 'pady' in kw:
+117:                     kw.pop('pady')
+118:                 if 'padx' in kw:
+119:                     kw.pop('padx')
+120:                 if 'width' in kw:
+121:                     try:
+122:                         w = int(kw['width'])
+123:                         if w < 100:
+124:                             kw['width'] = w * 9
+125:                     except:
+126:                         pass
+127:                 if 'height' in kw:
+128:                     try:
+129:                         h = int(kw['height'])
+130:                         if h < 10:
+131:                             kw['height'] = h * 20
+132:                     except:
+133:                         pass
+134:                 super().__init__(master, cnf, **kw)
+135:         tk.Button = CustomMacButton
+136:     except ImportError:
+137:         pass
+138: from tkinter import messagebox, ttk
+139: import sys
+140: 
+141: from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
+142: from core.host import encrypt_text, decrypt_text
+143: from core.viewer import run_client_viewer_loop
+144: 
+145: # Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
+146: _orig_toplevel_geometry = tk.Toplevel.geometry
+147: def _scaled_toplevel_geometry(self, newGeometry=None):
+148:     if newGeometry is None:
+149:         return _orig_toplevel_geometry(self)
+150:     try:
+151:         import re
+152:         m = re.match(r'^(\d+)x(\d+)(?:\+([+-]?\d+)\+([+-]?\d+))?$', newGeometry)
+153:         if m:
+154:             w = int(m.group(1))
+155:             h = int(m.group(2))
+156:             x = m.group(3)
+157:             y = m.group(4)
+158:             scale = self.winfo_fpixels('1i') / 96.0
+159:             sw = int(w * scale)
+160:             sh = int(h * scale)
+161:             if x is not None and y is not None:
+162:                 adj_x = int(x) - (sw - w) // 2
+163:                 adj_y = int(y) - (sh - h) // 2
+164:                 newGeometry = f"{sw}x{sh}+{adj_x}+{adj_y}"
+165:             else:
+166:                 newGeometry = f"{sw}x{sh}"
+167:     except Exception as e:
+168:         pass
+169:     return _orig_toplevel_geometry(self, newGeometry)
+170: 
+171: tk.Toplevel.geometry = _scaled_toplevel_geometry
+172: 
+173: 
+174: import pygame
+175: import sys
+176: import os
+177: import traceback
+178: 
+179: if sys.stdout is None:
+180:     sys.stdout = open(os.devnull, 'w')
+181: if sys.stderr is None:
+182:     sys.stderr = open(os.devnull, 'w')
+183: 
+184: if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
+185:     try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+186:     except: pass
+187: if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):
+188:     try: sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+189:     except: pass
+190: 
+191: def handle_exception(exc_type, exc_value, exc_traceback):
+192:     if issubclass(exc_type, KeyboardInterrupt):
+193:         sys.__excepthook__(exc_type, exc_value, exc_traceback)
+194:         return
+195:     # In ra stderr (để hiển thị trên terminal hoặc gui.log)
+196:     sys.__excepthook__(exc_type, exc_value, exc_traceback)
+197:     # Ghi vào file
+198:     with open("crash.log", "w", encoding="utf-8") as f:
+199:         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+200: 
+201: sys.excepthook = handle_exception
+202: 
+203: import builtins
+204: _orig_print = builtins.print
+205: def print_with_timestamp(*args, **kwargs):
+206:     timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+207:     if args:
+208:         first_arg = str(args[0])
+209:         if first_arg.startswith("[202") and first_arg.find("]") < 25:
+210:             _orig_print(*args, **kwargs)
+211:             return
+212:     msg = " ".join(str(arg) for arg in args)
+213:     _orig_print(f"{timestamp} {msg}", **kwargs)
+214: 
+215: print = print_with_timestamp
+216: 
+217: # Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
+218: if sys.platform != "win32":
+219:     try:
+220:         import os
+221:         os.umask(0) # Đảm bảo file cấu hình tạo bởi root (systemd) có quyền rw-rw-rw-
+222:     except:
+223:         pass
+224: if getattr(sys, 'frozen', False):
+225:     app_dir = os.path.dirname(sys.executable)
+226: else:
+227:     app_dir = os.path.dirname(os.path.abspath(__file__))
+228: os.chdir(app_dir)
+229: 
+230: def get_app_data_dir():
+231:     import os, sys
+232:     if sys.platform != "win32":
+233:         if sys.platform == "darwin":
+234:             path = os.path.expanduser("~/Library/Application Support/RemoteDesktopP2P")
+235:         else:
+236:             if os.path.exists("/opt/p2p_remote"):
+237:                 path = "/opt/p2p_remote/config"
+238:             else:
+239:                 path = os.path.expanduser("~/.config/RemoteDesktopP2P")
+240:         try:
+241:             os.makedirs(path, exist_ok=True)
+242:             # Đảm bảo quyền ghi cho mọi user (vì root tạo ra thì user không sửa được)
+243:             os.chmod(path, 0o777)
+244:         except Exception:
+245:             pass
+246:         return path
+247:     else:
+248:         if getattr(sys, 'frozen', False):
+249:             return os.path.dirname(sys.executable)
+250:         else:
+251:             return os.path.dirname(os.path.abspath(__file__))
+252: 
+253: def get_computers_xml_path():
+254:     import os, sys, shutil
+255:     
+256:     user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
+257:     if os.path.exists(user_path):
+258:         return user_path
+259:         
+260:     if sys.platform == "win32":
+261:         installed_path = r"C:\Apps\P2P\saved_computers.xml"
+262:     else:
+263:         installed_path = "/opt/p2p_remote/config/saved_computers.xml"
+264:         
+265:     if os.path.exists(installed_path):
+266:         try:
+267:             with open(installed_path, 'a'):
+268:                 pass
+269:             return installed_path
+270:         except Exception:
+271:             try:
+272:                 shutil.copy2(installed_path, user_path)
+273:             except Exception:
+274:                 pass
+275:             return user_path
+276:             
+277:     return user_path
+278: 
+279: is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
+280: 
+281: # Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
+282: if sys.platform == "win32":
+283:     try:
+284:         import ctypes
+285:         ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+286:     except:
+287:         try:
+288:             ctypes.windll.user32.SetProcessDPIAware()
+289:         except:
+290:             pass
+291: 
+292: from utils.logger import get_log_filepath, log_file_transfer, log_debug, log_activity
+293: 
+294: # Pygame CE drop-in compatibility
+295: # In pygame-ce, it is still imported as pygame.
+296: 
+297: # Remote Desktop Ports (Avoid 80/443 to prevent Router Web UI collision)
+298: 
+299: # LAN Discovery (UDP Broadcast) - Cho phép các máy trong cùng mạng LAN tự phát hiện nhau
+300: LAN_BEACON_INTERVAL = 5  # Gửi beacon mỗi 5 giây
+301: LAN_OFFLINE_TIMEOUT = 15  # Coi là offline nếu không nhận beacon trong 15 giây
+302: 
+303: # Host Controllers
+304: 
+305: # Button mapping for mouse clicks
+306: 
+307: 
+308: from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_scroll, send_input_mouse_move
+309: 
+310: from network.crypto import get_crypto_key, encrypt_payload, decrypt_payload
+311: from network.socket_utils import socket_passwords, APP_KEY, force_close_socket, send_msg, recv_msg, recv_exact
+312: 
+313: from gui.themes import get_theme_palette
+314: from utils.hwid import get_hwid, get_local_ip, get_public_ip, get_public_ipv6
+315: 
+316: from network.upnp import attempt_upnp_forward            
+317: # Get Public IPv6 address
+318: 
+319: # Get Public IP address
+320: 
+321: 
+322: from utils.clipboard_api import (ENABLE_CLIPBOARD_SYNC, set_clipboard_dword_format, setup_clipboard_exclusions, 
+323:                                 get_clipboard_files, set_clipboard_files, get_clipboard_text, set_clipboard_text)
+324: 
+325: from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip, InfoDialog
+326: from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, run_clipboard_agent_mode
+327: 
+328: from core.host import HostMixin, check_desktop_change
+329: from core.network_manager import NetworkMixin
+330: 
+331: class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
+332:     def __init__(self):
+333:         super().__init__()
+334:         import threading
+335:         
+336:         # Đảm bảo reset trạng thái BlockInput và màn hình che phủ khi app mới khởi động
+337:         try:
+338:             import ctypes
+339:             ctypes.windll.user32.BlockInput(False)
+340:             print("[App] Reset BlockInput to False on startup.")
+341:         except:
+342:             pass
+343:         
+344:         # Check headless flag (run in Session 0 / background service mode)
+345:         self.is_headless = "--headless" in sys.argv
+346:         if self.is_headless:
+347:             self.withdraw()
+348:             
+349:         # Configure logging and stdout redirection for diagnostics
+350:         try:
+351:             log_filename = "agent.log" if self.is_headless else "gui.log"
+352:             log_path = os.path.join(app_dir, log_filename)
+353:             sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+354:             sys.stderr = sys.stdout
+355:             
+356:             # Override built-in print to flush immediately so logs are unbuffered
+357:             import builtins
+358:             orig_print = builtins.print
+359:             def unbuffered_print(*args, **kwargs):
+360:                 orig_print(*args, **kwargs)
+361:                 try:
+362:                     sys.stdout.flush()
+363:                 except:
+364:                     pass
+365:             builtins.print = unbuffered_print
+366:             
+367:             print(f"\n--- App started in {'headless' if self.is_headless else 'GUI'} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+368:             
+369:             # Run diagnostics check for both GUI and Headless clients
+370:             try:
+371:                 import getpass
+372:                 username = getpass.getuser()
+373:                 print(f"[Diagnostics] Process running under user: {username}")
+374:                 
+375:                 if sys.platform == "win32":
+376:                     import win32con
+377:                     import win32api, win32security, winreg
+378:                     
+379:                     h_token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+380:                     sid_info = win32security.GetTokenInformation(h_token, win32security.TokenIntegrityLevel)
+381:                     sid = sid_info[0] if sid_info else None
+382:                     il_name = "Unknown"
+383:                     il = 0
+384:                     if sid:
+385:                         try:
+386:                             il = sid.GetSubAuthority(0)
+387:                             if il == 0x0000: il_name = "Untrusted"
+388:                             elif il == 0x1000: il_name = "Low"
+389:                             elif il == 0x2000: il_name = "Medium"
+390:                             elif il == 0x3000: il_name = "High"
+391:                             elif il >= 0x4000: il_name = "System"
+392:                         except Exception as e_sub:
+393:                             print(f"[Diagnostics] GetSubAuthority failed: {e_sub}")
+394:                     print(f"[Diagnostics] Integrity Level: {il_name} ({hex(il) if sid else 'N/A'})")
+395:                     
+396:                     # Token UIAccess Status
+397:                     try:
+398:                         import ctypes
+399:                         from ctypes import wintypes
+400:                         ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+401:                         GetTokenInformation = ADVAPI32.GetTokenInformation
+402:                         GetTokenInformation.argtypes = [
+403:                             wintypes.HANDLE,
+404:                             ctypes.c_int,
+405:                             ctypes.c_void_p,
+406:                             wintypes.DWORD,
+407:                             ctypes.POINTER(wintypes.DWORD)
+408:                         ]
+409:                         GetTokenInformation.restype = wintypes.BOOL
+410:                         
+411:                         uia_val = ctypes.c_ulong(0)
+412:                         ret_len = wintypes.DWORD(0)
+413:                         res = GetTokenInformation(
+414:                             int(h_token),
+415:                             26, # TokenUIAccess
+416:                             ctypes.byref(uia_val),
+417:                             ctypes.sizeof(uia_val),
+418:                             ctypes.byref(ret_len)
+419:                         )
+420:                         if res:
+421:                             print(f"[Diagnostics] Token UIAccess Status: {'Enabled' if uia_val.value else 'Disabled'}")
+422:                         else:
+423:                             print(f"[Diagnostics] GetTokenInformation for UIAccess failed: {ctypes.get_last_error()}")
+424:                     except Exception as uia_err:
+425:                         print(f"[Diagnostics] UIAccess check error: {uia_err}")
+426:                     
+427:                     reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+428:                     try:
+429:                         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+430:                         posd, reg_t = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+431:                         ssas, reg_t = winreg.QueryValueEx(key, "SoftwareSASGeneration")
+432:                         winreg.CloseKey(key)
+433:                         print(f"[Diagnostics] Registry: PromptOnSecureDesktop = {posd}, SoftwareSASGeneration = {ssas}")
+434:                     except Exception as ree:
+435:                         print(f"[Diagnostics] Registry read failed: {ree}")
+436:                     
+437:                     # Check scheduled task status
+438:                     try:
+439:                         import subprocess
+440:                         res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
+441:                         print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+442:                     except Exception as te:
+443:                         print(f"[Diagnostics] Failed to query scheduled task: {te}")
+444:             except Exception as de:
+445:                 print(f"[Diagnostics] Diagnostics gathering failed: {de}")
+446:         except Exception as e:
+447:             pass
+448:         
+449:         # Thiết lập icon cho cửa sổ chính
+450:         try:
+451:             icon_path = os.path.join(app_dir, "app_icon.png")
+452:             if os.path.exists(icon_path):
+453:                 try:
+454:                     icon_img = tk.PhotoImage(file=icon_path)
+455:                 except Exception:
+456:                     icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+457:                 self.iconphoto(True, icon_img)
+458:                 self._app_icon_img = icon_img  # Giữ reference tránh GC
+459:         except Exception as e:
+460:             print(f"[App] Lỗi thiết lập icon cửa sổ: {e}")
+461:         
+462:         # Register app instance to ClipboardSyncManager
+463:         if clipboard_sync_manager:
+464:             clipboard_sync_manager.register_app(self)
+465:         
+466:         # Window attributes
+467:         title_text = "Easy Remote Desktop"
+468:         try:
+469:             is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+470:             try:
+471:                 if hasattr(sys, 'getandroidapilevel'):
+472:                     is_android = True
+473:             except: pass
+474:             
+475:             if is_android:
+476:                 serial = ""
+477:                 try:
+478:                     with open("/sys/block/mmcblk0/device/serial", "r") as f:
+479:                         serial = f.read().strip()
+480:                         if serial.startswith("0x"):
+481:                             serial = serial[2:]
+482:                 except Exception:
+483:                     pass
+484:                 if serial:
+485:                     title_text += f" - MC-Android {serial}"
+486:         except Exception:
+487:             pass
+488:         self.title(title_text)
+489:         self.resizable(False, False)
+490:         
+491:         # Shutdown listener for closing client cleanly
+492:         if sys.platform == "win32":
+493:             try:
+494:                 import win32gui, win32con, win32api
+495:                 def WndProc(hwnd, msg, wparam, lparam):
+496:                     if msg == win32con.WM_QUERYENDSESSION:
+497:                         if not (lparam & 0x80000000): # 0x80000000 is ENDSESSION_LOGOFF
+498:                             print("[Host] System Shutdown/Restart detected!")
+499:                             try:
+500:                                 from network.socket_utils import socket_passwords, send_msg
+501:                                 import json
+502:                                 for conn in list(socket_passwords.keys()):
+503:                                     try:
+504:                                         send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+505:                                     except: pass
+506:                             except: pass
+507:                         return True
+508:                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+509:                 
+510:                 wc = win32gui.WNDCLASS()
+511:                 wc.lpfnWndProc = WndProc
+512:                 wc.lpszClassName = "AntigravityShutdownListener"
+513:                 wc.hInstance = win32api.GetModuleHandle(None)
+514:                 try: win32gui.RegisterClass(wc)
+515:                 except: pass
+516:                 self.shutdown_hwnd = win32gui.CreateWindow(wc.lpszClassName, "ShutdownListener", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
+517:             except Exception as e:
+518:                 print(f"[Host] Failed to setup shutdown listener: {e}")
+519:         elif sys.platform.startswith("linux") or sys.platform == "darwin":
+520:             try:
+521:                 import signal
+522:                 def handle_sigterm(signum, frame):
+523:                     print(f"[Host] System Shutdown/Restart detected (signal {signum})!")
+524:                     try:
+525:                         from network.socket_utils import socket_passwords, send_msg
+526:                         import json
+527:                         for conn in list(socket_passwords.keys()):
+528:                             try:
+529:                                 send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+530:                             except: pass
+531:                     except: pass
+532:                     import time
+533:                     time.sleep(1)
+534:                     sys.exit(0)
+535:                 signal.signal(signal.SIGTERM, handle_sigterm)
+536:                 signal.signal(signal.SIGHUP, handle_sigterm)
+537:             except Exception as e:
+538:                 print(f"[Host] Failed to setup Linux shutdown listener: {e}")
+539:         
+540:         # Cờ trạng thái chống mở nhiều cửa sổ điều khiển cùng lúc
+541:         self.is_client_connected = False
+542:         
+543:         # Load saved window position or center it
+544:         self.config_file = os.path.join(get_app_data_dir(), "window_config.json")
+545:         self.last_normal_geometry = None
+546:         self.bind("<Configure>", self.on_window_configure)
+547:         self.load_window_position()
+548:         # Load language setting
+549:         self.current_lang = tk.StringVar(value="vi")
+550:         try:
+551:             if os.path.exists(self.config_file):
+552:                 with open(self.config_file, "r") as f:
+553:                     cfg = json.load(f)
+554:                     saved_lang = cfg.get("language", "vi")
+555:                     self.current_lang.set(saved_lang)
+556:                     load_language(saved_lang)
+557:         except:
+558:             pass
+559: 
+560:         
+561:         # Migrate old JSON list to new encrypted XML format
+562:         old_json_file = "saved_computers.json"
+563:         new_xml_file = get_computers_xml_path()
+564:         if os.path.exists(old_json_file) and not os.path.exists(new_xml_file):
+565:             try:
+566:                 with open(old_json_file, "r", encoding="utf-8") as f:
+567:                     old_data = json.load(f)
+568:                 
+569:                 import xml.etree.ElementTree as ET
+570:                 root = ET.Element("computers")
+571:                 for comp in old_data:
+572:                     comp_node = ET.SubElement(root, "computer")
+573:                     
+574:                     name_node = ET.SubElement(comp_node, "name")
+575:                     name_node.text = encrypt_text(comp.get("name", ""))
+576:                     
+577:                     id_node = ET.SubElement(comp_node, "id")
+578:                     id_node.text = encrypt_text(comp.get("id", ""))
+579:                     
+580:                     pass_node = ET.SubElement(comp_node, "password")
+581:                     pass_node.text = encrypt_text(comp.get("password", ""))
+582:                 
+583:                 tree = ET.ElementTree(root)
+584:                 tree.write(new_xml_file, encoding="utf-8", xml_declaration=True)
+585:                 os.remove(old_json_file)
+586:                 print("[Migration] Đã chuyển đổi thành công danh sách máy tính sang XML mã hóa!")
+587:             except Exception as e:
+588:                 print(f"[Migration] Lỗi chuyển đổi: {e}")
+589:         
+590:         from gui.themes import setup_app_theme
+591:         setup_app_theme(self, self.config_file)
+592:         
+593:         self.my_id_clean, self.my_id_formatted, self.my_macs = get_hwid()
+594:         
+595:         # Check if service (headless agent) is active by checking the mutex
+596:         self.is_service_active = False
+597:         if not self.is_headless:
+598:             exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
+599:             exe_path_abs = os.path.abspath(exe_path).lower()
+600:             if sys.platform != "win32":
+601:                 if "/opt/p2p_remote" in exe_path_abs:
+602:                     self.is_service_active = True
+603:                     
+604:         if sys.platform == "win32" and not self.is_headless:
+605:             import win32event, win32con
+606:             
+607:             # Since the service is actually a Scheduled Task (EasyRemoteDesktopAgent),
+608:             # we check if we are running from the installation directory and wait for the headless agent.
+609:             is_installed_version = False
+610:             try:
+611:                 if "c:\\apps\\p2p" in exe_path_abs or "program files" in exe_path_abs:
+612:                     is_installed_version = True
+613:             except:
+614:                 pass
+615: 
+616:             session_id = 1
+617:             try:
+618:                 sid = ctypes.c_ulong()
+619:                 if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+620:                     session_id = sid.value
+621:             except:
+622:                 pass
+623: 
+624:             if is_installed_version:
+625:                 # If running from installation directory, always assume service is active to avoid port 12345 hijacking
+626:                 self.is_service_active = True
+627:             else:
+628:                 # Fallback to checking Mutex for portable versions
+629:                 for d_name in ["default", "winlogon"]:
+630:                     m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
+631:                     try:
+632:                         h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+633:                         if h_mutex:
+634:                             win32api.CloseHandle(h_mutex)
+635:                             self.is_service_active = True
+636:                             break
+637:                     except Exception as e:
+638:                         err_code = getattr(e, 'winerror', 0)
+639:                         if not err_code and hasattr(e, 'args') and len(e.args) > 0:
+640:                             err_code = e.args[0]
+641:                         if err_code == 5: # ERROR_ACCESS_DENIED
+642:                             self.is_service_active = True
+643:                             break
+644: 
+645:         # Load or generate password
+646:         if self.is_headless:
+647:             self.my_password = str(random.randint(1000, 9999))
+648:             try:
+649:                 pass_path = os.path.join(app_dir, "session_pass.txt")
+650:                 with open(pass_path, "w", encoding="utf-8") as f:
+651:                     f.write(self.my_password)
+652:                 print(f"[Host Service] Generated and saved session password to {pass_path}")
+653:             except Exception as e:
+654:                 print(f"[Host Service] Failed to save session password: {e}")
+655:         else:
+656:             if getattr(self, "is_service_active", False):
+657:                 global BOUND_PORT
+658:                 BOUND_PORT = 12346 # Prevent using port 12345 to avoid conflicting with the service
+659:                 import core.config; core.config.BOUND_PORT = 12346
+660:                 import core.network_manager; core.network_manager.BOUND_PORT = 12346
+661:                 import core.host; core.host.BOUND_PORT = 12346
+662:                 pass_path = os.path.join(app_dir, "session_pass.txt")
+663:                 if os.path.exists(pass_path):
+664:                     try:
+665:                         with open(pass_path, "r", encoding="utf-8") as f:
+666:                             self.my_password = f.read().strip()
+667:                         print(f"[Host GUI] Loaded shared session password from {pass_path}: {self.my_password}")
+668:                     except Exception as e:
+669:                         print(f"[Host GUI] Failed to load shared session password: {e}")
+670:                         self.my_password = str(random.randint(1000, 9999))
+671:                 else:
+672:                     self.my_password = str(random.randint(1000, 9999))
+673:             else:
+674:                 self.my_password = str(random.randint(1000, 9999))
+675:         # Migrate old fixed_password.txt to XML if it exists
+676:         self.fixed_password = ""
+677:         if os.path.exists("fixed_password.txt"):
+678:             try:
+679:                 with open("fixed_password.txt", "r", encoding="utf-8") as f:
+680:                     encrypted = f.read().strip()
+681:                     if encrypted:
+682:                         self.fixed_password = decrypt_text(encrypted)
+683:                 if self.fixed_password:
+684:                     self.save_fixed_password_to_xml(self.fixed_password)
+685:                 os.remove("fixed_password.txt")
+686:                 print("[Migration] Đã di trú mật khẩu cố định sang saved_computers.xml và xóa tệp cũ!")
+687:             except Exception as e:
+688:                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
+689:         else:
+690:             self.fixed_password = self.load_fixed_password_from_xml()
+691:         self.pass_type_var = tk.StringVar(value=_("4 chữ số"))
+692:         self.server_socket = None
+693:         self.running_server = True
+694:         self.active_clients = {}
+695:         self.active_viewers = []
+696:         self.current_ip = _("Đang lấy IP...")
+697:         self.local_ip = "127.0.0.1"
+698:         self.ipv6 = None
+699:         self.client_viewer_w = 1280
+700:         self.client_viewer_h = 720
+701:         
+702:         # Signaling State
+703:         self.signaling_socket = None
+704:         self.signaling_lock = threading.Lock()
+705:         self._reconnecting_signaling = False
+706:         self.pending_connection_info = None
+707:         self.status_dots_widgets = {}
+708:         self.tray_icon = None
+709:         self.last_signaling_response = time.time()
+710:         self.received_first_pong = False
+711:         
+712:         # Form variables
+713:         self.status_var = tk.StringVar(value=_("Đang kết nối tới mạng đăng ký..."))
+714:         self.partner_id_var = tk.StringVar()
+715:         self.partner_pass_var = tk.StringVar()
+716:         self.force_relay_var = tk.BooleanVar(value=False)
+717:         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
+718:         
+719:         # LAN Discovery State - Lưu trữ các máy phát hiện được trong mạng LAN
+720:         # Key: hwid, Value: {computer_name, local_ip, port, last_seen, macs}
+721:         self.lan_peers = self.load_lan_peers()
+722:         self.lan_peers_lock = threading.Lock()
+723:         
+724:         # Register Trace for Auto-Formatting Partner ID
+725:         self.id_trace_id = self.partner_id_var.trace_add("write", self.format_partner_id)
+726:         
+727:         # Intercept close window button ("X")
+728:         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
+729:         
+730:         # Setup UI
+731:         try:
+732:             self.setup_ui()
+733:         except Exception as e:
+734:             import traceback
+735:             try:
+736:                 with open("mac_crash.log", "w", encoding="utf-8") as f:
+737:                     traceback.print_exc(file=f)
+738:             except:
+739:                 pass
+740:             print(f"CRASH IN SETUP_UI: {e}")
+741:         
+742:         # Start background services
+743:         threading.Thread(target=self.init_network_services, daemon=True).start()
+744:         
+745:         # Bắt đầu polling Signaling status trên main thread (độ tin cậy cao hơn self.after từ background thread)
+746:         self.after(3000, self._poll_signaling_status)
+747:         
+748:         # Restore Event Listener for waking the GUI
+749:         if not self.is_headless:
+750:             threading.Thread(target=self.restore_event_listener_thread, daemon=True).start()
+751:             threading.Thread(target=self.screen_cover_event_listener_thread, daemon=True).start()
+752:     def screen_cover_event_listener_thread(self):
+753:         if sys.platform != "win32":
+754:             return
+755:         import win32event, win32security, ctypes
+756:         
+757:         try:
+758:             active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
+759:         except:
+760:             active_session_id = 1
+761:             
+762:         cover_event_name = f"Global\\AntigravityP2PRemoteDesktopScreenCoverEvent_{active_session_id}_default"
+763:         
+764:         sa = win32security.SECURITY_ATTRIBUTES()
+765:         sa.bInheritHandle = 1
+766:         sd = win32security.SECURITY_DESCRIPTOR()
+767:         sd.Initialize()
+768:         sd.SetSecurityDescriptorDacl(True, None, False)
+769:         sa.SECURITY_DESCRIPTOR = sd
+770:         
+771:         try:
+772:             h_event_toggle = win32event.CreateEvent(sa, False, False, cover_event_name)
+773:             h_event_disable = win32event.CreateEvent(sa, False, False, cover_event_name + "_disable")
+774:         except Exception as e:
+775:             print(f"[Event] Failed to create screen cover event: {e}")
+776:             return
+777:             
+778:         print(f"[Event] Listening for screen cover event: {cover_event_name}")
+779:         while True:
+780:             res = win32event.WaitForMultipleObjects([h_event_toggle, h_event_disable], False, win32event.INFINITE)
+781:             if res == win32event.WAIT_OBJECT_0:
+782:                 print("[Event] Received screen cover toggle signal.")
+783:                 self.after(0, self.toggle_screen_cover_gui)
+784:             elif res == win32event.WAIT_OBJECT_0 + 1:
+785:                 print("[Event] Received screen cover disable signal.")
+786:                 self.after(0, self.disable_screen_cover_gui)
+787: 
+788:     def restore_event_listener_thread(self):
+789:         if sys.platform != "win32":
+790:             return
+791:         import win32event, win32security
+792:         session_id = get_session_id()
+793:         desktop_name = get_desktop_name()
+794:         restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+795:         
+796:         sa = win32security.SECURITY_ATTRIBUTES()
+797:         sa.bInheritHandle = 1
+798:         sd = win32security.SECURITY_DESCRIPTOR()
+799:         sd.Initialize()
+800:         sd.SetSecurityDescriptorDacl(True, None, False)
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========== MODEL ==========
+Created At: 2026-08-01T00:25:58Z
+Completed At: 2026-08-01T00:25:58Z
+{"name":".agents","isDir":true}
+{"name":".git","isDir":true}
+{"name":".gitignore","sizeBytes":"893"}
+{"name":".venv","isDir":true}
+{"name":".vscode","isDir":true}
+{"name":"A.txt","sizeBytes":"1"}
+{"name":"B.txt","sizeBytes":"1"}
+{"name":"EasyRemoteDesktop_Installer.exe","sizeBytes":"74985031"}
+{"name":"README.md","sizeBytes":"5382"}
+{"name":"RemoteDesktopP2P.spec","sizeBytes":"1036"}
+{"name":"RemoteDesktopP2P.zip","sizeBytes":"77069850"}
+{"name":"RemoteDesktopService.spec","sizeBytes":"773"}
+{"name":"Vietnamese.isl","sizeBytes":"26450"}
+{"name":"__pycache__","isDir":true}
+{"name":"_internal_data","isDir":true}
+{"name":"add_overwrite_check.py","sizeBytes":"2900"}
+{"name":"add_pd_debug.py","sizeBytes":"711"}
+{"name":"add_power_button.py","sizeBytes":"10573"}
+{"name":"agent.log","sizeBytes":"69740"}
+{"name":"app.build","isDir":true}
+{"name":"app.ini","sizeBytes":"380"}
+{"name":"app.py","sizeBytes":"174589"}
+{"name":"app.spec","sizeBytes":"882"}
+{"name":"app_diff.txt","sizeBytes":"123862"}
+{"name":"app_diff2.txt","sizeBytes":"1399408"}
+{"name":"app_head.py","sizeBytes":"296040"}
+{"name":"app_icon.ico","sizeBytes":"125795"}
+{"name":"app_icon.png","sizeBytes":"1931876"}
+{"name":"app_last_commit_diff.txt","sizeBytes":"54348"}
+{"name":"app_old.py","sizeBytes":"78468"}
+{"name":"app_strings.txt","sizeBytes":"19755"}
+{"name":"apply_android_icon.py","sizeBytes":"1781"}
+{"name":"apply_changes.py","sizeBytes":"20534"}
+{"name":"apply_fix.py","sizeBytes":"14767"}
+{"name":"apply_fix2.py","sizeBytes":"18234"}
+{"name":"apply_fix3.py","sizeBytes":"3122"}
+{"name":"apply_fix4.py","sizeBytes":"2788"}
+{"name":"apply_fix5.py","sizeBytes":"5100"}
+{"name":"apply_remote_action.py","sizeBytes":"5570"}
+{"name":"apply_translations.py","sizeBytes":"14735"}
+{"name":"apply_translations2.py","sizeBytes":"1185"}
+{"name":"apply_wm.py","sizeBytes":"2316"}
+{"name":"arc_test.png","sizeBytes":"450"}
+{"name":"arc_test2.png","sizeBytes":"172"}
+{"name":"auto_translate_missing.py","sizeBytes":"2054"}
+{"name":"bounds.txt","sizeBytes":"807"}
+{"name":"build","isDir":true}
+{"name":"build_and_deploy.py","sizeBytes":"9191"}
+{"name":"build_android.bat","sizeBytes":"69"}
+{"name":"build_deploy.log","sizeBytes":"102261"}
+{"name":"build_signaling.py","sizeBytes":"2315"}
+{"name":"ca_strings.txt","sizeBytes":"15747"}
+{"name":"check_lang.py","sizeBytes":"880"}
+{"name":"check_lang_ast.py","sizeBytes":"1210"}
+{"name":"cinfo.txt"}
+{"name":"classes.txt","sizeBytes":"2510"}
+{"name":"classes_utf8.txt","sizeBytes":"1257"}
+{"name":"cleanup_pynput.py","sizeBytes":"1244"}
+{"name":"client.py","sizeBytes":"7123"}
+{"name":"clipboard_agent.log","sizeBytes":"1174"}
+{"name":"clipboard_agent.py","sizeBytes":"608"}
+{"name":"clipboard_agent_original.py","sizeBytes":"14562"}
+{"name":"clipboard_agent_utf8.py","sizeBytes":"18147"}
+{"name":"clipboard_debug.log","sizeBytes":"4875"}
+{"name":"clipboard_listener_code.py","sizeBytes":"7947"}
+{"name":"commit.patch","sizeBytes":"5628"}
+{"name":"config.json","sizeBytes":"18"}
+{"name":"conversations","isDir":true}
+{"name":"core","isDir":true}
+{"name":"crash.log","sizeBytes":"129"}
+{"name":"create_linux_release.sh","sizeBytes":"3504"}
+{"name":"csm_dump.txt","sizeBytes":"43713"}
+{"name":"cursor_b64.txt","sizeBytes":"1084"}
+{"name":"defs.txt","sizeBytes":"19880"}
+{"name":"defs_utf8.txt","sizeBytes":"9942"}
+{"name":"delayed_rendering.patch","sizeBytes":"39950"}
+{"name":"deploy_elevated.ps1","sizeBytes":"667"}
+{"name":"diff.txt","sizeBytes":"2491466"}
+{"name":"diff_out.txt","sizeBytes":"403228"}
+{"name":"dist","isDir":true}
+{"name":"dist_nuitka","isDir":true}
+{"name":"dist_nuitka_agent","isDir":true}
+{"name":"dist_nuitka_clip","isDir":true}
+{"name":"dist_nuitka_service","isDir":true}
+{"name":"dist_nuitka_service_onefile","isDir":true}
+{"name":"dist_nuitka_signaling","isDir":true}
+{"name":"dist_service","isDir":true}
+{"name":"dist_signaling","isDir":true}
+{"name":"dist_standalone","isDir":true}
+{"name":"do_extract_themes.py","sizeBytes":"1699"}
+{"name":"do_fix_config.py","sizeBytes":"1767"}
+{"name":"do_fix_lint.py","sizeBytes":"2670"}
+{"name":"do_fix_lint2.py","sizeBytes":"2252"}
+{"name":"do_fix_signaling.py","sizeBytes":"882"}
+{"name":"do_patch_all.py","sizeBytes":"61357"}
+{"name":"do_refactor_phase1.py","sizeBytes":"21018"}
+{"name":"do_refactor_phase2.py","sizeBytes":"11078"}
+{"name":"do_refactor_phase3.py","sizeBytes":"15117"}
+{"name":"do_refactor_phase4_1.py","sizeBytes":"26423"}
+{"name":"do_refactor_phase4_2.py","sizeBytes":"1886"}
+{"name":"do_refactor_phase5_1.py","sizeBytes":"2470"}
+{"name":"do_refactor_phase5_2.py","sizeBytes":"2843"}
+{"name":"do_refactor_phase6.py","sizeBytes":"1711"}
+{"name":"do_swap.py","sizeBytes":"1172"}
+{"name":"empty_keys.txt","sizeBytes":"868"}
+{"name":"export_conversations.py","sizeBytes":"3793"}
+{"name":"extract.py","sizeBytes":"1518"}
+{"name":"extract_fm.py","sizeBytes":"2223"}
+{"name":"extract_theme_logic.py","sizeBytes":"4598"}
+{"name":"find_bytesio.txt","sizeBytes":"144"}
+{"name":"find_missing_i18n.py","sizeBytes":"1428"}
+{"name":"find_out.txt","sizeBytes":"115"}
+{"name":"find_out2.txt","sizeBytes":"797"}
+{"name":"find_ping.txt","sizeBytes":"3021"}
+{"name":"find_types.py","sizeBytes":"215"}
+{"name":"fix2.py","sizeBytes":"212"}
+{"name":"fix3.py","sizeBytes":"935"}
+{"name":"fix4.py","sizeBytes":"2756"}
+{"name":"fix_android_punch.py","sizeBytes":"589"}
+{"name":"fix_android_signaling_port.py","sizeBytes":"1130"}
+{"name":"fix_app.py","sizeBytes":"1860"}
+{"name":"fix_app_ini.py","sizeBytes":"533"}
+{"name":"fix_clip_import.py","sizeBytes":"1359"}
+{"name":"fix_components_dangling.py","sizeBytes":"534"}
+{"name":"fix_dangling.py","sizeBytes":"506"}
+{"name":"fix_dangling2.py","sizeBytes":"466"}
+{"name":"fix_dialog_pos.py","sizeBytes":"2899"}
+{"name":"fix_dialog_pos2.py","sizeBytes":"2241"}
+{"name":"fix_download_dialog.py","sizeBytes":"7430"}
+{"name":"fix_download_dialog2.py","sizeBytes":"4301"}
+{"name":"fix_download_dialog3.py","sizeBytes":"2267"}
+{"name":"fix_download_dialog4.py","sizeBytes":"1824"}
+{"name":"fix_download_dialog5.py","sizeBytes":"1601"}
+{"name":"fix_export_template.py","sizeBytes":"796"}
+{"name":"fix_fonts.py","sizeBytes":"1075"}
+{"name":"fix_globals.py","sizeBytes":"1347"}
+{"name":"fix_hwid.py","sizeBytes":"722"}
+{"name":"fix_i18n.py","sizeBytes":"5042"}
+{"name":"fix_indent.py","sizeBytes":"1438"}
+{"name":"fix_indent2.py","sizeBytes":"1095"}
+{"name":"fix_pd.py","sizeBytes":"8634"}
+{"name":"fix_pd_threadsafe.py","sizeBytes":"3473"}
+{"name":"fix_pd_threadsafe2.py","sizeBytes":"3460"}
+{"name":"fix_pd_threadsafe3.py","sizeBytes":"2317"}
+{"name":"fix_pd_visibility.py","sizeBytes":"1560"}
+{"name":"fix_pd_visibility2.py","sizeBytes":"1670"}
+{"name":"fix_power_color.py","sizeBytes":"897"}
+{"name":"fix_service.py","sizeBytes":"262"}
+{"name":"fix_strings.py","sizeBytes":"6394"}
+{"name":"fix_strings2.py","sizeBytes":"4761"}
+{"name":"fix_syntax.py","sizeBytes":"464"}
+{"name":"fix_syntax2.py","sizeBytes":"379"}
+{"name":"fix_syntax3.py","sizeBytes":"528"}
+{"name":"fix_syntax4.py","sizeBytes":"308"}
+{"name":"fix_titlebar.py","sizeBytes":"1147"}
+{"name":"fix_titlebar2.py","sizeBytes":"1117"}
+{"name":"fix_upload.py","sizeBytes":"8974"}
+{"name":"fix_upload2.py","sizeBytes":"4476"}
+{"name":"fix_win7.py","sizeBytes":"1669"}
+{"name":"fix_win7_fonts.py","sizeBytes":"1138"}
+{"name":"fix_withdraw.py","sizeBytes":"486"}
+{"name":"fix_xml.py","sizeBytes":"1076"}
+{"name":"fm_crash.txt","sizeBytes":"227"}
+{"name":"gen_lang_template.py","sizeBytes":"2302"}
+{"name":"get_theme.txt","sizeBytes":"104"}
+{"name":"get_theme_utf8.txt","sizeBytes":"54"}
+{"name":"grep_results.txt","sizeBytes":"2606"}
+{"name":"grep_results2.txt","sizeBytes":"145"}
+{"name":"grep_results3.txt","sizeBytes":"318"}
+{"name":"grep_results4.txt","sizeBytes":"237"}
+{"name":"grep_results5.txt"}
+{"name":"grep_results6.txt","sizeBytes":"5010"}
+{"name":"grep_results7.txt","sizeBytes":"427"}
+{"name":"grep_results8.txt"}
+{"name":"gui","isDir":true}
+{"name":"gui.log","sizeBytes":"3395"}
+{"name":"gui_log.txt","sizeBytes":"94"}
+{"name":"host.py","sizeBytes":"7521"}
+{"name":"install.bat","sizeBytes":"2806"}
+{"name":"installer.iss","sizeBytes":"4588"}
+{"name":"keys.txt","sizeBytes":"11883"}
+{"name":"lan_keys.txt","sizeBytes":"708"}
+{"name":"lan_peers.json","sizeBytes":"513"}
+{"name":"lang","isDir":true}
+{"name":"lang_update_report.txt","sizeBytes":"257"}
+{"name":"linux_deploy","isDir":true}
+{"name":"linux_service_loop.py","sizeBytes":"6844"}
+{"name":"magic_wand.py","sizeBytes":"1296"}
+{"name":"menus.txt","sizeBytes":"2058"}
+{"name":"missing_en.json","sizeBytes":"265"}
+{"name":"missing_i18n.txt","sizeBytes":"4359"}
+{"name":"missing_i18n_all.txt","sizeBytes":"50803"}
+{"name":"missing_keys.txt","sizeBytes":"1113"}
+{"name":"missing_langs.json","sizeBytes":"1201"}
+{"name":"monitor-1.png","sizeBytes":"25876"}
+{"name":"mouse_hook_log.txt","sizeBytes":"40091"}
+{"name":"move_tooltip.py","sizeBytes":"849"}
+{"name":"mysetup.exe","sizeBytes":"1954044"}
+{"name":"network","isDir":true}
+{"name":"nuitka-crash-report.xml","sizeBytes":"1078668"}
+{"name":"old_app.py","sizeBytes":"1280476"}
+{"name":"old_code.json","sizeBytes":"5"}
+{"name":"old_code.py","sizeBytes":"994"}
+{"name":"original_app.py","sizeBytes":"78468"}
+{"name":"os_utils","isDir":true}
+{"name":"out.txt","sizeBytes":"16"}
+{"name":"out2.txt","sizeBytes":"437"}
+{"name":"out3.txt","sizeBytes":"1683"}
+{"name":"out4.txt","sizeBytes":"2889"}
+{"name":"out5.txt","sizeBytes":"206"}
+{"name":"out_defs.txt","sizeBytes":"9136"}
+{"name":"outline.txt","sizeBytes":"1744"}
+{"name":"output_search.txt","sizeBytes":"3668"}
+{"name":"patch.py","sizeBytes":"5709"}
+{"name":"patch2.py","sizeBytes":"7536"}
+{"name":"patch3.py","sizeBytes":"8895"}
+{"name":"patch4.py","sizeBytes":"1474"}
+{"name":"patch5.py","sizeBytes":"3226"}
+{"name":"patch_active_time.py","sizeBytes":"1038"}
+{"name":"patch_all.py","sizeBytes":"7510"}
+{"name":"patch_all_regex.py","sizeBytes":"3450"}
+{"name":"patch_app.py","sizeBytes":"6390"}
+{"name":"patch_app2.py","sizeBytes":"5978"}
+{"name":"patch_app4.py","sizeBytes":"22581"}
+{"name":"patch_app_i18n.py","sizeBytes":"1660"}
+{"name":"patch_entry.py","sizeBytes":"794"}
+{"name":"patch_entry2.py","sizeBytes":"2176"}
+{"name":"patch_focus.py","sizeBytes":"2507"}
+{"name":"patch_hybrid.py","sizeBytes":"7059"}
+{"name":"patch_i18n_complete.py","sizeBytes":"11238"}
+{"name":"patch_integrate.py","sizeBytes":"10098"}
+{"name":"patch_keyboard.py","sizeBytes":"1297"}
+{"name":"patch_label.py","sizeBytes":"1185"}
+{"name":"patch_label2.py","sizeBytes":"2297"}
+{"name":"patch_label3.py","sizeBytes":"709"}
+{"name":"patch_label4.py","sizeBytes":"1302"}
+{"name":"patch_missing_i18n_smart.py","sizeBytes":"2879"}
+{"name":"patch_mp.py","sizeBytes":"4650"}
+{"name":"patch_poll.py","sizeBytes":"2335"}
+{"name":"patch_power_bg.py","sizeBytes":"2245"}
+{"name":"patch_power_symbol.py","sizeBytes":"3142"}
+{"name":"patch_race.py","sizeBytes":"2700"}
+{"name":"patch_service.py","sizeBytes":"888"}
+{"name":"patch_ui.py","sizeBytes":"1115"}
+{"name":"patch_uipi.py","sizeBytes":"2246"}
+{"name":"patch_wingdings.py","sizeBytes":"1885"}
+{"name":"patch_wndproc.py","sizeBytes":"1979"}
+{"name":"pci.txt","sizeBytes":"1238"}
+{"name":"power_bg_test.png","sizeBytes":"282"}
+{"name":"power_test.png","sizeBytes":"222"}
+{"name":"power_test1.png","sizeBytes":"172"}
+{"name":"power_test2.png","sizeBytes":"167"}
+{"name":"power_test3.png","sizeBytes":"271"}
+{"name":"power_test_single.png","sizeBytes":"258"}
+{"name":"process_info.py","sizeBytes":"891"}
+{"name":"pyflakes_out.txt","sizeBytes":"42428"}
+{"name":"pyflakes_out2.txt","sizeBytes":"39202"}
+{"name":"pyinstaller","isDir":true}
+{"name":"python-3.8.10-amd64.exe","sizeBytes":"28296784"}
+{"name":"python-3.8.10.exe","sizeBytes":"27204536"}
+{"name":"qc","sizeBytes":"26"}
+{"name":"query","sizeBytes":"26"}
+{"name":"readme.txt","sizeBytes":"1253"}
+{"name":"real_cursor.txt","sizeBytes":"352"}
+{"name":"rebuild.ps1","sizeBytes":"518"}
+{"name":"rebuild.sh","sizeBytes":"2715"}
+{"name":"rebuild_32bit.ps1","sizeBytes":"1317"}
+{"name":"rebuild_app.py","sizeBytes":"3648"}
+{"name":"register_task.ps1","sizeBytes":"2247"}
+{"name":"remove_bg.py","sizeBytes":"1383"}
+{"name":"remove_perfect_bg.py","sizeBytes":"1583"}
+{"name":"remove_solid_bg.py","sizeBytes":"1296"}
+{"name":"rename_app.py","sizeBytes":"1147"}
+{"name":"render_lines.txt","sizeBytes":"1059"}
+{"name":"replace_bg.py","sizeBytes":"287"}
+{"name":"replace_pd.py","sizeBytes":"7047"}
+{"name":"replace_upload.py","sizeBytes":"6972"}
+{"name":"replace_upload_force.py","sizeBytes":"4811"}
+{"name":"requirements.txt","sizeBytes":"174"}
+{"name":"revert_android_signaling_port.py","sizeBytes":"988"}
+{"name":"revert_bg.py","sizeBytes":"281"}
+{"name":"run_debug.bat","sizeBytes":"82"}
+{"name":"scratch","isDir":true}
+{"name":"scratch.py","sizeBytes":"984"}
+{"name":"scratch.txt","sizeBytes":"466"}
+{"name":"scratch10.txt","sizeBytes":"889"}
+{"name":"scratch2","isDir":true}
+{"name":"scratch2.py","sizeBytes":"952"}
+{"name":"scratch2.txt","sizeBytes":"1528"}
+{"name":"scratch3.txt","sizeBytes":"952"}
+{"name":"scratch4.txt","sizeBytes":"1031"}
+{"name":"scratch5.txt","sizeBytes":"1087"}
+{"name":"scratch6.txt","sizeBytes":"8915"}
+{"name":"scratch7.txt","sizeBytes":"20999"}
+{"name":"scratch8.txt","sizeBytes":"1762"}
+{"name":"scratch9.txt","sizeBytes":"3604"}
+{"name":"scratch_border.py","sizeBytes":"1312"}
+{"name":"scratch_check.py","sizeBytes":"1738"}
+{"name":"scratch_lan_direct.txt","sizeBytes":"6946"}
+{"name":"scratch_menu_test.py","sizeBytes":"2010"}
+{"name":"scratch_new_connect.py","sizeBytes":"11633"}
+{"name":"scratch_old_lan.txt","sizeBytes":"18864"}
+{"name":"scratch_out.txt","sizeBytes":"2823"}
+{"name":"scratch_test.py","sizeBytes":"438233"}
+{"name":"scratch_test_server.py","sizeBytes":"2163"}
+{"name":"search.py","sizeBytes":"578"}
+{"name":"search_out.txt","sizeBytes":"8667"}
+{"name":"search_out2.txt","sizeBytes":"408"}
+{"name":"search_output.txt","sizeBytes":"146"}
+{"name":"search_res.txt","sizeBytes":"15620"}
+{"name":"search_result.txt","sizeBytes":"156"}
+{"name":"search_result_key_event.txt","sizeBytes":"158"}
+{"name":"search_results.txt","sizeBytes":"6164"}
+{"name":"search_results2.txt","sizeBytes":"670"}
+{"name":"search_results3.txt","sizeBytes":"48"}
+{"name":"search_results4.txt","sizeBytes":"697"}
+{"name":"search_results5.txt","sizeBytes":"145"}
+{"name":"search_results6.txt","sizeBytes":"1382"}
+{"name":"search_results7.txt","sizeBytes":"26"}
+{"name":"search_results_connected.txt","sizeBytes":"181"}
+{"name":"search_results_destroy.txt","sizeBytes":"3424"}
+{"name":"search_results_handshake.txt","sizeBytes":"61"}
+{"name":"search_results_hwid.txt","sizeBytes":"22"}
+{"name":"search_results_local_ip.txt","sizeBytes":"298"}
+{"name":"search_results_lock.txt"}
+{"name":"search_results_mutex.txt","sizeBytes":"1517"}
+{"name":"search_results_wndproc.txt","sizeBytes":"43"}
+{"name":"server.ini","sizeBytes":"113"}
+{"name":"service.log","sizeBytes":"29338"}
+{"name":"service_diff.txt","sizeBytes":"2666"}
+{"name":"service_path.txt","sizeBytes":"539"}
+{"name":"service_qc.txt"}
+{"name":"session_pass.txt","sizeBytes":"4"}
+{"name":"setup.exe","sizeBytes":"41273625"}
+{"name":"setup_ui.txt","sizeBytes":"62"}
+{"name":"setup_ui_utf8.txt","sizeBytes":"33"}
+{"name":"signaling_log.txt","sizeBytes":"412"}
+{"name":"signaling_server.ini","sizeBytes":"192"}
+{"name":"signaling_server.py","sizeBytes":"17633"}
+{"name":"signaling_server.spec","sizeBytes":"744"}
+{"name":"signaling_server.zip","sizeBytes":"12823872"}
+{"name":"smooth_edges.py","sizeBytes":"552"}
+{"name":"start_agent.ps1","sizeBytes":"430"}
+{"name":"stderr.log"}
+{"name":"stop_results.txt","sizeBytes":"1544"}
+{"name":"strings.txt","sizeBytes":"2757"}
+{"name":"strings_host.txt","sizeBytes":"8410"}
+{"name":"strings_nm.txt","sizeBytes":"9530"}
+{"name":"temp","isDir":true}
+{"name":"temp.py","sizeBytes":"568067"}
+{"name":"temp.txt","sizeBytes":"1646"}
+{"name":"temp_550.py","sizeBytes":"870732"}
+{"name":"temp_app.py","sizeBytes":"867526"}
+{"name":"temp_app_utf8.py","sizeBytes":"303624"}
+{"name":"temp_clip.txt","sizeBytes":"6940"}
+{"name":"temp_clip2.txt","sizeBytes":"5594"}
+{"name":"temp_clip3.txt","sizeBytes":"5783"}
+{"name":"temp_clip_agent.txt","sizeBytes":"3812"}
+{"name":"temp_clip_agent2.txt","sizeBytes":"5404"}
+{"name":"temp_clip_agent3.txt","sizeBytes":"19129"}
+{"name":"temp_clip_agent_end.txt","sizeBytes":"4996"}
+{"name":"temp_clip_init.txt","sizeBytes":"533"}
+{"name":"temp_clip_listener.txt","sizeBytes":"4708"}
+{"name":"temp_clip_packet.txt","sizeBytes":"5705"}
+{"name":"temp_dialog.py","sizeBytes":"1644"}
+{"name":"temp_error.txt","sizeBytes":"2640"}
+{"name":"temp_extract.txt","sizeBytes":"7364"}
+{"name":"temp_f838_agent.py","sizeBytes":"7829"}
+{"name":"temp_f838_app.py","sizeBytes":"303624"}
+{"name":"temp_f838_listener.py","sizeBytes":"7950"}
+{"name":"temp_get_exe.txt","sizeBytes":"1239"}
+{"name":"temp_grep.txt","sizeBytes":"560"}
+{"name":"temp_grep2.txt","sizeBytes":"1202"}
+{"name":"temp_header.txt","sizeBytes":"1103"}
+{"name":"temp_headless.txt","sizeBytes":"5006"}
+{"name":"temp_main.txt","sizeBytes":"3985"}
+{"name":"temp_out.txt","sizeBytes":"8473"}
+{"name":"temp_stable_app.py","sizeBytes":"386500"}
+{"name":"test.iss","sizeBytes":"566"}
+{"name":"test_client.py","sizeBytes":"2011"}
+{"name":"test_clip.py","sizeBytes":"1206"}
+{"name":"test_clip2.py","sizeBytes":"1296"}
+{"name":"test_clip_hwnd.py","sizeBytes":"566"}
+{"name":"test_clipboard.py","sizeBytes":"836"}
+{"name":"test_clipboard_copy.txt","sizeBytes":"26"}
+{"name":"test_connect.py","sizeBytes":"367"}
+{"name":"test_copy_dummy.txt","sizeBytes":"4"}
+{"name":"test_cursor.png","sizeBytes":"1024"}
+{"name":"test_delayed.py","sizeBytes":"1592"}
+{"name":"test_err.log","sizeBytes":"1186"}
+{"name":"test_err2.txt","sizeBytes":"400"}
+{"name":"test_event.py","sizeBytes":"312"}
+{"name":"test_explorer.py","sizeBytes":"861"}
+{"name":"test_file_descriptor.py","sizeBytes":"4188"}
+{"name":"test_floodfill.py","sizeBytes":"1105"}
+{"name":"test_global.py","sizeBytes":"49"}
+{"name":"test_headless.log"}
+{"name":"test_headless2.log"}
+{"name":"test_label.py","sizeBytes":"934"}
+{"name":"test_leak.py","sizeBytes":"519"}
+{"name":"test_leak2.py","sizeBytes":"622"}
+{"name":"test_listener.py","sizeBytes":"3430"}
+{"name":"test_mac.py","sizeBytes":"1741"}
+{"name":"test_menu.py","sizeBytes":"7154"}
+{"name":"test_mp_socket.build","isDir":true}
+{"name":"test_mp_socket.cmd","sizeBytes":"968"}
+{"name":"test_mp_socket.exe","sizeBytes":"688640"}
+{"name":"test_mp_socket.py","sizeBytes":"985"}
+{"name":"test_msgbox.py","sizeBytes":"758"}
+{"name":"test_mutex.py","sizeBytes":"974"}
+{"name":"test_notepad.py","sizeBytes":"1202"}
+{"name":"test_notify2.py","sizeBytes":"1255"}
+{"name":"test_notify_drives.py","sizeBytes":"828"}
+{"name":"test_ole.py","sizeBytes":"235"}
+{"name":"test_paths.build","isDir":true}
+{"name":"test_paths.dist","isDir":true}
+{"name":"test_paths.exe","sizeBytes":"7050752"}
+{"name":"test_paths.log","sizeBytes":"257"}
+{"name":"test_paths.onefile-build","isDir":true}
+{"name":"test_paths.py","sizeBytes":"384"}
+{"name":"test_pd.py","sizeBytes":"4569"}
+{"name":"test_pipe2.py","sizeBytes":"2489"}
+{"name":"test_pipe3.py","sizeBytes":"2598"}
+{"name":"test_ps.py","sizeBytes":"495"}
+{"name":"test_pynput.py","sizeBytes":"1869"}
+{"name":"test_render.py","sizeBytes":"1591"}
+{"name":"test_sas.py","sizeBytes":"766"}
+{"name":"test_screen.png","sizeBytes":"3779990"}
+{"name":"test_shell_notify.py","sizeBytes":"2029"}
+{"name":"test_taskmgr.ps1","sizeBytes":"28"}
+{"name":"test_timeout.py","sizeBytes":"249"}
+{"name":"test_tk.py","sizeBytes":"4096"}
+{"name":"test_tk_daemon.py","sizeBytes":"221"}
+{"name":"test_ttk.py","sizeBytes":"287"}
+{"name":"test_uac_desktop_switch.py","sizeBytes":"6449"}
+{"name":"test_uac_spawn.py","sizeBytes":"2506"}
+{"name":"test_uipi.py","sizeBytes":"388"}
+{"name":"translate_all.py","sizeBytes":"2511"}
+{"name":"unified_app_line.txt","sizeBytes":"64"}
+{"name":"unified_app_line_utf8.txt","sizeBytes":"34"}
+{"name":"unifiedapp_methods.txt","sizeBytes":"8712"}
+{"name":"uninstall.bat","sizeBytes":"1457"}
+{"name":"unregister_task.ps1","sizeBytes":"731"}
+{"name":"update_lang_files.py","sizeBytes":"1404"}
+{"name":"update_langs.py","sizeBytes":"1495"}
+{"name":"utils","isDir":true}
+{"name":"vietnamese_strings.txt","sizeBytes":"1689"}
+{"name":"vn_lines.txt","sizeBytes":"6504"}
+{"name":"vn_strings.json","sizeBytes":"2061"}
+{"name":"window_config.json","sizeBytes":"49"}
+{"name":"windows_service.exe","sizeBytes":"9855880"}
+{"name":"windows_service.py","sizeBytes":"19576"}
+{"name":"windows_service.spec","sizeBytes":"763"}
+{"name":"windows_service_loop.py","sizeBytes":"28849"}
+{"name":"windows_service_loop.spec","sizeBytes":"918"}
+
+Summary: This directory contains 34 subdirectories and 421 files.
+
+[Action: grep_search]
+  CaseInsensitive: True
+  Includes: ['*.py', '*.bat', '*.sh']
+  IsRegex: False
+  MatchPerLine: True
+  Query: android
+  SearchPath: d:\Data\AG\remote_desktop
+  toolAction: Searching for 'android'
+  toolSummary: Searching for 'android'
+
+========== MODEL ==========
+Created At: 2026-08-01T00:26:05Z
+Completed At: 2026-08-01T00:26:15Z
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":469,"LineContent":"            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":471,"LineContent":"                if hasattr(sys, 'getandroidapilevel'):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":472,"LineContent":"                    is_android = True"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":475,"LineContent":"            if is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":485,"LineContent":"                    title_text += f\" - MC-Android {serial}\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":18,"LineContent":"                show_cad_button = show_buttons and not is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":19,"LineContent":"                show_file_button = show_buttons and is_android\"\"\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":31,"LineContent":"                show_cad_button = show_buttons and not is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":32,"LineContent":"                show_file_button = show_buttons and is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":33,"LineContent":"                show_power_button = show_buttons and is_android\"\"\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\add_power_button.py","LineNumber":134,"LineContent":"                                print(\"[Client] Power Button Clicked. Sending power key event to Android.\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":6,"LineContent":"android_res_dir = r\"d:\\SOFT\\Coder\\Android\\app\\src\\main\\res\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":20,"LineContent":"        folder = os.path.join(android_res_dir, f\"mipmap-{density}\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":40,"LineContent":"    anydpi_folder = os.path.join(android_res_dir, \"mipmap-anydpi-v26\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":45,"LineContent":"    bg_xml = os.path.join(android_res_dir, \"drawable\", \"ic_launcher_background.xml\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":46,"LineContent":"    fg_xml = os.path.join(android_res_dir, \"drawable\", \"ic_launcher_foreground.xml\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_android_icon.py","LineNumber":52,"LineContent":"    print(\"Successfully applied the new icon to the Android project!\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\build_android.bat","LineNumber":2,"LineContent":"cd /d d:\\SOFT\\Coder\\Android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":122,"LineContent":"                                    comp = f\"MC-Android {serial}\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":262,"LineContent":"def run_client_viewer_loop(sock, host_w, host_h, computer_name=\"\", is_domain=False, partner_id=\"\", reconnect_queue=None, partner_pass=\"\", is_android=False, os_release=\"\"):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":305,"LineContent":"        # [Tùy chỉnh Android] Thu nhỏ màn hình mặc định nếu là thiết bị di động (màn hình dọc)"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":469,"LineContent":"            if is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":578,"LineContent":"                show_cad_button = show_buttons and not is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":579,"LineContent":"                show_file_button = show_buttons and is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":580,"LineContent":"                show_power_button = show_buttons and is_android"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":664,"LineContent":"                        if is_android and drag_start_pos is not None:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":665,"LineContent":"                            # Record drag path points for Android swipes/patterns"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":698,"LineContent":"                                threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), daemon=True).start()"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":702,"LineContent":"                                print(\"[Client] Power Button Clicked. Sending power key event to Android.\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":774,"LineContent":"                                if drag_start_pos and is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":829,"LineContent":"                            if is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":843,"LineContent":"                                # For Android, we inject characters directly into text fields using Accessibility."}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":854,"LineContent":"                                    char_to_send = \"enter\" # handled by Android handleKey"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\viewer.py","LineNumber":893,"LineContent":"                    # cho chất lượng upscale mượt hơn nhiều (đặc biệt khi xem Android 1080p)"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\host.py","LineNumber":523,"LineContent":"                    is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\host.py","LineNumber":524,"LineContent":"                    if hasattr(sys, 'getandroidapilevel'):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\host.py","LineNumber":525,"LineContent":"                        is_android = True"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\host.py","LineNumber":526,"LineContent":"                    if is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\host.py","LineNumber":536,"LineContent":"                            computer_name = f\"MC-Android {serial}\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":118,"LineContent":"            is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":119,"LineContent":"            if hasattr(sys, 'getandroidapilevel'):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":120,"LineContent":"                is_android = True"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":121,"LineContent":"            if is_android:"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":131,"LineContent":"                    comp_name = f\"MC-Android {serial}\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":1289,"LineContent":"                is_android = res.get(\"is_android\", False)"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":1438,"LineContent":"                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android, os_release)"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":1473,"LineContent":"    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name=\"\", zalo_phone=\"\", is_domain=False, partner_id=\"\", partner_pass=\"\", is_android=False, os_release=\"\"):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\core\\network_manager.py","LineNumber":1477,"LineContent":"            p = mp.Process(target=run_client_viewer_loop, args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release), daemon=True)"}
+{"File":"d:\\Data\\AG\\remote_desktop\\extract_fm.py","LineNumber":42,"LineContent":"code = code.replace(\"def open_transfer_window():\", \"def open_transfer_window(computer_name, is_android, send_event):\")"}
+{"File":"d:\\Data\\AG\\remote_desktop\\extract_fm.py","LineNumber":71,"LineContent":"        line = line.replace(\"target=open_transfer_window\", \"target=open_transfer_window, args=(computer_name, is_android, send_event)\")"}
+(...65 more results not shown)
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\build_android.bat
+  toolAction: Viewing build_android.bat
+  toolSummary: Viewing build_android.bat
+
+========== MODEL ==========
+Created At: 2026-08-01T00:26:20Z
+Completed At: 2026-08-01T00:26:20Z
+File Path: `file:///d:/Data/AG/remote_desktop/build_android.bat`
+Total Lines: 4
+Total Bytes: 69
+Showing lines 1 to 4
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: @echo off
+2: cd /d d:\SOFT\Coder\Android
+3: call gradlew.bat assembleDebug
+4: 
+The above content shows the entire, complete file contents of the requested file.
+
+[Action: list_dir]
+  DirectoryPath: d:\SOFT\Coder\Android
+  toolAction: Listing directory contents
+  toolSummary: Listing directory contents
+
+========== MODEL ==========
+Created At: 2026-08-01T00:26:26Z
+Completed At: 2026-08-01T00:26:31Z
+{"name":".git","isDir":true}
+{"name":".gitignore","sizeBytes":"225"}
+{"name":".gradle","isDir":true}
+{"name":".idea","isDir":true}
+{"name":".kotlin","isDir":true}
+{"name":"Studio","isDir":true}
+{"name":"app","isDir":true}
+{"name":"avd","isDir":true}
+{"name":"build","isDir":true}
+{"name":"build.gradle.kts","sizeBytes":"218"}
+{"name":"buildozer.spec","sizeBytes":"1031"}
+{"name":"gradle","isDir":true}
+{"name":"gradle.properties","sizeBytes":"1120"}
+{"name":"gradlew","sizeBytes":"8728"}
+{"name":"gradlew.bat","sizeBytes":"2937"}
+{"name":"local.properties","sizeBytes":"432"}
+{"name":"remotedesktop_p2p-1.0-arm64-v8a-debug.apk","sizeBytes":"45082423"}
+{"name":"settings.gradle.kts","sizeBytes":"626"}
+
+Summary: This directory contains 9 subdirectories and 9 files.
+
+[Action: view_file]
+  AbsolutePath: d:\SOFT\Coder\Android\buildozer.spec
+  toolAction: Viewing buildozer.spec
+  toolSummary: Viewing buildozer.spec
+[Action: view_file]
+  AbsolutePath: d:\SOFT\Coder\Android\app\build.gradle.kts
+  toolAction: Viewing build.gradle.kts
+  toolSummary: Viewing build.gradle.kts
+
+========== MODEL ==========
+Created At: 2026-08-01T00:26:36Z
+Completed At: 2026-08-01T00:26:39Z
+File Path: `file:///d:/SOFT/Coder/Android/buildozer.spec`
+Total Lines: 32
+Total Bytes: 1031
+Showing lines 1 to 32
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: 
+2: # ==============================================================================
+3: #                               buildozer.spec
+4: # ==============================================================================
+5: # File cấu hình để Buildozer biên dịch Python/Kivy thành Android APK (.apk)
+6: # Sử dụng: Chạy lệnh "buildozer -v android debug" trong Ubuntu/macOS
+7: # ==============================================================================
+8: 
+9: [app]
+10: 
+11: title = Remote Desktop ADB P2P
+12: package.name = remotedesktop_p2p
+13: package.domain = com.vietnam.remotedesktop
+14: source.dir = .
+15: source.include_exts = py,png,jpg,kv,atlas,json,txt
+16: version = 1.0
+17: requirements = python3,kivy,pillow,pyjnius
+18: 
+19: orientation = portrait
+20: fullscreen = 0
+21: 
+22: # Quyền Internet và chạy nền
+23: android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,SYSTEM_ALERT_WINDOW,FOREGROUND_SERVICE
+24: 
+25: android.api = 34
+26: android.minapi = 21
+27: android.sdk = 34
+28: 
+29: icon.filename = %(source.dir)s/app_icon.png
+30: android.archs = arm64-v8a
+31: 
+32: 
+The above content shows the entire, complete file contents of the requested file.
+
+========== MODEL ==========
+Created At: 2026-08-01T00:26:36Z
+Completed At: 2026-08-01T00:26:42Z
+File Path: `file:///d:/SOFT/Coder/Android/app/build.gradle.kts`
+Total Lines: 59
+Total Bytes: 1773
+Showing lines 1 to 59
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: plugins {
+2:     alias(libs.plugins.android.application)
+3:     alias(libs.plugins.kotlin.compose)
+4: }
+5: 
+6: android {
+7:     namespace = "com.example.p2pdroidremote"
+8:     compileSdk {
+9:         version = release(36) {
+10:             minorApiLevel = 1
+11:         }
+12:     }
+13: 
+14:     defaultConfig {
+15:         applicationId = "com.example.p2pdroidremote"
+16:         minSdk = 21
+17:         targetSdk = 36
+18:         versionCode = 1
+19:         versionName = "1.0"
+20: 
+21:         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+22:     }
+23: 
+24:     buildTypes {
+25:         release {
+26:             optimization {
+27:                 enable = false
+28:             }
+29:         }
+30:     }
+31:     compileOptions {
+32:         sourceCompatibility = JavaVersion.VERSION_11
+33:         targetCompatibility = JavaVersion.VERSION_11
+34:     }
+35:     buildFeatures {
+36:         compose = true
+37:     }
+38: }
+39: 
+40: dependencies {
+41:     implementation(platform(libs.androidx.compose.bom))
+42:     implementation(libs.androidx.activity.compose)
+43:     implementation(libs.androidx.compose.material3)
+44:     implementation(libs.androidx.compose.material.icons.extended)
+45:     implementation(libs.androidx.compose.ui)
+46:     implementation(libs.androidx.compose.ui.graphics)
+47:     implementation(libs.androidx.compose.ui.tooling.preview)
+48:     implementation(libs.androidx.core.ktx)
+49:     implementation(libs.androidx.lifecycle.runtime.ktx)
+50:     implementation(libs.okhttp)
+51:     implementation(libs.tink)
+52:     testImplementation(libs.junit)
+53:     androidTestImplementation(platform(libs.androidx.compose.bom))
+54:     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+55:     androidTestImplementation(libs.androidx.espresso.core)
+56:     androidTestImplementation(libs.androidx.junit)
+57:     debugImplementation(libs.androidx.compose.ui.test.manifest)
+58:     debugImplementation(libs.androidx.compose.ui.tooling)
+59: }
+The above content shows the entire, complete file contents of the requested file.
+
+========== MODEL ==========
+Chào bạn, việc đưa ứng dụng lên iOS là một bước tiến rất tốt. Theo quy tắc mặc định, chúng ta sẽ ưu tiên môi trường macOS, và điều này hoàn toàn trùng khớp vì để build app cho iOS, bạn **bắt buộc phải sử dụng macOS** (có cài đặt Xcode).
+
+Qua kiểm tra thư mục `d:\SOFT\Coder\Android`, tôi thấy bạn đang có 2 hướng phát triển cho Android trong cùng một thư mục:
+1. File `buildozer.spec` (dùng **Python + Kivy**).
+2. Mã nguồn native Android với `build.gradle.kts` (dùng **Kotlin + Jetpack Compose**).
+
+Dựa vào việc bạn đang dùng framework nào làm chủ đạo cho Android, dưới đây là các lộ trình tương ứng để mang app lên iOS:
+
+### 1. Nếu bạn đang dùng Python/Kivy (như file `buildozer.spec`)
+Bạn có thể tiếp tục dùng Python cho iOS thông qua **kivy-ios**. 
+* **Yêu cầu:** Máy Mac, Xcode, Command Line Tools.
+* **Cách thực hiện (trên macOS):**
+  1. Cài đặt `kivy-ios`: `pip install kivy-ios`
+  2. Dùng toolchain để build các thư viện nền tảng:
+     ```bash
+     toolchain build python3 kivy
+     ```
+  3. Tạo Xcode project cho app của bạn:
+     ```bash
+     toolchain create RemoteDesktopP2P <đường_dẫn_tới_code_python_kivy>
+     ```
+  4. Mở file `.xcodeproj` vừa được tạo ra bằng Xcode, cấu hình Signing & Capabilities (chọn team Apple Developer của bạn) và nhấn Run để build lên iPhone/iPad hoặc Simulator.
+
+### 2. Nếu bạn đang dùng Kotlin / Jetpack Compose (Native Android)
+Nếu app Android hiện tại của bạn là Kotlin native, cách tốt nhất để tái sử dụng code cho iOS là chuyển đổi sang **Compose Multiplatform (KMP - Kotlin Multiplatform)**.
+* Compose Multiplatform cho phép bạn dùng chung toàn bộ logic (network, socket) và cả giao diện (UI) giữa Android và iOS.
+* **Cách thực hiện:** Bạn sẽ cần cấu hình lại Gradle (thêm target `iosX64`, `iosArm64`, `iosSimulatorArm64`), tách code riêng biệt cho phần giao tiếp native của iOS, sau đó build thành framework để Xcode có thể chạy được. Hệ sinh thái KMP hiện tại hỗ trợ rất mạnh cho việc chia sẻ UI bằng Compose.
+
+### 3. Viết Native Client bằng Swift / SwiftUI
+Vì lõi Remote Desktop chủ yếu dựa trên giao tiếp Socket TCP/UDP và truyền tải frame hình ảnh, bạn hoàn toàn có thể viết một client độc lập cho iOS bằng **SwiftUI**.
+* **Ưu điểm:** Hiệu năng tốt nhất, cảm giác mượt mà và native nhất trên iOS.
+* **Nhược điểm:** Bạn phải bảo trì 2 mã nguồn UI tách biệt (Android và iOS).
+
+---
+
+**Bạn muốn đi theo hướng nào?** Bạn đang sử dụng codebase Kivy (Python) hay codebase Kotlin/Compose cho phiên bản Android hiện tại? Hãy cho tôi biết để tôi hỗ trợ bạn setup môi trường và viết code chi tiết cho iOS trên macOS!
+
+========== USER ==========
+app hiện tại của tôi đã có thể chạy trên MacOS, tôi có thể dùng code đó phát triển trên iOS được ko?
+
+========== MODEL ==========
+Rất tiếc là **bạn không thể mang nguyên si toàn bộ code hiện tại (chạy trên macOS) lên iOS được**, nhưng bạn **có thể tận dụng lại được phần lõi (Core Logic)**. 
+
+Dưới đây là phân tích chi tiết về những gì dùng được và không dùng được, cũng như giải pháp cho bạn:
+
+### 1. Phần KHÔNG THỂ dùng lại: Giao diện (GUI)
+App macOS hiện tại của bạn đang sử dụng **Tkinter** (và có thể là Pygame cho Viewer). 
+* **Lý do:** Tkinter là thư viện đồ họa dành riêng cho máy tính Desktop (dựa trên Tcl/Tk), nó hoàn toàn không được hỗ trợ trên môi trường di động như iOS hay Android. Giao diện dạng cửa sổ (windows) cũng không phù hợp với cảm ứng đa điểm trên màn hình điện thoại.
+* **Kết luận:** Bạn bắt buộc phải **viết lại phần giao diện** cho iOS.
+
+### 2. Phần CÓ THỂ dùng lại: Core Logic (Xử lý nền)
+Tất cả các đoạn code Python xử lý logic thuần túy không chạm tới giao diện đều có thể tái sử dụng trên iOS:
+* Logic mạng lưới (Socket, TCP/UDP, P2P Signaling).
+* Thuật toán mã hóa (Crypto).
+* Xử lý dữ liệu đa phương tiện, nén ảnh (nếu dùng các thư viện C/Python được biên dịch chéo hỗ trợ iOS).
+
+### 3. Giải pháp nếu bạn muốn tiếp tục viết bằng Python cho iOS
+Nếu bạn muốn tận dụng lại tối đa code Python hiện có và phát triển tiếp bản iOS bằng Python trên macOS, bạn có 3 hướng đi phổ biến sau:
+
+#### Hướng A: Sử dụng BeeWare (Khuyên dùng cho UI Native)
+BeeWare là một dự án tuyệt vời cho phép mang Python lên iOS, Android. 
+* **Cách hoạt động:** BeeWare cung cấp một thư viện UI tên là **Toga**. Toga sẽ gọi trực tiếp các thành phần giao diện gốc (Native) của iOS (như UIKit).
+* **Bạn cần làm gì:** Giữ nguyên thư mục `core`, `network` của bạn. Xóa phần code Tkinter và viết lại UI bằng **Toga**. Sau đó dùng lệnh `briefcase build ios` để tạo project Xcode.
+
+#### Hướng B: Sử dụng Kivy
+Kivy là framework Python nổi tiếng nhất để làm app đa nền tảng (đã có file `buildozer.spec` cho Android trong project của bạn).
+* **Cách hoạt động:** Kivy tự vẽ giao diện (giống các engine game) thay vì dùng UI gốc của iOS.
+* **Bạn cần làm gì:** Viết lại giao diện bằng ngôn ngữ `.kv` hoặc thư viện Kivy. Dùng `kivy-ios` để build ra app iOS.
+
+#### Hướng C: Sử dụng Flet (Dựa trên Flutter)
+Flet cho phép bạn viết UI bằng Python nhưng dưới nền tảng nó sẽ biên dịch ra Flutter.
+* **Bạn cần làm gì:** Viết lại UI bằng các component của Flet. Trải nghiệm UI/UX sẽ rất hiện đại và mượt mà tương đương Flutter.
+
+---
+
+**Tóm lại:** Nếu bạn muốn tận dụng codebase hiện tại, hãy tách bạch thật rõ ràng giữa phần **UI (giao diện)** và phần **Core (logic mạng)**. Bạn sẽ giữ lại phần Core, và chọn một trong 3 framework (BeeWare, Kivy, Flet) để thay thế cho Tkinter nhằm chạy được trên iOS.
+
+Bạn cảm thấy hứng thú với framework Python nào (BeeWare, Kivy, hay Flet) để tôi hướng dẫn bạn cách thiết lập cấu trúc lại project trên macOS?
+
+========== USER ==========
+cho tôi hỏi thêm 1 vấn đề nữa là khi build xong app (bên iOS) tôi phân phố như thế nào? có thể gửi file đóng gói như .apk bên android không?
+
+========== MODEL ==========
+Một câu hỏi rất hay và thực tế! Câu trả lời ngắn gọn là: **KHÔNG, việc phân phối trên iOS khắt khe hơn Android rất nhiều.** 
+
+Bên Android, bạn có file `.apk` và người dùng chỉ cần bật "Cài đặt từ nguồn không xác định" là xong. Nhưng Apple thì sử dụng hệ sinh thái đóng (bảo mật rất nghiêm ngặt). Bản build đóng gói của iOS có định dạng là **`.ipa`**, nhưng bạn **không thể** chỉ việc gửi file `.ipa` này cho người khác cài đặt dễ dàng như `.apk` được.
+
+Dưới đây là các cách thực tế để bạn phân phối ứng dụng iOS sau khi build xong:
+
+### 1. Phân phối chính thức qua App Store (Cách chuẩn nhất)
+* **Cách hoạt động:** Bạn upload app lên hệ thống của Apple, chờ họ duyệt, sau đó bất kỳ ai cũng có thể tải về từ App Store.
+* **Yêu cầu:** Bạn bắt buộc phải đăng ký tài khoản **Apple Developer Program** với phí **99 USD/năm** (khoảng 2.5 triệu VNĐ).
+* **Đánh giá:** Bắt buộc phải có nếu bạn muốn làm app chuyên nghiệp hoặc thương mại hóa.
+
+### 2. Phân phối qua TestFlight (Để Test / Dùng nội bộ)
+Apple cung cấp nền tảng TestFlight để gửi app cho người khác trải nghiệm trước mà không cần đưa lên App Store công khai.
+* **Cách hoạt động:** Người dùng cài app TestFlight, bạn gửi một link mời (Public Link) hoặc mời qua Email. Họ bấm vào link là cài được app của bạn.
+* **Hạn chế:** 
+  - Vẫn yêu cầu bạn phải có tài khoản Apple Developer 99 USD/năm.
+  - Bản build trên TestFlight sẽ hết hạn sau **90 ngày** (phải upload bản mới).
+  - Tối đa 10,000 người dùng thử.
+
+### 3. Cài đặt trực tiếp qua file `.ipa` (Ad-Hoc / Sideloading)
+Nếu bạn vẫn muốn gửi file `.ipa` giống như gửi `.apk`, đây là những trở ngại bạn sẽ gặp phải:
+
+* **Ad-Hoc (Phải đăng ký thiết bị):** Bạn có thể tạo ra file `.ipa` và gửi cho người khác cài, NHƯNG bạn phải xin mã số định danh phần cứng (UDID) của máy iPhone đó, thêm vào tài khoản Apple Developer (99 USD/năm) của bạn, rồi mới build ra file `.ipa`. File này **chỉ cài được trên đúng chiếc iPhone đã được đăng ký đó**. Giới hạn tối đa 100 thiết bị/năm.
+* **Dùng tool bên thứ ba (AltStore, Sideloadly - Miễn phí nhưng rất phiền):** 
+  Người dùng có thể dùng file `.ipa` của bạn và tự dùng tài khoản Apple ID miễn phí của họ để cài vào máy thông qua máy tính (dùng cáp cắm vào PC/Mac chạy phần mềm như AltStore/Sideloadly). 
+  - **Nhược điểm chí mạng:** App cài theo cách miễn phí này sẽ bị Apple thu hồi chứng chỉ và **văng app (crash) sau đúng 7 ngày**. Cứ sau 7 ngày người dùng lại phải cắm cáp vào máy tính để gia hạn (refresh) lại app. Cách này chỉ hợp cho các "vọc thủ" hoặc tự cài cho chính máy mình.
+
+### Tổng kết lời khuyên cho bạn
+Nếu bạn làm app này chỉ để tự dùng cho cá nhân hoặc nhóm nhỏ bạn bè/công ty: 
+* Có thể dùng **AltStore/Sideloadly** (không tốn tiền nhưng 7 ngày phải cắm cáp gia hạn một lần).
+* Hoặc "cắn răng" mua gói **Apple Developer (99 USD/năm)** để dùng TestFlight cài cho mọi người (thoải mái 90 ngày mới cần update một lần).
+
+Nếu bạn muốn phát triển app tiếp cận số lượng người dùng lớn: **Đường đi duy nhất và hợp lệ là mua gói 99 USD/năm và đưa lên App Store.**
+

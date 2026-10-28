@@ -455,6 +455,17 @@
   "Đã xóa thành công các file nhật ký ({count} mục).": "Successfully deleted log files ({count} items).",
   "Không thể xóa logs:": "Unable to clear logs:",
   "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?": "Are you sure you want to delete temporary files (*.tmp) in the Logs folder?",
-  "Đã xóa thành công các tệp tạm ({count} mục).": "Successfully deleted temporary files ({count} items).",
-  "Không thể xóa tệp tạm:": "Unable to clear temp files:"
+  "Không thể xóa tệp tạm:": "Unable to clear temp files:",
+  "Thay đổi mật khẩu": "Change password",
+  "🔑 THAY ĐỔI MẬT KHẨU": "🔑 CHANGE PASSWORD",
+  "Nhập mật khẩu mới:": "Enter new password:",
+  "Mật khẩu không được để trống!": "Password cannot be empty!",
+  "Đã cập nhật mật khẩu cho {name}!": "Updated password for {name}!",
+  "Đã xóa '{name}' khỏi danh sách!": "Deleted '{name}' from list!",
+  "💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy": "💡 Left click: Connect directly\n💡 Right click: Change password or Delete",
+  "🚀 Kết nối": "🚀 Connect",
+  "⚡ Bật nguồn (WOL)": "⚡ Wake on LAN (WOL)",
+  "🗑️ Xóa": "🗑️ Delete",
+  "Sai mật khẩu hoặc lỗi xác thực": "Wrong password or authentication error",
+  "Sai mật khẩu kết nối": "Incorrect connection password"
 }

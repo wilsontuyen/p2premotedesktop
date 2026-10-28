@@ -1,0 +1,854 @@
+========== USER ==========
+thêm 1 câu hỏi và trả lời nữa: "Có bị giới hạng địa lý không?" Không, chỉ cần có đường truyền internet truy cập được tới Việt Nam...
+
+[Action: grep_search]
+  CaseInsensitive: True
+  MatchPerLine: True
+  Query: faq
+  SearchPath: d:\Data\AG\p2p_website\guide.html
+  toolAction: Searching for FAQ section in guide.html
+  toolSummary: Search FAQ in guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:27+07:00
+Completed At: 2026-09-15T13:23:27+07:00
+No results found
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\guide.html
+  EndLine: 150
+  StartLine: 1
+  toolAction: Viewing guide.html
+  toolSummary: View guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:37+07:00
+Completed At: 2026-09-15T13:23:37+07:00
+File Path: `file:///d:/Data/AG/p2p_website/guide.html`
+Total Lines: 221
+Total Bytes: 17456
+Showing lines 1 to 150
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: <!DOCTYPE html>
+2: <html lang="vi" class="scroll-smooth">
+3: <head>
+4:     <meta charset="utf-8">
+5:     <meta name="viewport" content="width=device-width, initial-scale=1">
+6:     <title>Hướng dẫn sử dụng - Easy Remote Desktop</title>
+7:     <meta name="description" content="Hướng dẫn cài đặt và sử dụng Easy Remote Desktop để điều khiển máy tính từ xa.">
+8:     <script src="https://cdn.tailwindcss.com"></script>
+9: </head>
+10: <body class="bg-white text-slate-800 antialiased">
+11:     <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-indigo-600 focus:px-4 focus:py-2 focus:text-white">
+12:         Bỏ qua tới nội dung chính
+13:     </a>
+14: 
+15:     <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+16:         <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
+17:             <a href="index.html" class="flex items-center gap-2 text-lg font-bold text-slate-900">
+18:                 <img src="img/icon1.jpeg" alt="Easy Remote Desktop" class="h-9 w-9 rounded-lg object-cover">
+19:                 Easy Remote Desktop
+20:             </a>
+21: 
+22:             <input type="checkbox" id="nav-toggle" class="peer hidden">
+23:             <label for="nav-toggle" class="cursor-pointer rounded-md p-2 text-slate-600 hover:bg-slate-100 lg:hidden">
+24:                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6">
+25:                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+26:                 </svg>
+27:             </label>
+28: 
+29:             <nav class="hidden gap-6 text-sm font-medium text-slate-600 peer-checked:mt-4 peer-checked:flex peer-checked:w-full peer-checked:flex-col peer-checked:gap-4 lg:mt-0 lg:flex lg:w-auto lg:flex-row lg:items-center">
+30:                 <a href="index.html" class="hover:text-indigo-600">Trang chủ</a>
+31:                 <a href="download.html" class="hover:text-indigo-600">Tải xuống</a>
+32:                 <a href="guide.html" class="text-indigo-600">Hướng dẫn</a>
+33:                 <a href="contact.html" class="hover:text-indigo-600">Liên hệ</a>
+34: 
+35:                 <!-- Language Switcher -->
+36:                 <div class="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/80 p-1 text-xs font-semibold self-start lg:self-auto">
+37:                     <span class="flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1 text-indigo-600 shadow-sm cursor-default">
+38:                         <svg class="h-3.5 w-5 rounded-[2px] shadow-sm overflow-hidden inline-block shrink-0" viewBox="0 0 30 20" fill="none">
+39:                             <rect width="30" height="20" fill="#DA251D"/>
+40:                             <polygon fill="#FFFF00" points="15,4 16.347,8.146 20.706,8.146 17.180,10.708 18.527,14.854 15,12.292 11.473,14.854 12.820,10.708 9.294,8.146 13.653,8.146"/>
+41:                         </svg>
+42:                         <span>VN</span>
+43:                     </span>
+44:                     <a href="EN/guide.html" class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-slate-500 hover:text-slate-900 transition-all" title="Chuyển sang Tiếng Anh">
+45:                         <svg class="h-3.5 w-5 rounded-[2px] shadow-sm overflow-hidden inline-block shrink-0" viewBox="0 0 60 30">
+46:                             <clipPath id="uk-flag-gd"><path d="M0,0 v30 h60 v-30 z"/></clipPath>
+47:                             <clipPath id="uk-flag-gd-t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
+48:                             <g clip-path="url(#uk-flag-gd)">
+49:                                 <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
+50:                                 <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
+51:                                 <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-gd-t)" stroke="#C8102E" stroke-width="4"/>
+52:                                 <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
+53:                                 <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
+54:                             </g>
+55:                         </svg>
+56:                         <span>EN</span>
+57:                     </a>
+58:                 </div>
+59: 
+60:                 <a href="download.html" class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-white shadow-sm hover:bg-indigo-500">
+61:                     Tải miễn phí
+62:                 </a>
+63:             </nav>
+64:         </div>
+65:     </header>
+66: 
+67:     <main id="main-content">
+68:         <section class="mx-auto max-w-5xl px-6 py-16 lg:px-8">
+69:             <div class="mx-auto max-w-2xl text-center">
+70:                 <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">Hướng dẫn sử dụng</h1>
+71:                 <p class="mt-4 text-slate-600">Làm theo các bước dưới đây để cài đặt và bắt đầu điều khiển máy tính từ xa chỉ trong vài phút.</p>
+72:             </div>
+73: 
+74:             <ol class="mt-14 space-y-10">
+75:                 <li class="flex gap-6">
+76:                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white">1</span>
+77:                     <div>
+78:                         <h2 class="text-xl font-semibold text-slate-900">Cài đặt Easy Remote Desktop</h2>
+79:                         <p class="mt-2 text-slate-600">Truy cập trang Tải xuống, chọn hệ điều hành phù hợp (Windows, macOS hoặc Linux) và chạy tệp cài đặt vừa tải về. Làm theo hướng dẫn trên màn hình để hoàn tất cài đặt.</p>
+80:                     </div>
+81:                 </li>
+82:                 <li class="flex gap-6">
+83:                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white">2</span>
+84:                     <div>
+85:                         <h2 class="text-xl font-semibold text-slate-900">Lấy ID và mật khẩu</h2>
+86:                         <p class="mt-2 text-slate-600">Mở Easy Remote Desktop trên máy tính cần được điều khiển từ xa. Ứng dụng sẽ tự động tạo ra một ID và mật khẩu ngẫu nhiên, hiển thị ngay ở màn hình chính.</p>
+87:                     </div>
+88:                 </li>
+89:                 <li class="flex gap-6">
+90:                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white">3</span>
+91:                     <div>
+92:                         <h2 class="text-xl font-semibold text-slate-900">Kết nối tới máy từ xa</h2>
+93:                         <p class="mt-2 text-slate-600">Trên thiết bị của bạn, mở Easy Remote Desktop, nhập ID của máy cần điều khiển vào ô "Kết nối tới" rồi bấm Kết nối. Nhập mật khẩu khi được yêu cầu.</p>
+94:                     </div>
+95:                 </li>
+96:                 <li class="flex gap-6">
+97:                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white">4</span>
+98:                     <div>
+99:                         <h2 class="text-xl font-semibold text-slate-900">Điều khiển và làm việc</h2>
+100:                         <p class="mt-2 text-slate-600">Sau khi kết nối thành công, bạn có thể điều khiển chuột, bàn phím, truyền file, chat hoặc chia sẻ nhiều màn hình như đang ngồi trực tiếp trước máy.</p>
+101:                     </div>
+102:                 </li>
+103:                 <li class="flex gap-6">
+104:                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white">5</span>
+105:                     <div>
+106:                         <h2 class="text-xl font-semibold text-slate-900">Kết thúc phiên làm việc</h2>
+107:                         <p class="mt-2 text-slate-600">Bấm nút "Ngắt kết nối" trên thanh công cụ để kết thúc phiên an toàn. Mật khẩu ngẫu nhiên sẽ tự động thay đổi sau mỗi phiên để đảm bảo bảo mật.</p>
+108:                     </div>
+109:                 </li>
+110:             </ol>
+111: 
+112:             <div class="mt-16">
+113:                 <h2 class="text-2xl font-bold text-slate-900">Câu hỏi thường gặp</h2>
+114:                 <div class="mt-6 divide-y divide-slate-200 rounded-2xl border border-slate-200">
+115:                     <details class="group p-6">
+116:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+117:                             Easy Remote Desktop có miễn phí không?
+118:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+119:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+120:                             </svg>
+121:                         </summary>
+122:                         <p class="mt-3 text-sm text-slate-600">Có, phiên bản dành cho cá nhân hoàn toàn miễn phí. Doanh nghiệp có thể liên hệ để tìm hiểu về gói bản quyền nâng cao.</p>
+123:                     </details>
+124:                     <details class="group p-6">
+125:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+126:                             Kết nối có an toàn không?
+127:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+128:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+129:                             </svg>
+130:                         </summary>
+131:                         <p class="mt-3 text-sm text-slate-600">Phiên remote được mã hóa ChaCha20-Poly1305 đầu cuối. Ảnh màn hình được nén JPEG chất lượng cao (4:4:4) để đảm bảo mượt mà. Máy chủ relay chỉ chuyển tiếp dữ liệu, không có khả năng giải mã nội dung phiên.</p>
+132:                     </details>
+133:                     <details class="group p-6">
+134:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+135:                             Tôi có thể dùng trên điện thoại không?
+136:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+137:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+138:                             </svg>
+139:                         </summary>
+140:                         <p class="mt-3 text-sm text-slate-600">Có, Easy Remote Desktop hỗ trợ điều khiển từ thiết bị Android và iOS tới máy tính Windows, macOS hoặc Linux.</p>
+141:                     </details>
+142:                     <details class="group p-6">
+143:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+144:                             Nếu quên mật khẩu kết nối thì sao?
+145:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+146:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+147:                             </svg>
+148:                         </summary>
+149:                         <p class="mt-3 text-sm text-slate-600">Mật khẩu được tạo tự động và hiển thị trực tiếp trên máy cần điều khiển, bạn có thể tạo mật khẩu mới bất kỳ lúc nào trong ứng dụng.</p>
+150:                     </details>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\guide.html
+  EndLine: 180
+  StartLine: 145
+  toolAction: Viewing FAQ section in guide.html
+  toolSummary: View guide.html FAQ
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:39+07:00
+Completed At: 2026-09-15T13:23:39+07:00
+File Path: `file:///d:/Data/AG/p2p_website/guide.html`
+Total Lines: 221
+Total Bytes: 17456
+Showing lines 145 to 180
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+145:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+146:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+147:                             </svg>
+148:                         </summary>
+149:                         <p class="mt-3 text-sm text-slate-600">Mật khẩu được tạo tự động và hiển thị trực tiếp trên máy cần điều khiển, bạn có thể tạo mật khẩu mới bất kỳ lúc nào trong ứng dụng.</p>
+150:                     </details>
+151:                     <details class="group p-6">
+152:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+153:                             Nhận diện nhầm là virus / trojan?
+154:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+155:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+156:                             </svg>
+157:                         </summary>
+158:                         <div class="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+159:                             <p>Đây là trường hợp cảnh báo nhầm (False Positive) thường thấy đối với các ứng dụng mới:</p>
+160:                             <ul class="list-disc space-y-1.5 pl-5">
+161:                                 <li><strong>Chưa có chữ ký số:</strong> Vì Easy Remote Desktop là dự án cá nhân tự phát triển và phát hành miễn phí, chi phí để duy trì chứng chỉ số (Code Signing Certificate) hàng năm từ các tổ chức ủy quyền quốc tế là rất cao, nên hiện tại phần mềm chưa được gắn chữ ký số thương mại.</li>
+162:                                 <li><strong>Đặc thù hoạt động của ứng dụng Remote:</strong> Phần mềm điều khiển máy tính từ xa bắt buộc phải có các hành vi can thiệp hệ thống như chụp màn hình theo thời gian thực, điều khiển bàn phím/chuột và thiết lập kết nối mạng P2P. Các cơ chế quét tự động như Windows Defender, SmartScreen hoặc phần mềm diệt virus dễ nghi ngờ và cảnh báo nhầm những hành vi này là trojan/malware.</li>
+163:                             </ul>
+164:                             <p class="text-slate-800 font-medium">Easy Remote Desktop cam kết 100% an toàn, sạch sẽ, không chứa bất kỳ mã độc hay phần mềm gián điệp nào. Bạn hoàn toàn có thể an tâm bấm <em>More info &rarr; Run anyway</em> trên Windows hoặc thêm vào danh sách tin cậy (Whitelist) của phần mềm diệt virus để sử dụng.</p>
+165:                         </div>
+166:                     </details>
+167:                 </div>
+168:             </div>
+169: 
+170:             <div class="mt-16 rounded-2xl bg-indigo-50 p-8 text-center">
+171:                 <h3 class="text-lg font-semibold text-slate-900">Vẫn cần trợ giúp?</h3>
+172:                 <p class="mt-2 text-sm text-slate-600">Đội ngũ hỗ trợ của chúng tôi luôn sẵn sàng giải đáp thắc mắc của bạn.</p>
+173:                 <a href="contact.html" class="mt-5 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+174:                     Liên hệ hỗ trợ
+175:                 </a>
+176:             </div>
+177:         </section>
+178:     </main>
+179: 
+180:     <footer class="border-t border-slate-200 bg-slate-50">
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: grep_search]
+  CaseInsensitive: True
+  MatchPerLine: True
+  Query: Câu hỏi thường gặp
+  SearchPath: d:\Data\AG\p2p_website
+  toolAction: Searching for FAQ sections in workspace
+  toolSummary: Search FAQ in workspace
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:42+07:00
+Completed At: 2026-09-15T13:23:42+07:00
+{"File":"d:\\Data\\AG\\p2p_website\\guide.html","LineNumber":113,"LineContent":"                \u003ch2 class=\"text-2xl font-bold text-slate-900\"\u003eCâu hỏi thường gặp\u003c/h2\u003e"}
+
+[Action: grep_search]
+  CaseInsensitive: True
+  MatchPerLine: True
+  Query: Frequently Asked Questions
+  SearchPath: d:\Data\AG\p2p_website
+  toolAction: Searching for English FAQ in workspace
+  toolSummary: Search English FAQ
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:46+07:00
+Completed At: 2026-09-15T13:23:46+07:00
+{"File":"d:\\Data\\AG\\p2p_website\\EN\\guide.html","LineNumber":114,"LineContent":"                \u003ch2 class=\"text-2xl font-bold text-slate-900\"\u003eFrequently Asked Questions\u003c/h2\u003e"}
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\EN\guide.html
+  EndLine: 175
+  StartLine: 114
+  toolAction: Viewing FAQ section in EN/guide.html
+  toolSummary: View EN/guide.html FAQ
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:50+07:00
+Completed At: 2026-09-15T13:23:50+07:00
+File Path: `file:///d:/Data/AG/p2p_website/EN/guide.html`
+Total Lines: 222
+Total Bytes: 16580
+Showing lines 114 to 175
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+114:                 <h2 class="text-2xl font-bold text-slate-900">Frequently Asked Questions</h2>
+115:                 <div class="mt-6 divide-y divide-slate-200 rounded-2xl border border-slate-200">
+116:                     <details class="group p-6">
+117:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+118:                             Is Easy Remote Desktop free?
+119:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+120:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+121:                             </svg>
+122:                         </summary>
+123:                         <p class="mt-3 text-sm text-slate-600">Yes, the personal edition is completely free of charge. Enterprises and IT organizations can contact us for custom business solutions and premium support.</p>
+124:                     </details>
+125:                     <details class="group p-6">
+126:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+127:                             Is the remote connection secure?
+128:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+129:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+130:                             </svg>
+131:                         </summary>
+132:                         <p class="mt-3 text-sm text-slate-600">All remote sessions are secured with ChaCha20-Poly1305 end-to-end encryption. Screen images utilize high-fidelity JPEG compression (4:4:4) for ultra-low latency. Relay servers merely forward raw encrypted packets and cannot inspect your data.</p>
+133:                     </details>
+134:                     <details class="group p-6">
+135:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+136:                             Can I connect using a mobile phone?
+137:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+138:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+139:                             </svg>
+140:                         </summary>
+141:                         <p class="mt-3 text-sm text-slate-600">Yes, Easy Remote Desktop offers mobile support for Android and iOS devices, enabling you to manage Windows, macOS, or Linux computers on the go.</p>
+142:                     </details>
+143:                     <details class="group p-6">
+144:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+145:                             What if I forget the connection password?
+146:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+147:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+148:                             </svg>
+149:                         </summary>
+150:                         <p class="mt-3 text-sm text-slate-600">Passwords are generated in real-time and displayed directly on the host computer's screen. You can also generate a new one-click password whenever you want.</p>
+151:                     </details>
+152:                     <details class="group p-6">
+153:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+154:                             False positive: Flagged as a virus / trojan?
+155:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+156:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+157:                             </svg>
+158:                         </summary>
+159:                         <div class="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+160:                             <p>This is a common false positive detection:</p>
+161:                             <ul class="list-disc space-y-1.5 pl-5">
+162:                                 <li><strong>No commercial digital code signing:</strong> Because Easy Remote Desktop is an independent personal project provided free of charge, maintaining an expensive annual commercial Code Signing Certificate is currently unfeasible.</li>
+163:                                 <li><strong>Inherent Remote Desktop behavior:</strong> Remote desktop tools require direct interaction with low-level system APIs (real-time screen capture, mouse/keyboard simulation, and direct P2P socket communication). Automated security scanners like Windows SmartScreen or antivirus engines often mistakenly categorize these behaviors as suspicious.</li>
+164:                             </ul>
+165:                             <p class="text-slate-800 font-medium">Easy Remote Desktop is 100% clean, safe, and free of spyware or malicious code. You can safely proceed by clicking <em>More info &rarr; Run anyway</em> on Windows SmartScreen or whitelisting it in your antivirus software.</p>
+166:                         </div>
+167:                     </details>
+168:                 </div>
+169:             </div>
+170: 
+171:             <div class="mt-16 rounded-2xl bg-indigo-50 p-8 text-center">
+172:                 <h3 class="text-lg font-semibold text-slate-900">Still need assistance?</h3>
+173:                 <p class="mt-2 text-sm text-slate-600">Our support team is always available to assist with your technical questions.</p>
+174:                 <a href="contact.html" class="mt-5 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+175:                     Contact Support
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: grep_search]
+  CaseInsensitive: True
+  MatchPerLine: True
+  Query: Việt Nam
+  SearchPath: d:\Data\AG\p2p_website
+  toolAction: Searching for mentions of Vietnam
+  toolSummary: Search Vietnam mentions
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:54+07:00
+Completed At: 2026-09-15T13:23:55+07:00
+No results found
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\index.html
+  EndLine: 100
+  StartLine: 50
+  toolAction: Viewing index.html
+  toolSummary: View index.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:23:58+07:00
+Completed At: 2026-09-15T13:23:58+07:00
+File Path: `file:///d:/Data/AG/p2p_website/index.html`
+Total Lines: 443
+Total Bytes: 32968
+Showing lines 50 to 100
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+50:                                 <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
+51:                                 <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
+52:                                 <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-t)" stroke="#C8102E" stroke-width="4"/>
+53:                                 <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
+54:                                 <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
+55:                             </g>
+56:                         </svg>
+57:                         <span>EN</span>
+58:                     </button>
+59:                 </div>
+60: 
+61:                 <a href="download.html" data-link="download" data-i18n="navFreeDownload" class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-white shadow-sm hover:bg-indigo-500">
+62:                     Tải miễn phí
+63:                 </a>
+64:             </nav>
+65:         </div>
+66:     </header>
+67: 
+68:     <main id="main-content">
+69:         <section class="relative overflow-hidden bg-gradient-to-b from-indigo-50 via-white to-white">
+70:             <div class="mx-auto grid max-w-7xl items-center gap-12 px-6 py-20 lg:grid-cols-2 lg:px-8 lg:py-28">
+71:                 <div>
+72:                     <span data-i18n="badgePro" class="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-4 py-1 text-sm font-medium text-indigo-700">
+73:                         Phiên bản AI Pro luôn cập nhật
+74:                     </span>
+75:                     <h1 data-i18n="heroTitle" class="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+76:                         Điều khiển máy tính từ xa
+77:                         <span class="text-indigo-600">nhanh chóng &amp; an toàn</span>
+78:                     </h1>
+79:                     <p data-i18n="heroDesc" class="mt-6 text-lg text-slate-600">
+80:                         Easy Remote Desktop giúp bạn truy cập, hỗ trợ và làm việc trên bất kỳ máy tính nào từ xa
+81:                         chỉ với vài giây kết nối - không cần cấu hình mạng phức tạp, dữ liệu được mã hóa đầu cuối.
+82:                     </p>
+83:                     <div class="mt-8 flex flex-col gap-4 sm:flex-row">
+84:                         <a href="download.html" data-link="download" class="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-500">
+85:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+86:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/>
+87:                             </svg>
+88:                             <span data-i18n="heroBtnDownload">Tải xuống miễn phí</span>
+89:                         </a>
+90:                         <a href="guide.html" data-link="guide" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-6 py-3 text-base font-semibold text-slate-700 hover:bg-slate-50">
+91:                             <span data-i18n="heroBtnGuide">Xem hướng dẫn sử dụng</span>
+92:                         </a>
+93:                     </div>
+94:                     <dl class="mt-10 grid grid-cols-3 gap-6 border-t border-slate-200 pt-8 text-left">
+95:                         <div>
+96:                             <dt class="text-2xl font-bold text-slate-900">10.000+</dt>
+97:                             <dd data-i18n="stat1Label" class="text-sm text-slate-500">Người dùng tin cậy</dd>
+98:                         </div>
+99:                         <div>
+100:                             <dt class="text-2xl font-bold text-slate-900">99.9%</dt>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: replace_file_content]
+  AllowMultiple: False
+  Description: Thêm câu hỏi và câu trả lời về giới hạn địa lý vào mục FAQ trong guide.html
+  EndLine: 152
+  Instruction: Thêm mục FAQ "Có bị giới hạn địa lý không?" vào guide.html
+  ReplacementContent:                     <details class="group p-6">
+                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                      ...
+  StartLine: 142
+  TargetContent:                     <details class="group p-6">
+                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                      ...
+  TargetFile: d:\Data\AG\p2p_website\guide.html
+  toolAction: Editing guide.html
+  toolSummary: Add geo restriction FAQ to guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:06+07:00
+Completed At: 2026-09-15T13:24:08+07:00
+The following changes were made by the replace_file_content tool to: d:\Data\AG\p2p_website\guide.html. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -150,6 +150,15 @@
+                     </details>
+                     <details class="group p-6">
+                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
++                            Có bị giới hạn địa lý không?
++                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
++                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
++                            </svg>
++                        </summary>
++                        <p class="mt-3 text-sm text-slate-600">Không, phần mềm hoàn toàn không bị giới hạn vị trí địa lý. Chỉ cần thiết bị của bạn có đường truyền Internet truy cập được tới Việt Nam (hạ tầng máy chủ dịch vụ), bạn có thể kết nối và điều khiển máy tính từ xa mượt mà từ bất kỳ đâu trên thế giới.</p>
++                    </details>
++                    <details class="group p-6">
++                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                             Nhận diện nhầm là virus / trojan?
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+[Action: replace_file_content]
+  AllowMultiple: False
+  Description: Add geographic restrictions question to English FAQ in EN/guide.html
+  EndLine: 155
+  Instruction: Add FAQ "Are there any geographical restrictions?" to EN/guide.html
+  ReplacementContent:                     <details class="group p-6">
+                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                      ...
+  StartLine: 143
+  TargetContent:                     <details class="group p-6">
+                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                      ...
+  TargetFile: d:\Data\AG\p2p_website\EN\guide.html
+  toolAction: Editing EN/guide.html
+  toolSummary: Add geo restriction FAQ to EN/guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:12+07:00
+Completed At: 2026-09-15T13:24:14+07:00
+The following changes were made by the replace_file_content tool to: d:\Data\AG\p2p_website\EN\guide.html. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -151,6 +151,15 @@
+                     </details>
+                     <details class="group p-6">
+                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
++                            Are there any geographical restrictions?
++                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
++                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
++                            </svg>
++                        </summary>
++                        <p class="mt-3 text-sm text-slate-600">No, there are no geographical restrictions. As long as your device has an internet connection capable of reaching Vietnam (where our service server infrastructure is located), you can seamlessly connect and control computers remotely from anywhere in the world.</p>
++                    </details>
++                    <details class="group p-6">
++                        <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+                             False positive: Flagged as a virus / trojan?
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+[Action: run_command]
+  CommandLine: git diff guide.html EN/guide.html
+  Cwd: d:\Data\AG\p2p_website
+  WaitMsBeforeAsync: 5000
+  toolAction: Running git diff
+  toolSummary: Check git diff
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:16+07:00
+Completed At: 2026-09-15T13:24:26+07:00
+
+				The command exited with code 1.
+				Output:
+				<truncated 206 lines>
++                        <p class="mt-3 text-sm text-slate-600">No, there are no geographical restrictions. As long as your device has an internet connection capable of reaching Vietnam (where our service server infrastructure is located), you can seamlessly connect and control computers remotely from anywhere in the world.</p>
+                     </details>
+                     <details class="group p-6">
+                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+-                            Nhận diện nhầm là virus / trojan?
++                            False positive: Flagged as a virus / trojan?
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                             </svg>
+                         </summary>
+                         <div class="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+-                            <p>Đây là trường hợp cảnh báo nhầm (False Positive) thường thấy đối với các ứng dụng mới:</p>
++                            <p>This is a common false positive detection:</p>
+                             <ul class="list-disc space-y-1.5 pl-5">
+-                                <li><strong>Chưa có chữ ký số:</strong> Vì Easy Remote Desktop là dự án cá nhân tự phát triển và phát hành miễn phí, chi phí để duy trì chứng chỉ số (Code Signing Certificate) hàng năm từ các tổ chức ủy quyền quốc tế là rất cao, nên hiện tại phần mềm chưa được gắn chữ ký số thương mại.</li>
+-                                <li><strong>Đặc thù hoạt động của ứng dụng Remote:</strong> Phần mềm điều khiển máy tính từ xa bắt buộc phải có các hành vi can thiệp hệ thống như chụp màn hình theo thời gian thực, điều khiển bàn phím/chuột và thiết lập kết nối mạng P2P. Các cơ chế quét tự động như Windows Defender, SmartScreen hoặc phần mềm diệt virus dễ nghi ngờ và cảnh báo nhầm những hành vi này là trojan/malware.</li>
++                                <li><strong>No commercial digital code signing:</strong> Because Easy Remote Desktop is an independent personal project provided free of charge, maintaining an expensive annual commercial Code Signing Certificate is currently unfeasible.</li>
++                                <li><strong>Inherent Remote Desktop behavior:</strong> Remote desktop tools require direct interaction with low-level system APIs (real-time screen capture, mouse/keyboard simulation, and direct P2P socket communication). Automated security scanners like Windows SmartScreen or antivirus engines often mistakenly categorize these behaviors as suspicious.</li>
+                             </ul>
+-                            <p class="text-slate-800 font-medium">Easy Remote Desktop cam kết 100% an toàn, sạch sẽ, không chứa bất kỳ mã độc hay phần mềm gián điệp nào. Bạn hoàn toàn có thể an tâm bấm <em>More info &rarr; Run anyway</em> trên Windows hoặc thêm vào danh sách tin cậy (Whitelist) của phần mềm diệt virus để sử dụng.</p>
++                            <p class="text-slate-800 font-medium">Easy Remote Desktop is 100% clean, safe, and free of spyware or malicious code. You can safely proceed by clicking <em>More info &rarr; Run anyway</em> on Windows SmartScreen or whitelisting it in your antivirus software.</p>
+                         </div>
+                     </details>
+                 </div>
+             </div>
+ 
+             <div class="mt-16 rounded-2xl bg-indigo-50 p-8 text-center">
+-                <h3 class="text-lg font-semibold text-slate-900">Vẫn cần trợ giúp?</h3>
+-                <p class="mt-2 text-sm text-slate-600">Đội ngũ hỗ trợ của chúng tôi luôn sẵn sàng giải đáp thắc mắc của bạn.</p>
++                <h3 class="text-lg font-semibold text-slate-900">Still need assistance?</h3>
++                <p class="mt-2 text-sm text-slate-600">Our support team is always available to assist with your technical questions.</p>
+                 <a href="contact.html" class="mt-5 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+-                    Liên hệ hỗ trợ
++                    Contact Support
+                 </a>
+             </div>
+         </section>
+@@ -190,28 +191,28 @@
+         <div class="mx-auto grid max-w-7xl gap-10 px-6 py-12 lg:grid-cols-4 lg:px-8">
+             <div class="lg:col-span-2">
+                 <a href="index.html" class="flex items-center gap-2 text-lg font-bold text-slate-900">
+-                    <img src="img/icon1.jpeg" alt="Easy Remote Desktop" class="h-9 w-9 rounded-lg object-cover">
++                    <img src="../img/icon1.jpeg" alt="Easy Remote Desktop" class="h-9 w-9 rounded-lg object-cover">
+                     Easy Remote Desktop
+                 </a>
+                 <p class="mt-4 max-w-md text-sm text-slate-500">
+-                    Giải pháp điều khiển máy tính từ xa nhanh, bảo mật và dễ sử dụng dành cho cá nhân, đội ngũ IT và doanh nghiệp.
++                    Fast, secure, and easy-to-use remote desktop solution for individuals, IT teams, and enterprises.
+                 </p>
+             </div>
+ 
+             <div>
+-                <h3 class="text-sm font-semibold text-slate-900">Sản phẩm</h3>
++                <h3 class="text-sm font-semibold text-slate-900">Product</h3>
+                 <ul class="mt-4 space-y-2 text-sm text-slate-500">
+-                    <li><a href="index.html" class="hover:text-indigo-600">Giới thiệu</a></li>
+-                    <li><a href="download.html" class="hover:text-indigo-600">Tải xuống</a></li>
+-                    <li><a href="guide.html" class="hover:text-indigo-600">Hướng dẫn sử dụng</a></li>
++                    <li><a href="index.html" class="hover:text-indigo-600">Overview</a></li>
++                    <li><a href="download.html" class="hover:text-indigo-600">Download</a></li>
++                    <li><a href="guide.html" class="hover:text-indigo-600">User Guide</a></li>
+                 </ul>
+             </div>
+ 
+             <div>
+-                <h3 class="text-sm font-semibold text-slate-900">Hỗ trợ</h3>
++                <h3 class="text-sm font-semibold text-slate-900">Support</h3>
+                 <ul class="mt-4 space-y-2 text-sm text-slate-500">
+-                    <li><a href="contact.html" class="hover:text-indigo-600">Liên hệ</a></li>
+-                    <li><a href="tel:0941261771" class="hover:text-indigo-600">Mr. Tuyến - 0941261771</a></li>
++                    <li><a href="contact.html" class="hover:text-indigo-600">Contact Us</a></li>
++                    <li><a href="tel:0941261771" class="hover:text-indigo-600">Mr. Tuyến - (+84) 0941 261 771</a></li>
+                     <li><a href="https://zalo.me/0941261771" class="hover:text-indigo-600">Zalo: 0941 261 771</a></li>
+                 </ul>
+             </div>
+@@ -219,7 +220,7 @@
+ 
+         <div class="border-t border-slate-200 py-6">
+             <p class="mx-auto max-w-7xl px-6 text-center text-xs text-slate-400 lg:px-8">
+-                &copy; <span id="year"></span> Easy Remote Desktop. Bản quyền thuộc về tác giả.
++                &copy; <span id="year"></span> Easy Remote Desktop. All rights reserved.
+             </p>
+         </div>
+     </footer>
+
+[Action: run_command]
+  CommandLine: git diff guide.html
+  Cwd: d:\Data\AG\p2p_website
+  WaitMsBeforeAsync: 5000
+  toolAction: Checking git diff on guide.html
+  toolSummary: Check guide.html diff
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:28+07:00
+Completed At: 2026-09-15T13:24:32+07:00
+
+				The command exited with code 1.
+				Output:
+				warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+    --check               warn if changes introduce conflict markers or whitespace errors
+    --summary             condensed summary such as creations, renames and mode changes
+    --name-only           show only names of changed files
+    --name-status         show only names and status of changed files
+    --stat[=<width>[,<name-width>[,<count>]]]
+                          generate diffstat
+    --stat-width <width>  generate diffstat with a given width
+    --stat-name-width <width>
+                          generate diffstat with a given name width
+    --stat-graph-width <width>
+                          generate diffstat with a given graph width
+    --stat-count <count>  generate diffstat with limited lines
+    --[no-]compact-summary
+                          generate compact summary in diffstat
+    --binary              output a binary diff that can be applied
+    --[no-]full-index     show full pre- and post-image object names on the "index" lines
+    --[no-]color[=<when>] show colored diff
+    --ws-error-highlight <kind>
+                          highlight whitespace errors in the 'context', 'old' or 'new' lines in the diff
+    -z                    do not munge pathnames and use NULs as output field terminators in --raw or --numstat
+    --[no-]abbrev[=<n>]   use <n> digits to display object names
+    --src-prefix <prefix> show the given source prefix instead of "a/"
+    --dst-prefix <prefix> show the given destination prefix instead of "b/"
+    --line-prefix <prefix>
+                          prepend an additional prefix to every line of output
+    --no-prefix           do not show any source or destination prefix
+    --default-prefix      use default prefixes a/ and b/
+    --inter-hunk-context <n>
+                          show context between diff hunks up to the specified number of lines
+    --output-indicator-new <char>
+                          specify the character to indicate a new line instead of '+'
+    --output-indicator-old <char>
+                          specify the character to indicate an old line instead of '-'
+    --output-indicator-context <char>
+                          specify the character to indicate a context instead of ' '
+
+Diff rename options
+    -B, --break-rewrites[=<n>[/<m>]]
+                          break complete rewrite changes into pairs of delete and create
+    -M, --find-renames[=<n>]
+                          detect renames
+    -D, --irreversible-delete
+                          omit the preimage for deletes
+    -C, --find-copies[=<n>]
+                          detect copies
+    --[no-]find-copies-harder
+                          use unmodified files as source to find copies
+    --no-renames          disable rename detection
+    --[no-]rename-empty   use empty blobs as rename source
+    --[no-]follow         continue listing the history of a file beyond renames
+    -l <n>                prevent rename/copy detection if the number of rename/copy targets exceeds given limit
+
+Diff algorithm options
+    --minimal             produce the smallest possible diff
+    -w, --ignore-all-space
+                          ignore whitespace when comparing lines
+    -b, --ignore-space-change
+                          ignore changes in amount of whitespace
+    --ignore-space-at-eol ignore changes in whitespace at EOL
+    --ignore-cr-at-eol    ignore carrier-return at the end of line
+    --ignore-blank-lines  ignore changes whose lines are all blank
+    -I, --[no-]ignore-matching-lines <regex>
+                          ignore changes whose all lines match <regex>
+    --[no-]indent-heuristic
+                          heuristic to shift diff hunk boundaries for easy reading
+    --patience            generate diff using the "patience diff" algorithm
+    --histogram           generate diff using the "histogram diff" algorithm
+    --diff-algorithm <algorithm>
+                          choose a diff algorithm
+    --anchored <text>     generate diff using the "anchored diff" algorithm
+    --word-diff[=<mode>]  show word diff, using <mode> to delimit changed words
+    --word-diff-regex <regex>
+                          use <regex> to decide what a word is
+    --color-words[=<regex>]
+                          equivalent to --word-diff=color --word-diff-regex=<regex>
+    --[no-]color-moved[=<mode>]
+                          moved lines of code are colored differently
+    --[no-]color-moved-ws <mode>
+                          how white spaces are ignored in --color-moved
+
+Other diff options
+    --[no-]relative[=<prefix>]
+                          when run from subdir, exclude changes outside and show relative paths
+    -a, --[no-]text       treat all files as text
+    -R                    swap two inputs, reverse the diff
+    --[no-]exit-code      exit with 1 if there were differences, 0 otherwise
+    --[no-]quiet          disable all output of the program
+    --[no-]ext-diff       allow an external diff helper to be executed
+    --[no-]textconv       run external text conversion filters when comparing binary files
+    --ignore-submodules[=<when>]
+                          ignore changes to submodules in the diff generation
+    --submodule[=<format>]
+                          specify how differences in submodules are shown
+    --ita-invisible-in-index
+                          hide 'git add -N' entries from the index
+    --ita-visible-in-index
+                          treat 'git add -N' entries as real in the index
+    -S <string>           look for differences that change the number of occurrences of the specified string
+    -G <regex>            look for differences that change the number of occurrences of the specified regex
+    --pickaxe-all         show all changes in the changeset with -S or -G
+    --pickaxe-regex       treat <string> in -S as extended POSIX regular expression
+    -O <file>             control the order in which files appear in the output
+    --rotate-to <path>    show the change in the specified path first
+    --skip-to <path>      skip the output to the specified path
+    --find-object <object-id>
+                          look for differences that change the number of occurrences of the specified object
+    --diff-filter [(A|C|D|M|R|T|U|X|B)...[*]]
+                          select files by diff type
+    --max-depth <depth>   maximum tree depth to recurse
+    --output <file>       output to a specific file
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\guide.html
+  EndLine: 170
+  StartLine: 140
+  toolAction: Viewing FAQ section in guide.html
+  toolSummary: Check FAQ section in guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:34+07:00
+Completed At: 2026-09-15T13:24:34+07:00
+File Path: `file:///d:/Data/AG/p2p_website/guide.html`
+Total Lines: 230
+Total Bytes: 18537
+Showing lines 140 to 170
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+140:                         <p class="mt-3 text-sm text-slate-600">Có, Easy Remote Desktop hỗ trợ điều khiển từ thiết bị Android và iOS tới máy tính Windows, macOS hoặc Linux.</p>
+141:                     </details>
+142:                     <details class="group p-6">
+143:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+144:                             Nếu quên mật khẩu kết nối thì sao?
+145:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+146:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+147:                             </svg>
+148:                         </summary>
+149:                         <p class="mt-3 text-sm text-slate-600">Mật khẩu được tạo tự động và hiển thị trực tiếp trên máy cần điều khiển, bạn có thể tạo mật khẩu mới bất kỳ lúc nào trong ứng dụng.</p>
+150:                     </details>
+151:                     <details class="group p-6">
+152:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+153:                             Có bị giới hạn địa lý không?
+154:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+155:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+156:                             </svg>
+157:                         </summary>
+158:                         <p class="mt-3 text-sm text-slate-600">Không, phần mềm hoàn toàn không bị giới hạn vị trí địa lý. Chỉ cần thiết bị của bạn có đường truyền Internet truy cập được tới Việt Nam (hạ tầng máy chủ dịch vụ), bạn có thể kết nối và điều khiển máy tính từ xa mượt mà từ bất kỳ đâu trên thế giới.</p>
+159:                     </details>
+160:                     <details class="group p-6">
+161:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+162:                             Nhận diện nhầm là virus / trojan?
+163:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+164:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+165:                             </svg>
+166:                         </summary>
+167:                         <div class="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+168:                             <p>Đây là trường hợp cảnh báo nhầm (False Positive) thường thấy đối với các ứng dụng mới:</p>
+169:                             <ul class="list-disc space-y-1.5 pl-5">
+170:                                 <li><strong>Chưa có chữ ký số:</strong> Vì Easy Remote Desktop là dự án cá nhân tự phát triển và phát hành miễn phí, chi phí để duy trì chứng chỉ số (Code Signing Certificate) hàng năm từ các tổ chức ủy quyền quốc tế là rất cao, nên hiện tại phần mềm chưa được gắn chữ ký số thương mại.</li>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\p2p_website\EN\guide.html
+  EndLine: 170
+  StartLine: 140
+  toolAction: Viewing FAQ section in EN/guide.html
+  toolSummary: Check FAQ section in EN/guide.html
+
+========== MODEL ==========
+Created At: 2026-09-15T13:24:39+07:00
+Completed At: 2026-09-15T13:24:39+07:00
+File Path: `file:///d:/Data/AG/p2p_website/EN/guide.html`
+Total Lines: 231
+Total Bytes: 17578
+Showing lines 140 to 170
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+140:                         </summary>
+141:                         <p class="mt-3 text-sm text-slate-600">Yes, Easy Remote Desktop offers mobile support for Android and iOS devices, enabling you to manage Windows, macOS, or Linux computers on the go.</p>
+142:                     </details>
+143:                     <details class="group p-6">
+144:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+145:                             What if I forget the connection password?
+146:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+147:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+148:                             </svg>
+149:                         </summary>
+150:                         <p class="mt-3 text-sm text-slate-600">Passwords are generated in real-time and displayed directly on the host computer's screen. You can also generate a new one-click password whenever you want.</p>
+151:                     </details>
+152:                     <details class="group p-6">
+153:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+154:                             Are there any geographical restrictions?
+155:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+156:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+157:                             </svg>
+158:                         </summary>
+159:                         <p class="mt-3 text-sm text-slate-600">No, there are no geographical restrictions. As long as your device has an internet connection capable of reaching Vietnam (where our service server infrastructure is located), you can seamlessly connect and control computers remotely from anywhere in the world.</p>
+160:                     </details>
+161:                     <details class="group p-6">
+162:                         <summary class="flex cursor-pointer list-none items-center justify-between font-semibold text-slate-900">
+163:                             False positive: Flagged as a virus / trojan?
+164:                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5 shrink-0 transition-transform group-open:rotate-45">
+165:                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+166:                             </svg>
+167:                         </summary>
+168:                         <div class="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+169:                             <p>This is a common false positive detection:</p>
+170:                             <ul class="list-disc space-y-1.5 pl-5">
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========== MODEL ==========
+Đã thêm câu hỏi và câu trả lời vào mục **Câu hỏi thường gặp (FAQ)** trong cả hai trang hướng dẫn:
+
+1. [guide.html](file:///d:/Data/AG/p2p_website/guide.html#L152-L160) (Bản tiếng Việt):
+   - **Câu hỏi**: *Có bị giới hạn địa lý không?*
+   - **Trả lời**: *Không, phần mềm hoàn toàn không bị giới hạn vị trí địa lý. Chỉ cần thiết bị của bạn có đường truyền Internet truy cập được tới Việt Nam (hạ tầng máy chủ dịch vụ), bạn có thể kết nối và điều khiển máy tính từ xa mượt mà từ bất kỳ đâu trên thế giới.*
+
+2. [EN/guide.html](file:///d:/Data/AG/p2p_website/EN/guide.html#L153-L161) (Bản tiếng Anh):
+   - **Question**: *Are there any geographical restrictions?*
+   - **Answer**: *No, there are no geographical restrictions. As long as your device has an internet connection capable of reaching Vietnam (where our service server infrastructure is located), you can seamlessly connect and control computers remotely from anywhere in the world.*
+

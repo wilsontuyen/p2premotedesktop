@@ -477,6 +477,17 @@
   " máy trong mạng LAN & VPN": " máy trong mạng LAN & VPN",
   "🔄 Quét lại LAN": "🔄 Quét lại LAN",
   "Đang kết nối trực tiếp tới {name}...": "Đang kết nối trực tiếp tới {name}...",
-  "🗑️ Xóa sạch": "🗑️ Xóa sạch",
-  "Đã xóa sạch danh sách máy đã quét!": "Đã xóa sạch danh sách máy đã quét!"
+  "Đã xóa sạch danh sách máy đã quét!": "Đã xóa sạch danh sách máy đã quét!",
+  "Thay đổi mật khẩu": "Thay đổi mật khẩu",
+  "🔑 THAY ĐỔI MẬT KHẨU": "🔑 THAY ĐỔI MẬT KHẨU",
+  "Nhập mật khẩu mới:": "Nhập mật khẩu mới:",
+  "Mật khẩu không được để trống!": "Mật khẩu không được để trống!",
+  "Đã cập nhật mật khẩu cho {name}!": "Đã cập nhật mật khẩu cho {name}!",
+  "Đã xóa '{name}' khỏi danh sách!": "Đã xóa '{name}' khỏi danh sách!",
+  "💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy": "💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy",
+  "🚀 Kết nối": "🚀 Kết nối",
+  "⚡ Bật nguồn (WOL)": "⚡ Bật nguồn (WOL)",
+  "🗑️ Xóa": "🗑️ Xóa",
+  "Sai mật khẩu hoặc lỗi xác thực": "Sai mật khẩu hoặc lỗi xác thực",
+  "Sai mật khẩu kết nối": "Sai mật khẩu kết nối"
 }

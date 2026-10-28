@@ -1,0 +1,112 @@
+========== USER ==========
+app bên Windows 7 báo lỗi này:
+Bắt đầu khởi chạy ứng dụng...
+Traceback (most recent call last):
+  File "C:\PROGRA~2\EASYRE~1\app.py", line 39, in <module>
+  File "C:\PROGRA~2\EASYRE~1\socket.py", line 49, in <module>
+ImportError: LoadLibraryExW 'C:\PROGRA~2\EASYRE~1\_socket.pyd' failed: The parameter is incorrect.
+
+[Action: run_command]
+  CommandLine: python --version
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 500
+  toolAction: Running command
+  toolSummary: Command execution
+
+========== MODEL ==========
+Created At: 2026-07-22T03:12:04Z
+Completed At: 2026-07-22T03:12:11Z
+
+				The command completed successfully.
+				Output:
+				Python 3.8.10
+
+[Action: search_web]
+  query: "ImportError: LoadLibraryExW" "failed: The parameter is incorrect" python windows 7
+  toolAction: Searching the web
+  toolSummary: Web search
+
+========== MODEL ==========
+Created At: 2026-07-22T03:12:16Z
+Completed At: 2026-07-22T03:12:20Z
+The search for ""ImportError: LoadLibraryExW" "failed: The parameter is incorrect" python windows 7" returned the following summary:
+The `ImportError: LoadLibraryExW` "failed: The parameter is incorrect" error on Windows 7 typically indicates that your system is missing critical updates, specific Windows API patches, or necessary C++ runtime libraries required by the Python version or the compiled executable you are trying to run[1].
+
+Here are the recommended steps to resolve this issue:
+
+### 1. Install Critical Windows 7 Updates
+Windows 7 often requires specific updates to handle modern dynamic link library (DLL) loading correctly[1]. Ensure your system has the following:
+*   **Windows 7 Service Pack 1 (SP1):** This is mandatory for most modern software[1].
+*   **KB2533623 and KB3063858:** These specific patches are known to fix issues with system API parameter parsing that cause `LoadLibrary` errors[1].
+
+### 2. Install Microsoft Visual C++ Redistributables
+Python and its compiled libraries (like those created by PyInstaller or Nuitka) often depend on specific Microsoft Visual C++ Redistributable packages[1].
+*   Check which version of Python your application uses (e.g., Python 3.8+ often requires **VC++ 14.2** or newer).
+*   Download and install the latest supported **Microsoft Visual C++ Redistributable for Visual Studio (x64 or x86)** from the official Microsoft website.
+
+### 3. Check File Paths and Permissions
+Sometimes the error is triggered by the environment rather than missing files[1]:
+*   **Avoid Non-English Paths:** Ensure the application is located in a directory path that contains only English characters (e.g., `C:\Apps\MyApp` instead of paths with spaces, non-ASCII, or special characters)[1].
+*   **Run as Administrator:** Right-click your `.exe` file and select **"Run as administrator"** to ensure it has the necessary permissions to load required system modules[1].
+
+### 4. Rebuild or Recompile (If you are the developer)
+If you are compiling the code yourself using PyInstaller or Nuitka:
+*   **Nuitka:** If you are using Nuitka, try using the `--standalone` and `--mingw64` flags to create a self-contained package that minimizes dependencies on the host system's specific VC++ components[1].
+*   **PyInstaller:** Ensure that all dependencies (especially `socket` and other C-extension modules) are correctly collected[1]. Sometimes, manually specifying hidden imports can resolve these loading errors.
+
+If you are just running an existing `.exe`, focus on **Step 1** and **Step 2**, as these are the most common causes for this error on older Windows environments[1].
+
+Sources:
+[1] [volcengine.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEeIjaiUbqEbff-ziayjyEd7f--Ao25Xa2Rxvm_VtXLbUbVOZxTm7G5UzjBGC1nHER8sYgx6IPsZbl0yB1AdcmgLZJpsKF9_XmjzGFUNHsgwEENo7aYoaDz_gwpgy3aobM=)
+
+========== MODEL ==========
+Chào bạn, lỗi `ImportError: LoadLibraryExW '...\_socket.pyd' failed: The parameter is incorrect.` là một lỗi rất đặc trưng và phổ biến khi chạy các ứng dụng được viết bằng **Python 3.8** trở lên trên hệ điều hành **Windows 7**.
+
+### Nguyên nhân
+Kể từ phiên bản 3.8, thư viện nòng cốt của Python khi nạp các file đuôi `.pyd` (như `_socket.pyd`) hoặc `.dll` đã sử dụng hàm hệ thống `LoadLibraryExW` kèm theo một tham số (cờ) có tên là `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS` để tăng cường tính bảo mật. 
+
+Vấn đề là hệ điều hành Windows 7 gốc ban đầu chưa hỗ trợ cờ này. Microsoft chỉ thêm hỗ trợ cho cờ này thông qua một bản cập nhật về sau. Do máy Windows 7 mà bạn đang chạy app chưa được cài đặt bản cập nhật đó, nên hệ điều hành báo lỗi tham số không hợp lệ ("The parameter is incorrect").
+
+### Cách khắc phục (trên máy khách Windows 7)
+Để khắc phục lỗi này, máy tính chạy Windows 7 đó cần cài đặt thêm một số bản vá cập nhật của Microsoft:
+
+1. **Cài đặt bản cập nhật KB2533623 hoặc KB3063858:** 
+   Đây là bản cập nhật cốt lõi sửa lỗi bổ sung tham số cho API của Windows. Bạn có thể tìm tải bản cập nhật **KB3063858** (bản cập nhật mới hơn thay thế cho KB2533623) trên trang **Microsoft Update Catalog** và tiến hành cài đặt.
+2. **Đảm bảo đã có SP1:** Máy tính đó phải đang chạy phiên bản Windows 7 có Service Pack 1 (SP1).
+3. **Cài đặt Visual C++ Redistributable:** Hãy chắc chắn máy tính đã cài đặt bản *Microsoft Visual C++ Redistributable 2015-2022* (bản x86 hoặc x64 tùy thuộc vào việc app của bạn build 32bit hay 64bit).
+
+### Nếu bạn muốn fix từ phía mã nguồn/đóng gói
+Nếu bạn là người tạo ra ứng dụng này và muốn nó có thể chạy trên mọi máy tính Windows 7 cũ mà **không muốn bắt ép người dùng phải tự đi cài thêm bản cập nhật Windows**, thì bạn có một lựa chọn khác:
+
+* **Hạ cấp xuống Python 3.7:** Python 3.7 là phiên bản Python 3 cuối cùng sử dụng hàm nạp thư viện cũ (không yêu cầu bản cập nhật KB trên Windows 7). Bạn có thể tạo một môi trường ảo (virtualenv) với Python 3.7, cài lại các thư viện và dùng PyInstaller để đóng gói (build) lại file `.exe` từ mã nguồn. 
+
+*Lưu ý: Python 3.7 hiện tại đã hết vòng đời hỗ trợ (End of Life), tuy nhiên nó vẫn là giải pháp tương thích tốt nhất cho các máy tính sử dụng hệ điều hành quá cũ như Windows 7 chưa cập nhật.*
+
+========== USER ==========
+bản windows 7 hiện đang là SP1 và 2 bản cập nhật KB2533623 hoặc KB3063858 này đêu báo không tương thích & đã Cài đặt Visual C++ Redistributable 2015-2022 (cả 2 bản x86 hoặc x64) vẫn báo lỗi đó
+
+========== MODEL ==========
+Việc các bản cập nhật báo "Không tương thích" (Not applicable/Not compatible) trên Windows 7 xảy ra rất thường xuyên. Nguyên nhân chủ yếu rơi vào 2 trường hợp sau:
+1. **Tải sai phiên bản (32-bit vs 64-bit):** Bản Windows 7 trên máy đó có thể là 64-bit (x64) nhưng bạn vô tình tải bản vá dành cho 32-bit (x86), hoặc ngược lại.
+2. **Thiếu các bản cập nhật tiền đề (Prerequisites):** Các hệ điều hành cũ của Microsoft thường yêu cầu phải cài đặt bản cập nhật cấu trúc (Servicing Stack Update - SSU) hoặc bản cập nhật chứng chỉ SHA-2 trước thì mới cho phép cài các bản KB mới hơn. Nếu không, hệ thống sẽ báo không tương thích.
+
+Việc cố gắng "sửa" hệ điều hành Windows 7 cho từng khách hàng/máy tính sẽ tốn rất nhiều thời gian và gây khó chịu cho người dùng cuối (vì vòng lặp cập nhật của Win 7 rất phức tạp).
+
+Để giải quyết **triệt để** vấn đề này cho mọi máy khách chạy Windows 7 về sau, đây là các hướng đi tốt nhất cho bạn:
+
+### Giải pháp 1: Build lại App bằng Python 3.7 (Khuyến nghị cao nhất)
+Vì bạn đang phát triển ứng dụng (`Easy Remote Desktop`), giải pháp dứt điểm và chuyên nghiệp nhất là bạn không nên dùng Python 3.8.
+
+Hãy **cài đặt Python 3.7.9** (phiên bản cuối cùng của nhánh 3.7) trên máy dev của bạn để build app.
+* Python 3.7 không sử dụng các tham số (flag) mới trong lệnh gọi `LoadLibraryExW`.
+* File `.exe` được build bằng Python 3.7 + PyInstaller sẽ chạy **"ngon lành"** ngay lập tức trên mọi máy Windows 7 SP1 mà không bắt người dùng phải tự đi mò mẫm cài bất kỳ bản KB nào.
+
+### Giải pháp 2: Nếu bắt buộc phải dùng Python 3.8+ và muốn sửa cái máy Windows 7 đó
+Nếu bạn chỉ muốn cho app chạy được trên cái máy tính đó ngay lúc này, bạn cần cài đặt các bản vá theo đúng thứ tự (đảm bảo chọn đúng bản x86 hoặc x64 tùy vào máy đó đang chạy Win 7 32bit hay 64bit):
+
+1. Tải và cài đặt **KB4490628** (Servicing Stack Update). Khởi động lại máy.
+2. Tải và cài đặt **KB4474419** (Cập nhật hỗ trợ SHA-2 code signing). Khởi động lại máy.
+3. Sau khi cài đủ 2 bản trên, bạn mới có thể cài đặt **KB3063858** (bản vá sửa lỗi tham số LoadLibrary).
+
+*Khuyên dùng: Nếu app của bạn dùng cho nhiều người, hãy sử dụng Giải pháp 1. Việc hỗ trợ Windows 7 hiện nay luôn bắt buộc các lập trình viên Python phải lùi về Python 3.7 để đảm bảo tính tương thích (Out-of-the-box).* Bạn có muốn tôi hướng dẫn cách thiết lập môi trường ảo Python 3.7 để build lại dự án hiện tại không?
+

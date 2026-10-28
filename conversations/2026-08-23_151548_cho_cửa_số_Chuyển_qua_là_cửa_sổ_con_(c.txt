@@ -1,0 +1,3085 @@
+========== USER ==========
+cho cửa số "Chuyển qua" là cửa sổ con (child) của cửa sổ viewer (client windows) chứ không phải khóa trong cửa sổ "Chuyển tệp"
+
+[Action: grep_search]
+  Query: Chuyển qua
+  SearchPath: d:\Data\AG\remote_desktop
+  toolAction: Searching for 'Chuyển qua'
+  toolSummary: Search for 'Chuyển qua'
+
+========== MODEL ==========
+Created At: 2026-08-23T15:15:55+07:00
+Completed At: 2026-08-23T15:15:55+07:00
+{"File":"d:\\Data\\AG\\remote_desktop\\utils\\file_manager.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\vn_strings.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\en.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\de.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\fr.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\jp.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\lang_template.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\ru.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\tw.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\kr.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\lang\\cn.json"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_upload2.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_upload.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_syntax4.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_strings2.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_strings.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix4.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\do_patch_all.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_translations2.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\apply_translations.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-05_041959_aa1fa440-2a20-419f-8655-4ec79256c66c.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-07_035338_phần_File_Manager_thêm_cho_tôi_tính_năng.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-14_113912_File_manager_hiện_lên_rồi_nhưng_không_du.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-14_055043_ở_bản_build_này_có_thay_đổi_gì_mà_tui_th.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-05_160055_tạm_ổn_nhưng_để_hoàn_hảo_hơn.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-07_054502_-_giảm_số_lần_đục_lỗ_xuống_10_lần_với_th.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-04_134134_5ff5a56b-6961-448c-9f81-6255eaf6e41e.txt"}
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Viewing file_manager.py
+  toolSummary: View file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:01+07:00
+Completed At: 2026-08-23T15:16:01+07:00
+File Path: `file:///d:/Data/AG/remote_desktop/utils/file_manager.py`
+Total Lines: 1609
+Total Bytes: 78167
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: from core.i18n import _
+2: import os
+3: import time
+4: import base64
+5: import threading
+6: import pygame
+7: import tkinter as tk
+8: from tkinter import ttk, filedialog, messagebox
+9: from gui.components import ProgressDialog
+10: 
+11: def inline_ask_string(parent, title, prompt, initialvalue=""):
+12:     import tkinter as tk
+13:     from tkinter import ttk
+14:     var = tk.StringVar(parent, value="")
+15:     result = [None]
+16:     # We removed the dim overlay to allow seeing the File Manager content
+17:     dlg = tk.Frame(parent, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+18:     dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=400, height=150)
+19:     
+20:     # Lift to ensure they are on top of other widgets
+21:     dlg.lift()
+22:     
+23:     lbl_title = tk.Label(dlg, text=title, font=("Segoe UI", 10, "bold"), bg="#F0F0F0")
+24:     lbl_title.pack(pady=(10, 5), padx=20, anchor=tk.W)
+25:     
+26:     lbl_msg = tk.Label(dlg, text=prompt, font=("Segoe UI", 9), bg="#F0F0F0")
+27:     lbl_msg.pack(pady=(0, 5), padx=20, anchor=tk.W)
+28:     
+29:     entry = ttk.Entry(dlg, font=("Segoe UI", 9), width=35)
+30:     entry.pack(padx=20, pady=(0, 10))
+31:     if initialvalue:
+32:         entry.insert(0, initialvalue)
+33:         entry.select_range(0, tk.END)
+34:     entry.focus_force()
+35:     
+36:     btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+37:     btn_frame.pack(fill=tk.X, padx=20, pady=(0, 10), side=tk.BOTTOM)
+38:     
+39:     def _ok(e=None):
+40:         result[0] = entry.get()
+41:         var.set("done")
+42:         return "break"
+43:         
+44:     def _cancel(e=None):
+45:         result[0] = None
+46:         var.set("done")
+47:         return "break"
+48:         
+49:     entry.bind("<Return>", _ok)
+50:     entry.bind("<KP_Enter>", _ok)
+51:     entry.bind("<Escape>", _cancel)
+52:     dlg.bind("<Return>", _ok)
+53:     dlg.bind("<KP_Enter>", _ok)
+54:     dlg.bind("<Escape>", _cancel)
+55:     
+56:     btn_ok = ttk.Button(btn_frame, text=_("Đồng ý"), command=_ok, width=10, default="active")
+57:     btn_ok.bind("<Return>", _ok)
+58:     btn_ok.bind("<KP_Enter>", _ok)
+59:     btn_ok.pack(side=tk.LEFT, padx=(0, 5))
+60:     
+61:     btn_cancel = ttk.Button(btn_frame, text=_("Hủy"), command=_cancel, width=10)
+62:     btn_cancel.bind("<Return>", _cancel)
+63:     btn_cancel.bind("<KP_Enter>", _cancel)
+64:     btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
+65:     
+66:     dlg.grab_set()
+67:     parent.update_idletasks()
+68:     
+69:     parent.wait_variable(var)
+70:     dlg.destroy()
+71:     return result[0]
+72: 
+73: 
+74: def inline_messagebox(parent, title, message, m_type="info"):
+75:     import tkinter as tk
+76:     from tkinter import ttk
+77:     var = tk.StringVar(parent, value="")
+78:     result = [False]
+79:     
+80:     dlg = tk.Frame(parent, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+81:     dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=400, height=180)
+82:     dlg.lift()
+83:     
+84:     icons = {
+85:         "info": ("ℹ", "#0078D7"),
+86:         "error": ("❌", "#D32F2F"),
+87:         "warning": ("⚠", "#F57C00"),
+88:         "askyesno": ("❓", "#0078D7")
+89:     }
+90:     icon_char, icon_color = icons.get(m_type, ("", "black"))
+91:     
+92:     top_frame = tk.Frame(dlg, bg="#F0F0F0")
+93:     top_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+94:     
+95:     lbl_icon = tk.Label(top_frame, text=icon_char, font=("Segoe UI", 36), bg="#F0F0F0", fg=icon_color)
+96:     lbl_icon.pack(side=tk.LEFT, padx=(0, 15))
+97:     
+98:     lbl_msg = tk.Label(top_frame, text=message, font=("Segoe UI", 10), bg="#F0F0F0", wraplength=280, justify="left")
+99:     lbl_msg.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+100:     
+101:     btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+102:     btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+103:     
+104:     def _yes(e=None):
+105:         result[0] = True
+106:         var.set("done")
+107:         return "break"
+108:         
+109:     def _no(e=None):
+110:         result[0] = False
+111:         var.set("done")
+112:         return "break"
+113:         
+114:     dlg.bind("<Return>", _yes)
+115:     dlg.bind("<KP_Enter>", _yes)
+116:     dlg.bind("<Escape>", _no)
+117:     
+118:     if m_type == "askyesno":
+119:         btn_yes = ttk.Button(btn_frame, text=_("Đồng ý"), command=_yes, width=10, default="active")
+120:         btn_yes.bind("<Return>", _yes)
+121:         btn_yes.bind("<KP_Enter>", _yes)
+122:         btn_yes.pack(side=tk.LEFT, padx=(50, 5))
+123:         
+124:         btn_no = ttk.Button(btn_frame, text=_("Hủy"), command=_no, width=10)
+125:         btn_no.bind("<Return>", _no)
+126:         btn_no.bind("<KP_Enter>", _no)
+127:         btn_no.pack(side=tk.RIGHT, padx=(5, 50))
+128:         btn_yes.focus_force()
+129:     else:
+130:         btn_ok = ttk.Button(btn_frame, text=_("Đóng"), command=_yes, width=12, default="active")
+131:         btn_ok.bind("<Return>", _yes)
+132:         btn_ok.bind("<KP_Enter>", _yes)
+133:         btn_ok.pack(side=tk.TOP)
+134:         btn_ok.focus_force()
+135:         
+136:     dlg.grab_set()
+137:     parent.update_idletasks()
+138:     parent.wait_variable(var)
+139:     dlg.destroy()
+140:     return result[0]
+141: 
+142: class CustomMessageBox:
+143:     @staticmethod
+144:     def showinfo(title, message, **kwargs):
+145:         parent = kwargs.get("parent")
+146:         if not parent:
+147:             from tkinter import messagebox as tk_msg
+148:             return tk_msg.showinfo(title, message, **kwargs)
+149:         return inline_messagebox(parent, title, message, "info")
+150:         
+151:     @staticmethod
+152:     def showerror(title, message, **kwargs):
+153:         parent = kwargs.get("parent")
+154:         if not parent:
+155:             from tkinter import messagebox as tk_msg
+156:             return tk_msg.showerror(title, message, **kwargs)
+157:         return inline_messagebox(parent, title, message, "error")
+158:         
+159:     @staticmethod
+160:     def showwarning(title, message, **kwargs):
+161:         parent = kwargs.get("parent")
+162:         if not parent:
+163:             from tkinter import messagebox as tk_msg
+164:             return tk_msg.showwarning(title, message, **kwargs)
+165:         return inline_messagebox(parent, title, message, "warning")
+166:         
+167:     @staticmethod
+168:     def askyesno(title, message, **kwargs):
+169:         parent = kwargs.get("parent")
+170:         if not parent:
+171:             from tkinter import messagebox as tk_msg
+172:             return tk_msg.askyesno(title, message, **kwargs)
+173:         return inline_messagebox(parent, title, message, "askyesno")
+174: 
+175: 
+176: def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080, send_event_sync=None):
+177:     try:
+178:         import tkinter as tk
+179:         from tkinter import ttk, filedialog, messagebox
+180:         messagebox = CustomMessageBox
+181:         import threading, os, time, base64
+182: 
+183:         import sys
+184:         hwnd = host_hwnd
+185:         if not hwnd:
+186:             try: hwnd = pygame.display.get_wm_info().get("window")
+187:             except: pass
+188:             
+189:         top = tk.Tk()
+190:             
+191:         globals()['fm_top'] = top
+192:         active_upload_ack_events = []
+193:         active_upload_dialog = []
+194:         
+195:         if sys.platform == "win32":
+196:             top.attributes('-alpha', 0.0)
+197:         else:
+198:             top.withdraw()
+199: 
+200:         host_title = f" - {computer_name}" if computer_name else ""
+201:         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
+202:         if hwnd and sys.platform == "win32":
+203:             import ctypes
+204:             from ctypes import wintypes
+205:             rect = wintypes.RECT()
+206:             ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
+207:             py_w = rect.right - rect.left
+208:             py_h = rect.bottom - rect.top
+209: 
+210:             # Try to get screen coordinates of the Pygame window
+211:             pt = wintypes.POINT(0, 0)
+212:             ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+213: 
+214:             top.update_idletasks()
+215:             tk_hwnd = int(top.frame(), 16)
+216:             try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+217:             except: pass
+218:             style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+219:             style = (style | 0x40000000) & ~0x80000000
+220:             ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+221:             ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
+222:             x = max(0, (py_w - 900) // 2)
+223:             y = max(0, (py_h - 600) // 2)
+224:             top.geometry("900x600")
+225:             top.update_idletasks()
+226:             ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
+227:         else:
+228:             top.update_idletasks()
+229:             sw = top.winfo_screenwidth()
+230:             sh = top.winfo_screenheight()
+231:             top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
+232: 
+233:         top.attributes('-topmost', True)
+234:         if sys.platform == "win32":
+235:             top.attributes('-alpha', 1.0)
+236:         else:
+237:             top.deiconify()
+238:         top.configure(bg="#E5E5E5")
+239: 
+240:         left_frame = tk.Frame(top, bg="#E5E5E5")
+241:         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+242: 
+243:         mid_frame = tk.Frame(top, width=60, bg="#E5E5E5")
+244:         mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+245:         
+246:         btn_upload = tk.Button(mid_frame, text=_("Chuyển qua\n>>"), font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10)
+247:         btn_upload.pack(pady=(100, 10))
+248:         btn_download = tk.Button(mid_frame, text=_("Nhận về\n<<"), font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10)
+249:         btn_download.pack(pady=10)
+250: 
+251:         right_frame = tk.Frame(top, bg="#E5E5E5")
+252:         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+253: 
+254:         # --- Left Pane (Local) ---
+255:         tk.Label(left_frame, text=_("Máy của bạn (Local)"), font=("Segoe UI", 10, "bold"), bg="#E5E5E5").pack()
+256:         local_nav = tk.Frame(left_frame, bg="#E5E5E5")
+257:         local_nav.pack(fill=tk.X, pady=2)
+258: 
+259:         local_entry = tk.Entry(local_nav)
+260:         local_entry.insert(0, os.path.abspath(os.path.expanduser("~")))
+261: 
+262:         def format_size(s):
+263:             if s < 1024: return f"{s} B"
+264:             elif s < 1024*1024: return f"{s/1024:.1f} KB"
+265:             elif s < 1024*1024*1024: return f"{s/(1024*1024):.1f} MB"
+266:             elif s < 1024*1024*1024*1024: return f"{s/(1024*1024*1024):.2f} GB"
+267:             else: return f"{s/(1024*1024*1024*1024):.2f} TB"
+268: 
+269:         def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
+270:             """Show a properties dialog for a file or folder."""
+271:             w, h = 400, 380
+272:             # Removed dim overlay to see background
+273:             dlg = tk.Frame(top, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+274:             dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=w, height=h)
+275:             
+276:             dlg.lift()
+277: 
+278:             # Title bar
+279:             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
+280:             title_frame.pack(fill=tk.X)
+281:             title_frame.pack_propagate(False)
+282:             tk.Label(title_frame, text=f"  📋 {name}", font=("Segoe UI", 11, "bold"), bg="#0078D7", fg="white", anchor="w").pack(fill=tk.X, padx=5, pady=8)
+283: 
+284:             # Content
+285:             content_frame = tk.Frame(dlg, bg="#F0F0F0")
+286:             content_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+287: 
+288:             row = 0
+289:             def add_row(label_text, value_text, bold_value=False):
+290:                 nonlocal row
+291:                 tk.Label(content_frame, text=label_text, font=("Segoe UI", 9, "bold"), bg="#F0F0F0", fg="#333", anchor="w").grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+292:                 font_style = ("Segoe UI", 9, "bold") if bold_value else ("Segoe UI", 9)
+293:                 lbl = tk.Label(content_frame, text=value_text, font=font_style, bg="#F0F0F0", fg="#111", anchor="w", wraplength=250, justify="left")
+294:                 lbl.grid(row=row, column=1, sticky="w", pady=4)
+295:                 row += 1
+296:                 return lbl
+297: 
+298:             add_row(_("Tên:"), name)
+299: 
+300:             # Separator
+301:             sep1 = tk.Frame(content_frame, bg="#CCC", height=1)
+302:             sep1.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+303:             row += 1
+304: 
+305:             add_row(_("Loại:"), item_type)
+306:             add_row(_("Vị trí:"), location)
+307: 
+308:             sep2 = tk.Frame(content_frame, bg="#CCC", height=1)
+309:             sep2.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+310:             row += 1
+311: 
+312:             size_label = add_row(_("Kích thước:"), format_size(size_bytes) + f"  ({size_bytes:,} bytes)" if size_bytes >= 0 else _("Đang tính..."), bold_value=True)
+313: 
+314:             if file_count is not None:
+315:                 add_row(_("Chứa:"), _("Tệp: {file_count}, Thư mục: {folder_count}").format(file_count=file_count, folder_count=folder_count))
+316: 
+317:             if modified_time:
+318:                 sep3 = tk.Frame(content_frame, bg="#CCC", height=1)
+319:                 sep3.grid(row=row, column=0, columnspan=2, sticky="ew", pady=6)
+320:                 row += 1
+321:                 add_row(_("Sửa đổi:"), modified_time)
+322: 
+323:             # Close button
+324:             def _close_props():
+325:                 try: dlg.grab_release()
+326:                 except: pass
+327:                 dlg.destroy()
+328:             
+329:             btn_frame = tk.Frame(dlg, bg="#F0F0F0")
+330:             btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
+331:             ttk.Button(btn_frame, text=_("Đóng"), command=_close_props, width=12).pack(side=tk.RIGHT)
+332: 
+333:             try: dlg.grab_set()
+334:             except: pass
+335:             
+336:             return dlg, size_label
+337: 
+338:         def refresh_local():
+339:             for item in local_tree.get_children():
+340:                 local_tree.delete(item)
+341:             try:
+342:                 import sys
+343:                 path = local_entry.get()
+344:                 if path == "This PC":
+345:                     if sys.platform != "win32":
+346:                         local_entry.delete(0, tk.END)
+347:                         local_entry.insert(0, "/")
+348:                         path = "/"
+349:                     else:
+350:                         btn_upload.config(state=tk.DISABLED)
+351:                         btn_download.config(state=tk.DISABLED)
+352:                         import string
+353:                         import ctypes
+354:                         bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+355:                         drives = []
+356:                         for letter in string.ascii_uppercase:
+357:                             if bitmask & 1:
+358:                                 drives.append(f"{letter}:\\")
+359:                             bitmask >>= 1
+360:                         for d in drives:
+361:                             local_tree.insert("", "end", text=d, values=("", _("Ổ đĩa"), 0))
+362:                         return
+363:                 
+364:                 if path != "This PC":
+365:                     btn_upload.config(state=tk.NORMAL)
+366:                     btn_download.config(state=tk.NORMAL)
+367: 
+368:                 items = os.listdir(path)
+369:                 # Folders first, then files
+370:                 dirs = []
+371:                 files = []
+372:                 for item in items:
+373:                     full = os.path.join(path, item)
+374:                     if os.path.isdir(full):
+375:                         dirs.append(item)
+376:                     else:
+377:                         files.append(item)
+378:                 dirs.sort(key=str.lower)
+379:                 files.sort(key=str.lower)
+380: 
+381:                 for d in dirs:
+382:                     local_tree.insert("", "end", text=d, values=("", _("Thư mục")))
+383:                 for f in files:
+384:                     full = os.path.join(path, f)
+385:                     size = os.path.getsize(full)
+386:                     local_tree.insert("", "end", text=f, values=(format_size(size), _("Tệp"), size))
+387:             except Exception as e:
+388:                 pass
+389: 
+390:         def go_up_local():
+391:             current = local_entry.get()
+392:             if current == "This PC": return
+393:             parent = os.path.dirname(current)
+394:             if parent and parent == current:
+395:                 import sys
+396:                 if sys.platform == "win32":
+397:                     parent = "This PC"
+398:                 else:
+399:                     return
+400: 
+401:             local_entry.delete(0, tk.END)
+402:             local_entry.insert(0, parent)
+403:             refresh_local()
+404: 
+405:         tk.Button(local_nav, text=_("⬆ Lên"), command=go_up_local).pack(side=tk.LEFT)
+406:         local_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+407:         tk.Button(local_nav, text=_("Đi"), command=refresh_local).pack(side=tk.LEFT)
+408: 
+409:         local_tree_frame = tk.Frame(left_frame, bd=1, relief=tk.SUNKEN)
+410:         local_tree_frame.pack(fill=tk.BOTH, expand=True)
+411:         local_scrollbar = tk.Scrollbar(local_tree_frame, orient="vertical", width=16)
+412:         local_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+413:         local_tree = ttk.Treeview(local_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=local_scrollbar.set)
+414:         local_tree.heading("#0", text=_("Tên"))
+415:         local_tree.heading("size", text=_("Kích thước"))
+416:         local_tree.heading("type", text=_("Loại"))
+417:         local_tree.column("#0", width=200)
+418:         local_tree.column("size", width=80)
+419:         local_tree.column("type", width=70)
+420:         local_tree.column("raw_size", width=0, stretch=False)
+421:         local_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+422:         local_scrollbar.config(command=local_tree.yview)
+423: 
+424:         def local_double_click(event):
+425:             sel = local_tree.selection()
+426:             if sel:
+427:                 item = local_tree.item(sel[0])
+428:                 vals = item.get('values', [])
+429:                 name = item['text']
+430:                 if local_entry.get() == "This PC":
+431:                     fpath = name
+432:                 else:
+433:                     fpath = os.path.join(local_entry.get(), name)
+434:                 is_dir = (len(vals) > 1 and vals[1] in (_("Thư mục"), _("Ổ đĩa")))
+435:                 if not is_dir:
+436:                     try: is_dir = os.path.isdir(fpath)
+437:                     except: pass
+438:                 if is_dir:
+439:                     new_path = fpath
+440:                     local_entry.delete(0, tk.END)
+441:                     local_entry.insert(0, new_path)
+442:                     refresh_local()
+443:                 else:
+444:                     local_action("view")
+445:         def _handle_bs_local(e):
+446:             go_up_local()
+447:             return "break"
+448:         local_tree.bind("<Double-1>", local_double_click)
+449:         local_tree.bind("<BackSpace>", _handle_bs_local)
+450: 
+451:         local_menu = tk.Menu(top, tearoff=0)
+452:         def local_action(action):
+453:             try:
+454:                 current_dir = local_entry.get()
+455:                 sel = local_tree.selection()
+456:                 if action == "mkdir":
+457:                     
+458:                     new_name = inline_ask_string(top, _("Thư mục mới"), _("Nhập tên thư mục mới:"))
+459:                     top.focus_force()
+460:                     if new_name:
+461:                         try:
+462:                             folder_path = os.path.join(current_dir, new_name)
+463:                             if os.path.exists(folder_path):
+464:                                 messagebox.showinfo(_("Lỗi"), _('Thư mục "{new_name}" đã tồn tại trên "{current_dir}"').format(new_name=new_name, current_dir=current_dir), parent=top)
+465:                             else:
+466:                                 os.makedirs(folder_path, exist_ok=True)
+467:                                 refresh_local()
+468:                         except Exception as e:
+469:                             with open("C:\\Apps\\P2P\\debug_view.txt", "a", encoding="utf-8") as f: f.write(f"Error mkdir: {str(e)}\n")
+470:                     return
+471:                 if not sel: return
+472: 
+473:                 if action == "delete":
+474:                     if len(sel) == 1:
+475:                         msg = _("Bạn có chắc muốn xóa '{item_name}' không?").format(item_name=local_tree.item(sel[0])['text'])
+476:                     else:
+477:                         msg = _("Bạn có chắc muốn xóa {count} mục đã chọn không?").format(count=len(sel))
+478:                     confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
+479:                     top.focus_force()
+480:                     if confirm:
+481:                         for s in sel:
+482:                             item = local_tree.item(s)
+483:                             name = item['text']
+484:                             full_path = os.path.join(current_dir, name)
+485:                             vals = item.get('values', [])
+486:                             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+487:                             try:
+488:                                 if is_dir:
+489:                                     import shutil
+490:                                     shutil.rmtree(full_path)
+491:                                 else:
+492:                                     os.remove(full_path)
+493:                             except Exception as e:
+494:                                 messagebox.showerror(_("Lỗi"), _("Lỗi xóa {name}: {e}").format(name=name, e=e), parent=top)
+495:                         refresh_local()
+496:                     return
+497: 
+498:                 if action == "properties":
+499:                     # Properties for first selected item
+500:                     item = local_tree.item(sel[0])
+501:                     name = item['text']
+502:                     full_path = os.path.join(current_dir, name)
+503:                     vals = item.get('values', [])
+504:                     is_dir = (len(vals) > 1 and vals[1] in (_("Thư mục"), _("Ổ đĩa")))
+505: 
+506:                     from datetime import datetime
+507:                     try:
+508:                         mtime = os.path.getmtime(full_path)
+509:                         mod_time = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+510:                     except:
+511:                         mod_time = _("Không xác định")
+512: 
+513:                     if is_dir:
+514:                         # Show dialog immediately with "calculating..." then update in background
+515:                         dlg, size_label = show_properties_dialog(
+516:                             name, _("Thư mục"), current_dir, -1,
+517:                             file_count=0, folder_count=0, modified_time=mod_time
+518:                         )
+519:                         size_label.config(text=_("Đang tính..."))
+520: 
+521:                         def calc_dir_size(fp, lbl, dialog):
+522:                             total_size = 0
+523:                             file_count = 0
+524:                             folder_count = 0
+525:                             try:
+526:                                 for dirpath, dirnames, filenames in os.walk(fp):
+527:                                     folder_count += len(dirnames)
+528:                                     for f in filenames:
+529:                                         file_count += 1
+530:                                         try:
+531:                                             total_size += os.path.getsize(os.path.join(dirpath, f))
+532:                                         except:
+533:                                             pass
+534:                             except:
+535:                                 pass
+536:                             try:
+537:                                 if dialog.winfo_exists():
+538:                                     dialog.after(0, lambda: _update_props_labels(lbl, dialog, total_size, file_count, folder_count))
+539:                             except:
+540:                                 pass
+541: 
+542:                         def _update_props_labels(lbl, dialog, total_size, file_count, folder_count):
+543:                             try:
+544:                                 if dialog.winfo_exists():
+545:                                     lbl.config(text=format_size(total_size) + f"  ({total_size:,} bytes)")
+546:                                     # Find and update the "Chứa" label
+547:                                     for widget in dialog.winfo_children():
+548:                                         for child in widget.winfo_children():
+549:                                             try:
+550:                                                 if hasattr(child, 'cget') and child.cget('text').startswith(_("Tệp:")):
+551:                                                     child.config(text=_("Tệp: {file_count}, Thư mục: {folder_count}").format(file_count=file_count, folder_count=folder_count))
+552:                                             except:
+553:                                                 pass
+554:                             except:
+555:                                 pass
+556: 
+557:                         threading.Thread(target=calc_dir_size, args=(full_path, size_label, dlg), daemon=True).start()
+558:                     else:
+559:                         try:
+560:                             size = os.path.getsize(full_path)
+561:                         except:
+562:                             size = 0
+563:                         show_properties_dialog(name, _("Tệp"), current_dir, size, modified_time=mod_time)
+564:                     return
+565: 
+566:                 for s in sel:
+567:                     item = local_tree.item(s)
+568:                     name = item['text']
+569:                     full_path = os.path.join(current_dir, name)
+570:                     vals = item.get('values', [])
+571:                     is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+572: 
+573:                     if action == "view":
+574:                         from datetime import datetime
+575:                         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+576:                         print(f"{ts} [Local] Action 'view' started for '{name}', is_dir={is_dir}")
+577:                         if is_dir:
+578:                             messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
+579:                         else:
+580:                             if True:
+581:                                 try:
+582:                                     print(f"{ts} [Local] Opening {full_path}...")
+583:                                     with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+584:                                         file_content = f.read(5 * 1024 * 1024)
+585:                                     print(f"{ts} [Local] Read successful, creating window...")
+586:                                     np_win = tk.Toplevel(top)
+587:                                     import sys
+588:                                     if sys.platform == "win32":
+589:                                         np_win.attributes('-alpha', 0.0)
+590:                                     else:
+591:                                         np_win.withdraw()
+592:                                     np_win.title(_("Soạn thảo (Local) - {name}").format(name=name))
+593:                                     np_win.geometry("800x600")
+594:                                     
+595:                                     import sys
+596:                                     _np_hwnd = None
+597:                                     try: 
+598:                                         import pygame
+599:                                         _np_hwnd = pygame.display.get_wm_info().get("window")
+600:                                     except: pass
+601:                                     
+602:                                     if _np_hwnd and sys.platform == "win32":
+603:                                         import ctypes
+604:                                         from ctypes import wintypes
+605:                                         np_win.update_idletasks()
+606:                                         tk_hwnd = int(np_win.frame(), 16)
+607:                                         try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+608:                                         except: pass
+609:                                         style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+610:                                         style = (style | 0x40000000) & ~0x80000000
+611:                                         ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+612:                                         ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
+613:                                         rect = wintypes.RECT()
+614:                                         ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
+615:                                         py_w = rect.right - rect.left
+616:                                         py_h = rect.bottom - rect.top
+617:                                         x = max(0, (py_w - 800) // 2)
+618:                                         y = max(0, (py_h - 600) // 2)
+619:                                         np_win.geometry("800x600")
+620:                                         np_win.update_idletasks()
+621:                                         ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
+622:                                     else:
+623:                                         np_win.transient(top)
+624:                                         np_win.attributes('-topmost', True)
+625:                                         np_win.update_idletasks()
+626:                                         w, h = 800, 600
+627:                                         px, py = top.winfo_rootx(), top.winfo_rooty()
+628:                                         pw, ph = top.winfo_width(), top.winfo_height()
+629:                                         np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+630:                                     if sys.platform == "win32":
+631:                                         np_win.attributes('-alpha', 1.0)
+632:                                     else:
+633:                                         np_win.deiconify()
+634:                                     np_win.lift()
+635:                                     np_win.focus_force()
+636:                                     text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
+637:                                     text_area.pack(expand=True, fill="both")
+638:                                     text_area.insert("1.0", file_content)
+639:                                     def make_save(fp, ta, win):
+640:                                         def save_file():
+641:                                             try:
+642:                                                 with open(fp, "w", encoding="utf-8") as fw:
+643:                                                     fw.write(ta.get("1.0", "end-1c"))
+644:                                                 messagebox.showinfo(_("Thành công"), _("Đã lưu tệp!"), parent=win)
+645:                                             except Exception as e:
+646:                                                 messagebox.showerror(_("Lỗi"), _("Không thể lưu: {e}").format(e=e), parent=win)
+647:                                         return save_file
+648:                                     tk.Button(np_win, text=_("Lưu"), command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+649:                                     print(f"{ts} [Local] Window created successfully.")
+650:                                 except Exception as ex:
+651:                                     import traceback
+652:                                     print(f"{ts} [Local] CRASH during view: {traceback.format_exc()}")
+653:                                     messagebox.showerror(_("Lỗi"), str(ex), parent=top)
+654:                     elif action == "rename":
+655:                         
+656:                         new_name = inline_ask_string(top, _("Đổi tên"), _("Nhập tên mới cho '{name}':").format(name=name), initialvalue=name)
+657:                         top.focus_force()
+658:                         if new_name and new_name != name:
+659:                             try:
+660:                                 os.rename(full_path, os.path.join(current_dir, new_name))
+661:                             except Exception as e:
+662:                                 messagebox.showerror(_("Lỗi"), str(e), parent=top)
+663:                 if action == "rename":
+664:                     refresh_local()
+665:             except Exception as outer_e:
+666:                 import traceback
+667:                 from datetime import datetime
+668:                 ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+669:                 print(f"{ts} [Local] OUTER CRASH: {traceback.format_exc()}")
+670:                 messagebox.showerror(_("Lỗi"), str(outer_e), parent=top)
+671:         def show_local_menu(event):
+672:             local_menu.delete(0, 'end')
+673:             row = local_tree.identify_row(event.y)
+674:             if not row:
+675:                 local_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: local_action("mkdir"))
+676:                 local_menu.add_separator()
+677:                 local_menu.add_command(label=_("Làm mới"), command=refresh_local)
+678:                 local_menu.tk_popup(event.x_root, event.y_root)
+679:                 return
+680: 
+681:             if row not in local_tree.selection():
+682:                 local_tree.selection_set(row)
+683: 
+684:             vals = local_tree.item(row, "values")
+685:             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+686: 
+687:             if not is_dir:
+688:                 local_menu.add_command(label=_("Xem tệp"), command=lambda: local_action("view"))
+689:             local_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: local_action("mkdir"))
+690:             local_menu.add_command(label=_("Đổi tên"), command=lambda: local_action("rename"))
+691:             local_menu.add_separator()
+692:             local_menu.add_command(label=_("Xóa"), command=lambda: local_action("delete"))
+693:             local_menu.add_separator()
+694:             local_menu.add_command(label=_("Thuộc tính"), command=lambda: local_action("properties"))
+695: 
+696:             try:
+697:                 local_menu.tk_popup(event.x_root, event.y_root)
+698:             finally:
+699:                 local_menu.grab_release()
+700:         local_tree.bind("<Button-3>", show_local_menu)
+701: 
+702:         def select_all_local(event):
+703:             local_tree.selection_set(local_tree.get_children())
+704:             return "break"
+705:         local_tree.bind("<Control-a>", select_all_local)
+706:         local_tree.bind("<Control-A>", select_all_local)
+707: 
+708:         # --- Right Pane (Remote) ---
+709:         tk.Label(right_frame, text=_("Máy điều khiển (Remote Host)"), font=("Segoe UI", 10, "bold"), bg="#E5E5E5").pack()
+710:         remote_nav = tk.Frame(right_frame, bg="#E5E5E5")
+711:         remote_nav.pack(fill=tk.X, pady=2)
+712: 
+713:         remote_entry = tk.Entry(remote_nav)
+714:         
+715:         try:
+716:             import core.viewer
+717:             host_os = getattr(core.viewer, 'client_host_os_release', '10')
+718:             is_host_win = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in host_os
+719:         except Exception:
+720:             is_host_win = True
+721:             
+722:         if is_android:
+723:             default_path = "/sdcard/"
+724:         elif not is_host_win:
+725:             default_path = "/"
+726:         else:
+727:             default_path = "C:\\"
+728:             
+729:         remote_entry.insert(0, default_path)
+730: 
+731:         def request_remote_dir(path):
+732:             # send list_dir request
+733:             req = {"type": "request_list_dir", "path": path}
+734:             send_event(req)
+735: 
+736:         def on_remote_dir_result(event):
+737:             evt_type = event.get("type", "list_dir_result")
+738:             if evt_type == "list_dir_result":
+739:                 if event.get("path") != remote_entry.get():
+740:                     return
+741:                 if remote_entry.get() == "This PC":
+742:                     btn_upload.config(state=tk.DISABLED)
+743:                     btn_download.config(state=tk.DISABLED)
+744:                 elif local_entry.get() != "This PC":
+745:                     btn_upload.config(state=tk.NORMAL)
+746:                     btn_download.config(state=tk.NORMAL)
+747:                 for item in remote_tree.get_children():
+748:                     remote_tree.delete(item)
+749:                 items = event.get("items", [])
+750:                 dirs = [i for i in items if i.get("is_dir")]
+751:                 files = [i for i in items if not i.get("is_dir")]
+752:                 dirs.sort(key=lambda x: str(x.get("name")).lower())
+753:                 files.sort(key=lambda x: str(x.get("name")).lower())
+754: 
+755:                 for d in dirs:
+756:                     remote_tree.insert("", "end", text=d.get("name"), values=("", _("Thư mục")))
+757:                 for f in files:
+758:                     sz = f.get("size", 0)
+759:                     remote_tree.insert("", "end", text=f.get("name"), values=(format_size(sz), _("Tệp"), sz))
+760:             elif evt_type == "get_properties_result":
+761:                 success = event.get("success")
+762:                 if success:
+763:                     name = event.get("name", "")
+764:                     item_type = _("Thư mục") if event.get("is_dir") else _("Tệp")
+765:                     location = event.get("location", "")
+766:                     size_bytes = event.get("size", 0)
+767:                     file_count = event.get("file_count")
+768:                     folder_count = event.get("folder_count")
+769:                     mod_time = event.get("modified_time", _("Không xác định"))
+770:                     show_properties_dialog(name, item_type, location, size_bytes,
+771:                                           file_count=file_count, folder_count=folder_count,
+772:                                           modified_time=mod_time)
+773:                 else:
+774:                     messagebox.showerror(_("Lỗi"), event.get("error", _("Không thể lấy thuộc tính")), parent=top)
+775:             elif evt_type in ("delete_item_result", "rename_item_result", "create_folder_result", "open_file_result"):
+776:                 success = event.get("success")
+777:                 error = event.get("error")
+778:                 if not success:
+779:                     messagebox.showerror(_("Lỗi"), error or _("Thao tác thất bại"), parent=top)
+780:                 else:
+781:                     request_remote_dir(remote_entry.get())
+782:             elif evt_type == "read_text_file_result":
+783:                 success = event.get("success")
+784:                 if success:
+785:                     try:
+786:                         from datetime import datetime
+787:                         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+788:                         print(f"{ts} [Remote] Remote read success, creating Toplevel Notepad")
+789:                         content = event.get("content", "")
+790:                         path = event.get("path", "")
+791:                         name = path.split("/")[-1] if "/" in path else path.split("\\")[-1]
+792:                         np_win = tk.Toplevel(top)
+793:                         import sys
+794:                         if sys.platform == "win32":
+795:                             np_win.attributes('-alpha', 0.0)
+796:                         else:
+797:                             np_win.withdraw()
+798:                         np_win.title(_("Soạn thảo (Remote) - {name}").format(name=name))
+799:                         np_win.geometry("800x600")
+800:                         
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: grep_search]
+  Query: ProgressDialog
+  SearchPath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Searching for 'ProgressDialog' in file_manager.py
+  toolSummary: Search for 'ProgressDialog' in file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:07+07:00
+Completed At: 2026-08-23T15:16:07+07:00
+{"File":"d:/Data/AG/remote_desktop/utils/file_manager.py"}
+
+[Action: grep_search]
+  MatchPerLine: True
+  Query: ProgressDialog
+  SearchPath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Searching for 'ProgressDialog' in file_manager.py
+  toolSummary: Search for 'ProgressDialog' in file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:14+07:00
+Completed At: 2026-08-23T15:16:14+07:00
+No results found
+
+[Action: grep_search]
+  CaseInsensitive: True
+  MatchPerLine: True
+  Query: progressdialog
+  SearchPath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Searching for 'progressdialog' in file_manager.py
+  toolSummary: Search for 'progressdialog' in file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:19+07:00
+Completed At: 2026-08-23T15:16:19+07:00
+No results found
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\gui\components.py
+  toolAction: Viewing components.py
+  toolSummary: View components.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:26+07:00
+Completed At: 2026-08-23T15:16:26+07:00
+File Path: `file:///d:/Data/AG/remote_desktop/gui/components.py`
+Total Lines: 662
+Total Bytes: 28727
+Showing lines 1 to 662
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import tkinter as tk
+2: from tkinter import ttk
+3: import os
+4: import time
+5: import sys
+6: _DIALOG_FONT = "Segoe UI" if sys.platform == "win32" else "Helvetica"
+7: from utils.logger import log_debug
+8: from core.i18n import _
+9: 
+10: try:
+11:     from PIL import Image, ImageTk
+12: except ImportError:
+13:     pass
+14: 
+15: if getattr(sys, 'frozen', False):
+16:     app_dir = os.path.dirname(sys.executable)
+17: else:
+18:     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+19: 
+20: class PremiumProgressBar(tk.Canvas):
+21:     def __init__(self, parent, width=320, height=12, bg="#15151B", fg="#00ADB5", **kwargs):
+22:         super().__init__(parent, width=width, height=height, bg=parent["bg"], highlightthickness=0, bd=0, **kwargs)
+23:         self.width = width
+24:         self.height = height
+25:         self.fg = fg
+26:         self.bg_color = bg
+27:         
+28:         self.draw_rounded_rect(0, 0, width, height, radius=5, fill=bg)
+29:         self.fill_id = None
+30: 
+31:     def draw_rounded_rect(self, x1, y1, x2, y2, radius=5, **kwargs):
+32:         points = [x1+radius, y1,
+33:                   x2-radius, y1,
+34:                   x2, y1,
+35:                   x2, y1+radius,
+36:                   x2, y2-radius,
+37:                   x2, y2,
+38:                   x2-radius, y2,
+39:                   x1+radius, y2,
+40:                   x1, y2,
+41:                   x1, y2-radius,
+42:                   x1, y1+radius,
+43:                   x1, y1]
+44:         return self.create_polygon(points, **kwargs, smooth=True)
+45: 
+46:     def set_progress(self, percent):
+47:         percent = max(0, min(100, percent))
+48:         if self.fill_id:
+49:             self.delete(self.fill_id)
+50:             self.fill_id = None
+51:             
+52:         if percent > 0:
+53:             fill_width = int(self.width * (percent / 100))
+54:             if fill_width > 10:
+55:                 self.fill_id = self.draw_rounded_rect(0, 0, fill_width, self.height, radius=5, fill=self.fg)
+56:             elif fill_width > 0:
+57:                 self.fill_id = self.create_rectangle(0, 0, fill_width, self.height, fill=self.fg, width=0)
+58: 
+59: from os_utils.ui import get_file_icon_as_image
+60: 
+61: class ClassicCopyDialog(tk.Toplevel):
+62:     def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
+63:         super().__init__(parent)
+64:         self.withdraw()
+65:         self.title("Copy File")
+66:         self.geometry("520x420")
+67:         self.resizable(False, False)
+68:         self.configure(bg="#FFFFFF")
+69:         
+70:         try:
+71:             icon_path = os.path.join(app_dir, "app_icon.png")
+72:             if os.path.exists(icon_path):
+73:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+74:                 self.iconphoto(False, icon_img)
+75:                 self._dialog_icon_img = icon_img
+76:         except Exception:
+77:             pass
+78:             
+79:         self.choice = None
+80:         self.has_multiple = has_multiple
+81:         
+82:         self.attributes("-topmost", True)
+83:         self.focus_force()
+84:         
+85:         self.update_idletasks()
+86:         w = 520
+87:         h = 420
+88:         ws = self.winfo_screenwidth()
+89:         hs = self.winfo_screenheight()
+90:         x = (ws - w) // 2
+91:         y = (hs - h) // 2
+92:         self.geometry(f"{w}x{h}+{x}+{y}")
+93:         self.deiconify()
+94:         
+95:         self.grab_set()
+96:         
+97:         lbl_title = tk.Label(
+98:             self, text="There is already a file with the same name in this location.",
+99:             font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
+100:         )
+101:         lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
+102:         
+103:         lbl_sub = tk.Label(
+104:             self, text="Click the file you want to keep",
+105:             font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
+106:         )
+107:         lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
+108:         
+109:         def format_size(bytes_size):
+110:             if bytes_size < 1024:
+111:                 return f"{bytes_size} bytes"
+112:             elif bytes_size < 1024 * 1024:
+113:                 return f"{bytes_size / 1024:.1f} KB"
+114:             else:
+115:                 return f"{bytes_size / (1024 * 1024):.1f} MB"
+116: 
+117:         def format_time(timestamp):
+118:             try:
+119:                 import datetime
+120:                 dt = datetime.datetime.fromtimestamp(timestamp)
+121:                 return dt.strftime("%m/%d/%Y %I:%M %p")
+122:             except:
+123:                 return "Unknown"
+124:                 
+125:         def format_location_info(file_path):
+126:             if not file_path:
+127:                 return "Unknown location"
+128:             parent_dir = os.path.dirname(file_path)
+129:             parent_folder_name = os.path.basename(parent_dir)
+130:             if not parent_folder_name:
+131:                 parent_folder_name = parent_dir
+132:             return f"{parent_folder_name} ({parent_dir})"
+133:             
+134:         src_icon_img = get_file_icon_as_image(filename)
+135:         dest_icon_img = get_file_icon_as_image(dest_info.get("path", filename))
+136:         
+137:         self.src_icon = ImageTk.PhotoImage(src_icon_img) if src_icon_img else None
+138:         self.dest_icon = ImageTk.PhotoImage(dest_icon_img) if dest_icon_img else None
+139:         
+140:         def get_all_children(w):
+141:             children = [w]
+142:             for child in w.winfo_children():
+143:                 children.extend(get_all_children(child))
+144:             return children
+145:             
+146:         def setup_command_link(frame, action_val):
+147:             normal_bg = "#FFFFFF"
+148:             hover_bg = "#E5F1FB"
+149:             normal_border = "#FFFFFF"
+150:             hover_border = "#B8D6F3"
+151:             
+152:             frame.configure(background=normal_bg, highlightbackground=normal_border, highlightthickness=1, bd=0)
+153:             
+154:             def on_enter(event):
+155:                 frame.configure(background=hover_bg, highlightbackground=hover_border)
+156:                 for child in get_all_children(frame):
+157:                     try: child.configure(background=hover_bg)
+158:                     except: pass
+159:                     
+160:             def on_leave(event):
+161:                 x, y = frame.winfo_pointerx() - frame.winfo_rootx(), frame.winfo_pointery() - frame.winfo_rooty()
+162:                 if x < 0 or x >= frame.winfo_width() or y < 0 or y >= frame.winfo_height():
+163:                     frame.configure(background=normal_bg, highlightbackground=normal_border)
+164:                     for child in get_all_children(frame):
+165:                         try: child.configure(background=normal_bg)
+166:                         except: pass
+167:                         
+168:             def on_click(event):
+169:                 self.choice = action_val
+170:                 self.destroy()
+171:                 
+172:             for w in get_all_children(frame):
+173:                 w.bind("<Enter>", on_enter)
+174:                 w.bind("<Leave>", on_leave)
+175:                 w.bind("<Button-1>", on_click)
+176:                 w.configure(cursor="hand2")
+177:                 
+178:         # Link 1: Copy and Replace
+179:         link1 = tk.Frame(self, bg="#FFFFFF")
+180:         link1.pack(fill=tk.X, padx=24, pady=5)
+181:         
+182:         lbl_arrow1 = tk.Label(link1, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+183:         lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+184:         
+185:         right_content1 = tk.Frame(link1, bg="#FFFFFF")
+186:         right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+187:         
+188:         lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+189:         lbl_title1.pack(fill=tk.X)
+190:         
+191:         lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+192:         lbl_desc1.pack(fill=tk.X, pady=(0, 5))
+193:         
+194:         info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
+195:         info_frame1.pack(fill=tk.X, padx=(10, 0))
+196:         
+197:         if self.src_icon:
+198:             lbl_icon1 = tk.Label(info_frame1, image=self.src_icon, bg="#FFFFFF")
+199:             lbl_icon1.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+200:             
+201:         info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
+202:         info_text1.pack(side=tk.LEFT, fill=tk.X)
+203:         
+204:         tk.Label(info_text1, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+205:         tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+206:         tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+207:         tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+208:         
+209:         setup_command_link(link1, "replace")
+210:         
+211:         # Link 2: Don't Copy
+212:         link2 = tk.Frame(self, bg="#FFFFFF")
+213:         link2.pack(fill=tk.X, padx=24, pady=5)
+214:         
+215:         lbl_arrow2 = tk.Label(link2, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+216:         lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+217:         
+218:         right_content2 = tk.Frame(link2, bg="#FFFFFF")
+219:         right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+220:         
+221:         lbl_title2 = tk.Label(right_content2, text="Don't copy", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+222:         lbl_title2.pack(fill=tk.X)
+223:         
+224:         lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+225:         lbl_desc2.pack(fill=tk.X, pady=(0, 5))
+226:         
+227:         info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
+228:         info_frame2.pack(fill=tk.X, padx=(10, 0))
+229:         
+230:         if self.dest_icon:
+231:             lbl_icon2 = tk.Label(info_frame2, image=self.dest_icon, bg="#FFFFFF")
+232:             lbl_icon2.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+233:             
+234:         info_text2 = tk.Frame(info_frame2, bg="#FFFFFF")
+235:         info_text2.pack(side=tk.LEFT, fill=tk.X)
+236:         
+237:         tk.Label(info_text2, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+238:         tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+239:         tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+240:         tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+241:         
+242:         setup_command_link(link2, "skip")
+243:         
+244:         sep = tk.Frame(self, height=1, bg="#D0D0D0", bd=0)
+245:         sep.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 0))
+246:         
+247:         bottom_bar = tk.Frame(self, bg="#F0F0F0", height=48)
+248:         bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
+249:         bottom_bar.pack_propagate(False)
+250:         
+251:         self.var_all = tk.BooleanVar()
+252:         if has_multiple:
+253:             chk = tk.Checkbutton(
+254:                 bottom_bar, text="Do this for all conflicts", font=(_DIALOG_FONT, 9),
+255:                 variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
+256:             )
+257:             chk.pack(side=tk.LEFT, padx=24, pady=10)
+258:             
+259:         btn_cancel = tk.Button(
+260:             bottom_bar, text="Cancel", font=(_DIALOG_FONT, 9), width=10,
+261:             bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
+262:             command=self.on_cancel
+263:         )
+264:         btn_cancel.pack(side=tk.RIGHT, padx=24, pady=10)
+265:         
+266:         def btn_enter(event):
+267:             btn_cancel.configure(bg="#E5F1FB", bd=1)
+268:         def btn_leave(event):
+269:             btn_cancel.configure(bg="#E1E1E1", bd=1)
+270:         btn_cancel.bind("<Enter>", btn_enter)
+271:         btn_cancel.bind("<Leave>", btn_leave)
+272:         
+273:         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+274:         
+275:     def on_cancel(self):
+276:         self.choice = "cancel"
+277:         self.destroy()
+278: 
+279: class ProgressDialog(tk.Toplevel):
+280:     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
+281:         super().__init__(parent)
+282:         self.parent_window = parent
+283:         self.withdraw()
+284:         self.attributes("-alpha", 0.0)
+285:         self.overrideredirect(True)
+286:         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
+287: 
+288:         title_bg = "#F3F3F3"
+289:         self.title_bar = tk.Frame(self, bg=title_bg, height=28)
+290:         self.title_bar.pack(fill=tk.X, side=tk.TOP)
+291:         self.title_bar.pack_propagate(False)
+292:         self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
+293:         self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
+294: 
+295:         # Cho phép kéo thả hộp thoại bằng chuột trên thanh tiêu đề
+296:         self._drag_offset_x = 0
+297:         self._drag_offset_y = 0
+298:         for widget in (self.title_bar, self.title_lbl):
+299:             widget.bind("<ButtonPress-1>", self._start_drag)
+300:             widget.bind("<B1-Motion>", self._do_drag)
+301: 
+302:         self.attributes("-topmost", True)
+303:         self.lift()
+304:         self.total_size = total_size
+305:         self.filename = str(filename) if filename is not None else "Unknown"
+306:         self.start_time = time.time()
+307:         self.history = [(self.start_time, 0)]
+308:         self.on_cancel = on_cancel
+309:         
+310:         top_frame = tk.Frame(self, bg="#FFFFFF")
+311:         top_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+312:         
+313:         display_name = self.filename
+314:         if len(display_name) > 40:
+315:             display_name = display_name[:20] + "..." + display_name[-15:]
+316:             
+317:         self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+318:         self.lbl_action.pack(fill=tk.X)
+319:         
+320:         self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+321:         self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
+322:         
+323:         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+324:         self.prog1.pack(fill=tk.X, pady=(0, 10))
+325:         
+326:         self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+327:         self.lbl_files.pack(fill=tk.X)
+328:         
+329:         self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+330:         self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
+331:         
+332:         self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+333:         self.prog2.pack(fill=tk.X)
+334:         
+335:         bottom_frame = tk.Frame(self, bg="#F0F0F0", height=45)
+336:         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+337:         bottom_frame.pack_propagate(False)
+338:         
+339:         sep = tk.Frame(self, height=1, bg="#DFDFDF", bd=0)
+340:         sep.pack(fill=tk.X, side=tk.BOTTOM)
+341:         
+342:         if self.on_cancel:
+343:             btn_cancel = tk.Button(
+344:                 bottom_frame, text=_("Hủy"), font=(_DIALOG_FONT, 9),
+345:                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
+346:                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
+347:             )
+348:             btn_cancel.pack(side=tk.RIGHT, padx=15, pady=10)
+349:             def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
+350:             def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
+351:             btn_cancel.bind("<Enter>", btn_enter)
+352:             btn_cancel.bind("<Leave>", btn_leave)
+353:             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
+354:             dialog_h = 270
+355:         else:
+356:             dialog_h = 225
+357:             
+358:         self.update_idletasks()
+359:         dialog_w = 400
+360:         
+361:         screen_w = self.winfo_screenwidth()
+362:         screen_h = self.winfo_screenheight()
+363:         x = (screen_w - dialog_w) // 2
+364:         y = (screen_h - dialog_h) // 2
+365:         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+366:         self.deiconify()
+367:         self.lift()
+368:         self.focus_force()
+369:         self.attributes("-alpha", 1.0)
+370:         self.update()
+371: 
+372:     def trigger_cancel(self):
+373:         try: self.destroy()
+374:         except: pass
+375:         if self.on_cancel:
+376:             try: self.on_cancel()
+377:             except: pass
+378: 
+379:     def _start_drag(self, event):
+380:         self._drag_offset_x = event.x_root - self.winfo_x()
+381:         self._drag_offset_y = event.y_root - self.winfo_y()
+382: 
+383:     def _do_drag(self, event):
+384:         x = event.x_root - self._drag_offset_x
+385:         y = event.y_root - self._drag_offset_y
+386:         
+387:         if hasattr(self, 'parent_window') and self.parent_window:
+388:             try:
+389:                 p_x = self.parent_window.winfo_rootx()
+390:                 p_y = self.parent_window.winfo_rooty()
+391:                 p_w = self.parent_window.winfo_width()
+392:                 p_h = self.parent_window.winfo_height()
+393:                 
+394:                 my_w = self.winfo_width()
+395:                 my_h = self.winfo_height()
+396:                 
+397:                 x = max(p_x, min(x, p_x + p_w - my_w))
+398:                 y = max(p_y, min(y, p_y + p_h - my_h))
+399:             except Exception:
+400:                 pass
+401:                 
+402:         self.geometry(f"+{x}+{y}")
+403: 
+404:     def update_progress(self, sent_bytes):
+405:         def _do_update():
+406:             try:
+407:                 percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
+408:                 percent = max(0, min(100, percent))
+409: 
+410:                 self.prog1["value"] = percent
+411:                 self.prog2["value"] = percent
+412: 
+413:                 current_time = time.time()
+414:                 self.history.append((current_time, sent_bytes))
+415:                 while len(self.history) > 1 and current_time - self.history[0][0] > 2.0:
+416:                     self.history.pop(0)
+417: 
+418:                 elapsed_time = current_time - self.history[0][0]
+419:                 bytes_in_window = sent_bytes - self.history[0][1]
+420:                 
+421:                 if elapsed_time > 0 and bytes_in_window > 0:
+422:                     speed = bytes_in_window / elapsed_time
+423:                 else:
+424:                     speed = 0
+425: 
+426:                 if speed > 0:
+427:                     remaining_bytes = self.total_size - sent_bytes
+428:                     remaining_time = remaining_bytes / speed
+429:                     mins = int(remaining_time // 60)
+430:                     secs = int(remaining_time % 60)
+431:                     if mins > 0:
+432:                         time_str = f"{mins} min {secs} sec(s)"
+433:                     else:
+434:                         time_str = f"{secs} sec(s)"
+435:                 if speed > 0:
+436:                     speed_str = f"{self.format_speed(speed)}"
+437:                 else:
+438:                     speed_str = "-- MB/s"
+439:                     time_str = "-- sec(s)"
+440: 
+441:                 sent_str = self.format_size(sent_bytes)
+442:                 total_str = self.format_size(self.total_size)
+443: 
+444:                 self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {speed_str}  {time_str}")
+445:                 self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {time_str}")
+446:             except: pass
+447:         try:
+448:             self.after(0, _do_update)
+449:         except: pass
+450: 
+451:     def safe_destroy(self):
+452:         try: self.after(0, self.destroy)
+453:         except: pass
+454: 
+455:     def format_size(self, size_bytes):
+456:         if size_bytes < 1024: return f"{size_bytes} B"
+457:         elif size_bytes < 1024 * 1024: return f"{size_bytes / 1024:.2f} KB"
+458:         elif size_bytes < 1024 * 1024 * 1024: return f"{size_bytes / (1024 * 1024):.2f} MB"
+459:         else: return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+460: 
+461:     def format_speed(self, speed_bytes_per_sec):
+462:         if speed_bytes_per_sec < 1024: return f"{speed_bytes_per_sec:.0f} B/s"
+463:         elif speed_bytes_per_sec < 1024 * 1024: return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
+464:         elif speed_bytes_per_sec < 1024 * 1024 * 1024: return f"{speed_bytes_per_sec / (1024 * 1024):.2f} MB/s"
+465:         else: return f"{speed_bytes_per_sec / (1024 * 1024 * 1024):.2f} GB/s"
+466: 
+467: class ConfirmDialog(tk.Toplevel):
+468:     def __init__(self, parent, title, message, on_yes, on_no):
+469:         super().__init__(parent)
+470:         self.title(title)
+471:         self.resizable(False, False)
+472:         self.configure(bg="#1E1E24")
+473:         
+474:         try:
+475:             icon_path = os.path.join(app_dir, "app_icon.png")
+476:             if os.path.exists(icon_path):
+477:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+478:                 self.iconphoto(False, icon_img)
+479:                 self._dialog_icon_img = icon_img
+480:         except Exception:
+481:             pass
+482:             
+483:         # Thiết lập thuộc tính Modal & Topmost
+484:         self.attributes("-topmost", True)
+485:         # Chỉ liên kết transient nếu cửa sổ cha đang hiển thị, nếu không hộp thoại sẽ bị ẩn theo cha.
+486:         if parent and parent.state() != "withdrawn":
+487:             self.transient(parent)
+488:         else:
+489:             # Ép hiển thị vì nếu parent ẩn, Toplevel có thể bị ẩn theo mặc định
+490:             self.deiconify()
+491:             self.lift()
+492:             self.focus_force()
+493:         # Bỏ grab_set() để tránh xung đột Focus & Event routing trên một số hệ thống Windows
+494:         
+495:         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+496:         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
+497:         
+498:         lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=380)
+499:         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
+500:         
+501:         btn_frame = tk.Frame(self, bg="#1E1E24")
+502:         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+503:         
+504:         self.decision_made = False
+505:         self.on_yes_cb = on_yes
+506:         self.on_no_cb = on_no
+507:         
+508:         def _yes():
+509:             self.decision_made = True
+510:             self.destroy()
+511:             if self.on_yes_cb:
+512:                 self.on_yes_cb()
+513:                 
+514:         def _no():
+515:             self.decision_made = True
+516:             self.destroy()
+517:             if self.on_no_cb:
+518:                 self.on_no_cb()
+519:                 
+520:         btn_yes = tk.Button(
+521:             btn_frame, text=_("Đồng ý (Yes)"), font=(_DIALOG_FONT, 9, "bold"),
+522:             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
+523:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
+524:         )
+525:         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+526:         
+527:         btn_no = tk.Button(
+528:             btn_frame, text=_("Bỏ qua (No)"), font=(_DIALOG_FONT, 9, "bold"),
+529:             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
+530:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
+531:         )
+532:         btn_no.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+533:         
+534:         self.protocol("WM_DELETE_WINDOW", _no)
+535:         
+536:         self.update_idletasks()
+537:         dialog_w = 420
+538:         dialog_h = 160
+539:         
+540:         parent_x = parent.winfo_x()
+541:         parent_y = parent.winfo_y()
+542:         parent_w = parent.winfo_width()
+543:         parent_h = parent.winfo_height()
+544:         
+545:         x = parent_x + (parent_w - dialog_w) // 2
+546:         y = parent_y + (parent_h - dialog_h) // 2
+547:         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+548: 
+549: class InfoDialog(tk.Toplevel):
+550:     def __init__(self, parent, title, message, button_text=None, show_cancel=False, cancel_text=None, on_ok=None, on_cancel=None):
+551:         super().__init__(parent)
+552:         self.withdraw()  # Ẩn tạm thời để tránh nháy
+553:         self.title(title)
+554:         self.resizable(False, False)
+555:         self.configure(bg="#1E1E24")
+556:         
+557:         try:
+558:             icon_path = os.path.join(app_dir, "app_icon.png")
+559:             if os.path.exists(icon_path):
+560:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+561:                 self.iconphoto(False, icon_img)
+562:                 self._dialog_icon_img = icon_img
+563:         except Exception:
+564:             pass
+565:             
+566:         self.attributes("-topmost", True)
+567:         if parent and parent.state() != "withdrawn":
+568:             self.transient(parent)
+569:         else:
+570:             self.lift()
+571:             self.focus_force()
+572:         
+573:         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+574:         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
+575:         
+576:         lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=440)
+577:         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
+578:         
+579:         btn_frame = tk.Frame(self, bg="#1E1E24")
+580:         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+581:         
+582:         def _ok():
+583:             self.destroy()
+584:             if on_ok:
+585:                 on_ok()
+586:                 
+587:         def _cancel():
+588:             self.destroy()
+589:             if on_cancel:
+590:                 on_cancel()
+591:                 
+592:         if button_text is None:
+593:             button_text = _("Đồng ý (OK)")
+594:             
+595:         btn_ok = tk.Button(
+596:             btn_frame, text=button_text, font=(_DIALOG_FONT, 9, "bold"),
+597:             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
+598:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_ok
+599:         )
+600:         btn_ok.pack(side=tk.RIGHT if not show_cancel else tk.LEFT, fill=tk.X if show_cancel else tk.NONE, expand=show_cancel, padx=(0, 5) if show_cancel else 0)
+601:         
+602:         if show_cancel:
+603:             if cancel_text is None:
+604:                 cancel_text = _("Hủy (Cancel)")
+605:             btn_cancel = tk.Button(
+606:                 btn_frame, text=cancel_text, font=(_DIALOG_FONT, 9, "bold"),
+607:                 fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
+608:                 relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_cancel
+609:             )
+610:             btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+611:             self.protocol("WM_DELETE_WINDOW", _cancel)
+612:         else:
+613:             self.protocol("WM_DELETE_WINDOW", _ok)
+614:         
+615:         self.update_idletasks()
+616:         # Tính toán chiều cao tự động dựa trên nội dung
+617:         req_height = self.winfo_reqheight()
+618:         dialog_w = 480
+619:         dialog_h = max(160, req_height + 20)
+620:         
+621:         if parent:
+622:             parent_x = parent.winfo_x()
+623:             parent_y = parent.winfo_y()
+624:             parent_w = parent.winfo_width()
+625:             parent_h = parent.winfo_height()
+626:             
+627:             x = parent_x + (parent_w - dialog_w) // 2
+628:             y = parent_y + (parent_h - dialog_h) // 2
+629:             self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+630:         else:
+631:             self.geometry(f"{dialog_w}x{dialog_h}")
+632:             
+633:         self.deiconify() # Hiển thị sau khi set geometry
+634: 
+635: 
+636: class ToolTip(object):
+637:     def __init__(self, widget, text='widget info'):
+638:         self.widget = widget
+639:         self.text = text
+640:         self.widget.bind("<Enter>", self.enter)
+641:         self.widget.bind("<Leave>", self.close)
+642:         self.tw = None
+643: 
+644:     def enter(self, event=None):
+645:         x = y = 0
+646:         x, y, cx, cy = self.widget.bbox("insert")
+647:         x += self.widget.winfo_rootx() + 25
+648:         y += self.widget.winfo_rooty() + 20
+649:         # creates a toplevel window
+650:         self.tw = tk.Toplevel(self.widget)
+651:         self.tw.wm_overrideredirect(True)
+652:         self.tw.wm_geometry("+%d+%d" % (x, y))
+653:         label = tk.Label(self.tw, text=self.text, justify='left',
+654:                          background='#ffffe0', relief='solid', borderwidth=1,
+655:                          font=(_DIALOG_FONT, "8", "normal"), padx=2, pady=1)
+656:         label.pack(ipadx=1)
+657: 
+658:     def close(self, event=None):
+659:         if self.tw:
+660:             self.tw.destroy()
+661:             self.tw = None
+662: 
+The above content shows the entire, complete file contents of the requested file.
+
+[Action: grep_search]
+  Query: ProgressDialog(
+  SearchPath: d:\Data\AG\remote_desktop
+  toolAction: Searching for ProgressDialog instantiation
+  toolSummary: Search for ProgressDialog instantiation
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:32+07:00
+Completed At: 2026-08-23T15:16:33+07:00
+{"File":"d:\\Data\\AG\\remote_desktop\\utils\\file_manager.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\test_tk.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\test_pd.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_stable_app.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_f838_app.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_app_utf8.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_app.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_550.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\scratch_test.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\replace_upload_force.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\replace_upload.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\replace_pd.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\patch_app4.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\old_app.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\os_utils\\windows_clipboard.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\gui\\components.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_upload2.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_upload.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_pd.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_download_dialog5.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_download_dialog4.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\fix_download_dialog3.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\do_refactor_phase4_1.py"}
+{"File":"d:\\Data\\AG\\remote_desktop\\commit.patch"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-05_160055_tạm_ổn_nhưng_để_hoàn_hảo_hơn.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-05_041959_aa1fa440-2a20-419f-8655-4ec79256c66c.txt"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-14_055043_ở_bản_build_này_có_thay_đổi_gì_mà_tui_th.txt"}
+
+[Action: grep_search]
+  MatchPerLine: True
+  Query: ProgressDialog(
+  SearchPath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Searching for ProgressDialog in file_manager.py
+  toolSummary: Search for ProgressDialog in file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:38+07:00
+Completed At: 2026-08-23T15:16:38+07:00
+No results found
+
+[Action: grep_search]
+  MatchPerLine: True
+  Query: ProgressDialog
+  SearchPath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Searching for ProgressDialog in file_manager.py
+  toolSummary: Search for ProgressDialog in file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:45+07:00
+Completed At: 2026-08-23T15:16:46+07:00
+No results found
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  StartLine: 800
+  toolAction: Viewing file_manager.py
+  toolSummary: View file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:16:52+07:00
+Completed At: 2026-08-23T15:16:52+07:00
+File Path: `file:///d:/Data/AG/remote_desktop/utils/file_manager.py`
+Total Lines: 1609
+Total Bytes: 78167
+Showing lines 800 to 1599
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+800:                         
+801:                         import sys
+802:                         _np_hwnd = None
+803:                         try: 
+804:                             import pygame
+805:                             _np_hwnd = pygame.display.get_wm_info().get("window")
+806:                         except: pass
+807:                         
+808:                         if _np_hwnd and sys.platform == "win32":
+809:                             import ctypes
+810:                             from ctypes import wintypes
+811:                             np_win.update_idletasks()
+812:                             tk_hwnd = int(np_win.frame(), 16)
+813:                             try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+814:                             except: pass
+815:                             style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+816:                             style = (style | 0x40000000) & ~0x80000000
+817:                             ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+818:                             ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
+819:                             rect = wintypes.RECT()
+820:                             ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
+821:                             py_w = rect.right - rect.left
+822:                             py_h = rect.bottom - rect.top
+823:                             x = max(0, (py_w - 800) // 2)
+824:                             y = max(0, (py_h - 600) // 2)
+825:                             np_win.geometry("800x600")
+826:                             np_win.update_idletasks()
+827:                             ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
+828:                         else:
+829:                             np_win.transient(top)
+830:                             np_win.attributes('-topmost', True)
+831:                             np_win.update_idletasks()
+832:                             w, h = 800, 600
+833:                             px, py = top.winfo_rootx(), top.winfo_rooty()
+834:                             pw, ph = top.winfo_width(), top.winfo_height()
+835:                             np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
+836:                         if sys.platform == "win32":
+837:                             np_win.attributes('-alpha', 1.0)
+838:                         else:
+839:                             np_win.deiconify()
+840:                         np_win.lift()
+841:                         np_win.focus_force()
+842:                         text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
+843:                         text_area.pack(expand=True, fill="both")
+844:                         text_area.insert("1.0", content)
+845:                     except Exception as ex:
+846:                         messagebox.showerror(_("Lỗi Code"), _("Lỗi tạo Notepad: {ex}").format(ex=ex), parent=top)
+847:                         return
+848:                     def save_remote_file():
+849:                         req = {"type": "request_write_text_file", "path": path, "content": text_area.get("1.0", "end-1c")}
+850:                         send_event(req)
+851:                         messagebox.showinfo(_("Thông báo"), _("Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển."), parent=np_win)
+852:                     tk.Button(np_win, text=_("Lưu"), command=save_remote_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+853:                 else:
+854:                     messagebox.showerror(_("Lỗi"), event.get("error", _("Không thể đọc tệp")), parent=top)
+855:             elif evt_type == "write_text_file_result":
+856:                 success = event.get("success")
+857:                 if not success:
+858:                     messagebox.showerror(_("Lỗi"), event.get("error", _("Lỗi lưu tệp từ xa")), parent=top)
+859:             elif evt_type in ("batch_start", "file_start", "file_chunk", "file_end"):
+860:                 try:
+861:                     from core.clipboard_agent import clipboard_sync_manager as cm
+862:                     if cm:
+863:                         cm.process_clipboard_event(event)
+864:                 except Exception:
+865:                     pass
+866:             elif evt_type == "upload_progress_ack":
+867:                 fm_event_queue.put({"type": "upload_progress_update", "received": event.get("received", 0)})
+868:             elif evt_type == "upload_batch_ack":
+869:                 for ev in active_upload_ack_events:
+870:                     ev.set()
+871:                 active_upload_ack_events.clear()
+872:             elif evt_type == "batch_end":
+873:                 try:
+874:                     from core.clipboard_agent import clipboard_sync_manager as cm
+875:                     if cm:
+876:                         cm.process_clipboard_event(event)
+877:                 except Exception:
+878:                     pass
+879:                 top.after(500, lambda: fm_event_queue.put({"type": "trigger_local_refresh"}))
+880: 
+881:         import queue
+882:         fm_event_queue = queue.Queue()
+883:         def process_fm_queue():
+884:             try:
+885:                 while True:
+886:                     evt = fm_event_queue.get_nowait()
+887:                     try:
+888:                         if evt.get("type") == "trigger_local_refresh":
+889:                             refresh_local()
+890:                         elif evt.get("type") == "upload_progress_update":
+891:                             if active_upload_dialog:
+892:                                 active_upload_dialog[0].update_progress(evt.get("received", 0))
+893:                         else:
+894:                             on_remote_dir_result(evt)
+895:                     except Exception as e:
+896:                         import traceback
+897:                         print(f"Error in process_fm_queue: {e}\n{traceback.format_exc()}\n")
+898:             except queue.Empty:
+899:                 pass
+900:             if top.winfo_exists():
+901:                 top.after(100, process_fm_queue)
+902: 
+903:         top.after(100, process_fm_queue)
+904:         import core.viewer
+905:         core.viewer.file_manager_callback = lambda e: fm_event_queue.put(e)
+906: 
+907:         def go_up_remote():
+908:             p = remote_entry.get().replace("\\", "/").rstrip("/")
+909:             if "/" in p:
+910:                 parent = p.rsplit("/", 1)[0]
+911:                 if not parent: parent = "/"
+912:                 if not is_android and len(parent) == 2 and parent.endswith(":"):
+913:                     parent += "/"
+914:                 remote_entry.delete(0, tk.END)
+915:                 remote_entry.insert(0, parent)
+916:                 request_remote_dir(parent)
+917: 
+918:         tk.Button(remote_nav, text=_("⬆ Lên"), command=go_up_remote).pack(side=tk.LEFT)
+919:         remote_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+920:         tk.Button(remote_nav, text=_("Đi"), command=lambda: request_remote_dir(remote_entry.get())).pack(side=tk.LEFT)
+921: 
+922:         remote_tree_frame = tk.Frame(right_frame, bd=1, relief=tk.SUNKEN)
+923:         remote_tree_frame.pack(fill=tk.BOTH, expand=True)
+924:         remote_scrollbar = tk.Scrollbar(remote_tree_frame, orient="vertical", width=16)
+925:         remote_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+926:         remote_tree = ttk.Treeview(remote_tree_frame, columns=("size", "type", "raw_size"), show="tree headings", yscrollcommand=remote_scrollbar.set)
+927:         remote_tree.heading("#0", text=_("Tên"))
+928:         remote_tree.heading("size", text=_("Kích thước"))
+929:         remote_tree.heading("type", text=_("Loại"))
+930:         remote_tree.column("#0", width=200)
+931:         remote_tree.column("size", width=80)
+932:         remote_tree.column("type", width=70)
+933:         remote_tree.column("raw_size", width=0, stretch=False)
+934:         remote_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+935:         remote_scrollbar.config(command=remote_tree.yview)
+936: 
+937:         def remote_double_click(event):
+938:             sel = remote_tree.selection()
+939:             if sel:
+940:                 item = remote_tree.item(sel[0])
+941:                 vals = item.get('values', [])
+942:                 is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+943:                 if is_dir:
+944:                     p = remote_entry.get()
+945:                     sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
+946:                     if not p.endswith(sep): p += sep
+947:                     new_path = p + item['text']
+948:                     remote_entry.delete(0, tk.END)
+949:                     remote_entry.insert(0, new_path)
+950:                     request_remote_dir(new_path)
+951:                 else:
+952:                     remote_action("view")
+953:         def _handle_bs_remote(e):
+954:             go_up_remote()
+955:             return "break"
+956:         remote_tree.bind("<Double-1>", remote_double_click)
+957:         remote_tree.bind("<BackSpace>", _handle_bs_remote)
+958: 
+959:         remote_menu = tk.Menu(top, tearoff=0)
+960:         def remote_action(action):
+961:             current_dir = remote_entry.get()
+962:             sep = "/" if "/" in current_dir else ("\\" if "\\" in current_dir else "/")
+963:             if not current_dir.endswith(sep): current_dir += sep
+964:             sel = remote_tree.selection()
+965:             if action == "mkdir":
+966:                 
+967:                 new_name = inline_ask_string(top, _("Thư mục mới"), _("Nhập tên thư mục mới:"))
+968:                 top.focus_force()
+969:                 if new_name:
+970:                     exists = False
+971:                     for child in remote_tree.get_children():
+972:                         if remote_tree.item(child, "text") == new_name:
+973:                             exists = True
+974:                             break
+975:                     if exists:
+976:                         messagebox.showinfo(_("Lỗi"), _('Thư mục "{new_name}" đã tồn tại trên "{current_dir}"').format(new_name=new_name, current_dir=current_dir), parent=top)
+977:                     else:
+978:                         req = {"type": "request_create_folder", "parent_path": current_dir, "folder_name": new_name}
+979:                         send_event(req)
+980:                 return
+981:             if not sel: return
+982: 
+983:             if action == "delete":
+984:                 if len(sel) == 1:
+985:                     msg = _("Bạn có chắc muốn xóa '{item_name}' khỏi máy điều khiển không?").format(item_name=remote_tree.item(sel[0])['text'])
+986:                 else:
+987:                     msg = _("Bạn có chắc muốn xóa {count} mục đã chọn khỏi máy điều khiển không?").format(count=len(sel))
+988:                 confirm = messagebox.askyesno(_("Xác nhận"), msg, parent=top)
+989:                 top.focus_force()
+990:                 if confirm:
+991:                     for s in sel:
+992:                         item = remote_tree.item(s)
+993:                         name = item['text']
+994:                         full_path = current_dir + name
+995:                         req = {"type": "request_delete_item", "path": full_path}
+996:                         send_event(req)
+997:                 return
+998: 
+999:             for s in sel:
+1000:                 item = remote_tree.item(s)
+1001:                 name = item['text']
+1002:                 full_path = current_dir + name
+1003:                 vals = item.get('values', [])
+1004:                 is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+1005:                 if action == "view":
+1006:                     from datetime import datetime
+1007:                     ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+1008:                     print(f"{ts} [Remote] Action 'view' on '{name}', is_dir={is_dir}")
+1009:                     if is_dir:
+1010:                         messagebox.showwarning(_("Cảnh báo"), _("Không thể xem thư mục '{name}' bằng Notepad!").format(name=name), parent=top)
+1011:                     else:
+1012:                         req = {"type": "request_read_text_file", "path": full_path}
+1013:                         try:
+1014:                             print(f"{ts} [Remote] Sending file read request: {req}")
+1015:                             send_event(req)
+1016:                         except Exception as ex:
+1017:                             messagebox.showerror(_("Lỗi"), _("Không thể gửi lệnh: {ex}").format(ex=ex), parent=top)
+1018:                 elif action == "rename":
+1019:                     
+1020:                     new_name = inline_ask_string(top, _("Đổi tên"), _("Nhập tên mới cho '{name}':").format(name=name), initialvalue=name)
+1021:                     top.focus_force()
+1022:                     if new_name and new_name != name:
+1023:                         req = {"type": "request_rename_item", "old_path": full_path, "new_name": new_name}
+1024:                         send_event(req)
+1025:                 elif action == "properties":
+1026:                     req = {"type": "request_get_properties", "path": full_path}
+1027:                     send_event(req)
+1028:                     return
+1029:         def show_remote_menu(event):
+1030:             remote_menu.delete(0, 'end')
+1031:             row = remote_tree.identify_row(event.y)
+1032:             if not row:
+1033:                 remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
+1034:                 remote_menu.add_separator()
+1035:                 remote_menu.add_command(label=_("Làm mới"), command=lambda: request_remote_dir(remote_entry.get()))
+1036:                 remote_menu.tk_popup(event.x_root, event.y_root)
+1037:                 return
+1038: 
+1039:             if row not in remote_tree.selection():
+1040:                 remote_tree.selection_set(row)
+1041: 
+1042:             vals = remote_tree.item(row, "values")
+1043:             is_dir = (len(vals) > 1 and vals[1] == _("Thư mục"))
+1044: 
+1045:             if not is_dir:
+1046:                 remote_menu.add_command(label=_("Xem tệp"), command=lambda: remote_action("view"))
+1047:             remote_menu.add_command(label=_("Tạo thư mục mới"), command=lambda: remote_action("mkdir"))
+1048:             remote_menu.add_command(label=_("Đổi tên"), command=lambda: remote_action("rename"))
+1049:             remote_menu.add_separator()
+1050:             remote_menu.add_command(label=_("Xóa"), command=lambda: remote_action("delete"))
+1051:             remote_menu.add_separator()
+1052:             remote_menu.add_command(label=_("Thuộc tính"), command=lambda: remote_action("properties"))
+1053:             
+1054:             try:
+1055:                 remote_menu.tk_popup(event.x_root, event.y_root)
+1056:             finally:
+1057:                 remote_menu.grab_release()
+1058:         remote_tree.bind("<Button-3>", show_remote_menu)
+1059: 
+1060:         def select_all_remote(event):
+1061:             remote_tree.selection_set(remote_tree.get_children())
+1062:             return "break"
+1063:         remote_tree.bind("<Control-a>", select_all_remote)
+1064:         remote_tree.bind("<Control-A>", select_all_remote)
+1065: 
+1066:         def on_tree_keypress(event, tree):
+1067:             if not event.char or not event.char.isprintable():
+1068:                 return
+1069:             char = event.char.lower()
+1070:             items = tree.get_children()
+1071:             if not items: return "break"
+1072: 
+1073:             start_idx = 0
+1074:             current_sel = tree.selection()
+1075:             if current_sel:
+1076:                 try:
+1077:                     start_idx = items.index(current_sel[0]) + 1
+1078:                 except ValueError:
+1079:                     start_idx = 0
+1080: 
+1081:             for idx in list(range(start_idx, len(items))) + list(range(0, start_idx)):
+1082:                 item = items[idx]
+1083:                 text = tree.item(item, 'text').lower()
+1084:                 if text.startswith(char):
+1085:                     tree.selection_set(item)
+1086:                     tree.focus(item)
+1087:                     tree.see(item)
+1088:                     return "break"
+1089:             return "break"
+1090: 
+1091:         local_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, local_tree))
+1092:         remote_tree.bind("<KeyPress>", lambda e: on_tree_keypress(e, remote_tree))
+1093: 
+1094:         local_tree.bind("<F2>", lambda e: local_action("rename"))
+1095:         remote_tree.bind("<F2>", lambda e: remote_action("rename"))
+1096: 
+1097:         local_tree.bind("<F5>", lambda e: refresh_local())
+1098:         remote_tree.bind("<F5>", lambda e: request_remote_dir(remote_entry.get()))
+1099: 
+1100:         def tree_go_home(event, tree):
+1101:             items = tree.get_children()
+1102:             if items:
+1103:                 tree.selection_set(items[0])
+1104:                 tree.focus(items[0])
+1105:                 tree.see(items[0])
+1106:             return "break"
+1107: 
+1108:         def tree_go_end(event, tree):
+1109:             items = tree.get_children()
+1110:             if items:
+1111:                 tree.selection_set(items[-1])
+1112:                 tree.focus(items[-1])
+1113:                 tree.see(items[-1])
+1114:             return "break"
+1115: 
+1116:         def tree_page_up(event, tree):
+1117:             items = tree.get_children()
+1118:             if not items: return "break"
+1119:             sel = tree.selection()
+1120:             new_idx = max(0, items.index(sel[0]) - 15) if sel else 0
+1121:             tree.selection_set(items[new_idx])
+1122:             tree.focus(items[new_idx])
+1123:             tree.see(items[new_idx])
+1124:             return "break"
+1125: 
+1126:         def tree_page_down(event, tree):
+1127:             items = tree.get_children()
+1128:             if not items: return "break"
+1129:             sel = tree.selection()
+1130:             new_idx = min(len(items) - 1, items.index(sel[-1]) + 15) if sel else len(items) - 1
+1131:             tree.selection_set(items[new_idx])
+1132:             tree.focus(items[new_idx])
+1133:             tree.see(items[new_idx])
+1134:             return "break"
+1135: 
+1136:         for t in (local_tree, remote_tree):
+1137:             t.bind("<Home>", lambda e, tr=t: tree_go_home(e, tr))
+1138:             t.bind("<End>", lambda e, tr=t: tree_go_end(e, tr))
+1139:             t.bind("<Prior>", lambda e, tr=t: tree_page_up(e, tr))
+1140:             t.bind("<Next>", lambda e, tr=t: tree_page_down(e, tr))
+1141: 
+1142:         # --- Transfer Actions ---
+1143:         def get_dir_stats(path):
+1144:             total_size = 0
+1145:             file_count = 0
+1146:             folder_count = 0
+1147:             try:
+1148:                 for root, dirs, files in os.walk(path):
+1149:                     folder_count += len(dirs)
+1150:                     file_count += len(files)
+1151:                     for f in files:
+1152:                         try:
+1153:                             total_size += os.path.getsize(os.path.join(root, f))
+1154:                         except:
+1155:                             pass
+1156:             except:
+1157:                 pass
+1158:             return total_size, file_count, folder_count
+1159: 
+1160:         def resolve_conflicts(conflicts, parent, is_upload):
+1161:             results = {}
+1162:             overwrite_all = False
+1163: 
+1164:             for c in conflicts:
+1165:                 if overwrite_all:
+1166:                     results[c['name']] = 'overwrite'
+1167:                     continue
+1168: 
+1169:                 dlg = tk.Frame(parent, bg="#FFFFFF", highlightbackground="#0078D7", highlightthickness=2)
+1170:                 dlg.place(relx=0.5, rely=0.5, anchor="center", width=650, height=380)
+1171:                 dlg.lift()
+1172:                 dlg.focus_force()
+1173: 
+1174:                 try:
+1175:                     dlg.grab_set()
+1176:                 except: pass
+1177: 
+1178:                 title_bar = tk.Frame(dlg, bg="#F3F3F3", height=30)
+1179:                 title_bar.pack(fill=tk.X, side=tk.TOP)
+1180:                 title_bar.pack_propagate(False)
+1181:                 tk.Label(title_bar, text=_("Xác nhận"), bg="#F3F3F3", fg="#333333", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=10, pady=5)
+1182: 
+1183:                 frame = tk.Frame(dlg, bg="white")
+1184:                 frame.pack(fill="both", expand=True)
+1185: 
+1186:                 # Pack btn_frame first at the bottom so it never gets clipped
+1187:                 btn_frame = tk.Frame(frame, bg="white")
+1188:                 btn_frame.pack(fill="x", side="bottom", pady=20, padx=20)
+1189: 
+1190:                 item_type = _("Thư mục") if c.get('src_is_dir') else _("Tập tin")
+1191:                 lbl_title = tk.Label(frame, text=_("{item_type} với tên \"{item_name}\" đã tồn tại.").format(item_type=item_type, item_name=c['name']), font=("Segoe UI", 11, "bold"), bg="white", anchor="w")
+1192:                 lbl_title.pack(fill="x", padx=20, pady=(20, 10))
+1193: 
+1194:                 try:
+1195:                     src_sz_val = int(float(c.get('src_size', 0)))
+1196:                 except:
+1197:                     src_sz_val = 0
+1198:                 try:
+1199:                     dst_sz_val = int(float(c.get('dst_size', 0)))
+1200:                 except:
+1201:                     dst_sz_val = 0
+1202: 
+1203:                 src_sz = format_size(src_sz_val)
+1204:                 dst_sz = format_size(dst_sz_val)
+1205: 
+1206:                 src_path = c.get('src_path', _('Không rõ'))
+1207:                 dst_path = c.get('dst_path', _('Không rõ'))
+1208:                 src_mtime = c.get('src_mtime', _('Không xác định'))
+1209:                 dst_mtime = c.get('dst_mtime', _('Không xác định'))
+1210: 
+1211:                 if is_upload:
+1212:                     src_title = _("Nguồn (Máy bạn):")
+1213:                     dst_title = _("Đích (Máy từ xa):")
+1214:                 else:
+1215:                     src_title = _("Nguồn (Máy từ xa):")
+1216:                     dst_title = _("Đích (Máy bạn):")
+1217: 
+1218:                 src_fc = c.get('src_file_count')
+1219:                 if src_fc is not None:
+1220:                     src_extra = _("\n- Chứa: {fc} tệp, {dc} thư mục").format(fc=src_fc, dc=c.get('src_folder_count', 0))
+1221:                 elif c.get('src_is_dir'):
+1222:                     src_extra = _("\n- Chứa: Không rõ (Remote)")
+1223:                 else:
+1224:                     src_extra = ""
+1225: 
+1226:                 dst_fc = c.get('dst_file_count')
+1227:                 if dst_fc is not None:
+1228:                     dst_extra = _("\n- Chứa: {fc} tệp, {dc} thư mục").format(fc=dst_fc, dc=c.get('dst_folder_count', 0))
+1229:                 elif c.get('dst_is_dir'):
+1230:                     dst_extra = _("\n- Chứa: Không rõ (Remote)")
+1231:                 else:
+1232:                     dst_extra = ""
+1233: 
+1234:                 src_disp = _("""{src_title}
+1235: - Vị trí: {src_path}
+1236: - Dung lượng: {src_sz}{src_extra}
+1237: - Ngày sửa đổi: {src_mtime}""").format(src_title=src_title, src_path=src_path, src_sz=src_sz, src_extra=src_extra, src_mtime=src_mtime)
+1238:                 dst_disp = _("""{dst_title}
+1239: - Vị trí: {dst_path}
+1240: - Dung lượng: {dst_sz}{dst_extra}
+1241: - Ngày sửa đổi: {dst_mtime}""").format(dst_title=dst_title, dst_path=dst_path, dst_sz=dst_sz, dst_extra=dst_extra, dst_mtime=dst_mtime)
+1242: 
+1243:                 tk.Label(frame, text=src_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=2)
+1244:                 tk.Label(frame, text=dst_disp, font=("Segoe UI", 10), bg="white", anchor="w", fg="#333333", justify="left").pack(fill="x", padx=20, pady=(2, 10))
+1245:                 tk.Label(frame, text=_("Bạn muốn làm gì?"), font=("Segoe UI", 10, "bold"), bg="white", anchor="w").pack(fill="x", padx=20, pady=(5, 15))
+1246: 
+1247:                 decision = ["cancel"]
+1248:                 def make_decision(d):
+1249:                     decision[0] = d
+1250:                     try: dlg.grab_release()
+1251:                     except: pass
+1252:                     dlg.destroy()
+1253: 
+1254:                 btn_cancel = tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 10, "bold"), bg="#e0e0e0", fg="black", width=8, relief="raised", borderwidth=2, command=lambda: make_decision("cancel"))
+1255:                 btn_cancel.pack(side="right", padx=5)
+1256: 
+1257:                 btn_skip = tk.Button(btn_frame, text=_("Bỏ qua"), font=("Segoe UI", 10), bg="#e0e0e0", fg="black", width=10, relief="raised", borderwidth=2, command=lambda: make_decision("skip"))
+1258:                 btn_skip.pack(side="right", padx=10)
+1259: 
+1260:                 btn_ow = tk.Button(btn_frame, text=_("Ghi đè"), font=("Segoe UI", 10), bg="#e0e0e0", fg="black", width=10, relief="raised", borderwidth=2, command=lambda: make_decision("overwrite"))
+1261:                 btn_ow.pack(side="right", padx=10)
+1262: 
+1263:                 btn_ow_all = tk.Button(btn_frame, text=_("Ghi đè toàn bộ"), font=("Segoe UI", 10, "bold"), bg="#e0e0e0", fg="black", width=15, relief="raised", borderwidth=2, command=lambda: make_decision("overwrite_all"))
+1264:                 btn_ow_all.pack(side="right", padx=10)
+1265: 
+1266:                 parent.wait_window(dlg)
+1267:                 if decision[0] == "cancel": return None
+1268:                 elif decision[0] == "overwrite_all":
+1269:                     overwrite_all = True
+1270:                     results[c['name']] = 'overwrite'
+1271:                 else: results[c['name']] = decision[0]
+1272: 
+1273:             return results
+1274: 
+1275:         def write_transfer_log(direction, file_name, file_size, dest_dir):
+1276:             try:
+1277:                 import datetime
+1278:                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+1279:                 log_line = f"[{now}] {direction} | File: {file_name} | Size: {format_size(file_size)} | To: {dest_dir}\n"
+1280:                 with open("transfer.log", "a", encoding="utf-8") as lf:
+1281:                     lf.write(log_line)
+1282:             except Exception as e:
+1283:                 print("Log error:", e)
+1284: 
+1285:         def do_upload():
+1286:             sel = local_tree.selection()
+1287:             if not sel: return
+1288: 
+1289:             target_dir = remote_entry.get()
+1290: 
+1291:             # Check conflicts
+1292:             remote_items = {}
+1293:             for child in remote_tree.get_children():
+1294:                 txt = remote_tree.item(child, "text")
+1295:                 vals = remote_tree.item(child, "values")
+1296:                 is_dir = True if len(vals) > 1 and vals[1] == _("Thư mục") else False
+1297:                 sz = vals[2] if len(vals) > 2 else 0
+1298:                 remote_items[txt] = {"is_dir": is_dir, "size": sz}
+1299: 
+1300:             conflicts = []
+1301:             for s in sel:
+1302:                 name = local_tree.item(s, "text")
+1303:                 if name in remote_items:
+1304:                     fpath = os.path.join(local_entry.get(), name)
+1305:                     is_dir = os.path.isdir(fpath)
+1306:                     
+1307:                     src_file_count = None
+1308:                     src_folder_count = None
+1309:                     if is_dir:
+1310:                         sz, src_file_count, src_folder_count = get_dir_stats(fpath)
+1311:                     else:
+1312:                         sz = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
+1313: 
+1314:                     try:
+1315:                         import datetime
+1316:                         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
+1317:                     except: mtime = _("Không xác định")
+1318:                     dpath = remote_entry.get()
+1319:                     if not dpath.endswith('/'): dpath += '/'
+1320:                     dpath += name
+1321:                     conflicts.append({
+1322:                         "name": name,
+1323:                         "src_size": sz, "src_is_dir": is_dir, "src_path": fpath, "src_mtime": mtime,
+1324:                         "src_file_count": src_file_count, "src_folder_count": src_folder_count,
+1325:                         "dst_size": remote_items[name]["size"], "dst_is_dir": remote_items[name]["is_dir"],
+1326:                         "dst_path": dpath, "dst_mtime": _("Không xác định (Remote)"),
+1327:                         "dst_file_count": None, "dst_folder_count": None
+1328:                     })
+1329: 
+1330:             if conflicts:
+1331:                 decisions = resolve_conflicts(conflicts, top, is_upload=True)
+1332:                 if decisions is None: return
+1333:             else:
+1334:                 decisions = {}
+1335: 
+1336:             items_to_upload = [] # List of (local_path, remote_name, size)
+1337:             total_size = 0
+1338: 
+1339:             for s in sel:
+1340:                 item = local_tree.item(s)
+1341:                 name = item['text']
+1342: 
+1343:                 if name in decisions and decisions[name] == 'skip':
+1344:                     continue
+1345:                 fpath = os.path.join(local_entry.get(), name)
+1346: 
+1347:                 if os.path.isfile(fpath):
+1348:                     sz = os.path.getsize(fpath)
+1349:                     items_to_upload.append((fpath, name, sz, False))
+1350:                     total_size += sz
+1351:                 elif os.path.isdir(fpath):
+1352:                     # Recursive walk for folders
+1353:                     base_name = name
+1354:                     for root, dirs, files in os.walk(fpath):
+1355:                         rel_path = os.path.relpath(root, os.path.dirname(fpath))
+1356:                         if not dirs and not files:
+1357:                             remote_name = rel_path.replace('\\', '/')
+1358:                             items_to_upload.append((None, remote_name, 0, True))
+1359:                         for d in dirs:
+1360:                             remote_name = os.path.join(rel_path, d).replace('\\', '/')
+1361:                         for f in files:
+1362:                             full_file = os.path.join(root, f)
+1363:                             if os.path.isfile(full_file):
+1364:                                 sz = os.path.getsize(full_file)
+1365:                                 remote_name = os.path.join(rel_path, f).replace('\\', '/')
+1366:                                 items_to_upload.append((full_file, remote_name, sz, False))
+1367:                                 total_size += sz
+1368: 
+1369:             if not items_to_upload: return
+1370: 
+1371:             display_name = items_to_upload[0][1]
+1372:             if len(items_to_upload) > 1:
+1373:                 display_name += _(" và {count} mục khác").format(count=len(items_to_upload)-1)
+1374: 
+1375:             class UploadState:
+1376:                 is_cancelled = False
+1377:             state = UploadState()
+1378: 
+1379:             dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True))
+1380:             dialog.update_progress(0)
+1381:             
+1382:             active_upload_dialog.clear()
+1383:             active_upload_dialog.append(dialog)
+1384: 
+1385:             upload_ack_event = threading.Event()
+1386:             active_upload_ack_events.append(upload_ack_event)
+1387: 
+1388:             def upload_batch_thread(items, t_dir, dlg, st, ack_event):
+1389:                 send_fn = send_event_sync if send_event_sync else send_event
+1390:                 try:
+1391:                     sent_total = 0
+1392:                     batch_start_time = time.time()
+1393:                     for path, n, sz, is_empty_dir in items:
+1394:                         if st.is_cancelled: break
+1395: 
+1396:                         if is_empty_dir:
+1397:                             final_target_dir = t_dir
+1398:                             if not final_target_dir.endswith("/"): final_target_dir += "/"
+1399: 
+1400:                             parts = n.strip('/').rsplit('/', 1)
+1401:                             if len(parts) == 2:
+1402:                                 parent_path = final_target_dir + parts[0]
+1403:                                 folder_name = parts[1]
+1404:                             else:
+1405:                                 parent_path = final_target_dir
+1406:                                 if parent_path.endswith("/"): parent_path = parent_path[:-1]
+1407:                                 folder_name = parts[0]
+1408: 
+1409:                             send_fn({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name})
+1410:                             time.sleep(0.1)
+1411:                             continue
+1412: 
+1413:                         write_transfer_log("UPLOAD", n, sz, t_dir)
+1414: 
+1415:                         parts = n.split('/')
+1416:                         file_name = parts[-1]
+1417:                         sub_dir = "/".join(parts[:-1])
+1418: 
+1419:                         final_target_dir = t_dir
+1420:                         if not final_target_dir.endswith("/"): final_target_dir += "/"
+1421:                         if sub_dir:
+1422:                             final_target_dir += sub_dir
+1423: 
+1424:                         send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
+1425:                         time.sleep(0.5)
+1426: 
+1427:                         # Adaptive throttling: đo thời gian send thực tế để tự điều chỉnh tốc độ
+1428:                         # Dùng chunk 16KB nhỏ để sendall() trả nhanh, không chặn socket lock lâu
+1429:                         # Sau mỗi chunk luôn yield 50ms cho control events (chuột/phím) qua socket
+1430:                         chunk_size = 16 * 1024
+1431: 
+1432:                         with open(path, "rb") as f:
+1433:                             while True:
+1434:                                 if st.is_cancelled: break
+1435: 
+1436:                                 chunk = f.read(chunk_size)
+1437:                                 if not chunk: break
+1438: 
+1439:                                 t_send_start = time.time()
+1440:                                 send_fn({
+1441:                                     "type": "file_chunk",
+1442:                                     "name": file_name,
+1443:                                     "data": base64.b64encode(chunk).decode('utf-8')
+1444:                                 })
+1445:                                 send_duration = time.time() - t_send_start
+1446: 
+1447:                                 sent_total += len(chunk)
+1448:                                 dlg.update_progress(sent_total)
+1449: 
+1450:                                 # Adaptive wait: nếu send mất lâu → mạng chậm → chờ thêm
+1451:                                 # Luôn chờ ít nhất 50ms để nhường socket cho control events
+1452:                                 wait_time = max(0.05, send_duration * 0.5)
+1453:                                 if wait_time > 2.0:
+1454:                                     wait_time = 2.0
+1455:                                 sleep_end = time.time() + wait_time
+1456:                                 while time.time() < sleep_end:
+1457:                                     if st.is_cancelled:
+1458:                                         break
+1459:                                     time.sleep(0.05)
+1460: 
+1461:                         send_fn({"type": "file_end"})
+1462:                         time.sleep(0.1) 
+1463: 
+1464:                     if not st.is_cancelled:
+1465:                         # Gửi batch_end để báo host đã gửi xong
+1466:                         send_fn({"type": "batch_end"})
+1467:                         # Đóng cửa sổ tiến trình ngay lập tức
+1468:                         dlg.safe_destroy()
+1469: 
+1470:                     def delayed_refresh():
+1471:                         time.sleep(1)
+1472:                         top.after(0, lambda: request_remote_dir(t_dir))
+1473:                     threading.Thread(target=delayed_refresh, daemon=True).start()
+1474:                 except Exception as e:
+1475:                     print(f"Upload error: {e}")
+1476:                     dlg.safe_destroy()
+1477: 
+1478:             threading.Thread(target=upload_batch_thread, args=(items_to_upload, target_dir, dialog, state, upload_ack_event), daemon=True).start()
+1479: 
+1480:         def do_download():
+1481:             sel = remote_tree.selection()
+1482:             if not sel: return
+1483: 
+1484:             target_dir = os.path.abspath(local_entry.get())
+1485: 
+1486:             # Check conflicts
+1487:             conflicts = []
+1488:             for s in sel:
+1489:                 name = remote_tree.item(s, "text")
+1490:                 vals = remote_tree.item(s, "values")
+1491:                 src_is_dir = True if len(vals) > 1 and vals[1] == _("Thư mục") else False
+1492:                 src_sz = vals[2] if len(vals) > 2 else 0
+1493: 
+1494:                 fpath = os.path.join(target_dir, name)
+1495:                 if os.path.exists(fpath):
+1496:                     dst_is_dir = os.path.isdir(fpath)
+1497:                     dst_file_count = None
+1498:                     dst_folder_count = None
+1499:                     if dst_is_dir:
+1500:                         dst_sz, dst_file_count, dst_folder_count = get_dir_stats(fpath)
+1501:                     else:
+1502:                         dst_sz = os.path.getsize(fpath) if not dst_is_dir else 0
+1503:                     try:
+1504:                         import datetime
+1505:                         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
+1506:                     except: mtime = _("Không xác định")
+1507:                     spath = remote_entry.get()
+1508:                     sep = "/" if "/" in spath else ("\\" if "\\" in spath else "/")
+1509:                     if not spath.endswith(sep): spath += sep
+1510:                     spath += name
+1511:                     conflicts.append({
+1512:                         "name": name,
+1513:                         "src_size": src_sz, "src_is_dir": src_is_dir, "src_path": spath, "src_mtime": _("Không xác định (Remote)"),
+1514:                         "src_file_count": None, "src_folder_count": None,
+1515:                         "dst_size": dst_sz, "dst_is_dir": dst_is_dir, "dst_path": fpath, "dst_mtime": mtime,
+1516:                         "dst_file_count": dst_file_count, "dst_folder_count": dst_folder_count
+1517:                     })
+1518: 
+1519:             if conflicts:
+1520:                 decisions = resolve_conflicts(conflicts, top, is_upload=False)
+1521:                 if decisions is None: return
+1522:             else:
+1523:                 decisions = {}
+1524: 
+1525:             try:
+1526:                 from core.clipboard_agent import clipboard_sync_manager as cm
+1527:             except Exception:
+1528:                 cm = None
+1529: 
+1530:             total_size = 0
+1531:             files_to_download = []
+1532:             display_names = []
+1533: 
+1534:             for s in sel:
+1535:                 item = remote_tree.item(s)
+1536:                 name = item['text']
+1537: 
+1538:                 if name in decisions and decisions[name] == 'skip':
+1539:                     continue
+1540:                 vals = item.get('values', [])
+1541: 
+1542:                 src_is_dir = True if len(vals) > 1 and vals[1] == _("Thư mục") else False
+1543:                 if src_is_dir:
+1544:                     os.makedirs(os.path.join(target_dir, name), exist_ok=True)
+1545: 
+1546:                 p = remote_entry.get()
+1547:                 sep = "/" if "/" in p else ("\\" if "\\" in p else "/")
+1548:                 if not p.endswith(sep): p += sep
+1549:                 full_remote = p + name
+1550: 
+1551:                 size = vals[2] if len(vals) > 2 else 0
+1552:                 total_size += size
+1553: 
+1554:                 files_to_download.append(full_remote)
+1555:                 display_names.append(name)
+1556: 
+1557:             if not files_to_download: return
+1558: 
+1559:             if cm:
+1560:                 cm.target_save_dir = target_dir
+1561:                 cm.batch_total_size = total_size
+1562:                 cm.batch_received = 0
+1563:                 cm.active_batch = True
+1564:                 cm._receive_cancelled = False
+1565: 
+1566:                 display_name = display_names[0]
+1567:                 if len(display_names) > 1:
+1568:                     display_name += _(" và {count} mục khác").format(count=len(display_names)-1)
+1569: 
+1570:                 def _cancel():
+1571:                     cm.cancel_active_transfer(remote_triggered=False)
+1572: 
+1573:                 dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel)
+1574:                 dialog.update_progress(0)
+1575:                 cm.active_dialog = dialog
+1576: 
+1577:             write_transfer_log("DOWNLOAD", display_names[0] + (" (batch)" if len(display_names) > 1 else ""), total_size, target_dir)
+1578:             req = {"type": "request_download_batch", "paths": files_to_download, "target_dir_local": target_dir}
+1579:             send_event(req)
+1580: 
+1581:         btn_upload.config(command=do_upload)
+1582:         btn_download.config(command=do_download)
+1583: 
+1584:         def on_close():
+1585:             try: top.withdraw()
+1586:             except: pass
+1587: 
+1588:         top.protocol("WM_DELETE_WINDOW", on_close)
+1589: 
+1590:         # init
+1591:         refresh_local()
+1592:         request_remote_dir(remote_entry.get())
+1593: 
+1594:         top.focus_force()
+1595:         local_entry.focus()
+1596:         top.mainloop()
+1597:     except Exception as ex:
+1598:         import traceback
+1599:         err = traceback.format_exc()
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: multi_replace_file_content]
+  Description: Update ProgressDialog to accept host_hwnd and use SetParent to make it a child of the viewer window, rather than constrained to the file manager.
+  Instruction: Update ProgressDialog to support host_hwnd and SetParent in win32, and add drag constraints for host_hwnd.
+  ReplacementChunks: [{'AllowMultiple': False, 'EndLine': 283, 'ReplacementContent': '    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None):\n        super().__init__(parent)\n  ...
+  TargetFile: d:\Data\AG\remote_desktop\gui\components.py
+  toolAction: Updating ProgressDialog in components.py
+  toolSummary: Update ProgressDialog
+
+========== MODEL ==========
+Created At: 2026-08-23T15:18:29+07:00
+Completed At: 2026-08-23T15:18:31+07:00
+The following changes were made by the multi_replace_file_content tool to: d:\Data\AG\remote_desktop\gui\components.py. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -277,9 +277,10 @@
+         self.destroy()
+ 
+ class ProgressDialog(tk.Toplevel):
+-    def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
++    def __init__(self, parent, title_text, filename, total_size, on_cancel=None, host_hwnd=None):
+         super().__init__(parent)
+         self.parent_window = parent
++        self.host_hwnd = host_hwnd
+         self.withdraw()
+         self.attributes("-alpha", 0.0)
+         self.overrideredirect(True)
+@@ -357,11 +357,39 @@
+         self.update_idletasks()
+         dialog_w = 400
+         
+-        screen_w = self.winfo_screenwidth()
+-        screen_h = self.winfo_screenheight()
+-        x = (screen_w - dialog_w) // 2
+-        y = (screen_h - dialog_h) // 2
+-        self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
++        if self.host_hwnd and sys.platform == "win32":
++            try:
++                import ctypes
++                from ctypes import wintypes
++                tk_hwnd = int(self.frame(), 16)
++                style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
++                style = (style | 0x40000000) & ~0x80000000
++                ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
++                ctypes.windll.user32.SetParent(tk_hwnd, self.host_hwnd)
++                
++                rect = wintypes.RECT()
++                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
++                py_w = rect.right - rect.left
++                py_h = rect.bottom - rect.top
++                
++                x = max(0, (py_w - dialog_w) // 2)
++                y = max(0, (py_h - dialog_h) // 2)
++                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0004 | 0x0020)
++                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
++                self.parent_window = None # Not locked to File Manager
++            except Exception:
++                screen_w = self.winfo_screenwidth()
++                screen_h = self.winfo_screenheight()
++                x = (screen_w - dialog_w) // 2
++                y = (screen_h - dialog_h) // 2
++                self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
++        else:
++            screen_w = self.winfo_screenwidth()
++            screen_h = self.winfo_screenheight()
++            x = (screen_w - dialog_w) // 2
++            y = (screen_h - dialog_h) // 2
++            self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
++
+         self.deiconify()
+         self.lift()
+         self.focus_force()
+@@ -396,6 +396,21 @@
+                 y = max(p_y, min(y, p_y + p_h - my_h))
+             except Exception:
+                 pass
++        elif hasattr(self, 'host_hwnd') and self.host_hwnd and sys.platform == "win32":
++            try:
++                import ctypes
++                from ctypes import wintypes
++                rect = wintypes.RECT()
++                ctypes.windll.user32.GetClientRect(self.host_hwnd, ctypes.byref(rect))
++                p_w = rect.right - rect.left
++                p_h = rect.bottom - rect.top
++                my_w = self.winfo_width()
++                my_h = self.winfo_height()
++                
++                x = max(0, min(x, p_w - my_w))
++                y = max(0, min(y, p_h - my_h))
++            except Exception:
++                pass
+                 
+         self.geometry(f"+{x}+{y}")
+ 
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+[Action: multi_replace_file_content]
+  Description: Pass host_hwnd to ProgressDialog when creating upload and download progress dialogs so they become children of the viewer window.
+  Instruction: Pass host_hwnd to ProgressDialog in do_upload and do_download.
+  ReplacementChunks: [{'AllowMultiple': False, 'EndLine': 1379, 'ReplacementContent': '            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, \'is_cancelled\', Tr...
+  TargetFile: d:\Data\AG\remote_desktop\utils\file_manager.py
+  toolAction: Updating file_manager.py to pass host_hwnd
+  toolSummary: Update file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:18:38+07:00
+Completed At: 2026-08-23T15:18:40+07:00
+The following changes were made by the multi_replace_file_content tool to: d:\Data\AG\remote_desktop\utils\file_manager.py. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -1376,7 +1376,7 @@
+                 is_cancelled = False
+             state = UploadState()
+ 
+-            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True))
++            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=lambda: setattr(state, 'is_cancelled', True), host_hwnd=hwnd)
+             dialog.update_progress(0)
+             
+             active_upload_dialog.clear()
+@@ -1569,7 +1569,7 @@
+                 def _cancel():
+                     cm.cancel_active_transfer(remote_triggered=False)
+ 
+-                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel)
++                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd)
+                 dialog.update_progress(0)
+                 cm.active_dialog = dialog
+ 
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+========== MODEL ==========
+Đã xong! Tôi vừa chỉnh sửa lại mã nguồn để cửa sổ "Chuyển qua" (và cả "Nhận về") trở thành một cửa sổ con trực tiếp của trình xem máy tính từ xa (Viewer window) thay vì bị khóa dính vào cửa sổ Quản lý tệp.
+
+Cụ thể, các thay đổi tôi đã thực hiện bao gồm:
+1. **[`gui/components.py`](file:///d:/Data/AG/remote_desktop/gui/components.py)**: Cập nhật lớp `ProgressDialog` để nhận tham số `host_hwnd`. Khi có `host_hwnd` trên Windows, hộp thoại sẽ gọi API `SetParent` để gắn chính nó làm cửa sổ con của trình điều khiển, thay vì trình quản lý tệp, đồng thời điều chỉnh lại cơ chế kéo thả để nó không bị giới hạn trong khung cửa sổ "Chuyển tệp" mà dựa trên kích thước của trình điều khiển.
+2. **[`utils/file_manager.py`](file:///d:/Data/AG/remote_desktop/utils/file_manager.py)**: Truyền tham số `host_hwnd=hwnd` (chính là handle của trình điều khiển) vào mỗi khi khởi tạo `ProgressDialog` ở 2 tính năng Upload và Download.
+
+Bạn có thể chạy thử nghiệm lại tính năng chuyển tệp để xem thay đổi ngay nhé!
+
+========== USER ==========
+@[build_and_deploy.py]
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\build_and_deploy.py
+  toolAction: Viewing build_and_deploy.py
+  toolSummary: View build_and_deploy.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:19:35+07:00
+Completed At: 2026-08-23T15:19:36+07:00
+File Path: `file:///d:/Data/AG/remote_desktop/build_and_deploy.py`
+Total Lines: 228
+Total Bytes: 9419
+Showing lines 1 to 228
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import os
+2: import sys
+3: import subprocess
+4: import shutil
+5: import time
+6: 
+7: workspace_dir = os.path.dirname(os.path.abspath(__file__))
+8: target_dir = r"C:\Apps\P2P"
+9: log_path = os.path.join(workspace_dir, "build_deploy.log")
+10: 
+11: def log(msg):
+12:     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+13:     log_line = f"[{timestamp}] {msg}\n"
+14:     print(log_line, end="")
+15:     try:
+16:         with open(log_path, "a", encoding="utf-8") as f:
+17:             f.write(log_line)
+18:     except Exception as e:
+19:         print(f"Failed to write log: {e}")
+20: 
+21: def run_cmd(cmd, cwd=workspace_dir):
+22:     log(f"Running command: {cmd}")
+23:     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=cwd)
+24:     output_lines = []
+25:     while True:
+26:         line = p.stdout.readline()
+27:         if not line:
+28:             break
+29:         output_lines.append(line)
+30:         # log in real time
+31:         print(line, end="")
+32:         try:
+33:             with open(log_path, "a", encoding="utf-8") as f:
+34:                 f.write(line)
+35:         except:
+36:             pass
+37:     p.wait()
+38:     if p.returncode != 0:
+39:         log(f"Command failed with exit code {p.returncode}")
+40:         return False
+41:     return True
+42: 
+43: def main():
+44:     if os.path.exists(log_path):
+45:         try: os.remove(log_path)
+46:         except: pass
+47: 
+48:     log("=== STARTING BUILD AND DEPLOYMENT ===")
+49: 
+50:     # 1. Stop Scheduled Task
+51:     log("Stopping scheduled task 'EasyRemoteDesktopAgent'...")
+52:     subprocess.run("schtasks /end /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+53:     
+54:     # 2. Terminate running instances to release file locks
+55:     log("Terminating any running instances of agent and service...")
+56:     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+57:     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+58:     time.sleep(2)
+59: 
+60:     # Metadata for Anti-Virus (Reduces False Positives)
+61:     company_name = "P2P Remote Desktop"
+62:     version_string = "1.0.0.0"
+63:     
+64:     # Calculate jobs to limit CPU usage to ~80%
+65:     cpu_count = os.cpu_count() or 4
+66:     jobs_limit = max(1, int(cpu_count * 0.8))
+67:     
+68:     # 3. Build Service using Nuitka (standalone)
+69:     log("Building RemoteDesktopService via Nuitka (standalone)...")
+70:     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
+71:     service_product_name = "P2P Remote Desktop Service"
+72:     service_desc = "Background Service for P2P Remote Desktop"
+73:     nuitka_service_cmd = (
+74:         f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+75:         f'--assume-yes-for-downloads '
+76:         f'--windows-icon-from-ico=app_icon.ico '
+77:         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
+78:         f'--windows-file-version={version_string} --windows-product-version={version_string} '
+79:         f'--windows-file-description="{service_desc}" '
+80:         f'--jobs={jobs_limit} '
+81:         f'--output-dir=dist_nuitka_service windows_service_loop.py'
+82:     )
+83:     if not run_cmd(nuitka_service_cmd):
+84:         log("ERROR: Nuitka service build failed. Aborting deployment.")
+85:         return
+86: 
+87:     # 4. Build Agent using Nuitka
+88:     log("Building RemoteDesktopP2P via Nuitka (standalone)...")
+89:     app_product_name = "P2P Remote Desktop Client"
+90:     app_desc = "Client GUI for P2P Remote Desktop"
+91:     nuitka_cmd = (
+92:         f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
+93:         f'--assume-yes-for-downloads '
+94:         f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam '
+95:         f'--no-deployment-flag=excluded-module-usage '
+96:         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
+97:         f'--windows-file-version={version_string} --windows-product-version={version_string} '
+98:         f'--windows-file-description="{app_desc}" '
+99:         f'--jobs={jobs_limit} '
+100:         f'--output-dir=dist_nuitka app.py'
+101:     )
+102:     if not run_cmd(nuitka_cmd):
+103:         log("ERROR: Nuitka build failed. Aborting deployment.")
+104:         return
+105: 
+106: 
+107:     # 5. Post-build renaming and asset preparation
+108:     log("Preparing build outputs...")
+109:     app_dist_dir = os.path.join(workspace_dir, "dist_nuitka", "app.dist")
+110:     
+111:     # Rename app.exe -> RemoteDesktopP2P.exe
+112:     old_exe = os.path.join(app_dist_dir, "app.exe")
+113:     new_exe = os.path.join(app_dist_dir, "RemoteDesktopP2P.exe")
+114:     if os.path.exists(old_exe):
+115:         try:
+116:             if os.path.exists(new_exe):
+117:                 os.remove(new_exe)
+118:             os.rename(old_exe, new_exe)
+119:             log("Successfully renamed app.exe to RemoteDesktopP2P.exe")
+120:         except Exception as e:
+121:             log(f"Failed to rename app.exe: {e}")
+122:             return
+123:             
+124:     # Copy Nuitka Service standalone files into app.dist (merging them)
+125:     service_dist_dir = os.path.join(workspace_dir, "dist_nuitka_service", "windows_service_loop.dist")
+126:     if os.path.exists(service_dist_dir):
+127:         log("Merging RemoteDesktopService standalone files into app.dist...")
+128:         for item in os.listdir(service_dist_dir):
+129:             s = os.path.join(service_dist_dir, item)
+130:             d = os.path.join(app_dist_dir, item)
+131:             if item.lower() == "windows_service_loop.exe":
+132:                 d = os.path.join(app_dist_dir, "RemoteDesktopService.exe")
+133:             try:
+134:                 if os.path.isdir(s):
+135:                     if os.path.exists(d):
+136:                         shutil.rmtree(d)
+137:                     shutil.copytree(s, d)
+138:                 else:
+139:                     shutil.copy2(s, d)
+140:             except Exception as e:
+141:                 log(f"Warning: Failed to merge service file {item}: {e}")
+142:     else:
+143:         log("ERROR: Compiled RemoteDesktopService standalone directory not found!")
+144:         return
+145: 
+146: 
+147:     # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
+148:     files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt"]
+149:     for file_name in files_to_copy:
+150:         src = os.path.join(workspace_dir, file_name)
+151:         dst = os.path.join(app_dist_dir, file_name)
+152:         if os.path.exists(src):
+153:             try:
+154:                 shutil.copy2(src, dst)
+155:                 log(f"Copied {file_name} to app.dist")
+156:             except Exception as e:
+157:                 log(f"Failed to copy {file_name}: {e}")
+158: 
+159:     # Copy lang directory to app.dist
+160:     lang_src = os.path.join(workspace_dir, "lang")
+161:     lang_dst = os.path.join(app_dist_dir, "lang")
+162:     if os.path.exists(lang_src):
+163:         try:
+164:             if os.path.exists(lang_dst):
+165:                 shutil.rmtree(lang_dst)
+166:             shutil.copytree(lang_src, lang_dst)
+167:             log("Copied lang directory to app.dist")
+168:         except Exception as e:
+169:             log(f"Failed to copy lang directory: {e}")
+170: 
+171:     # Make zip archive
+172:     log("Creating RemoteDesktopP2P.zip archive...")
+173:     zip_path = os.path.join(workspace_dir, "RemoteDesktopP2P")
+174:     try:
+175:         shutil.make_archive(zip_path, 'zip', app_dist_dir)
+176:         log("Archive created successfully.")
+177:     except Exception as e:
+178:         log(f"Warning: Failed to create zip archive: {e}")
+179: 
+180:     # Build Inno Setup Installer
+181:     log("Building Installer via Inno Setup...")
+182:     iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+183:     if not os.path.exists(iscc_path):
+184:         iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
+185:     
+186:     if os.path.exists(iscc_path):
+187:         iss_file = os.path.join(workspace_dir, "installer.iss")
+188:         if os.path.exists(iss_file):
+189:             cmd = f'"{iscc_path}" "{iss_file}"'
+190:             if not run_cmd(cmd):
+191:                 log("WARNING: Inno Setup build failed.")
+192:             else:
+193:                 log("Successfully built setup.exe using Inno Setup.")
+194:         else:
+195:             log("WARNING: installer.iss not found. Skipping installer build.")
+196:     else:
+197:         # Fallback to checking if iscc is in PATH
+198:         cmd = f'iscc "{os.path.join(workspace_dir, "installer.iss")}"'
+199:         try:
+200:             if not run_cmd(cmd):
+201:                 log("WARNING: Inno Setup build failed.")
+202:             else:
+203:                 log("Successfully built setup.exe using Inno Setup.")
+204:         except Exception:
+205:             log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
+206: 
+207:     # 6. Show Popup Notification
+208:     try:
+209:         import ctypes
+210:         MB_OK = 0x00000000
+211:         MB_ICONINFORMATION = 0x00000040
+212:         MB_SERVICE_NOTIFICATION = 0x00200000
+213:         MB_TOPMOST = 0x00040000
+214:         ctypes.windll.user32.MessageBoxW(
+215:             0, 
+216:             "Đã build xong Easy Remote Desktop! Hãy kiểm tra thư mục dự án.", 
+217:             "Build Thành Công", 
+218:             MB_OK | MB_ICONINFORMATION | MB_SERVICE_NOTIFICATION | MB_TOPMOST
+219:         )
+220:         log("Shown success popup to user.")
+221:     except Exception as e:
+222:         log(f"Failed to show popup: {e}")
+223: 
+224:     log("=== BUILD AND DEPLOYMENT FINISHED ===")
+225: 
+226: if __name__ == "__main__":
+227:     main()
+228: 
+The above content shows the entire, complete file contents of the requested file.
+
+[Action: run_command]
+  CommandLine: python build_and_deploy.py
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 500
+  toolAction: Running build_and_deploy.py
+  toolSummary: Run build_and_deploy.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:19:43+07:00
+Tool is running as a background task with task id: bb746798-1feb-4ecc-9ae1-11854402908f/task-51
+Task Description: python build_and_deploy.py
+Task logs are available at: file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/bb746798-1feb-4ecc-9ae1-11854402908f/.system_generated/tasks/task-51.log
+
+========== MODEL ==========
+Tôi đã khởi chạy lệnh build dự án thông qua file `build_and_deploy.py`. 
+
+Quá trình build bằng Nuitka (bao gồm cả Service và App) sẽ mất một chút thời gian. Lệnh đang được chạy dưới nền và sẽ hiển thị popup thông báo ("Đã build xong Easy Remote Desktop!") khi hoàn thành. Bạn có thể tiếp tục làm việc khác trong lúc chờ đợi nhé!
+
+========== MODEL ==========
+Quá trình build đã hoàn tất thành công! Bộ cài đặt mới của Easy Remote Desktop đã được tạo xong. Bạn có thể kiểm tra ở thư mục `D:\Data\AG\remote_desktop` và sử dụng file `EasyRemoteDesktop_Installer.exe` mới vừa được tạo ra.
+
+Bạn có cần tôi hỗ trợ thêm gì với ứng dụng này không?
+
+========== USER ==========
+ổn rồi, cảm ơn bạn
+
+========== MODEL ==========
+Không có gì! Rất vui được hỗ trợ bạn hoàn thiện tính năng chuyển tệp. Nếu bạn gặp bất kỳ vấn đề nào khác hoặc cần nâng cấp thêm tính năng mới cho P2P Remote Desktop, đừng ngần ngại cho tôi biết nhé. Chúc bạn có một ngày làm việc hiệu quả!
+
+========== USER ==========
+khoan đã, dialog sao lại nằm sau "Chuyển tệp" rồi?
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\utils\file_manager.py
+  EndLine: 300
+  StartLine: 150
+  toolAction: Viewing file_manager.py
+  toolSummary: View file_manager.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:27:59+07:00
+Completed At: 2026-08-23T15:27:59+07:00
+File Path: `file:///d:/Data/AG/remote_desktop/utils/file_manager.py`
+Total Lines: 1609
+Total Bytes: 78199
+Showing lines 150 to 300
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+150:         
+151:     @staticmethod
+152:     def showerror(title, message, **kwargs):
+153:         parent = kwargs.get("parent")
+154:         if not parent:
+155:             from tkinter import messagebox as tk_msg
+156:             return tk_msg.showerror(title, message, **kwargs)
+157:         return inline_messagebox(parent, title, message, "error")
+158:         
+159:     @staticmethod
+160:     def showwarning(title, message, **kwargs):
+161:         parent = kwargs.get("parent")
+162:         if not parent:
+163:             from tkinter import messagebox as tk_msg
+164:             return tk_msg.showwarning(title, message, **kwargs)
+165:         return inline_messagebox(parent, title, message, "warning")
+166:         
+167:     @staticmethod
+168:     def askyesno(title, message, **kwargs):
+169:         parent = kwargs.get("parent")
+170:         if not parent:
+171:             from tkinter import messagebox as tk_msg
+172:             return tk_msg.askyesno(title, message, **kwargs)
+173:         return inline_messagebox(parent, title, message, "askyesno")
+174: 
+175: 
+176: def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080, send_event_sync=None):
+177:     try:
+178:         import tkinter as tk
+179:         from tkinter import ttk, filedialog, messagebox
+180:         messagebox = CustomMessageBox
+181:         import threading, os, time, base64
+182: 
+183:         import sys
+184:         hwnd = host_hwnd
+185:         if not hwnd:
+186:             try: hwnd = pygame.display.get_wm_info().get("window")
+187:             except: pass
+188:             
+189:         top = tk.Tk()
+190:             
+191:         globals()['fm_top'] = top
+192:         active_upload_ack_events = []
+193:         active_upload_dialog = []
+194:         
+195:         if sys.platform == "win32":
+196:             top.attributes('-alpha', 0.0)
+197:         else:
+198:             top.withdraw()
+199: 
+200:         host_title = f" - {computer_name}" if computer_name else ""
+201:         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
+202:         if hwnd and sys.platform == "win32":
+203:             import ctypes
+204:             from ctypes import wintypes
+205:             rect = wintypes.RECT()
+206:             ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
+207:             py_w = rect.right - rect.left
+208:             py_h = rect.bottom - rect.top
+209: 
+210:             # Try to get screen coordinates of the Pygame window
+211:             pt = wintypes.POINT(0, 0)
+212:             ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+213: 
+214:             top.update_idletasks()
+215:             tk_hwnd = int(top.frame(), 16)
+216:             try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+217:             except: pass
+218:             style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
+219:             style = (style | 0x40000000) & ~0x80000000
+220:             ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
+221:             ctypes.windll.user32.SetParent(tk_hwnd, hwnd)
+222:             x = max(0, (py_w - 900) // 2)
+223:             y = max(0, (py_h - 600) // 2)
+224:             top.geometry("900x600")
+225:             top.update_idletasks()
+226:             ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 900, 600, 0x0004)
+227:         else:
+228:             top.update_idletasks()
+229:             sw = top.winfo_screenwidth()
+230:             sh = top.winfo_screenheight()
+231:             top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
+232: 
+233:         top.attributes('-topmost', True)
+234:         if sys.platform == "win32":
+235:             top.attributes('-alpha', 1.0)
+236:         else:
+237:             top.deiconify()
+238:         top.configure(bg="#E5E5E5")
+239: 
+240:         left_frame = tk.Frame(top, bg="#E5E5E5")
+241:         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+242: 
+243:         mid_frame = tk.Frame(top, width=60, bg="#E5E5E5")
+244:         mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+245:         
+246:         btn_upload = tk.Button(mid_frame, text=_("Chuyển qua\n>>"), font=("Segoe UI", 10, "bold"), bg="#2196F3", fg="white", width=10)
+247:         btn_upload.pack(pady=(100, 10))
+248:         btn_download = tk.Button(mid_frame, text=_("Nhận về\n<<"), font=("Segoe UI", 10, "bold"), bg="#4CAF50", fg="white", width=10)
+249:         btn_download.pack(pady=10)
+250: 
+251:         right_frame = tk.Frame(top, bg="#E5E5E5")
+252:         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+253: 
+254:         # --- Left Pane (Local) ---
+255:         tk.Label(left_frame, text=_("Máy của bạn (Local)"), font=("Segoe UI", 10, "bold"), bg="#E5E5E5").pack()
+256:         local_nav = tk.Frame(left_frame, bg="#E5E5E5")
+257:         local_nav.pack(fill=tk.X, pady=2)
+258: 
+259:         local_entry = tk.Entry(local_nav)
+260:         local_entry.insert(0, os.path.abspath(os.path.expanduser("~")))
+261: 
+262:         def format_size(s):
+263:             if s < 1024: return f"{s} B"
+264:             elif s < 1024*1024: return f"{s/1024:.1f} KB"
+265:             elif s < 1024*1024*1024: return f"{s/(1024*1024):.1f} MB"
+266:             elif s < 1024*1024*1024*1024: return f"{s/(1024*1024*1024):.2f} GB"
+267:             else: return f"{s/(1024*1024*1024*1024):.2f} TB"
+268: 
+269:         def show_properties_dialog(name, item_type, location, size_bytes, file_count=None, folder_count=None, modified_time=None):
+270:             """Show a properties dialog for a file or folder."""
+271:             w, h = 400, 380
+272:             # Removed dim overlay to see background
+273:             dlg = tk.Frame(top, bg="#F0F0F0", highlightbackground="#0078D7", highlightthickness=2)
+274:             dlg.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=w, height=h)
+275:             
+276:             dlg.lift()
+277: 
+278:             # Title bar
+279:             title_frame = tk.Frame(dlg, bg="#0078D7", height=40)
+280:             title_frame.pack(fill=tk.X)
+281:             title_frame.pack_propagate(False)
+282:             tk.Label(title_frame, text=f"  📋 {name}", font=("Segoe UI", 11, "bold"), bg="#0078D7", fg="white", anchor="w").pack(fill=tk.X, padx=5, pady=8)
+283: 
+284:             # Content
+285:             content_frame = tk.Frame(dlg, bg="#F0F0F0")
+286:             content_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+287: 
+288:             row = 0
+289:             def add_row(label_text, value_text, bold_value=False):
+290:                 nonlocal row
+291:                 tk.Label(content_frame, text=label_text, font=("Segoe UI", 9, "bold"), bg="#F0F0F0", fg="#333", anchor="w").grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+292:                 font_style = ("Segoe UI", 9, "bold") if bold_value else ("Segoe UI", 9)
+293:                 lbl = tk.Label(content_frame, text=value_text, font=font_style, bg="#F0F0F0", fg="#111", anchor="w", wraplength=250, justify="left")
+294:                 lbl.grid(row=row, column=1, sticky="w", pady=4)
+295:                 row += 1
+296:                 return lbl
+297: 
+298:             add_row(_("Tên:"), name)
+299: 
+300:             # Separator
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: multi_replace_file_content]
+  Description: Bring ProgressDialog to the top of the Z-order so it isn't hidden behind the File Manager window.
+  Instruction: Remove SWP_NOZORDER (0x0004) from SetWindowPos flags in components.py to bring the window to the top.
+  ReplacementChunks: [{'AllowMultiple': False, 'EndLine': 378, 'ReplacementContent': '                x = max(0, (py_w - dialog_w) // 2)\n                y = max(0, (py_h - dialog_h) // 2)\n                # Use HWND_TOP ...
+  TargetFile: d:\Data\AG\remote_desktop\gui\components.py
+  toolAction: Updating components.py to bring dialog to top
+  toolSummary: Update components.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:28:14+07:00
+Completed At: 2026-08-23T15:28:16+07:00
+The following changes were made by the multi_replace_file_content tool to: d:\Data\AG\remote_desktop\gui\components.py. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -376,7 +376,8 @@
+                 
+                 x = max(0, (py_w - dialog_w) // 2)
+                 y = max(0, (py_h - dialog_h) // 2)
+-                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0004 | 0x0020)
++                # Use HWND_TOP (0) and do NOT use SWP_NOZORDER (0x0004) so it stays on top of siblings
++                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, dialog_w, dialog_h, 0x0020)
+                 self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+                 self.parent_window = None # Not locked to File Manager
+             except Exception:
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+[Action: run_command]
+  CommandLine: python build_and_deploy.py
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 500
+  toolAction: Running build_and_deploy.py
+  toolSummary: Run build_and_deploy.py
+
+========== MODEL ==========
+Created At: 2026-08-23T15:28:22+07:00
+Tool is running as a background task with task id: bb746798-1feb-4ecc-9ae1-11854402908f/task-69
+Task Description: python build_and_deploy.py
+Task logs are available at: file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/bb746798-1feb-4ecc-9ae1-11854402908f/.system_generated/tasks/task-69.log
+
+========== MODEL ==========
+Xin lỗi bạn vì sự bất tiện này! Nguyên nhân là do khi tôi thiết lập cho "Chuyển qua" trở thành cửa sổ con của trình xem máy tính, nó được đặt cùng cấp với "Chuyển tệp" nhưng vô tình chưa được ưu tiên hiển thị lên trên cùng. 
+
+Tôi đã chỉnh sửa lại mã nguồn (`components.py`) để loại bỏ cờ `SWP_NOZORDER` và sử dụng cờ `HWND_TOP`, qua đó yêu cầu Windows ưu tiên đưa hộp thoại tiến trình này lên lớp trên cùng của trình xem máy tính (Viewer).
+
+Tôi đang chạy lệnh build lại ứng dụng dưới nền. Bạn vui lòng đợi ít phút cho đến khi nhận được thông báo popup hoàn tất build để thử lại nhé!
+
+========== MODEL ==========
+Ứng dụng đã được build lại xong hoàn toàn. Bây giờ bạn có thể mở ứng dụng bằng bộ cài đặt vừa được tạo để kiểm tra lại nhé, cửa sổ "Chuyển qua" / "Nhận về" sẽ hiển thị nổi trên cùng, không còn bị "Chuyển tệp" che khuất nữa.
+
+Hãy báo lại cho tôi nếu có bất kỳ vấn đề gì khác nha!
+

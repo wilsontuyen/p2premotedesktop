@@ -1,0 +1,516 @@
+========== USER ==========
+đổi giùm tôi nút "ghi hình" (quay video) thành hình vẽ trong màu đỏ & nếu đang quay (đang ghi hình) thì đổi thành nút vuông màu đỏ nhấp nháy (từ dòng 1039 trong viewer.py). Tức là chuyển sang vẽ hình hết giùm tôi, không dùng ký tự của font chữ nữa đê thống nhất với bên Unbutu
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\core\viewer.py
+  EndLine: 1080
+  StartLine: 1000
+  toolAction: Viewing viewer.py
+  toolSummary: View viewer.py
+
+========== MODEL ==========
+Created At: 2026-07-20T22:18:37Z
+Completed At: 2026-07-20T22:18:38Z
+File Path: `file:///d:/Data/AG/remote_desktop/core/viewer.py`
+Total Lines: 1251
+Total Bytes: 70447
+Showing lines 1000 to 1080
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1000:                             pygame.draw.rect(screen, power_bg, power_btn_rect, border_radius=4)
+1001:                             pygame.draw.rect(screen, btn_border_color, power_btn_rect, width=1, border_radius=4)
+1002:                             
+1003:                             try:
+1004:                                 symbol_font = pygame.font.SysFont("Wingdings", 16)
+1005:                                 power_text_surf = symbol_font.render("¤", True, (0, 0, 0))
+1006:                             except:
+1007:                                 power_text_surf = btn_font.render("¤", True, (0, 0, 0))
+1008:                             power_text_rect = power_text_surf.get_rect(center=power_btn_rect.center)
+1009:                             # Shift a bit up for symbol centering
+1010:                             power_text_rect.y -= 1
+1011:                             screen.blit(power_text_surf, power_text_rect)
+1012: 
+1013:                         if show_cad_button:
+1014:                             # Draw Eye Button
+1015:                             eye_bg = (100, 100, 100) if globals().get('viewer_cover_state', False) else cad_bg_color
+1016:                             if eye_is_hover and not globals().get('viewer_cover_state', False):
+1017:                                 pass # cad_bg_color already has hover color assigned
+1018:                             elif eye_is_hover:
+1019:                                 eye_bg = (130, 130, 130)
+1020:                             
+1021:                             pygame.draw.rect(screen, eye_bg, eye_btn_rect, border_radius=4)
+1022:                             pygame.draw.rect(screen, btn_border_color, eye_btn_rect, width=1, border_radius=4)
+1023:                             
+1024:                             eye_icon_rect = pygame.Rect(0, 0, 16, 10)
+1025:                             eye_icon_rect.center = eye_btn_rect.center
+1026:                             pygame.draw.ellipse(screen, cad_text_color, eye_icon_rect, width=1)
+1027:                             pygame.draw.circle(screen, cad_text_color, eye_icon_rect.center, 3)
+1028: 
+1029:                             # Draw CAD Button
+1030:                             pygame.draw.rect(screen, cad_bg_color, cad_btn_rect, border_radius=4)
+1031:                             pygame.draw.rect(screen, btn_border_color, cad_btn_rect, width=1, border_radius=4)
+1032:                             
+1033:                             is_host_win = globals().get('client_host_os_release', '10') in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in globals().get('client_host_os_release', '10')
+1034:                             cad_text_str = "Ctrl + Alt + Delete" if is_host_win else "Terminal"
+1035:                             cad_text_surf = btn_font.render(cad_text_str, True, cad_text_color)
+1036:                             cad_text_rect = cad_text_surf.get_rect(center=cad_btn_rect.center)
+1037:                             screen.blit(cad_text_surf, cad_text_rect)
+1038:                     
+1039:                     # Record button (Red circle)
+1040:                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
+1041:                     rec_bg_color = (80, 80, 80) if rec_is_hover else (50, 50, 50)
+1042:                     if pygame_theme in ["light", "crystal", "orange", "red"]:
+1043:                         rec_bg_color = (220, 220, 235) if rec_is_hover else (245, 245, 255)
+1044:                     
+1045:                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
+1046:                     pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
+1047:                     
+1048:                     try:
+1049:                         import sys
+1050:                         if sys.platform == "win32":
+1051:                             windings_font = pygame.font.SysFont("Wingdings", 14)
+1052:                             icon_char = "n" if state['is_recording'] else "l"
+1053:                             rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
+1054:                         else:
+1055:                             rec_text_surf = btn_font.render("Rec", True, (255, 0, 0))
+1056:                         rec_text_rect = rec_text_surf.get_rect(center=rec_btn_rect.center)
+1057:                         screen.blit(rec_text_surf, rec_text_rect)
+1058:                     except:
+1059:                         if state['is_recording']:
+1060:                             pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+1061:                         else:
+1062:                             pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
+1063:                         
+1064:                     if state['is_recording']:
+1065:                         import time as _time
+1066:                         if int(_time.time() * 2) % 2 == 0:
+1067:                             # Make the icon dim to simulate blinking
+1068:                             dim_surf = pygame.Surface(rec_btn_rect.size, pygame.SRCALPHA)
+1069:                             dim_surf.fill((0, 0, 0, 128))
+1070:                             screen.blit(dim_surf, rec_btn_rect.topleft)
+1071: 
+1072:                     # Close button (Red X)
+1073:                     close_bg_color = (255, 77, 77) if close_is_hover else (204, 0, 0)
+1074:                     close_border_color = (255, 255, 255)
+1075:                     pygame.draw.rect(screen, close_bg_color, close_btn_rect, border_radius=4)
+1076:                     pygame.draw.rect(screen, close_border_color, close_btn_rect, width=1, border_radius=4)
+1077:                     
+1078:                     close_text_surf = btn_font.render("X", True, (255, 255, 255))
+1079:                     close_text_rect = close_text_surf.get_rect(center=close_btn_rect.center)
+1080:                     screen.blit(close_text_surf, close_text_rect)
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: replace_file_content]
+  AllowMultiple: False
+  Description: Thay đổi biểu tượng nút quay video thành hình tròn/hình vuông thay vì dùng font chữ.
+  EndLine: 1071
+  Instruction: Change the record button drawing logic to use shapes instead of fonts for consistency.
+  ReplacementContent:                     if state['is_recording']:
+                        pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+                    e...
+  StartLine: 1048
+  TargetContent:                     try:
+                        import sys
+                        if sys.platform == "win32":
+                            windings_font = pygame.font.SysFont("Wingdings", 14)
+       ...
+  TargetFile: d:\Data\AG\remote_desktop\core\viewer.py
+  toolAction: Editing viewer.py
+  toolSummary: Update record button
+
+========== MODEL ==========
+Created At: 2026-07-20T22:19:11Z
+Completed At: 2026-07-20T22:19:12Z
+The following changes were made by the replace_file_content tool to: d:\Data\AG\remote_desktop\core\viewer.py. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -1045,21 +1045,10 @@
+                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
+                     pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
+                     
+-                    try:
+-                        import sys
+-                        if sys.platform == "win32":
+-                            windings_font = pygame.font.SysFont("Wingdings", 14)
+-                            icon_char = "n" if state['is_recording'] else "l"
+-                            rec_text_surf = windings_font.render(icon_char, True, (255, 0, 0))
+-                        else:
+-                            rec_text_surf = btn_font.render("Rec", True, (255, 0, 0))
+-                        rec_text_rect = rec_text_surf.get_rect(center=rec_btn_rect.center)
+-                        screen.blit(rec_text_surf, rec_text_rect)
+-                    except:
+-                        if state['is_recording']:
+-                            pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+-                        else:
+-                            pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
++                    if state['is_recording']:
++                        pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
++                    else:
++                        pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
+                         
+                     if state['is_recording']:
+                         import time as _time
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+========== MODEL ==========
+Tôi đã sửa lại mã nguồn trong file `viewer.py` theo đúng yêu cầu của bạn. 
+
+Bây giờ nút ghi hình đã được thay đổi để luôn vẽ thành hình (thay vì dùng font chữ `Wingdings` hay text "Rec"). Cụ thể:
+- **Khi không quay:** Nút hiển thị hình tròn màu đỏ.
+- **Khi đang quay:** Nút chuyển thành hình vuông màu đỏ và có hiệu ứng nhấp nháy (dim) như cũ, đảm bảo tính thống nhất với phiên bản trên Ubuntu. 
+
+Bạn có thể chạy thử chương trình để xem thay đổi này. Nếu cần điều chỉnh thêm gì thì báo lại cho tôi nhé!
+
+========== USER ==========
+@[build_and_deploy.py]
+
+========== USER ==========
+The USER performed the following action:
+Show the contents of file d:\Data\AG\remote_desktop\core\viewer.py from lines 1042 to 1075
+File Path: `file:///d:/Data/AG/remote_desktop/core/viewer.py`
+Total Lines: 1240
+Total Bytes: 69753
+Showing lines 1042 to 1075
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1042:                     if pygame_theme in ["light", "crystal", "orange", "red"]:
+1043:                         rec_bg_color = (220, 220, 235) if rec_is_hover else (245, 245, 255)
+1044:                     
+1045:                     pygame.draw.rect(screen, rec_bg_color, rec_btn_rect, border_radius=4)
+1046:                     pygame.draw.rect(screen, btn_border_color, rec_btn_rect, width=1, border_radius=4)
+1047:                     
+1048:                     if state['is_recording']:
+1049:                         pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(rec_btn_rect.centerx - 4, rec_btn_rect.centery - 4, 8, 8))
+1050:                     else:
+1051:                         pygame.draw.circle(screen, (255, 0, 0), rec_btn_rect.center, 5)
+1052:                         
+1053:                     if state['is_recording']:
+1054:                         import time as _time
+1055:                         if int(_time.time() * 2) % 2 == 0:
+1056:                             # Make the icon dim to simulate blinking
+1057:                             dim_surf = pygame.Surface(rec_btn_rect.size, pygame.SRCALPHA)
+1058:                             dim_surf.fill((0, 0, 0, 128))
+1059:                             screen.blit(dim_surf, rec_btn_rect.topleft)
+1060: 
+1061:                     # Close button (Red X)
+1062:                     close_bg_color = (255, 77, 77) if close_is_hover else (204, 0, 0)
+1063:                     close_border_color = (255, 255, 255)
+1064:                     pygame.draw.rect(screen, close_bg_color, close_btn_rect, border_radius=4)
+1065:                     pygame.draw.rect(screen, close_border_color, close_btn_rect, width=1, border_radius=4)
+1066:                     
+1067:                     close_text_surf = btn_font.render("X", True, (255, 255, 255))
+1068:                     close_text_rect = close_text_surf.get_rect(center=close_btn_rect.center)
+1069:                     screen.blit(close_text_surf, close_text_rect)
+1070:                     
+1071:                 current_countdown = globals().get('client_switching_desktop_countdown', 0)
+1072:                 if current_countdown > 0:
+1073:                     if not was_switching:
+1074:                         was_switching = True
+1075:                         switching_last_tick = pygame.time.get_ticks()
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\build_and_deploy.py
+  toolAction: Viewing build_and_deploy.py
+  toolSummary: View build_and_deploy.py
+
+========== MODEL ==========
+Created At: 2026-07-20T22:19:49Z
+Completed At: 2026-07-20T22:19:49Z
+File Path: `file:///d:/Data/AG/remote_desktop/build_and_deploy.py`
+Total Lines: 269
+Total Bytes: 11629
+Showing lines 1 to 269
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import os
+2: import sys
+3: import subprocess
+4: import shutil
+5: import time
+6: 
+7: workspace_dir = os.path.dirname(os.path.abspath(__file__))
+8: target_dir = r"C:\Apps\P2P"
+9: log_path = os.path.join(workspace_dir, "build_deploy.log")
+10: 
+11: def log(msg):
+12:     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+13:     log_line = f"[{timestamp}] {msg}\n"
+14:     print(log_line, end="")
+15:     try:
+16:         with open(log_path, "a", encoding="utf-8") as f:
+17:             f.write(log_line)
+18:     except Exception as e:
+19:         print(f"Failed to write log: {e}")
+20: 
+21: def run_cmd(cmd, cwd=workspace_dir):
+22:     log(f"Running command: {cmd}")
+23:     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=cwd)
+24:     output_lines = []
+25:     while True:
+26:         line = p.stdout.readline()
+27:         if not line:
+28:             break
+29:         output_lines.append(line)
+30:         # log in real time
+31:         print(line, end="")
+32:         try:
+33:             with open(log_path, "a", encoding="utf-8") as f:
+34:                 f.write(line)
+35:         except:
+36:             pass
+37:     p.wait()
+38:     if p.returncode != 0:
+39:         log(f"Command failed with exit code {p.returncode}")
+40:         return False
+41:     return True
+42: 
+43: def main():
+44:     if os.path.exists(log_path):
+45:         try: os.remove(log_path)
+46:         except: pass
+47: 
+48:     log("=== STARTING BUILD AND DEPLOYMENT ===")
+49: 
+50:     # 1. Stop Scheduled Task
+51:     log("Stopping scheduled task 'EasyRemoteDesktopAgent'...")
+52:     subprocess.run("schtasks /end /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+53:     
+54:     # 2. Terminate running instances to release file locks
+55:     log("Terminating any running instances of agent and service...")
+56:     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+57:     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+58:     time.sleep(2)
+59: 
+60:     # Metadata for Anti-Virus (Reduces False Positives)
+61:     company_name = "P2P Remote Desktop"
+62:     version_string = "1.0.0.0"
+63:     
+64:     # 3. Build Service using Nuitka (standalone)
+65:     log("Building RemoteDesktopService via Nuitka (standalone)...")
+66:     python_path = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
+67:     service_product_name = "P2P Remote Desktop Service"
+68:     service_desc = "Background Service for P2P Remote Desktop"
+69:     nuitka_service_cmd = (
+70:         f'"{python_path}" -m nuitka --standalone --windows-disable-console --windows-uac-admin '
+71:         f'--assume-yes-for-downloads '
+72:         f'--windows-icon-from-ico=app_icon.ico '
+73:         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
+74:         f'--windows-file-version={version_string} --windows-product-version={version_string} '
+75:         f'--windows-file-description="{service_desc}" '
+76:         f'--output-dir=dist_nuitka_service windows_service_loop.py'
+77:     )
+78:     if not run_cmd(nuitka_service_cmd):
+79:         log("ERROR: Nuitka service build failed. Aborting deployment.")
+80:         return
+81: 
+82:     # 4. Build Agent using Nuitka
+83:     log("Building RemoteDesktopP2P via Nuitka (standalone)...")
+84:     app_product_name = "P2P Remote Desktop Client"
+85:     app_desc = "Client GUI for P2P Remote Desktop"
+86:     nuitka_cmd = (
+87:         f'"{python_path}" -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter '
+88:         f'--assume-yes-for-downloads '
+89:         f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon '
+90:         f'--no-deployment-flag=excluded-module-usage '
+91:         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
+92:         f'--windows-file-version={version_string} --windows-product-version={version_string} '
+93:         f'--windows-file-description="{app_desc}" '
+94:         f'--output-dir=dist_nuitka app.py'
+95:     )
+96:     if not run_cmd(nuitka_cmd):
+97:         log("ERROR: Nuitka build failed. Aborting deployment.")
+98:         return
+99: 
+100: 
+101:     # 5. Post-build renaming and asset preparation
+102:     log("Preparing build outputs...")
+103:     app_dist_dir = os.path.join(workspace_dir, "dist_nuitka", "app.dist")
+104:     
+105:     # Rename app.exe -> RemoteDesktopP2P.exe
+106:     old_exe = os.path.join(app_dist_dir, "app.exe")
+107:     new_exe = os.path.join(app_dist_dir, "RemoteDesktopP2P.exe")
+108:     if os.path.exists(old_exe):
+109:         try:
+110:             if os.path.exists(new_exe):
+111:                 os.remove(new_exe)
+112:             os.rename(old_exe, new_exe)
+113:             log("Successfully renamed app.exe to RemoteDesktopP2P.exe")
+114:         except Exception as e:
+115:             log(f"Failed to rename app.exe: {e}")
+116:             return
+117:             
+118:     # Copy Nuitka Service standalone files into app.dist (merging them)
+119:     service_dist_dir = os.path.join(workspace_dir, "dist_nuitka_service", "windows_service_loop.dist")
+120:     if os.path.exists(service_dist_dir):
+121:         log("Merging RemoteDesktopService standalone files into app.dist...")
+122:         for item in os.listdir(service_dist_dir):
+123:             s = os.path.join(service_dist_dir, item)
+124:             d = os.path.join(app_dist_dir, item)
+125:             if item.lower() == "windows_service_loop.exe":
+126:                 d = os.path.join(app_dist_dir, "RemoteDesktopService.exe")
+127:             try:
+128:                 if os.path.isdir(s):
+129:                     if os.path.exists(d):
+130:                         shutil.rmtree(d)
+131:                     shutil.copytree(s, d)
+132:                 else:
+133:                     shutil.copy2(s, d)
+134:             except Exception as e:
+135:                 log(f"Warning: Failed to merge service file {item}: {e}")
+136:     else:
+137:         log("ERROR: Compiled RemoteDesktopService standalone directory not found!")
+138:         return
+139: 
+140: 
+141:     # Copy icons, install.bat, uninstall.bat and readme.txt to app.dist
+142:     files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt"]
+143:     for file_name in files_to_copy:
+144:         src = os.path.join(workspace_dir, file_name)
+145:         dst = os.path.join(app_dist_dir, file_name)
+146:         if os.path.exists(src):
+147:             try:
+148:                 shutil.copy2(src, dst)
+149:                 log(f"Copied {file_name} to app.dist")
+150:             except Exception as e:
+151:                 log(f"Failed to copy {file_name}: {e}")
+152: 
+153:     # Copy lang directory to app.dist
+154:     lang_src = os.path.join(workspace_dir, "lang")
+155:     lang_dst = os.path.join(app_dist_dir, "lang")
+156:     if os.path.exists(lang_src):
+157:         try:
+158:             if os.path.exists(lang_dst):
+159:                 shutil.rmtree(lang_dst)
+160:             shutil.copytree(lang_src, lang_dst)
+161:             log("Copied lang directory to app.dist")
+162:         except Exception as e:
+163:             log(f"Failed to copy lang directory: {e}")
+164: 
+165:     # Make zip archive
+166:     log("Creating RemoteDesktopP2P.zip archive...")
+167:     zip_path = os.path.join(workspace_dir, "RemoteDesktopP2P")
+168:     try:
+169:         shutil.make_archive(zip_path, 'zip', app_dist_dir)
+170:         log("Archive created successfully.")
+171:     except Exception as e:
+172:         log(f"Warning: Failed to create zip archive: {e}")
+173: 
+174:     # Build Inno Setup Installer
+175:     log("Building Installer via Inno Setup...")
+176:     iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+177:     if not os.path.exists(iscc_path):
+178:         iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
+179:     
+180:     if os.path.exists(iscc_path):
+181:         iss_file = os.path.join(workspace_dir, "installer.iss")
+182:         if os.path.exists(iss_file):
+183:             cmd = f'"{iscc_path}" "{iss_file}"'
+184:             if not run_cmd(cmd):
+185:                 log("WARNING: Inno Setup build failed.")
+186:             else:
+187:                 log("Successfully built setup.exe using Inno Setup.")
+188:         else:
+189:             log("WARNING: installer.iss not found. Skipping installer build.")
+190:     else:
+191:         # Fallback to checking if iscc is in PATH
+192:         cmd = f'iscc "{os.path.join(workspace_dir, "installer.iss")}"'
+193:         try:
+194:             if not run_cmd(cmd):
+195:                 log("WARNING: Inno Setup build failed.")
+196:             else:
+197:                 log("Successfully built setup.exe using Inno Setup.")
+198:         except Exception:
+199:             log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
+200: 
+201:     # 6. Deploy to D:\Apps\P2P
+202:     log("Ensuring all running instances are terminated right before deployment to release file locks...")
+203:     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+204:     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+205:     time.sleep(2)
+206: 
+207:     log(f"Deploying files to {target_dir}...")
+208:     if not os.path.exists(target_dir):
+209:         try:
+210:             os.makedirs(target_dir)
+211:             log(f"Created target directory {target_dir}")
+212:         except Exception as e:
+213:             log(f"Failed to create target directory: {e}")
+214:             return
+215: 
+216:     # Copy Nuitka app.dist contents (overwrite existing)
+217:     log(f"Copying all agent, service and installation files to {target_dir}...")
+218:     errors = 0
+219:     for item in os.listdir(app_dist_dir):
+220:         s = os.path.join(app_dist_dir, item)
+221:         d = os.path.join(target_dir, item)
+222:         try:
+223:             if os.path.isdir(s):
+224:                 if os.path.exists(d):
+225:                     shutil.rmtree(d)
+226:                 shutil.copytree(s, d)
+227:             else:
+228:                 shutil.copy2(s, d)
+229:         except Exception as e:
+230:             log(f"Error copying {item}: {e}")
+231:             errors += 1
+232: 
+233:     if errors > 0:
+234:         log(f"Deployment completed with {errors} errors.")
+235:     else:
+236:         log("Deployment completed successfully!")
+237: 
+238:     # 7. Kill hết mọi instance cũ còn sót lại
+239:     log("Killing any remaining instances before clean launch...")
+240:     subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+241:     subprocess.run("taskkill /F /IM RemoteDesktopService.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+242:     time.sleep(2)
+243: 
+244:     # 8. Re-enable & Start Scheduled Task (Service sẽ tự spawn --headless agent)
+245:     log("Re-enabling and starting scheduled task 'EasyRemoteDesktopAgent'...")
+246:     subprocess.run("schtasks /change /tn \"EasyRemoteDesktopAgent\" /enable", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+247:     subprocess.run("schtasks /run /tn \"EasyRemoteDesktopAgent\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+248: 
+249:     # 9. Chờ Service khởi động và hoàn tất bước cleanup
+250:     log("Waiting for service to initialize and complete cleanup (5s)...")
+251:     time.sleep(5)
+252:     
+253:     # Service will now automatically spawn the GUI Agent (--gui-agent) and Clipboard Agent (--clipboard-agent) 
+254:     # under the active user's session using CreateProcessAsUser.
+255: 
+256:     # 10. Start the main application
+257:     app_exe_path = os.path.join(target_dir, "RemoteDesktopP2P.exe")
+258:     if os.path.exists(app_exe_path):
+259:         log(f"Starting application: {app_exe_path}")
+260:         try:
+261:             subprocess.Popen([app_exe_path], cwd=target_dir)
+262:         except Exception as e:
+263:             log(f"Failed to start application: {e}")
+264: 
+265:     log("=== BUILD AND DEPLOYMENT FINISHED ===")
+266: 
+267: if __name__ == "__main__":
+268:     main()
+269: 
+The above content shows the entire, complete file contents of the requested file.
+
+[Action: run_command]
+  CommandLine: python build_and_deploy.py
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 5000
+  toolAction: Running build_and_deploy.py
+  toolSummary: Run build script
+
+========== MODEL ==========
+Created At: 2026-07-20T22:19:54Z
+Tool is running as a background task with task id: 1fa44246-294b-4736-bb75-395dd1b36f16/task-19
+Task Description: python build_and_deploy.py
+Task logs are available at: file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/1fa44246-294b-4736-bb75-395dd1b36f16/.system_generated/tasks/task-19.log
+
+========== MODEL ==========
+Tôi đã bắt đầu chạy tiến trình `build_and_deploy.py` dưới nền. Quá trình này sẽ sử dụng Nuitka để biên dịch lại app và cài đặt (chép vào thư mục `C:\Apps\P2P`), sau đó tự động khởi chạy lại ứng dụng để áp dụng các thay đổi ở giao diện nút "ghi hình" mới. 
+
+Bạn có thể theo dõi tiến trình chạy và khi hoàn tất thì kiểm tra thử lại kết quả xem nút đã đúng như ý muốn chưa nhé!
+
+========== MODEL ==========
+Quá trình biên dịch và cài đặt (chạy `build_and_deploy.py`) đã hoàn tất thành công! 🎉
+
+Ứng dụng `RemoteDesktopP2P.exe` bản mới đã được sao chép vào `C:\Apps\P2P` và tự động khởi động lại. Bạn có thể kiểm tra ngay giao diện của ứng dụng để xem nút "ghi hình" mới (hình tròn đỏ khi bình thường và hình vuông nhấp nháy khi đang quay) đã hoạt động đúng như mong đợi chưa nhé!
+

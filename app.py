@@ -1426,11 +1426,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def load_lan_peers(self):
-        lan_file = "lan_peers.json"
+        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers
+        lan_file = get_lan_peers_json_path()
         if os.path.exists(lan_file):
             try:
                 with open(lan_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                if isinstance(data, dict):
+                    return deduplicate_lan_peers(data)
                 return data
             except:
                 pass
@@ -1438,12 +1441,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def save_lan_peers(self):
-        lan_file = "lan_peers.json"
+        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers
+        lan_file = get_lan_peers_json_path()
         try:
             from datetime import datetime
             import hashlib
             with open(lan_file, 'w', encoding='utf-8') as f:
                 with self.lan_peers_lock:
+                    self.lan_peers = deduplicate_lan_peers(self.lan_peers)
                     dump_data = {}
                     for k, v in self.lan_peers.items():
                         v_copy = dict(v)

@@ -377,6 +377,37 @@ def resolve_hostname_safe(ip, timeout=0.6):
     return info[0]
 
 
+def get_lan_peers_json_path():
+    """Lấy đường dẫn đầy đủ tới file lan_peers.json, ưu tiên thư mục cài đặt app rồi tới APPDATA."""
+    candidates = []
+    if getattr(sys, 'frozen', False):
+        app_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    inst = os.path.join(app_dir, "lan_peers.json")
+    candidates.append(inst)
+
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        user_path = os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json")
+        candidates.append(user_path)
+    else:
+        user_path = inst
+
+    candidates.append(os.path.abspath("lan_peers.json"))
+
+    if os.path.exists(inst):
+        if os.access(inst, os.W_OK):
+            return inst
+        else:
+            return user_path if os.path.exists(user_path) else inst
+
+    if os.path.exists(user_path):
+        return user_path
+
+    return candidates[0] if candidates else user_path
+
+
 def hash_password_md5(pw):
     """Mã hóa mật khẩu bằng MD5 (32 ký tự hex) để không lưu mật khẩu dạng plaintext trong lan_peers.json."""
     if not pw:
@@ -518,15 +549,166 @@ def match_saved_computer(comp_name=None, hwid=None):
     return None
 
 
-def make_stable_hwid(ip, comp_name=""):
-    """Tạo HWID 12 chữ số cố định cho máy từ xa nếu máy đó là bản cũ chưa gửi HWID."""
-    seed = f"VPN_STABLE_{ip}_{comp_name}".encode('utf-8')
+
+def are_same_machine(hwid1, p1, hwid2, p2):
+    """
+    Kiểm tra xem 2 bản ghi có thuộc về cùng 1 máy tính vật lý hay không:
+    1. Trùng HWID/ID chính xác (hoặc trùng saved_id).
+    2. Trùng địa chỉ MAC vật lý (không phân biệt chữ hoa/thường, dấu gạch nối hay hai chấm).
+    3. Trùng tên máy tính đã xác định (không phải tên rỗng, unknown, localhost hay fallback PC-xxx chưa xác thực).
+    4. Trùng IP (local_ip hoặc source_ip) kèm tên máy không mâu thuẫn.
+    """
+    if not p1 or not p2:
+        return False
+
+    # 1. Trùng HWID hoặc ID đã lưu (saved_id / signaling host id)
+    id_candidates_1 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid1, p1.get("hwid"), p1.get("saved_id")) if x}
+    id_candidates_1.discard('')
+    id_candidates_2 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid2, p2.get("hwid"), p2.get("saved_id")) if x}
+    id_candidates_2.discard('')
+    if id_candidates_1 and id_candidates_2 and id_candidates_1.intersection(id_candidates_2):
+        return True
+
+    # 2. Trùng MAC vật lý
+    macs1 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p1.get("macs", "")).split(",") if m.strip()]
+    macs2 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p2.get("macs", "")).split(",") if m.strip()]
+    valid_macs1 = [m for m in macs1 if len(m) >= 12 and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
+    valid_macs2 = [m for m in macs2 if len(m) >= 12 and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
+    if valid_macs1 and valid_macs2:
+        if any(m in valid_macs2 for m in valid_macs1):
+            return True
+
+    # 3. Trùng tên máy tính (không phân biệt hoa/thường, bỏ domain suffix .local/.lan/...)
+    n1 = str(p1.get("computer_name") or "").strip().lower()
+    n2 = str(p2.get("computer_name") or "").strip().lower()
+    n1_clean = n1.split('.')[0].strip()
+    n2_clean = n2.split('.')[0].strip()
+    if n1_clean and n2_clean and n1_clean == n2_clean:
+        if n1_clean not in ("unknown", "không rõ", "localhost") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", n1_clean):
+            # Nếu tên dạng PC-xxx (ví dụ PC-48, PC-201) thì cả 2 phải được verified
+            if not re.match(r"^pc-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
+                return True
+
+    # 4. Trùng IP và tên máy không mâu thuẫn (hỗ trợ trường hợp máy đổi IP hoặc 2 card mạng, hoặc tên fallback chưa xác thực)
+    ips1 = [x.strip() for x in (str(p1.get("local_ip", "")) + "," + str(p1.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
+    ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + str(p2.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
+    common_ips = set(ips1).intersection(set(ips2))
+    if common_ips:
+        is_fallback_1 = (not p1.get("name_verified")) or re.match(r"^pc-\d+$", n1_clean) or n1_clean in ("unknown", "không rõ")
+        is_fallback_2 = (not p2.get("name_verified")) or re.match(r"^pc-\d+$", n2_clean) or n2_clean in ("unknown", "không rõ")
+        if is_fallback_1 or is_fallback_2 or n1_clean == n2_clean:
+            return True
+
+    return False
+
+
+def merge_peers(p_winner, p_loser):
+    """
+    Gộp thông tin của 2 bản ghi cùng máy tính:
+    - p_winner là bản ghi ưu tiên (ví dụ: bản ghi vừa probe online thành công hoặc có last_seen mới hơn).
+    - p_loser là bản ghi cũ cần gộp vào.
+    - Giữ lại các IP cũ bổ sung vào local_ip (không xóa IP nào, đặt IP mới lên đầu).
+    - Giữ lại MAC, mật khẩu đã lưu (saved_password), saved_id, tên verified từ bản ghi cũ nếu winner bị thiếu.
+    """
+    res = dict(p_winner)
+
+    # 1. Gộp local_ip (IP mới nhất của winner đứng trước, sau đó là các IP khác)
+    winner_ips = [x.strip() for x in (str(p_winner.get("local_ip", "")) + "," + str(p_winner.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
+    loser_ips = [x.strip() for x in (str(p_loser.get("local_ip", "")) + "," + str(p_loser.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
+    merged_ips = list(dict.fromkeys(winner_ips + loser_ips))
+    if merged_ips:
+        res["local_ip"] = ",".join(merged_ips)
+
+    # 2. Gộp MAC
+    w_macs = [x.strip() for x in str(p_winner.get("macs", "")).split(",") if x.strip()]
+    l_macs = [x.strip() for x in str(p_loser.get("macs", "")).split(",") if x.strip()]
+    merged_macs = list(dict.fromkeys(w_macs + l_macs))
+    if merged_macs:
+        res["macs"] = ",".join(merged_macs)
+
+    # 3. Tên máy tính (ưu tiên tên đã verified hoặc tên rõ ràng, không generic)
+    w_name = str(res.get("computer_name") or "").strip()
+    l_name = str(p_loser.get("computer_name") or "").strip()
+    if p_loser.get("name_verified") and not res.get("name_verified") and l_name:
+        res["computer_name"] = l_name
+        res["name_verified"] = True
+    elif (not w_name or w_name.lower() in ("unknown", "không rõ") or re.match(r"^pc-\d+$", w_name.lower())) and l_name and not re.match(r"^pc-\d+$", l_name.lower()):
+        res["computer_name"] = l_name
+        res["name_verified"] = p_loser.get("name_verified", False)
+
+    # 4. OS
+    if not res.get("os") and p_loser.get("os"):
+        res["os"] = p_loser["os"]
+
+    # 5. Saved Password & Saved ID
+    if not res.get("saved_password") and p_loser.get("saved_password"):
+        res["saved_password"] = p_loser["saved_password"]
+    if not res.get("saved_id") and p_loser.get("saved_id"):
+        res["saved_id"] = p_loser["saved_id"]
+
+    # 6. Network type (ưu tiên nhãn chi tiết hơn LAN mặc định)
+    w_net = str(res.get("network_type") or "").strip()
+    l_net = str(p_loser.get("network_type") or "").strip()
+    if (not w_net or w_net.upper() == "LAN") and l_net and l_net.upper() != "LAN":
+        res["network_type"] = l_net
+
+    return res
+
+
+def deduplicate_lan_peers(peers_dict):
+    """
+    Khử trùng lặp danh sách máy tính trong mạng LAN & VPN:
+    - Nếu 1 máy tính có nhiều bản ghi (do đổi IP VPN/DHCP hoặc nhiều card mạng),
+      gộp lại thành 1 dòng duy nhất.
+    - Giữ lại bản ghi có last_seen mới nhất làm bản ghi gốc (winner) và bổ sung
+      đầy đủ các IP, MAC, mật khẩu đã lưu từ các bản ghi cũ.
+    """
+    if not peers_dict or not isinstance(peers_dict, dict):
+        return {}
+
+    items = list(peers_dict.items())
+    # Sắp xếp theo epoch giảm dần: máy có last_seen gần nhất sẽ đứng trước và làm winner
+    items.sort(key=lambda x: get_last_seen_epoch(x[1].get("last_seen", 0)), reverse=True)
+
+    deduped = {}
+    for hwid, p in items:
+        matched_key = None
+        for m_key, m_p in deduped.items():
+            if are_same_machine(m_key, m_p, hwid, p):
+                matched_key = m_key
+                break
+
+        if matched_key:
+            deduped[matched_key] = merge_peers(deduped[matched_key], p)
+        else:
+            deduped[hwid] = dict(p)
+
+    return deduped
+
+
+def make_stable_hwid(ip, comp_name="", mac=""):
+    """
+    Tạo HWID 12 chữ số cố định cho máy từ xa nếu máy đó là bản cũ chưa gửi HWID:
+    - Ưu tiên 1: Địa chỉ MAC vật lý cố định (không đổi theo IP).
+    - Ưu tiên 2: Tên máy tính đã xác định (không đổi khi đổi IP DHCP/VPN).
+    - Ưu tiên 3: IP cục bộ (khi hoàn toàn không có MAC và tên máy).
+    """
+    clean_mac = re.sub(r'[^A-Fa-f0-9]', '', (mac or "").split(',')[0]).upper()
+    if len(clean_mac) >= 12:
+        seed = f"PEER_MAC_{clean_mac[:12]}".encode('utf-8')
+    else:
+        cn = (comp_name or "").strip().upper()
+        # Loại trừ tên generic hoặc IP
+        if cn and cn not in ("UNKNOWN", "KHÔNG RÕ", "LOCALHOST") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", cn) and not re.match(r"^PC-\d+$", cn):
+            seed = f"PEER_NAME_{cn}".encode('utf-8')
+        else:
+            seed = f"VPN_STABLE_{ip}_{comp_name}".encode('utf-8')
     val = int(hashlib.sha256(seed).hexdigest()[:12], 16)
     twelve = (val % 900000000000) + 100000000000
     return str(twelve)
 
 
-def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45):
+def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, recv_timeout=0.6):
     """
     Thăm dò một địa chỉ IP xem có đang chạy EasyRemoteDesktop không:
     - Gửi gói tin probe với APP_KEY.
@@ -537,7 +719,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45):
     s.settimeout(timeout)
     try:
         s.connect((ip, port))
-        s.settimeout(0.8)
+        s.settimeout(recv_timeout)
         probe_packet = json.dumps({"action": "probe", "sig": LAN_APP_SIGNATURE}).encode('utf-8')
         send_msg(s, probe_packet, APP_KEY)
         resp = recv_msg(s, [APP_KEY])
@@ -562,7 +744,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45):
                     if not os_name:
                         os_name = r_os
 
-                hwid = data.get("hwid") or make_stable_hwid(ip, comp_name)
+                hwid = data.get("hwid") or make_stable_hwid(ip, comp_name, nb_mac)
                 full_local_ip = data.get("local_ip") or ip
                 # Đảm bảo IP đang thăm dò nằm trong danh sách local_ip
                 if ip not in [x.strip() for x in full_local_ip.split(',')]:
@@ -591,7 +773,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45):
             # Bản cũ hoặc phản hồi mật khẩu sai (xác nhận 100% đang chạy app)
             if data.get("status") == "error":
                 comp_name, nb_mac, os_name, is_verified = resolve_host_info_safe(ip)
-                hwid = make_stable_hwid(ip, comp_name)
+                hwid = make_stable_hwid(ip, comp_name, nb_mac)
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
                 matched_comp = match_saved_computer(comp_name, hwid)
@@ -620,6 +802,48 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45):
         except Exception:
             pass
     return None
+
+
+def probe_peer_direct(peer_info, timeout=0.35):
+    """
+    Thăm dò trực tiếp trạng thái Online của một máy tính trong mạng LAN / VPN qua TCP:
+    - Thử kết nối tới source_ip và các IP trong local_ip trên cổng port (mặc định BOUND_PORT).
+    - Gửi gói tin probe với APP_KEY và kiểm tra phản hồi từ host.
+    - Không cần thông qua Signaling Server.
+    
+    Trả về: (is_online: bool, updated_info: dict hoặc None)
+    """
+    candidate_ips = []
+    # 1. Thử source_ip trước vì đây là IP thực tế mà máy này đã gửi tin tới ta gần nhất
+    src_ip = str(peer_info.get("source_ip") or "").strip()
+    if src_ip and not src_ip.startswith("127."):
+        candidate_ips.append(src_ip)
+
+    # 2. Thử các IP trong local_ip
+    for raw in [peer_info.get("local_ip", "")]:
+        for part in str(raw).split(","):
+            ip = part.strip()
+            if ip and ip not in candidate_ips and not ip.startswith("127."):
+                candidate_ips.append(ip)
+
+    if not candidate_ips:
+        return False, None
+
+    port = int(peer_info.get("port") or BOUND_PORT)
+    vpn_label = peer_info.get("network_type") or "LAN"
+
+    for ip in candidate_ips:
+        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45)
+        if res:
+            return True, res
+
+    if port != 12345:
+        for ip in candidate_ips:
+            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45)
+            if res:
+                return True, res
+
+    return False, None
 
 
 def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None):

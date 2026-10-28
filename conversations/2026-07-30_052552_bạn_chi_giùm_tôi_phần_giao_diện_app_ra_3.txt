@@ -1,0 +1,2930 @@
+========== USER ==========
+bạn chi giùm tôi phần giao diện app ra 3 loại ứng với từng hệ điều hành Windows , Linux và Mac OS
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\app.py
+  toolAction: Viewing app.py
+  toolSummary: Viewing app.py
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\gui\components.py
+  toolAction: Viewing components.py
+  toolSummary: Viewing components.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:25:58Z
+Completed At: 2026-07-29T22:25:58Z
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 4126
+Total Bytes: 189564
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import sys
+2: if sys.platform == "darwin":
+3:     APP_FONT_NAME = "Helvetica"
+4: else:
+5:     APP_FONT_NAME = "Segoe UI"
+6: 
+7: import traceback
+8: import os
+9: try:
+10:     import tempfile
+11:     crash_log_path = os.path.join(tempfile.gettempdir(), "early_crash.log")
+12:     _f = open(crash_log_path, "w", encoding="utf-8", buffering=1)
+13:     sys.stderr = _f
+14:     sys.stdout = _f
+15:     print("Bắt đầu khởi chạy ứng dụng...")
+16: except:
+17:     pass
+18: 
+19: from core.config import *
+20: 
+21: import platform
+22: 
+23: _is_old_win = platform.release() in ["7", "8", "8.1"]
+24: EMOJI_FONT = (APP_FONT_NAME, 9)
+25: EMOJI_FONT_BOLD = (APP_FONT_NAME, 9, "bold")
+26: EMOJI_FONT_LARGE = (APP_FONT_NAME, 12, "bold")
+27: EMOJI_FONT_10 = (APP_FONT_NAME, 10)
+28: EMOJI_FONT_8_BOLD = (APP_FONT_NAME, 8, "bold")
+29: 
+30: 
+31: def E(text):
+32:     import sys
+33:     if sys.platform == "darwin":
+34:         return text
+35:     if sys.platform != "win32" or platform.release() in ["7", "8", "8.1"]:
+36:         mapping = {
+37:             "📋": "❐", "📁": "≡", "📡": "⌂", "🔧": "¤",
+38:             "🔄": "↻", "🔍": "⌕", "➕": "+", "❌": "X"
+39:         }
+40:         for k, v in mapping.items():
+41:             text = text.replace(k, v)
+42:     return text
+43: 
+44: from core.i18n import _, load_language, get_available_languages, export_template, get_language_name
+45: 
+46: import socket
+47: import logging
+48: 
+49: print("==== RUNNING APP VERSION: MAC_DEBUG_101 ====")
+50: 
+51: import threading
+52: import json
+53: import struct
+54: import time
+55: import mss
+56: # pyrefly: ignore [missing-import]
+57: from PIL import Image, ImageDraw, ImageTk
+58: try:
+59:     if sys.platform == "darwin":
+60:         raise Exception("Disabled on macOS to prevent Tkinter runloop crash")
+61:     # pyrefly: ignore [missing-import]
+62:     import pystray
+63:     # pyrefly: ignore [missing-import]
+64:     from pystray import MenuItem as item
+65: except Exception as e:
+66:     print(f"Warning: pystray could not be loaded: {e}")
+67:     pystray = None
+68:     item = None
+69: 
+70: import random
+71: import subprocess
+72: import base64
+73: import ctypes
+74: if sys.platform == "win32":
+75:     from ctypes import wintypes
+76: import hashlib
+77: from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+78: import urllib.request
+79: import urllib.parse
+80: 
+81: _is_child = False
+82: if "--headless" in sys.argv or "--clipboard-agent" in sys.argv:
+83:     _is_child = True
+84: else:
+85:     for arg in sys.argv:
+86:         if "multiprocessing" in arg or arg == "-c":
+87:             _is_child = True
+88:             break
+89: if _is_child and sys.platform == "darwin":
+90:     try:
+91:         import ctypes
+92:         objc = ctypes.cdll.LoadLibrary('/usr/lib/libobjc.A.dylib')
+93:         objc.objc_getClass.restype = ctypes.c_void_p
+94:         objc.sel_registerName.restype = ctypes.c_void_p
+95:         msgSend = objc.objc_msgSend
+96:         msgSend.restype = ctypes.c_void_p
+97:         msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+98:         NSApplication = objc.objc_getClass(b'NSApplication')
+99:         sharedApplication = objc.sel_registerName(b'sharedApplication')
+100:         app = msgSend(NSApplication, sharedApplication)
+101:         setActivationPolicy = objc.sel_registerName(b'setActivationPolicy:')
+102:         msgSend_policy = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int)(msgSend)
+103:         msgSend_policy(app, setActivationPolicy, 2)
+104:     except Exception:
+105:         pass
+106: 
+107: import tkinter as tk
+108: import sys
+109: if sys.platform == 'darwin':
+110:     try:
+111:         from tkmacosx import Button as MacButton
+112:         class CustomMacButton(MacButton):
+113:             def __init__(self, master=None, cnf={}, **kw):
+114:                 if 'borderless' not in kw:
+115:                     kw['borderless'] = 1
+116:                 if 'pady' in kw:
+117:                     kw.pop('pady')
+118:                 if 'padx' in kw:
+119:                     kw.pop('padx')
+120:                 if 'width' in kw:
+121:                     try:
+122:                         w = int(kw['width'])
+123:                         if w < 100:
+124:                             kw['width'] = w * 9
+125:                     except:
+126:                         pass
+127:                 if 'height' in kw:
+128:                     try:
+129:                         h = int(kw['height'])
+130:                         if h < 10:
+131:                             kw['height'] = h * 20
+132:                     except:
+133:                         pass
+134:                 super().__init__(master, cnf, **kw)
+135:         tk.Button = CustomMacButton
+136:     except ImportError:
+137:         pass
+138: from tkinter import messagebox, ttk
+139: import sys
+140: 
+141: from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode
+142: from core.host import encrypt_text, decrypt_text
+143: from core.viewer import run_client_viewer_loop
+144: 
+145: # Monkey-patch tk.Toplevel.geometry de tu dong ty le kich thuoc theo DPI Scale
+146: _orig_toplevel_geometry = tk.Toplevel.geometry
+147: def _scaled_toplevel_geometry(self, newGeometry=None):
+148:     if newGeometry is None:
+149:         return _orig_toplevel_geometry(self)
+150:     try:
+151:         import re
+152:         m = re.match(r'^(\d+)x(\d+)(?:\+([+-]?\d+)\+([+-]?\d+))?$', newGeometry)
+153:         if m:
+154:             w = int(m.group(1))
+155:             h = int(m.group(2))
+156:             x = m.group(3)
+157:             y = m.group(4)
+158:             scale = self.winfo_fpixels('1i') / 96.0
+159:             sw = int(w * scale)
+160:             sh = int(h * scale)
+161:             if x is not None and y is not None:
+162:                 adj_x = int(x) - (sw - w) // 2
+163:                 adj_y = int(y) - (sh - h) // 2
+164:                 newGeometry = f"{sw}x{sh}+{adj_x}+{adj_y}"
+165:             else:
+166:                 newGeometry = f"{sw}x{sh}"
+167:     except Exception as e:
+168:         pass
+169:     return _orig_toplevel_geometry(self, newGeometry)
+170: 
+171: tk.Toplevel.geometry = _scaled_toplevel_geometry
+172: 
+173: 
+174: import pygame
+175: import sys
+176: import os
+177: import traceback
+178: 
+179: if sys.stdout is None:
+180:     sys.stdout = open(os.devnull, 'w')
+181: if sys.stderr is None:
+182:     sys.stderr = open(os.devnull, 'w')
+183: 
+184: if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
+185:     try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+186:     except: pass
+187: if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):
+188:     try: sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+189:     except: pass
+190: 
+191: def handle_exception(exc_type, exc_value, exc_traceback):
+192:     if issubclass(exc_type, KeyboardInterrupt):
+193:         sys.__excepthook__(exc_type, exc_value, exc_traceback)
+194:         return
+195:     # In ra stderr (để hiển thị trên terminal hoặc gui.log)
+196:     sys.__excepthook__(exc_type, exc_value, exc_traceback)
+197:     # Ghi vào file
+198:     with open("crash.log", "w", encoding="utf-8") as f:
+199:         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+200: 
+201: sys.excepthook = handle_exception
+202: 
+203: import builtins
+204: _orig_print = builtins.print
+205: def print_with_timestamp(*args, **kwargs):
+206:     timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+207:     if args:
+208:         first_arg = str(args[0])
+209:         if first_arg.startswith("[202") and first_arg.find("]") < 25:
+210:             _orig_print(*args, **kwargs)
+211:             return
+212:     msg = " ".join(str(arg) for arg in args)
+213:     _orig_print(f"{timestamp} {msg}", **kwargs)
+214: 
+215: print = print_with_timestamp
+216: 
+217: # Chuyển thư mục làm việc về thư mục chứa file thực thi (.exe hoặc .py) để tránh lỗi đọc/ghi file cấu hình khi khởi động cùng Windows
+218: if sys.platform != "win32":
+219:     try:
+220:         import os
+221:         os.umask(0) # Đảm bảo file cấu hình tạo bởi root (systemd) có quyền rw-rw-rw-
+222:     except:
+223:         pass
+224: if getattr(sys, 'frozen', False):
+225:     app_dir = os.path.dirname(sys.executable)
+226: else:
+227:     app_dir = os.path.dirname(os.path.abspath(__file__))
+228: os.chdir(app_dir)
+229: 
+230: def get_app_data_dir():
+231:     import os, sys
+232:     if sys.platform != "win32":
+233:         if os.path.exists("/opt/p2p_remote"):
+234:             path = "/opt/p2p_remote/config"
+235:         else:
+236:             path = os.path.expanduser("~/.config/RemoteDesktopP2P")
+237:         try:
+238:             os.makedirs(path, exist_ok=True)
+239:             # Đảm bảo quyền ghi cho mọi user (vì root tạo ra thì user không sửa được)
+240:             os.chmod(path, 0o777)
+241:         except Exception:
+242:             pass
+243:         return path
+244:     else:
+245:         if getattr(sys, 'frozen', False):
+246:             return os.path.dirname(sys.executable)
+247:         else:
+248:             return os.path.dirname(os.path.abspath(__file__))
+249: 
+250: def get_computers_xml_path():
+251:     import os, sys, shutil
+252:     
+253:     user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
+254:     if os.path.exists(user_path):
+255:         return user_path
+256:         
+257:     if sys.platform == "win32":
+258:         installed_path = r"C:\Apps\P2P\saved_computers.xml"
+259:     else:
+260:         installed_path = "/opt/p2p_remote/config/saved_computers.xml"
+261:         
+262:     if os.path.exists(installed_path):
+263:         try:
+264:             with open(installed_path, 'a'):
+265:                 pass
+266:             return installed_path
+267:         except Exception:
+268:             try:
+269:                 shutil.copy2(installed_path, user_path)
+270:             except Exception:
+271:                 pass
+272:             return user_path
+273:             
+274:     return user_path
+275: 
+276: is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
+277: 
+278: # Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
+279: if sys.platform == "win32":
+280:     try:
+281:         import ctypes
+282:         ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+283:     except:
+284:         try:
+285:             ctypes.windll.user32.SetProcessDPIAware()
+286:         except:
+287:             pass
+288: 
+289: from utils.logger import get_log_filepath, log_file_transfer, log_debug, log_activity
+290: 
+291: # Pygame CE drop-in compatibility
+292: # In pygame-ce, it is still imported as pygame.
+293: 
+294: # Remote Desktop Ports (Avoid 80/443 to prevent Router Web UI collision)
+295: 
+296: # LAN Discovery (UDP Broadcast) - Cho phép các máy trong cùng mạng LAN tự phát hiện nhau
+297: LAN_BEACON_INTERVAL = 5  # Gửi beacon mỗi 5 giây
+298: LAN_OFFLINE_TIMEOUT = 15  # Coi là offline nếu không nhận beacon trong 15 giây
+299: 
+300: # Host Controllers
+301: 
+302: # Button mapping for mouse clicks
+303: 
+304: 
+305: from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_scroll, send_input_mouse_move
+306: 
+307: from network.crypto import get_crypto_key, encrypt_payload, decrypt_payload
+308: from network.socket_utils import socket_passwords, APP_KEY, force_close_socket, send_msg, recv_msg, recv_exact
+309: 
+310: from gui.themes import get_theme_palette
+311: from utils.hwid import get_hwid, get_local_ip, get_public_ip, get_public_ipv6
+312: 
+313: from network.upnp import attempt_upnp_forward            
+314: # Get Public IPv6 address
+315: 
+316: # Get Public IP address
+317: 
+318: 
+319: from utils.clipboard_api import (ENABLE_CLIPBOARD_SYNC, set_clipboard_dword_format, setup_clipboard_exclusions, 
+320:                                 get_clipboard_files, set_clipboard_files, get_clipboard_text, set_clipboard_text)
+321: 
+322: from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip, InfoDialog
+323: from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, run_clipboard_agent_mode
+324: 
+325: from core.host import HostMixin, check_desktop_change
+326: from core.network_manager import NetworkMixin
+327: 
+328: class UnifiedApp(tk.Tk, HostMixin, NetworkMixin):
+329:     def __init__(self):
+330:         super().__init__()
+331:         import threading
+332:         
+333:         # Đảm bảo reset trạng thái BlockInput và màn hình che phủ khi app mới khởi động
+334:         try:
+335:             import ctypes
+336:             ctypes.windll.user32.BlockInput(False)
+337:             print("[App] Reset BlockInput to False on startup.")
+338:         except:
+339:             pass
+340:         
+341:         # Check headless flag (run in Session 0 / background service mode)
+342:         self.is_headless = "--headless" in sys.argv
+343:         if self.is_headless:
+344:             self.withdraw()
+345:             
+346:         # Configure logging and stdout redirection for diagnostics
+347:         try:
+348:             log_filename = "agent.log" if self.is_headless else "gui.log"
+349:             log_path = os.path.join(app_dir, log_filename)
+350:             sys.stdout = open(log_path, "a", encoding="utf-8", buffering=1)
+351:             sys.stderr = sys.stdout
+352:             
+353:             # Override built-in print to flush immediately so logs are unbuffered
+354:             import builtins
+355:             orig_print = builtins.print
+356:             def unbuffered_print(*args, **kwargs):
+357:                 orig_print(*args, **kwargs)
+358:                 try:
+359:                     sys.stdout.flush()
+360:                 except:
+361:                     pass
+362:             builtins.print = unbuffered_print
+363:             
+364:             print(f"\n--- App started in {'headless' if self.is_headless else 'GUI'} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
+365:             
+366:             # Run diagnostics check for both GUI and Headless clients
+367:             try:
+368:                 import getpass
+369:                 username = getpass.getuser()
+370:                 print(f"[Diagnostics] Process running under user: {username}")
+371:                 
+372:                 if sys.platform == "win32":
+373:                     import win32con
+374:                     import win32api, win32security, winreg
+375:                     
+376:                     h_token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+377:                     sid_info = win32security.GetTokenInformation(h_token, win32security.TokenIntegrityLevel)
+378:                     sid = sid_info[0] if sid_info else None
+379:                     il_name = "Unknown"
+380:                     il = 0
+381:                     if sid:
+382:                         try:
+383:                             il = sid.GetSubAuthority(0)
+384:                             if il == 0x0000: il_name = "Untrusted"
+385:                             elif il == 0x1000: il_name = "Low"
+386:                             elif il == 0x2000: il_name = "Medium"
+387:                             elif il == 0x3000: il_name = "High"
+388:                             elif il >= 0x4000: il_name = "System"
+389:                         except Exception as e_sub:
+390:                             print(f"[Diagnostics] GetSubAuthority failed: {e_sub}")
+391:                     print(f"[Diagnostics] Integrity Level: {il_name} ({hex(il) if sid else 'N/A'})")
+392:                     
+393:                     # Token UIAccess Status
+394:                     try:
+395:                         import ctypes
+396:                         from ctypes import wintypes
+397:                         ADVAPI32 = ctypes.WinDLL('advapi32', use_last_error=True)
+398:                         GetTokenInformation = ADVAPI32.GetTokenInformation
+399:                         GetTokenInformation.argtypes = [
+400:                             wintypes.HANDLE,
+401:                             ctypes.c_int,
+402:                             ctypes.c_void_p,
+403:                             wintypes.DWORD,
+404:                             ctypes.POINTER(wintypes.DWORD)
+405:                         ]
+406:                         GetTokenInformation.restype = wintypes.BOOL
+407:                         
+408:                         uia_val = ctypes.c_ulong(0)
+409:                         ret_len = wintypes.DWORD(0)
+410:                         res = GetTokenInformation(
+411:                             int(h_token),
+412:                             26, # TokenUIAccess
+413:                             ctypes.byref(uia_val),
+414:                             ctypes.sizeof(uia_val),
+415:                             ctypes.byref(ret_len)
+416:                         )
+417:                         if res:
+418:                             print(f"[Diagnostics] Token UIAccess Status: {'Enabled' if uia_val.value else 'Disabled'}")
+419:                         else:
+420:                             print(f"[Diagnostics] GetTokenInformation for UIAccess failed: {ctypes.get_last_error()}")
+421:                     except Exception as uia_err:
+422:                         print(f"[Diagnostics] UIAccess check error: {uia_err}")
+423:                     
+424:                     reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+425:                     try:
+426:                         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+427:                         posd, reg_t = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+428:                         ssas, reg_t = winreg.QueryValueEx(key, "SoftwareSASGeneration")
+429:                         winreg.CloseKey(key)
+430:                         print(f"[Diagnostics] Registry: PromptOnSecureDesktop = {posd}, SoftwareSASGeneration = {ssas}")
+431:                     except Exception as ree:
+432:                         print(f"[Diagnostics] Registry read failed: {ree}")
+433:                     
+434:                     # Check scheduled task status
+435:                     try:
+436:                         import subprocess
+437:                         res = subprocess.run('schtasks /query /tn "EasyRemoteDesktopAgent" /fo list', shell=True, capture_output=True, text=True)
+438:                         print(f"[Diagnostics] Scheduled Task Status:\n{res.stdout if res.returncode == 0 else res.stderr}")
+439:                     except Exception as te:
+440:                         print(f"[Diagnostics] Failed to query scheduled task: {te}")
+441:             except Exception as de:
+442:                 print(f"[Diagnostics] Diagnostics gathering failed: {de}")
+443:         except Exception as e:
+444:             pass
+445:         
+446:         # Thiết lập icon cho cửa sổ chính
+447:         try:
+448:             icon_path = os.path.join(app_dir, "app_icon.png")
+449:             if os.path.exists(icon_path):
+450:                 try:
+451:                     icon_img = tk.PhotoImage(file=icon_path)
+452:                 except Exception:
+453:                     icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+454:                 self.iconphoto(True, icon_img)
+455:                 self._app_icon_img = icon_img  # Giữ reference tránh GC
+456:         except Exception as e:
+457:             print(f"[App] Lỗi thiết lập icon cửa sổ: {e}")
+458:         
+459:         # Register app instance to ClipboardSyncManager
+460:         if clipboard_sync_manager:
+461:             clipboard_sync_manager.register_app(self)
+462:         
+463:         # Window attributes
+464:         title_text = "Easy Remote Desktop"
+465:         try:
+466:             is_android = 'ANDROID_ARGUMENT' in os.environ or 'ANDROID_BOOTLOGO' in os.environ
+467:             try:
+468:                 if hasattr(sys, 'getandroidapilevel'):
+469:                     is_android = True
+470:             except: pass
+471:             
+472:             if is_android:
+473:                 serial = ""
+474:                 try:
+475:                     with open("/sys/block/mmcblk0/device/serial", "r") as f:
+476:                         serial = f.read().strip()
+477:                         if serial.startswith("0x"):
+478:                             serial = serial[2:]
+479:                 except Exception:
+480:                     pass
+481:                 if serial:
+482:                     title_text += f" - MC-Android {serial}"
+483:         except Exception:
+484:             pass
+485:         self.title(title_text)
+486:         self.resizable(False, False)
+487:         
+488:         # Shutdown listener for closing client cleanly
+489:         if sys.platform == "win32":
+490:             try:
+491:                 import win32gui, win32con, win32api
+492:                 def WndProc(hwnd, msg, wparam, lparam):
+493:                     if msg == win32con.WM_QUERYENDSESSION:
+494:                         if not (lparam & 0x80000000): # 0x80000000 is ENDSESSION_LOGOFF
+495:                             print("[Host] System Shutdown/Restart detected!")
+496:                             try:
+497:                                 from network.socket_utils import socket_passwords, send_msg
+498:                                 import json
+499:                                 for conn in list(socket_passwords.keys()):
+500:                                     try:
+501:                                         send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+502:                                     except: pass
+503:                             except: pass
+504:                         return True
+505:                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+506:                 
+507:                 wc = win32gui.WNDCLASS()
+508:                 wc.lpfnWndProc = WndProc
+509:                 wc.lpszClassName = "AntigravityShutdownListener"
+510:                 wc.hInstance = win32api.GetModuleHandle(None)
+511:                 try: win32gui.RegisterClass(wc)
+512:                 except: pass
+513:                 self.shutdown_hwnd = win32gui.CreateWindow(wc.lpszClassName, "ShutdownListener", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
+514:             except Exception as e:
+515:                 print(f"[Host] Failed to setup shutdown listener: {e}")
+516:         elif sys.platform.startswith("linux") or sys.platform == "darwin":
+517:             try:
+518:                 import signal
+519:                 def handle_sigterm(signum, frame):
+520:                     print(f"[Host] System Shutdown/Restart detected (signal {signum})!")
+521:                     try:
+522:                         from network.socket_utils import socket_passwords, send_msg
+523:                         import json
+524:                         for conn in list(socket_passwords.keys()):
+525:                             try:
+526:                                 send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+527:                             except: pass
+528:                     except: pass
+529:                     import time
+530:                     time.sleep(1)
+531:                     sys.exit(0)
+532:                 signal.signal(signal.SIGTERM, handle_sigterm)
+533:                 signal.signal(signal.SIGHUP, handle_sigterm)
+534:             except Exception as e:
+535:                 print(f"[Host] Failed to setup Linux shutdown listener: {e}")
+536:         
+537:         # Cờ trạng thái chống mở nhiều cửa sổ điều khiển cùng lúc
+538:         self.is_client_connected = False
+539:         
+540:         # Load saved window position or center it
+541:         self.config_file = os.path.join(get_app_data_dir(), "window_config.json")
+542:         self.last_normal_geometry = None
+543:         self.bind("<Configure>", self.on_window_configure)
+544:         self.load_window_position()
+545:         # Load language setting
+546:         self.current_lang = tk.StringVar(value="vi")
+547:         try:
+548:             if os.path.exists(self.config_file):
+549:                 with open(self.config_file, "r") as f:
+550:                     cfg = json.load(f)
+551:                     saved_lang = cfg.get("language", "vi")
+552:                     self.current_lang.set(saved_lang)
+553:                     load_language(saved_lang)
+554:         except:
+555:             pass
+556: 
+557:         
+558:         # Migrate old JSON list to new encrypted XML format
+559:         old_json_file = "saved_computers.json"
+560:         new_xml_file = get_computers_xml_path()
+561:         if os.path.exists(old_json_file) and not os.path.exists(new_xml_file):
+562:             try:
+563:                 with open(old_json_file, "r", encoding="utf-8") as f:
+564:                     old_data = json.load(f)
+565:                 
+566:                 import xml.etree.ElementTree as ET
+567:                 root = ET.Element("computers")
+568:                 for comp in old_data:
+569:                     comp_node = ET.SubElement(root, "computer")
+570:                     
+571:                     name_node = ET.SubElement(comp_node, "name")
+572:                     name_node.text = encrypt_text(comp.get("name", ""))
+573:                     
+574:                     id_node = ET.SubElement(comp_node, "id")
+575:                     id_node.text = encrypt_text(comp.get("id", ""))
+576:                     
+577:                     pass_node = ET.SubElement(comp_node, "password")
+578:                     pass_node.text = encrypt_text(comp.get("password", ""))
+579:                 
+580:                 tree = ET.ElementTree(root)
+581:                 tree.write(new_xml_file, encoding="utf-8", xml_declaration=True)
+582:                 os.remove(old_json_file)
+583:                 print("[Migration] Đã chuyển đổi thành công danh sách máy tính sang XML mã hóa!")
+584:             except Exception as e:
+585:                 print(f"[Migration] Lỗi chuyển đổi: {e}")
+586:         
+587:         from gui.themes import setup_app_theme
+588:         setup_app_theme(self, self.config_file)
+589:         
+590:         self.my_id_clean, self.my_id_formatted, self.my_macs = get_hwid()
+591:         
+592:         # Check if service (headless agent) is active by checking the mutex
+593:         self.is_service_active = False
+594:         if not self.is_headless:
+595:             exe_path = sys.argv[0] if (sys.argv and sys.argv[0]) else sys.executable
+596:             exe_path_abs = os.path.abspath(exe_path).lower()
+597:             if sys.platform != "win32":
+598:                 if "/opt/p2p_remote" in exe_path_abs:
+599:                     self.is_service_active = True
+600:                     
+601:         if sys.platform == "win32" and not self.is_headless:
+602:             import win32event, win32con
+603:             
+604:             # Since the service is actually a Scheduled Task (EasyRemoteDesktopAgent),
+605:             # we check if we are running from the installation directory and wait for the headless agent.
+606:             is_installed_version = False
+607:             try:
+608:                 if "c:\\apps\\p2p" in exe_path_abs or "program files" in exe_path_abs:
+609:                     is_installed_version = True
+610:             except:
+611:                 pass
+612: 
+613:             session_id = 1
+614:             try:
+615:                 sid = ctypes.c_ulong()
+616:                 if ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.windll.kernel32.GetCurrentProcessId(), ctypes.byref(sid)):
+617:                     session_id = sid.value
+618:             except:
+619:                 pass
+620: 
+621:             if is_installed_version:
+622:                 # If running from installation directory, always assume service is active to avoid port 12345 hijacking
+623:                 self.is_service_active = True
+624:             else:
+625:                 # Fallback to checking Mutex for portable versions
+626:                 for d_name in ["default", "winlogon"]:
+627:                     m_name = f"Global\\AntigravityP2PRemoteDesktopAppMutex_1_{session_id}_{d_name}"
+628:                     try:
+629:                         h_mutex = win32event.OpenMutex(win32con.SYNCHRONIZE, False, m_name)
+630:                         if h_mutex:
+631:                             win32api.CloseHandle(h_mutex)
+632:                             self.is_service_active = True
+633:                             break
+634:                     except Exception as e:
+635:                         err_code = getattr(e, 'winerror', 0)
+636:                         if not err_code and hasattr(e, 'args') and len(e.args) > 0:
+637:                             err_code = e.args[0]
+638:                         if err_code == 5: # ERROR_ACCESS_DENIED
+639:                             self.is_service_active = True
+640:                             break
+641: 
+642:         # Load or generate password
+643:         if self.is_headless:
+644:             self.my_password = str(random.randint(1000, 9999))
+645:             try:
+646:                 pass_path = os.path.join(app_dir, "session_pass.txt")
+647:                 with open(pass_path, "w", encoding="utf-8") as f:
+648:                     f.write(self.my_password)
+649:                 print(f"[Host Service] Generated and saved session password to {pass_path}")
+650:             except Exception as e:
+651:                 print(f"[Host Service] Failed to save session password: {e}")
+652:         else:
+653:             if getattr(self, "is_service_active", False):
+654:                 global BOUND_PORT
+655:                 BOUND_PORT = 12346 # Prevent using port 12345 to avoid conflicting with the service
+656:                 import core.config; core.config.BOUND_PORT = 12346
+657:                 import core.network_manager; core.network_manager.BOUND_PORT = 12346
+658:                 import core.host; core.host.BOUND_PORT = 12346
+659:                 pass_path = os.path.join(app_dir, "session_pass.txt")
+660:                 if os.path.exists(pass_path):
+661:                     try:
+662:                         with open(pass_path, "r", encoding="utf-8") as f:
+663:                             self.my_password = f.read().strip()
+664:                         print(f"[Host GUI] Loaded shared session password from {pass_path}: {self.my_password}")
+665:                     except Exception as e:
+666:                         print(f"[Host GUI] Failed to load shared session password: {e}")
+667:                         self.my_password = str(random.randint(1000, 9999))
+668:                 else:
+669:                     self.my_password = str(random.randint(1000, 9999))
+670:             else:
+671:                 self.my_password = str(random.randint(1000, 9999))
+672:         # Migrate old fixed_password.txt to XML if it exists
+673:         self.fixed_password = ""
+674:         if os.path.exists("fixed_password.txt"):
+675:             try:
+676:                 with open("fixed_password.txt", "r", encoding="utf-8") as f:
+677:                     encrypted = f.read().strip()
+678:                     if encrypted:
+679:                         self.fixed_password = decrypt_text(encrypted)
+680:                 if self.fixed_password:
+681:                     self.save_fixed_password_to_xml(self.fixed_password)
+682:                 os.remove("fixed_password.txt")
+683:                 print("[Migration] Đã di trú mật khẩu cố định sang saved_computers.xml và xóa tệp cũ!")
+684:             except Exception as e:
+685:                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
+686:         else:
+687:             self.fixed_password = self.load_fixed_password_from_xml()
+688:         self.pass_type_var = tk.StringVar(value=_("4 chữ số"))
+689:         self.server_socket = None
+690:         self.running_server = True
+691:         self.active_clients = {}
+692:         self.active_viewers = []
+693:         self.current_ip = _("Đang lấy IP...")
+694:         self.local_ip = "127.0.0.1"
+695:         self.ipv6 = None
+696:         self.client_viewer_w = 1280
+697:         self.client_viewer_h = 720
+698:         
+699:         # Signaling State
+700:         self.signaling_socket = None
+701:         self.signaling_lock = threading.Lock()
+702:         self._reconnecting_signaling = False
+703:         self.pending_connection_info = None
+704:         self.status_dots_widgets = {}
+705:         self.tray_icon = None
+706:         self.last_signaling_response = time.time()
+707:         self.received_first_pong = False
+708:         
+709:         # Form variables
+710:         self.status_var = tk.StringVar(value=_("Đang kết nối tới mạng đăng ký..."))
+711:         self.partner_id_var = tk.StringVar()
+712:         self.partner_pass_var = tk.StringVar()
+713:         self.force_relay_var = tk.BooleanVar(value=False)
+714:         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
+715:         
+716:         # LAN Discovery State - Lưu trữ các máy phát hiện được trong mạng LAN
+717:         # Key: hwid, Value: {computer_name, local_ip, port, last_seen, macs}
+718:         self.lan_peers = self.load_lan_peers()
+719:         self.lan_peers_lock = threading.Lock()
+720:         
+721:         # Register Trace for Auto-Formatting Partner ID
+722:         self.id_trace_id = self.partner_id_var.trace_add("write", self.format_partner_id)
+723:         
+724:         # Intercept close window button ("X")
+725:         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
+726:         
+727:         # Setup UI
+728:         try:
+729:             self.setup_ui()
+730:         except Exception as e:
+731:             import traceback
+732:             try:
+733:                 with open("mac_crash.log", "w", encoding="utf-8") as f:
+734:                     traceback.print_exc(file=f)
+735:             except:
+736:                 pass
+737:             print(f"CRASH IN SETUP_UI: {e}")
+738:         
+739:         # Start background services
+740:         threading.Thread(target=self.init_network_services, daemon=True).start()
+741:         
+742:         # Bắt đầu polling Signaling status trên main thread (độ tin cậy cao hơn self.after từ background thread)
+743:         self.after(3000, self._poll_signaling_status)
+744:         
+745:         # Restore Event Listener for waking the GUI
+746:         if not self.is_headless:
+747:             threading.Thread(target=self.restore_event_listener_thread, daemon=True).start()
+748:             threading.Thread(target=self.screen_cover_event_listener_thread, daemon=True).start()
+749:     def screen_cover_event_listener_thread(self):
+750:         if sys.platform != "win32":
+751:             return
+752:         import win32event, win32security, ctypes
+753:         
+754:         try:
+755:             active_session_id = ctypes.windll.kernel32.WTSGetActiveConsoleSessionId()
+756:         except:
+757:             active_session_id = 1
+758:             
+759:         cover_event_name = f"Global\\AntigravityP2PRemoteDesktopScreenCoverEvent_{active_session_id}_default"
+760:         
+761:         sa = win32security.SECURITY_ATTRIBUTES()
+762:         sa.bInheritHandle = 1
+763:         sd = win32security.SECURITY_DESCRIPTOR()
+764:         sd.Initialize()
+765:         sd.SetSecurityDescriptorDacl(True, None, False)
+766:         sa.SECURITY_DESCRIPTOR = sd
+767:         
+768:         try:
+769:             h_event_toggle = win32event.CreateEvent(sa, False, False, cover_event_name)
+770:             h_event_disable = win32event.CreateEvent(sa, False, False, cover_event_name + "_disable")
+771:         except Exception as e:
+772:             print(f"[Event] Failed to create screen cover event: {e}")
+773:             return
+774:             
+775:         print(f"[Event] Listening for screen cover event: {cover_event_name}")
+776:         while True:
+777:             res = win32event.WaitForMultipleObjects([h_event_toggle, h_event_disable], False, win32event.INFINITE)
+778:             if res == win32event.WAIT_OBJECT_0:
+779:                 print("[Event] Received screen cover toggle signal.")
+780:                 self.after(0, self.toggle_screen_cover_gui)
+781:             elif res == win32event.WAIT_OBJECT_0 + 1:
+782:                 print("[Event] Received screen cover disable signal.")
+783:                 self.after(0, self.disable_screen_cover_gui)
+784: 
+785:     def restore_event_listener_thread(self):
+786:         if sys.platform != "win32":
+787:             return
+788:         import win32event, win32security
+789:         session_id = get_session_id()
+790:         desktop_name = get_desktop_name()
+791:         restore_event_name = f"Global\\AntigravityP2PRemoteDesktopRestoreEvent_{session_id}_{desktop_name}"
+792:         
+793:         sa = win32security.SECURITY_ATTRIBUTES()
+794:         sa.bInheritHandle = 1
+795:         sd = win32security.SECURITY_DESCRIPTOR()
+796:         sd.Initialize()
+797:         sd.SetSecurityDescriptorDacl(True, None, False)
+798:         sa.SECURITY_DESCRIPTOR = sd
+799:         
+800:         try:
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========== MODEL ==========
+Created At: 2026-07-29T22:25:58Z
+Completed At: 2026-07-29T22:25:58Z
+File Path: `file:///d:/Data/AG/remote_desktop/gui/components.py`
+Total Lines: 617
+Total Bytes: 26780
+Showing lines 1 to 617
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import tkinter as tk
+2: from tkinter import ttk
+3: import os
+4: import time
+5: import sys
+6: _DIALOG_FONT = "Segoe UI" if sys.platform == "win32" else "Helvetica"
+7: from utils.logger import log_debug
+8: from core.i18n import _
+9: 
+10: try:
+11:     from PIL import Image, ImageTk
+12: except ImportError:
+13:     pass
+14: 
+15: if getattr(sys, 'frozen', False):
+16:     app_dir = os.path.dirname(sys.executable)
+17: else:
+18:     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+19: 
+20: class PremiumProgressBar(tk.Canvas):
+21:     def __init__(self, parent, width=320, height=12, bg="#15151B", fg="#00ADB5", **kwargs):
+22:         super().__init__(parent, width=width, height=height, bg=parent["bg"], highlightthickness=0, bd=0, **kwargs)
+23:         self.width = width
+24:         self.height = height
+25:         self.fg = fg
+26:         self.bg_color = bg
+27:         
+28:         self.draw_rounded_rect(0, 0, width, height, radius=5, fill=bg)
+29:         self.fill_id = None
+30: 
+31:     def draw_rounded_rect(self, x1, y1, x2, y2, radius=5, **kwargs):
+32:         points = [x1+radius, y1,
+33:                   x2-radius, y1,
+34:                   x2, y1,
+35:                   x2, y1+radius,
+36:                   x2, y2-radius,
+37:                   x2, y2,
+38:                   x2-radius, y2,
+39:                   x1+radius, y2,
+40:                   x1, y2,
+41:                   x1, y2-radius,
+42:                   x1, y1+radius,
+43:                   x1, y1]
+44:         return self.create_polygon(points, **kwargs, smooth=True)
+45: 
+46:     def set_progress(self, percent):
+47:         percent = max(0, min(100, percent))
+48:         if self.fill_id:
+49:             self.delete(self.fill_id)
+50:             self.fill_id = None
+51:             
+52:         if percent > 0:
+53:             fill_width = int(self.width * (percent / 100))
+54:             if fill_width > 10:
+55:                 self.fill_id = self.draw_rounded_rect(0, 0, fill_width, self.height, radius=5, fill=self.fg)
+56:             elif fill_width > 0:
+57:                 self.fill_id = self.create_rectangle(0, 0, fill_width, self.height, fill=self.fg, width=0)
+58: 
+59: from os_utils.ui import get_file_icon_as_image
+60: 
+61: class ClassicCopyDialog(tk.Toplevel):
+62:     def __init__(self, parent, filename, source_info, dest_info, has_multiple=False):
+63:         super().__init__(parent)
+64:         self.withdraw()
+65:         self.title("Copy File")
+66:         self.geometry("520x420")
+67:         self.resizable(False, False)
+68:         self.configure(bg="#FFFFFF")
+69:         
+70:         try:
+71:             icon_path = os.path.join(app_dir, "app_icon.png")
+72:             if os.path.exists(icon_path):
+73:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+74:                 self.iconphoto(False, icon_img)
+75:                 self._dialog_icon_img = icon_img
+76:         except Exception:
+77:             pass
+78:             
+79:         self.choice = None
+80:         self.has_multiple = has_multiple
+81:         
+82:         self.attributes("-topmost", True)
+83:         self.focus_force()
+84:         
+85:         self.update_idletasks()
+86:         w = 520
+87:         h = 420
+88:         ws = self.winfo_screenwidth()
+89:         hs = self.winfo_screenheight()
+90:         x = (ws - w) // 2
+91:         y = (hs - h) // 2
+92:         self.geometry(f"{w}x{h}+{x}+{y}")
+93:         self.deiconify()
+94:         
+95:         self.grab_set()
+96:         
+97:         lbl_title = tk.Label(
+98:             self, text="There is already a file with the same name in this location.",
+99:             font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT
+100:         )
+101:         lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
+102:         
+103:         lbl_sub = tk.Label(
+104:             self, text="Click the file you want to keep",
+105:             font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
+106:         )
+107:         lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
+108:         
+109:         def format_size(bytes_size):
+110:             if bytes_size < 1024:
+111:                 return f"{bytes_size} bytes"
+112:             elif bytes_size < 1024 * 1024:
+113:                 return f"{bytes_size / 1024:.1f} KB"
+114:             else:
+115:                 return f"{bytes_size / (1024 * 1024):.1f} MB"
+116: 
+117:         def format_time(timestamp):
+118:             try:
+119:                 import datetime
+120:                 dt = datetime.datetime.fromtimestamp(timestamp)
+121:                 return dt.strftime("%m/%d/%Y %I:%M %p")
+122:             except:
+123:                 return "Unknown"
+124:                 
+125:         def format_location_info(file_path):
+126:             if not file_path:
+127:                 return "Unknown location"
+128:             parent_dir = os.path.dirname(file_path)
+129:             parent_folder_name = os.path.basename(parent_dir)
+130:             if not parent_folder_name:
+131:                 parent_folder_name = parent_dir
+132:             return f"{parent_folder_name} ({parent_dir})"
+133:             
+134:         src_icon_img = get_file_icon_as_image(filename)
+135:         dest_icon_img = get_file_icon_as_image(dest_info.get("path", filename))
+136:         
+137:         self.src_icon = ImageTk.PhotoImage(src_icon_img) if src_icon_img else None
+138:         self.dest_icon = ImageTk.PhotoImage(dest_icon_img) if dest_icon_img else None
+139:         
+140:         def get_all_children(w):
+141:             children = [w]
+142:             for child in w.winfo_children():
+143:                 children.extend(get_all_children(child))
+144:             return children
+145:             
+146:         def setup_command_link(frame, action_val):
+147:             normal_bg = "#FFFFFF"
+148:             hover_bg = "#E5F1FB"
+149:             normal_border = "#FFFFFF"
+150:             hover_border = "#B8D6F3"
+151:             
+152:             frame.configure(background=normal_bg, highlightbackground=normal_border, highlightthickness=1, bd=0)
+153:             
+154:             def on_enter(event):
+155:                 frame.configure(background=hover_bg, highlightbackground=hover_border)
+156:                 for child in get_all_children(frame):
+157:                     try: child.configure(background=hover_bg)
+158:                     except: pass
+159:                     
+160:             def on_leave(event):
+161:                 x, y = frame.winfo_pointerx() - frame.winfo_rootx(), frame.winfo_pointery() - frame.winfo_rooty()
+162:                 if x < 0 or x >= frame.winfo_width() or y < 0 or y >= frame.winfo_height():
+163:                     frame.configure(background=normal_bg, highlightbackground=normal_border)
+164:                     for child in get_all_children(frame):
+165:                         try: child.configure(background=normal_bg)
+166:                         except: pass
+167:                         
+168:             def on_click(event):
+169:                 self.choice = action_val
+170:                 self.destroy()
+171:                 
+172:             for w in get_all_children(frame):
+173:                 w.bind("<Enter>", on_enter)
+174:                 w.bind("<Leave>", on_leave)
+175:                 w.bind("<Button-1>", on_click)
+176:                 w.configure(cursor="hand2")
+177:                 
+178:         # Link 1: Copy and Replace
+179:         link1 = tk.Frame(self, bg="#FFFFFF")
+180:         link1.pack(fill=tk.X, padx=24, pady=5)
+181:         
+182:         lbl_arrow1 = tk.Label(link1, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+183:         lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+184:         
+185:         right_content1 = tk.Frame(link1, bg="#FFFFFF")
+186:         right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+187:         
+188:         lbl_title1 = tk.Label(right_content1, text="Copy and Replace", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+189:         lbl_title1.pack(fill=tk.X)
+190:         
+191:         lbl_desc1 = tk.Label(right_content1, text="Replace the file in the destination folder with the file you are copying:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+192:         lbl_desc1.pack(fill=tk.X, pady=(0, 5))
+193:         
+194:         info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
+195:         info_frame1.pack(fill=tk.X, padx=(10, 0))
+196:         
+197:         if self.src_icon:
+198:             lbl_icon1 = tk.Label(info_frame1, image=self.src_icon, bg="#FFFFFF")
+199:             lbl_icon1.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+200:             
+201:         info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
+202:         info_text1.pack(side=tk.LEFT, fill=tk.X)
+203:         
+204:         tk.Label(info_text1, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+205:         tk.Label(info_text1, text=format_location_info(source_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+206:         tk.Label(info_text1, text=f"Size: {format_size(source_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+207:         tk.Label(info_text1, text=f"Date modified: {format_time(source_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+208:         
+209:         setup_command_link(link1, "replace")
+210:         
+211:         # Link 2: Don't Copy
+212:         link2 = tk.Frame(self, bg="#FFFFFF")
+213:         link2.pack(fill=tk.X, padx=24, pady=5)
+214:         
+215:         lbl_arrow2 = tk.Label(link2, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
+216:         lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+217:         
+218:         right_content2 = tk.Frame(link2, bg="#FFFFFF")
+219:         right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+220:         
+221:         lbl_title2 = tk.Label(right_content2, text="Don't copy", font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
+222:         lbl_title2.pack(fill=tk.X)
+223:         
+224:         lbl_desc2 = tk.Label(right_content2, text="No files will be changed. Leave this file in the destination folder:", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+225:         lbl_desc2.pack(fill=tk.X, pady=(0, 5))
+226:         
+227:         info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
+228:         info_frame2.pack(fill=tk.X, padx=(10, 0))
+229:         
+230:         if self.dest_icon:
+231:             lbl_icon2 = tk.Label(info_frame2, image=self.dest_icon, bg="#FFFFFF")
+232:             lbl_icon2.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+233:             
+234:         info_text2 = tk.Frame(info_frame2, bg="#FFFFFF")
+235:         info_text2.pack(side=tk.LEFT, fill=tk.X)
+236:         
+237:         tk.Label(info_text2, text=filename, font=(_DIALOG_FONT, 9, "bold"), fg="#000000", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+238:         tk.Label(info_text2, text=format_location_info(dest_info.get("path")), font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+239:         tk.Label(info_text2, text=f"Size: {format_size(dest_info.get('size', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+240:         tk.Label(info_text2, text=f"Date modified: {format_time(dest_info.get('mtime', 0))}", font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF", anchor="w").pack(fill=tk.X)
+241:         
+242:         setup_command_link(link2, "skip")
+243:         
+244:         sep = tk.Frame(self, height=1, bg="#D0D0D0", bd=0)
+245:         sep.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 0))
+246:         
+247:         bottom_bar = tk.Frame(self, bg="#F0F0F0", height=48)
+248:         bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
+249:         bottom_bar.pack_propagate(False)
+250:         
+251:         self.var_all = tk.BooleanVar()
+252:         if has_multiple:
+253:             chk = tk.Checkbutton(
+254:                 bottom_bar, text="Do this for all conflicts", font=(_DIALOG_FONT, 9),
+255:                 variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
+256:             )
+257:             chk.pack(side=tk.LEFT, padx=24, pady=10)
+258:             
+259:         btn_cancel = tk.Button(
+260:             bottom_bar, text="Cancel", font=(_DIALOG_FONT, 9), width=10,
+261:             bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
+262:             command=self.on_cancel
+263:         )
+264:         btn_cancel.pack(side=tk.RIGHT, padx=24, pady=10)
+265:         
+266:         def btn_enter(event):
+267:             btn_cancel.configure(bg="#E5F1FB", bd=1)
+268:         def btn_leave(event):
+269:             btn_cancel.configure(bg="#E1E1E1", bd=1)
+270:         btn_cancel.bind("<Enter>", btn_enter)
+271:         btn_cancel.bind("<Leave>", btn_leave)
+272:         
+273:         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+274:         
+275:     def on_cancel(self):
+276:         self.choice = "cancel"
+277:         self.destroy()
+278: 
+279: class ProgressDialog(tk.Toplevel):
+280:     def __init__(self, parent, title_text, filename, total_size, on_cancel=None):
+281:         super().__init__(parent)
+282:         self.withdraw()
+283:         self.attributes("-alpha", 0.0)
+284:         self.overrideredirect(True)
+285:         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
+286: 
+287:         title_bg = "#F3F3F3"
+288:         self.title_bar = tk.Frame(self, bg=title_bg, height=28)
+289:         self.title_bar.pack(fill=tk.X, side=tk.TOP)
+290:         self.title_bar.pack_propagate(False)
+291:         self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
+292:         self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
+293: 
+294:         # Cho phép kéo thả hộp thoại bằng chuột trên thanh tiêu đề
+295:         self._drag_offset_x = 0
+296:         self._drag_offset_y = 0
+297:         for widget in (self.title_bar, self.title_lbl):
+298:             widget.bind("<ButtonPress-1>", self._start_drag)
+299:             widget.bind("<B1-Motion>", self._do_drag)
+300: 
+301:         self.attributes("-topmost", True)
+302:         self.lift()
+303:         self.total_size = total_size
+304:         self.filename = str(filename) if filename is not None else "Unknown"
+305:         self.start_time = time.time()
+306:         self.on_cancel = on_cancel
+307:         
+308:         top_frame = tk.Frame(self, bg="#FFFFFF")
+309:         top_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+310:         
+311:         display_name = self.filename
+312:         if len(display_name) > 40:
+313:             display_name = display_name[:20] + "..." + display_name[-15:]
+314:             
+315:         self.lbl_action = tk.Label(top_frame, text=f'Copy file "{display_name}"', font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+316:         self.lbl_action.pack(fill=tk.X)
+317:         
+318:         self.lbl_stats1 = tk.Label(top_frame, text=f"(0 B of {self.format_size(total_size)})  -- MB/s  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+319:         self.lbl_stats1.pack(fill=tk.X, padx=5, pady=(2, 5))
+320:         
+321:         self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+322:         self.prog1.pack(fill=tk.X, pady=(0, 10))
+323:         
+324:         self.lbl_files = tk.Label(top_frame, text="Copy 1 of 1 file(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+325:         self.lbl_files.pack(fill=tk.X)
+326:         
+327:         self.lbl_stats2 = tk.Label(top_frame, text=f"0 B of {self.format_size(total_size)}  -- sec(s)", font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w")
+328:         self.lbl_stats2.pack(fill=tk.X, padx=5, pady=(2, 5))
+329:         
+330:         self.prog2 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+331:         self.prog2.pack(fill=tk.X)
+332:         
+333:         bottom_frame = tk.Frame(self, bg="#F0F0F0", height=45)
+334:         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+335:         bottom_frame.pack_propagate(False)
+336:         
+337:         sep = tk.Frame(self, height=1, bg="#DFDFDF", bd=0)
+338:         sep.pack(fill=tk.X, side=tk.BOTTOM)
+339:         
+340:         if self.on_cancel:
+341:             btn_cancel = tk.Button(
+342:                 bottom_frame, text=_("Hủy"), font=(_DIALOG_FONT, 9),
+343:                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
+344:                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
+345:             )
+346:             btn_cancel.pack(side=tk.RIGHT, padx=15, pady=10)
+347:             def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
+348:             def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
+349:             btn_cancel.bind("<Enter>", btn_enter)
+350:             btn_cancel.bind("<Leave>", btn_leave)
+351:             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
+352:             dialog_h = 270
+353:         else:
+354:             dialog_h = 225
+355:             
+356:         self.update_idletasks()
+357:         dialog_w = 400
+358:         
+359:         screen_w = self.winfo_screenwidth()
+360:         screen_h = self.winfo_screenheight()
+361:         x = (screen_w - dialog_w) // 2
+362:         y = (screen_h - dialog_h) // 2
+363:         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+364:         self.deiconify()
+365:         self.lift()
+366:         self.focus_force()
+367:         self.attributes("-alpha", 1.0)
+368:         self.update()
+369: 
+370:     def trigger_cancel(self):
+371:         try: self.destroy()
+372:         except: pass
+373:         if self.on_cancel:
+374:             try: self.on_cancel()
+375:             except: pass
+376: 
+377:     def _start_drag(self, event):
+378:         self._drag_offset_x = event.x_root - self.winfo_x()
+379:         self._drag_offset_y = event.y_root - self.winfo_y()
+380: 
+381:     def _do_drag(self, event):
+382:         x = event.x_root - self._drag_offset_x
+383:         y = event.y_root - self._drag_offset_y
+384:         self.geometry(f"+{x}+{y}")
+385: 
+386:     def update_progress(self, sent_bytes):
+387:         def _do_update():
+388:             try:
+389:                 percent = int(sent_bytes * 100 / self.total_size) if self.total_size > 0 else 100
+390:                 percent = max(0, min(100, percent))
+391: 
+392:                 self.prog1["value"] = percent
+393:                 self.prog2["value"] = percent
+394: 
+395:                 elapsed_time = time.time() - self.start_time
+396:                 if elapsed_time > 0 and sent_bytes > 0:
+397:                     speed = sent_bytes / elapsed_time
+398:                     if speed > 0:
+399:                         remaining_bytes = self.total_size - sent_bytes
+400:                         remaining_time = remaining_bytes / speed
+401:                         mins = int(remaining_time // 60)
+402:                         secs = int(remaining_time % 60)
+403:                         if mins > 0:
+404:                             time_str = f"{mins} min {secs} sec(s)"
+405:                         else:
+406:                             time_str = f"{secs} sec(s)"
+407:                     else:
+408:                         time_str = "-- sec(s)"
+409:                     speed_str = f"{self.format_speed(speed)}"
+410:                 else:
+411:                     speed_str = "-- MB/s"
+412:                     time_str = "-- sec(s)"
+413: 
+414:                 sent_str = self.format_size(sent_bytes)
+415:                 total_str = self.format_size(self.total_size)
+416: 
+417:                 self.lbl_stats1.config(text=f"({sent_str} of {total_str})  {speed_str}  {time_str}")
+418:                 self.lbl_stats2.config(text=f"{sent_str} of {total_str}  {time_str}")
+419:             except: pass
+420:         try:
+421:             self.after(0, _do_update)
+422:         except: pass
+423: 
+424:     def safe_destroy(self):
+425:         try: self.after(0, self.destroy)
+426:         except: pass
+427: 
+428:     def format_size(self, size_bytes):
+429:         if size_bytes < 1024: return f"{size_bytes} B"
+430:         elif size_bytes < 1024 * 1024: return f"{size_bytes / 1024:.2f} KB"
+431:         elif size_bytes < 1024 * 1024 * 1024: return f"{size_bytes / (1024 * 1024):.2f} MB"
+432:         else: return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+433: 
+434:     def format_speed(self, speed_bytes_per_sec):
+435:         if speed_bytes_per_sec < 1024: return f"{speed_bytes_per_sec:.0f} B/s"
+436:         elif speed_bytes_per_sec < 1024 * 1024: return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
+437:         elif speed_bytes_per_sec < 1024 * 1024 * 1024: return f"{speed_bytes_per_sec / (1024 * 1024):.2f} MB/s"
+438:         else: return f"{speed_bytes_per_sec / (1024 * 1024 * 1024):.2f} GB/s"
+439: 
+440: class ConfirmDialog(tk.Toplevel):
+441:     def __init__(self, parent, title, message, on_yes, on_no):
+442:         super().__init__(parent)
+443:         self.title(title)
+444:         self.resizable(False, False)
+445:         self.configure(bg="#1E1E24")
+446:         
+447:         try:
+448:             icon_path = os.path.join(app_dir, "app_icon.png")
+449:             if os.path.exists(icon_path):
+450:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+451:                 self.iconphoto(False, icon_img)
+452:                 self._dialog_icon_img = icon_img
+453:         except Exception:
+454:             pass
+455:             
+456:         # Thiết lập thuộc tính Modal & Topmost
+457:         self.attributes("-topmost", True)
+458:         # Chỉ liên kết transient nếu cửa sổ cha đang hiển thị, nếu không hộp thoại sẽ bị ẩn theo cha.
+459:         if parent and parent.state() != "withdrawn":
+460:             self.transient(parent)
+461:         else:
+462:             # Ép hiển thị vì nếu parent ẩn, Toplevel có thể bị ẩn theo mặc định
+463:             self.deiconify()
+464:             self.lift()
+465:             self.focus_force()
+466:         # Bỏ grab_set() để tránh xung đột Focus & Event routing trên một số hệ thống Windows
+467:         
+468:         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+469:         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
+470:         
+471:         lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=320)
+472:         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
+473:         
+474:         btn_frame = tk.Frame(self, bg="#1E1E24")
+475:         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+476:         
+477:         self.decision_made = False
+478:         self.on_yes_cb = on_yes
+479:         self.on_no_cb = on_no
+480:         
+481:         def _yes():
+482:             self.decision_made = True
+483:             self.destroy()
+484:             if self.on_yes_cb:
+485:                 self.on_yes_cb()
+486:                 
+487:         def _no():
+488:             self.decision_made = True
+489:             self.destroy()
+490:             if self.on_no_cb:
+491:                 self.on_no_cb()
+492:                 
+493:         btn_yes = tk.Button(
+494:             btn_frame, text=_("Đồng ý (Yes)"), font=(_DIALOG_FONT, 9, "bold"),
+495:             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
+496:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_yes
+497:         )
+498:         btn_yes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+499:         
+500:         btn_no = tk.Button(
+501:             btn_frame, text=_("Bỏ qua (No)"), font=(_DIALOG_FONT, 9, "bold"),
+502:             fg="#FFFFFF", bg="#3A3A4A", activeforeground="#FFFFFF", activebackground="#2A2A35",
+503:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_no
+504:         )
+505:         btn_no.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+506:         
+507:         self.protocol("WM_DELETE_WINDOW", _no)
+508:         
+509:         self.update_idletasks()
+510:         dialog_w = 360
+511:         dialog_h = 160
+512:         
+513:         parent_x = parent.winfo_x()
+514:         parent_y = parent.winfo_y()
+515:         parent_w = parent.winfo_width()
+516:         parent_h = parent.winfo_height()
+517:         
+518:         x = parent_x + (parent_w - dialog_w) // 2
+519:         y = parent_y + (parent_h - dialog_h) // 2
+520:         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+521: 
+522: class InfoDialog(tk.Toplevel):
+523:     def __init__(self, parent, title, message, button_text=None):
+524:         super().__init__(parent)
+525:         self.withdraw()  # Ẩn tạm thời để tránh nháy
+526:         self.title(title)
+527:         self.resizable(False, False)
+528:         self.configure(bg="#1E1E24")
+529:         
+530:         try:
+531:             icon_path = os.path.join(app_dir, "app_icon.png")
+532:             if os.path.exists(icon_path):
+533:                 icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+534:                 self.iconphoto(False, icon_img)
+535:                 self._dialog_icon_img = icon_img
+536:         except Exception:
+537:             pass
+538:             
+539:         self.attributes("-topmost", True)
+540:         if parent and parent.state() != "withdrawn":
+541:             self.transient(parent)
+542:         else:
+543:             self.lift()
+544:             self.focus_force()
+545:         
+546:         lbl_title = tk.Label(self, text=title.upper(), font=(_DIALOG_FONT, 11, "bold"), fg="#00ADB5", bg="#1E1E24")
+547:         lbl_title.pack(pady=(15, 10), padx=20, anchor=tk.W)
+548:         
+549:         lbl_msg = tk.Label(self, text=message, font=(_DIALOG_FONT, 9), fg="#FFFFFF", bg="#1E1E24", justify=tk.LEFT, wraplength=380)
+550:         lbl_msg.pack(pady=(0, 15), padx=20, anchor=tk.W)
+551:         
+552:         btn_frame = tk.Frame(self, bg="#1E1E24")
+553:         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
+554:         
+555:         def _ok():
+556:             self.destroy()
+557:                 
+558:         if button_text is None:
+559:             button_text = _("Đồng ý (OK)")
+560:             
+561:         btn_ok = tk.Button(
+562:             btn_frame, text=button_text, font=(_DIALOG_FONT, 9, "bold"),
+563:             fg="#FFFFFF", bg="#00ADB5", activeforeground="#FFFFFF", activebackground="#008B90",
+564:             relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_ok
+565:         )
+566:         btn_ok.pack(side=tk.RIGHT, fill=tk.X, expand=False, padx=0)
+567:         
+568:         self.protocol("WM_DELETE_WINDOW", _ok)
+569:         
+570:         self.update_idletasks()
+571:         # Tính toán chiều cao tự động dựa trên nội dung
+572:         req_height = self.winfo_reqheight()
+573:         dialog_w = 420
+574:         dialog_h = max(160, req_height + 20)
+575:         
+576:         if parent:
+577:             parent_x = parent.winfo_x()
+578:             parent_y = parent.winfo_y()
+579:             parent_w = parent.winfo_width()
+580:             parent_h = parent.winfo_height()
+581:             
+582:             x = parent_x + (parent_w - dialog_w) // 2
+583:             y = parent_y + (parent_h - dialog_h) // 2
+584:             self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+585:         else:
+586:             self.geometry(f"{dialog_w}x{dialog_h}")
+587:             
+588:         self.deiconify() # Hiển thị sau khi set geometry
+589: 
+590: 
+591: class ToolTip(object):
+592:     def __init__(self, widget, text='widget info'):
+593:         self.widget = widget
+594:         self.text = text
+595:         self.widget.bind("<Enter>", self.enter)
+596:         self.widget.bind("<Leave>", self.close)
+597:         self.tw = None
+598: 
+599:     def enter(self, event=None):
+600:         x = y = 0
+601:         x, y, cx, cy = self.widget.bbox("insert")
+602:         x += self.widget.winfo_rootx() + 25
+603:         y += self.widget.winfo_rooty() + 20
+604:         # creates a toplevel window
+605:         self.tw = tk.Toplevel(self.widget)
+606:         self.tw.wm_overrideredirect(True)
+607:         self.tw.wm_geometry("+%d+%d" % (x, y))
+608:         label = tk.Label(self.tw, text=self.text, justify='left',
+609:                          background='#ffffe0', relief='solid', borderwidth=1,
+610:                          font=(_DIALOG_FONT, "8", "normal"), padx=2, pady=1)
+611:         label.pack(ipadx=1)
+612: 
+613:     def close(self, event=None):
+614:         if self.tw:
+615:             self.tw.destroy()
+616:             self.tw = None
+617: 
+The above content shows the entire, complete file contents of the requested file.
+
+[Action: grep_search]
+  CaseInsensitive: True
+  IsRegex: False
+  MatchPerLine: True
+  Query: def setup_ui
+  SearchPath: d:\Data\AG\remote_desktop
+  toolAction: Searching for setup_ui
+  toolSummary: Search setup_ui
+
+========== MODEL ==========
+Created At: 2026-07-29T22:26:03Z
+Completed At: 2026-07-29T22:26:21Z
+{"File":"d:\\Data\\AG\\remote_desktop\\app.py","LineNumber":913,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app_head.py","LineNumber":485,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\app_old.py","LineNumber":482,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-06-23_065213_thêm_cho_tôi_1_giao_diện_nữa_Cam.txt","LineNumber":98,"LineContent":"  CommandLine: \"findstr /N /C:\\\"def setup_ui\\\" app.py \u003e setup_ui.txt ; Get-Content setup_ui.txt -Encoding Unicode | Out-File setup_ui_utf8.txt -Encoding utf8\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-06-29_180455_tôi_muốn_có_tính_năng_kết_nối_với_các_má.txt","LineNumber":41,"LineContent":"  Query: \"class.*App\\\\|def setup_ui\\\\|def create_gui\\\\|def main\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\old_app.py","LineNumber":6361,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\original_app.py","LineNumber":482,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\scratch_test.py","LineNumber":4607,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_132243_cho_tôi_hỏi_giờ_tôi_muốn_refactor_lại_d.txt","LineNumber":4052,"LineContent":"  Query: \"def setup_ui\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_132243_cho_tôi_hỏi_giờ_tôi_muốn_refactor_lại_d.txt","LineNumber":4058,"LineContent":"  Query: \"def setup_ui\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_132243_cho_tôi_hỏi_giờ_tôi_muốn_refactor_lại_d.txt","LineNumber":4064,"LineContent":"  Query: \"def setup_ui\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_132243_cho_tôi_hỏi_giờ_tôi_muốn_refactor_lại_d.txt","LineNumber":4108,"LineContent":"  ReplacementChunks: [{\"AllowMultiple\":false,\"EndLine\":481,\"ReplacementContent\":\"    def change_theme(self):\\n        from gui.themes import change_app_theme\\n        change_app_theme(self)\\n        \\n    def setup_ui(sel..."}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_155959_service.log_báo.txt","LineNumber":72,"LineContent":"  Query: \"def setup_ui\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_155959_service.log_báo.txt","LineNumber":84,"LineContent":"  Query: \"def setup_ui\\\\|def setup_app_theme\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\conversations\\2026-07-11_155959_service.log_báo.txt","LineNumber":233,"LineContent":"  Query: \"def setup_ui\""}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp.py","LineNumber":5678,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_550.py","LineNumber":4632,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_app.py","LineNumber":4604,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_app_utf8.py","LineNumber":3365,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_f838_app.py","LineNumber":3365,"LineContent":"    def setup_ui(self):"}
+{"File":"d:\\Data\\AG\\remote_desktop\\temp_stable_app.py","LineNumber":4176,"LineContent":"    def setup_ui(self):"}
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\app.py
+  EndLine: 1000
+  StartLine: 910
+  toolAction: Viewing app.py
+  toolSummary: Viewing app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:26:26Z
+Completed At: 2026-07-29T22:26:26Z
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 4126
+Total Bytes: 189564
+Showing lines 910 to 1000
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+910: 
+911: 
+912:         
+913:     def setup_ui(self):
+914:         def create_flat_button(parent, **kwargs):
+915:             cmd = kwargs.pop('command', None)
+916:             active_bg = kwargs.pop('activebackground', kwargs.get('bg'))
+917:             kwargs.pop('relief', None)
+918:             kwargs.pop('bd', None)
+919:             kwargs.pop('highlightthickness', None)
+920:             kwargs.pop('highlightbackground', None)
+921:             if 'cursor' not in kwargs:
+922:                 kwargs['cursor'] = 'hand2'
+923:             pady = kwargs.pop('pady', 5)
+924:             padx = kwargs.pop('padx', 5)
+925:             
+926:             text = kwargs.get('text', '')
+927:             if text and len(text) > 2 and text[0] in ['📋', '📁', '📡', '🔧', '🔄', '🔍', '➕', '❌', '❐', '≡', '⌂', '¤', '↻', '⌕']:
+928:                 icon_char = text[0]
+929:                 label_text = text[1:].strip()
+930:                 kwargs.pop('text')
+931:                 
+932:                 frame = tk.Frame(parent, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+933:                 inner = tk.Frame(frame, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+934:                 inner.pack(expand=True, pady=pady)
+935:                 
+936:                 font = kwargs.get('font')
+937:                 fg = kwargs.get('fg')
+938:                 bg = kwargs.get('bg')
+939:                 
+940:                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
+941:                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
+942:                 
+943:                 lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+944:                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
+945:                 
+946:                 def on_enter(e):
+947:                     frame.config(bg=active_bg)
+948:                     inner.config(bg=active_bg)
+949:                     lbl_icon.config(bg=active_bg)
+950:                     lbl_text.config(bg=active_bg)
+951:                 def on_leave(e):
+952:                     frame.config(bg=bg)
+953:                     inner.config(bg=bg)
+954:                     lbl_icon.config(bg=bg)
+955:                     lbl_text.config(bg=bg)
+956:                     
+957:                 frame.bind("<Enter>", on_enter)
+958:                 inner.bind("<Enter>", on_enter)
+959:                 lbl_icon.bind("<Enter>", on_enter)
+960:                 lbl_text.bind("<Enter>", on_enter)
+961:                 frame.bind("<Leave>", on_leave)
+962:                 inner.bind("<Leave>", on_leave)
+963:                 lbl_icon.bind("<Leave>", on_leave)
+964:                 lbl_text.bind("<Leave>", on_leave)
+965:                 
+966:                 if cmd:
+967:                     frame.bind("<Button-1>", lambda e: cmd())
+968:                     inner.bind("<Button-1>", lambda e: cmd())
+969:                     lbl_icon.bind("<Button-1>", lambda e: cmd())
+970:                     lbl_text.bind("<Button-1>", lambda e: cmd())
+971:                     
+972:                 return frame
+973: 
+974:             lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
+975:             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
+976:             lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+977:             if cmd:
+978:                 lbl.bind("<Button-1>", lambda e, c=cmd: c())
+979:             return lbl
+980: 
+981:         # Setup Window Menu Bar
+982:         menubar = tk.Menu(self)
+983:         
+984:         # 1. File Menu
+985:         file_menu = tk.Menu(menubar, tearoff=0)
+986:         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
+987:         file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+988:         file_menu.add_separator()
+989:         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
+990:         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
+991:         file_menu.add_separator()
+992:         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
+993:         menubar.add_cascade(label=_("File"), menu=file_menu)
+994:         
+995:         # 2. Options Menu
+996:         options_menu = tk.Menu(menubar, tearoff=0)
+997: 
+998:         # Submenu: Password type
+999:         password_menu = tk.Menu(options_menu, tearoff=0)
+1000:         password_menu.add_radiobutton(
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: write_to_file]
+  ArtifactMetadata: {'RequestFeedback': True, 'Summary': 'Implementation plan for splitting GUI into 3 types for Windows, Linux, and macOS', 'UserFacing': True}
+  CodeContent: # Split App UI by Operating System
+
+This document outlines the plan to separate the user interface for Windows, Linux, and macOS into distinct components, fulfilling the request to have 3 types of UI ...
+  Description: Created implementation plan for OS-specific UI split
+  Overwrite: True
+  TargetFile: C:\Users\Tuyen\.gemini\antigravity-ide\brain\9dd960e8-8324-46b8-b3cf-3a1b24afbc2a\implementation_plan.md
+  toolAction: Writing to implementation_plan.md
+  toolSummary: Plan UI OS Split
+
+========== MODEL ==========
+Created At: 2026-07-29T22:26:38Z
+Completed At: 2026-07-29T22:26:38Z
+Created file file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/implementation_plan.md with requested content.
+If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+Note: You have just created an artifact and requested user feedback. Stop calling tools to end your turn, and allow the user to review the artifact, approve it, or provide feedback
+
+========== MODEL ==========
+I have created an implementation plan to split the UI into three separate components for Windows, Linux, and macOS. Please review the plan in [implementation_plan.md](file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/implementation_plan.md) and let me know if you approve or if you have any specific design requests for the macOS or Linux interfaces!
+
+========== USER ==========
+
+
+[Action: write_to_file]
+  ArtifactMetadata: {'RequestFeedback': False, 'Summary': 'Task tracking for splitting UI into OS specific files', 'UserFacing': True}
+  CodeContent: - `[/]` Extract current `setup_ui` logic from `app.py`.
+- `[ ]` Create `gui/windows_ui.py`.
+- `[ ]` Create `gui/mac_ui.py`.
+- `[ ]` Create `gui/linux_ui.py`.
+- `[ ]` Modify `app.py`'s `setup_ui` to dy...
+  Description: Created task tracker
+  Overwrite: True
+  TargetFile: C:\Users\Tuyen\.gemini\antigravity-ide\brain\9dd960e8-8324-46b8-b3cf-3a1b24afbc2a\task.md
+  toolAction: Writing to task.md
+  toolSummary: Create Task Tracker
+
+========== MODEL ==========
+Created At: 2026-07-29T22:26:53Z
+Completed At: 2026-07-29T22:26:53Z
+Created file file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/task.md with requested content.
+If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+
+[Action: grep_search]
+  CaseInsensitive: False
+  IsRegex: True
+  MatchPerLine: True
+  Query: ^[ \t]*def 
+  SearchPath: d:\Data\AG\remote_desktop\app.py
+  toolAction: Searching for function definitions in app.py
+  toolSummary: Search for functions
+
+========== MODEL ==========
+Created At: 2026-07-29T22:26:58Z
+Completed At: 2026-07-29T22:26:58Z
+No results found
+
+[Action: grep_search]
+  CaseInsensitive: False
+  IsRegex: False
+  MatchPerLine: True
+  Query:     def 
+  SearchPath: d:\Data\AG\remote_desktop\app.py
+  toolAction: Searching for method definitions in app.py
+  toolSummary: Search methods in app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:02Z
+Completed At: 2026-07-29T22:27:03Z
+No results found
+
+[Action: grep_search]
+  CaseInsensitive: False
+  IsRegex: False
+  MatchPerLine: True
+  Query: def 
+  SearchPath: d:\Data\AG\remote_desktop\app.py
+  toolAction: Searching for def in app.py
+  toolSummary: Search def in app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:08Z
+Completed At: 2026-07-29T22:27:08Z
+No results found
+
+[Action: run_command]
+  CommandLine: grep -n "def " app.py
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 500
+  toolAction: Searching for defs in app.py
+  toolSummary: Grep defs
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:13Z
+Completed At: 2026-07-29T22:27:15Z
+
+				The command completed successfully.
+				Output:
+				app.py
+31      def E(text):
+113                 def __init__(self, master=None, cnf={}, **kw):
+147     def _scaled_toplevel_geometry(self, newGeometry=None):
+191     def handle_exception(exc_type, exc_value, exc_traceback):
+205     def print_with_timestamp(*args, **kwargs):
+230     def get_app_data_dir():
+250     def get_computers_xml_path():
+329         def __init__(self):
+356                 def unbuffered_print(*args, **kwargs):
+492                     def WndProc(hwnd, msg, wparam, lparam):
+519                     def handle_sigterm(signum, frame):
+749         def screen_cover_event_listener_thread(self):
+785         def restore_event_listener_thread(self):
+813         def change_theme(self):
+818         def export_lang_template(self):
+834         def import_custom_language(self):
+862         def change_language(self, *args):
+872         def import_saved_computers(self):
+889         def export_saved_computers(self):
+913         def setup_ui(self):
+914             def create_flat_button(parent, **kwargs):
+946                     def on_enter(e):
+951                     def on_leave(e):
+1207        def format_partner_id(self, *args):
+1217        def _do_format_partner_id(self):
+1269        def on_window_configure(self, event):
+1287        def fix_mac_permissions(self):
+1325        def load_window_position(self):
+1376        def save_window_position(self):
+1405        def copy_id_and_password(self):
+1422        def copy_to_clipboard(self, text):
+1438        def make_context_menu(self, entry):
+1453        def refresh_password(self):
+1480        def show_saved_computers_dialog(self):
+1494                    def _show_reopen():
+1543            def on_focus_in(event):
+1548            def on_focus_out(event):
+1556            def on_search_change(*args):
+1564            def load_computers():
+1567            def save_computers(lst):
+1594            def _on_mousewheel(event):
+1609            def _bind_mousewheel():
+1617            def _unbind_mousewheel():
+1631            def on_dialog_destroy():
+1637            def connect_computer(item):
+1644            def delete_computer(item):
+1653            def check_auto_scroll():
+1674            def on_drag_motion(event):
+1709            def on_drop(event):
+1761            def rename_group_dialog(old_group_name):
+1787                def do_rename():
+1810            def reorder_list():
+1817                def get_is_online(c):
+1835                def group_sort_key(g):
+1853            def refresh_list(force=False):
+1860                def _refresh_task():
+1871            def _refresh_list_inner(force=False):
+1918                    def toggle_group(event, g=grp):
+1935                    def show_grp_context(event, menu=grp_context_menu):
+1975                    def show_context_menu(event, menu=context_menu):
+1978                    def start_drag(event, c_id=clean_id, c=comp):
+2012            def open_add_dialog():
+2015            def start_refresh_cooldown():
+2018                def update_timer():
+2064            def auto_refresh_status():
+2075            def _show_initial():
+2083        def add_current_partner_to_saved(self):
+2089        def open_add_computer_dialog_with_vals(self, initial_id="", initial_pass="", parent_win=None, on_save=None):
+2137            def load_computers():
+2140            def save_computers(lst):
+2143            def save_new():
+2190        def open_edit_computer_dialog(self, item, parent_win, on_save):
+2238            def load_computers():
+2241            def save_computers(lst):
+2244            def save_edit():
+2291        def load_lan_peers(self):
+2303        def save_lan_peers(self):
+2313        def load_saved_computers(self):
+2352        def save_saved_computers(self, lst):
+2406        def save_group_states_only(self):
+2429        def load_fixed_password_from_xml(self):
+2444        def save_fixed_password_to_xml(self, password):
+2500        def save_fixed_password(self, password):
+2505        def load_zalo_phone_from_xml(self):
+2520        def save_zalo_phone_to_xml(self, value):
+2576        def open_set_zalo_phone_dialog(self):
+2610            def save_val():
+2635        def show_server_settings_dialog(self):
+2679            def save_config():
+2731        def update_fixed_password_indicator(self):
+2739        def open_set_fixed_password_dialog(self):
+2773            def toggle_password():
+2788            def save_password():
+2818        def is_startup_enabled(self):
+2854        def toggle_startup(self):
+2946        def open_zalo(self):
+2983                    def contact(val=p_val, name=c_name):
+3007        def show_zalo_error_popup(self, comp_name=""):
+3041        def open_phone_dialog(self):
+3076                    def show_phone(val=p_val, name=c_name):
+3094        def show_phone_number_popup(self, phone_val, comp_name=""):
+3129        def show_about_dialog(self):
+3179        def query_computer_status(self, clean_id):
+3202        def check_and_default_offline(self, clean_id):
+3215        def update_saved_computer_status(self, partner_id, is_online):
+3233        def show_custom_info(self, title, message, parent=None, auto_close_sec=None):
+3281                def update_countdown(remaining):
+3299        def show_custom_error(self, title, message, parent=None):
+3350        def _show_lan_error_dialog(self, public_ip=""):
+3451        def show_custom_question(self, title, message, parent=None):
+3490            def on_yes():
+3494            def on_no():
+3525        def update_status(self, text, is_error=False, blink=False, is_success=False):
+3526            def _do_update():
+3549        def check_if_service_active(self):
+3589        def _poll_signaling_status(self):
+3639        def _blink_status(self):
+3648        def add_firewall_rule_for_app(self):
+3659        def configure_uac_registry(self):
+3680        def wake_on_lan(self, mac_str):
+3716        def on_close_window(self):
+3729        def setup_tray_icon(self):
+3767        def show_gui_from_tray(self, icon=None, item=None):
+3771        def _restore_window(self):
+3802        def exit_from_tray(self, icon=None, item=None):
+3812        def destroy(self):
+3815            def force_terminate():
+3946            def get_session_id():
+3955            def get_desktop_name():
+4060                def graceful_shutdown(signum, frame):
+4088            def check_signals():
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\app.py
+  EndLine: 1206
+  StartLine: 913
+  toolAction: Viewing app.py
+  toolSummary: Viewing app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:24Z
+Completed At: 2026-07-29T22:27:24Z
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 4126
+Total Bytes: 189564
+Showing lines 913 to 1206
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+913:     def setup_ui(self):
+914:         def create_flat_button(parent, **kwargs):
+915:             cmd = kwargs.pop('command', None)
+916:             active_bg = kwargs.pop('activebackground', kwargs.get('bg'))
+917:             kwargs.pop('relief', None)
+918:             kwargs.pop('bd', None)
+919:             kwargs.pop('highlightthickness', None)
+920:             kwargs.pop('highlightbackground', None)
+921:             if 'cursor' not in kwargs:
+922:                 kwargs['cursor'] = 'hand2'
+923:             pady = kwargs.pop('pady', 5)
+924:             padx = kwargs.pop('padx', 5)
+925:             
+926:             text = kwargs.get('text', '')
+927:             if text and len(text) > 2 and text[0] in ['📋', '📁', '📡', '🔧', '🔄', '🔍', '➕', '❌', '❐', '≡', '⌂', '¤', '↻', '⌕']:
+928:                 icon_char = text[0]
+929:                 label_text = text[1:].strip()
+930:                 kwargs.pop('text')
+931:                 
+932:                 frame = tk.Frame(parent, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+933:                 inner = tk.Frame(frame, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+934:                 inner.pack(expand=True, pady=pady)
+935:                 
+936:                 font = kwargs.get('font')
+937:                 fg = kwargs.get('fg')
+938:                 bg = kwargs.get('bg')
+939:                 
+940:                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
+941:                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
+942:                 
+943:                 lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+944:                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
+945:                 
+946:                 def on_enter(e):
+947:                     frame.config(bg=active_bg)
+948:                     inner.config(bg=active_bg)
+949:                     lbl_icon.config(bg=active_bg)
+950:                     lbl_text.config(bg=active_bg)
+951:                 def on_leave(e):
+952:                     frame.config(bg=bg)
+953:                     inner.config(bg=bg)
+954:                     lbl_icon.config(bg=bg)
+955:                     lbl_text.config(bg=bg)
+956:                     
+957:                 frame.bind("<Enter>", on_enter)
+958:                 inner.bind("<Enter>", on_enter)
+959:                 lbl_icon.bind("<Enter>", on_enter)
+960:                 lbl_text.bind("<Enter>", on_enter)
+961:                 frame.bind("<Leave>", on_leave)
+962:                 inner.bind("<Leave>", on_leave)
+963:                 lbl_icon.bind("<Leave>", on_leave)
+964:                 lbl_text.bind("<Leave>", on_leave)
+965:                 
+966:                 if cmd:
+967:                     frame.bind("<Button-1>", lambda e: cmd())
+968:                     inner.bind("<Button-1>", lambda e: cmd())
+969:                     lbl_icon.bind("<Button-1>", lambda e: cmd())
+970:                     lbl_text.bind("<Button-1>", lambda e: cmd())
+971:                     
+972:                 return frame
+973: 
+974:             lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
+975:             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
+976:             lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+977:             if cmd:
+978:                 lbl.bind("<Button-1>", lambda e, c=cmd: c())
+979:             return lbl
+980: 
+981:         # Setup Window Menu Bar
+982:         menubar = tk.Menu(self)
+983:         
+984:         # 1. File Menu
+985:         file_menu = tk.Menu(menubar, tearoff=0)
+986:         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
+987:         file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+988:         file_menu.add_separator()
+989:         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
+990:         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
+991:         file_menu.add_separator()
+992:         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
+993:         menubar.add_cascade(label=_("File"), menu=file_menu)
+994:         
+995:         # 2. Options Menu
+996:         options_menu = tk.Menu(menubar, tearoff=0)
+997: 
+998:         # Submenu: Password type
+999:         password_menu = tk.Menu(options_menu, tearoff=0)
+1000:         password_menu.add_radiobutton(
+1001:             label=_("4 chữ số"),
+1002:             variable=self.pass_type_var, value=_("4 chữ số"),
+1003:             command=self.refresh_password
+1004:         )
+1005:         password_menu.add_radiobutton(
+1006:             label=_("5 chữ số"),
+1007:             variable=self.pass_type_var, value=_("5 chữ số"),
+1008:             command=self.refresh_password
+1009:         )
+1010:         password_menu.add_radiobutton(
+1011:             label=_("8 ký tự (chữ + số)"),
+1012:             variable=self.pass_type_var, value=_("8 ký tự (chữ + số)"),
+1013:             command=self.refresh_password
+1014:         )
+1015:         password_menu.add_separator()
+1016:         password_menu.add_command(
+1017:             label=_("Cài mật khẩu cố định..."),
+1018:             command=self.open_set_fixed_password_dialog
+1019:         )
+1020:         options_menu.add_cascade(label=_("Mật khẩu (Password)"), menu=password_menu)
+1021:         options_menu.add_separator()
+1022:         options_menu.add_checkbutton(
+1023:             label=_("Chạy khi mở máy (Run on Startup)"),
+1024:             variable=self.startup_var,
+1025:             command=self.toggle_startup
+1026:         )
+1027:         options_menu.add_command(
+1028:             label=_("Cài Zalo / Điện thoại"),
+1029:             command=self.open_set_zalo_phone_dialog
+1030:         )
+1031:         options_menu.add_separator()
+1032:         options_menu.add_command(
+1033:             label=_("Cài đặt máy chủ..."),
+1034:             command=self.show_server_settings_dialog
+1035:         )
+1036:         if sys.platform == "darwin":
+1037:             options_menu.add_separator()
+1038:             options_menu.add_command(
+1039:                 label=_("Sửa lỗi quyền macOS..."),
+1040:                 command=self.fix_mac_permissions
+1041:             )
+1042:         options_menu.add_separator()
+1043:         
+1044:         
+1045:         # Submenu: Language
+1046:         lang_menu = tk.Menu(options_menu, tearoff=0)
+1047:         langs = get_available_languages()
+1048:         for l in langs:
+1049:             lang_menu.add_radiobutton(label=get_language_name(l), variable=self.current_lang, value=l, command=self.change_language)
+1050:         
+1051:         # Export template
+1052:         lang_menu.add_separator()
+1053:         lang_menu.add_command(label=_("Xuất tệp ngôn ngữ mẫu..."), command=self.export_lang_template)
+1054:         lang_menu.add_command(label=_("Ngôn ngữ riêng của bạn"), command=self.import_custom_language)
+1055:         options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
+1056:         options_menu.add_separator()
+1057: 
+1058:         # Submenu: Theme
+1059:         theme_menu = tk.Menu(options_menu, tearoff=0)
+1060:         theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
+1061:         theme_menu.add_radiobutton(label=_("Tối"), variable=self.current_theme, value="dark", command=self.change_theme)
+1062:         theme_menu.add_radiobutton(label=_("Xám"), variable=self.current_theme, value="gray", command=self.change_theme)
+1063:         theme_menu.add_radiobutton(label=_("Hồng"), variable=self.current_theme, value="pink", command=self.change_theme)
+1064:         theme_menu.add_radiobutton(label=_("Pha lê"), variable=self.current_theme, value="crystal", command=self.change_theme)
+1065:         theme_menu.add_radiobutton(label=_("Cam"), variable=self.current_theme, value="orange", command=self.change_theme)
+1066:         theme_menu.add_radiobutton(label=_("Đỏ"), variable=self.current_theme, value="red", command=self.change_theme)
+1067:         theme_menu.add_separator()
+1068:         theme_menu.add_radiobutton(label=_("Tùy chỉnh"), variable=self.current_theme, value="custom", command=self.change_theme)
+1069:         options_menu.add_cascade(label=_("Giao diện"), menu=theme_menu)
+1070:  
+1071:         menubar.add_cascade(label=_("Options"), menu=options_menu)
+1072:         
+1073:         # 3. Help Menu
+1074:         help_menu = tk.Menu(menubar, tearoff=0)
+1075:         help_menu.add_command(label=_("Zalo"), command=self.open_zalo)
+1076:         help_menu.add_command(label=_("Điện thoại"), command=self.open_phone_dialog)
+1077:         help_menu.add_command(label=_("About"), command=self.show_about_dialog)
+1078:         menubar.add_cascade(label=_("Help"), menu=help_menu)
+1079:         
+1080:         self.config(menu=menubar)
+1081:         
+1082: 
+1083:         # Header Label
+1084:         header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color)
+1085:         header.pack(pady=(15, 5))
+1086:         
+1087:         # Sub-header
+1088:         subheader = tk.Label(self, text=_("Điều khiển trực tuyến máy tính bằng HWID"), font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+1089:         subheader.pack(pady=(0, 15))
+1090:         
+1091:         # Main Panels Container
+1092:         container = tk.Frame(self, bg=self.bg_color)
+1093:         self._main_container = container
+1094:         container.pack(fill=tk.BOTH, expand=True, padx=20)
+1095:         
+1096:         # LEFT PANEL: Allow Remote Control
+1097:         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+1098:         self._left_panel = left_panel
+1099:         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
+1100:         
+1101:         lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+1102:         lbl_allow.pack(pady=(15, 10))
+1103:         
+1104:         lbl_id = tk.Label(left_panel, text=_("Mã ID của bạn:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1105:         lbl_id.pack(anchor=tk.W, padx=20)
+1106:         
+1107:         id_frame = tk.Frame(left_panel, bg=self.card_color)
+1108:         self._id_frame = id_frame
+1109:         id_frame.pack(fill=tk.X, padx=20, pady=(5, 12))
+1110:         
+1111:         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
+1112:         self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1113:         
+1114:         copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+1115:         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1116:         ToolTip(copy_id_btn, _("Sao chép"))
+1117:         
+1118:         lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1119:         lbl_pass.pack(anchor=tk.W, padx=20)
+1120:         
+1121:         pass_frame = tk.Frame(left_panel, bg=self.card_color)
+1122:         self._pass_frame = pass_frame
+1123:         pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
+1124:         
+1125:         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
+1126:         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1127:         
+1128:         copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+1129:         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1130:         ToolTip(copy_pass_btn, _("Sao chép"))
+1131:         
+1132:         refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=self.refresh_password)
+1133:         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1134:         ToolTip(refresh_btn, _("Đổi mật khẩu"))
+1135: 
+1136:         # Nhãn hiển thị trạng thái mật khẩu cố định
+1137:         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
+1138:         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
+1139:         self.update_fixed_password_indicator()
+1140: 
+1141:         # Button to Copy both ID & Password at once
+1142:         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
+1143:         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
+1144: 
+1145:         # Nút gọi Danh sách máy tính đã lưu
+1146:         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+1147:         saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
+1148:         
+1149:         # RIGHT PANEL: Control Remote Computer
+1150:         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+1151:         self._right_panel = right_panel
+1152:         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
+1153:         
+1154:         lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+1155:         lbl_control.pack(pady=(15, 10))
+1156:         
+1157:         lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1158:         lbl_p_id.pack(anchor=tk.W, padx=20)
+1159:         
+1160:         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+1161:         self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
+1162:         
+1163:         lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1164:         lbl_p_pass.pack(anchor=tk.W, padx=20)
+1165:         
+1166:         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+1167:         self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+1168:         
+1169:         # Bind Enter keys to trigger Connection immediately
+1170:         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
+1171:         self.entry_p_id.bind("<KP_Enter>", lambda event: self.click_connect())
+1172:         self.entry_p_pass.bind("<Return>", lambda event: self.click_connect())
+1173:         self.entry_p_pass.bind("<KP_Enter>", lambda event: self.click_connect())
+1174:         
+1175:         # Container to hold CONNECT & ADD (+) buttons
+1176:         btn_container = tk.Frame(right_panel, bg=self.card_color)
+1177:         btn_container.pack(padx=20, fill=tk.X)
+1178:         
+1179:         self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
+1180:         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1181:         
+1182:         # Add button with a blue "+"
+1183:         self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
+1184:         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
+1185:         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
+1186: 
+1187:         # LAN Discovery button - Quét máy trong mạng nội bộ
+1188:         lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+1189:         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
+1190: 
+1191:         # Attach Context Menus for Copy & Paste
+1192:         self.make_context_menu(self.entry_p_id)
+1193:         self.make_context_menu(self.entry_p_pass)
+1194:         
+1195:         # BOTTOM STATUS BAR
+1196:         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)
+1197:         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+1198:         
+1199:         self.lbl_status = tk.Label(status_bar, textvariable=self.status_var, font=(APP_FONT_NAME, 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W)
+1200:         self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
+1201:         
+1202:         # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
+1203:         if not self.is_headless:
+1204:             self.setup_tray_icon()
+1205:         
+1206:     # Auto formatting spaces inside ID: "123 456 789 012"
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: run_command]
+  CommandLine: $lines = Get-Content app.py -Encoding utf8
+$startIndex = 912
+$endIndex = 1205
+$body = $lines[$startIndex..$endIndex]
+
+$template = @"
+import tkinter as tk
+import sys
+from core.i18n import _, get_availa...
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 2000
+  toolAction: Creating UI modules
+  toolSummary: Create UI OS modules
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:34Z
+Completed At: 2026-07-29T22:27:38Z
+
+				The command completed successfully.
+				Output:
+				Error formatting a string: Input string was not in a correct format..
+At line:34 char:1
++ $winContent = ($template -f "setup_windows_ui") + "`n" + ($body -join ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (import tkinter ...E, 12, "bold")
+:String) [], RuntimeException
+    + FullyQualifiedErrorId : FormatError
+ 
+Error formatting a string: Input string was not in a correct format..
+At line:35 char:1
++ $macContent = ($template -f "setup_mac_ui") + "`n" + ($body -join "`n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (import tkinter ...E, 12, "bold")
+:String) [], RuntimeException
+    + FullyQualifiedErrorId : FormatError
+ 
+Error formatting a string: Input string was not in a correct format..
+At line:36 char:1
++ $linContent = ($template -f "setup_linux_ui") + "`n" + ($body -join " ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (import tkinter ...E, 12, "bold")
+:String) [], RuntimeException
+    + FullyQualifiedErrorId : FormatError
+
+[Action: run_command]
+  CommandLine: $lines = Get-Content app.py -Encoding utf8
+$startIndex = 912
+$endIndex = 1205
+$body = $lines[$startIndex..$endIndex]
+
+$template = @"
+import tkinter as tk
+import sys
+from core.i18n import _, get_availa...
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 2000
+  toolAction: Creating UI modules
+  toolSummary: Create OS UI modules
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:46Z
+Completed At: 2026-07-29T22:27:48Z
+
+				The command completed successfully.
+			Stdout:
+			
+			Stderr:
+
+[Action: view_file]
+  AbsolutePath: d:\Data\AG\remote_desktop\app.py
+  EndLine: 1211
+  StartLine: 911
+  toolAction: Viewing app.py
+  toolSummary: Viewing app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:27:54Z
+Completed At: 2026-07-29T22:27:54Z
+File Path: `file:///d:/Data/AG/remote_desktop/app.py`
+Total Lines: 4126
+Total Bytes: 189564
+Showing lines 911 to 1211
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+911: 
+912:         
+913:     def setup_ui(self):
+914:         def create_flat_button(parent, **kwargs):
+915:             cmd = kwargs.pop('command', None)
+916:             active_bg = kwargs.pop('activebackground', kwargs.get('bg'))
+917:             kwargs.pop('relief', None)
+918:             kwargs.pop('bd', None)
+919:             kwargs.pop('highlightthickness', None)
+920:             kwargs.pop('highlightbackground', None)
+921:             if 'cursor' not in kwargs:
+922:                 kwargs['cursor'] = 'hand2'
+923:             pady = kwargs.pop('pady', 5)
+924:             padx = kwargs.pop('padx', 5)
+925:             
+926:             text = kwargs.get('text', '')
+927:             if text and len(text) > 2 and text[0] in ['📋', '📁', '📡', '🔧', '🔄', '🔍', '➕', '❌', '❐', '≡', '⌂', '¤', '↻', '⌕']:
+928:                 icon_char = text[0]
+929:                 label_text = text[1:].strip()
+930:                 kwargs.pop('text')
+931:                 
+932:                 frame = tk.Frame(parent, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+933:                 inner = tk.Frame(frame, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+934:                 inner.pack(expand=True, pady=pady)
+935:                 
+936:                 font = kwargs.get('font')
+937:                 fg = kwargs.get('fg')
+938:                 bg = kwargs.get('bg')
+939:                 
+940:                 lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
+941:                 lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
+942:                 
+943:                 lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+944:                 lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
+945:                 
+946:                 def on_enter(e):
+947:                     frame.config(bg=active_bg)
+948:                     inner.config(bg=active_bg)
+949:                     lbl_icon.config(bg=active_bg)
+950:                     lbl_text.config(bg=active_bg)
+951:                 def on_leave(e):
+952:                     frame.config(bg=bg)
+953:                     inner.config(bg=bg)
+954:                     lbl_icon.config(bg=bg)
+955:                     lbl_text.config(bg=bg)
+956:                     
+957:                 frame.bind("<Enter>", on_enter)
+958:                 inner.bind("<Enter>", on_enter)
+959:                 lbl_icon.bind("<Enter>", on_enter)
+960:                 lbl_text.bind("<Enter>", on_enter)
+961:                 frame.bind("<Leave>", on_leave)
+962:                 inner.bind("<Leave>", on_leave)
+963:                 lbl_icon.bind("<Leave>", on_leave)
+964:                 lbl_text.bind("<Leave>", on_leave)
+965:                 
+966:                 if cmd:
+967:                     frame.bind("<Button-1>", lambda e: cmd())
+968:                     inner.bind("<Button-1>", lambda e: cmd())
+969:                     lbl_icon.bind("<Button-1>", lambda e: cmd())
+970:                     lbl_text.bind("<Button-1>", lambda e: cmd())
+971:                     
+972:                 return frame
+973: 
+974:             lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
+975:             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
+976:             lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+977:             if cmd:
+978:                 lbl.bind("<Button-1>", lambda e, c=cmd: c())
+979:             return lbl
+980: 
+981:         # Setup Window Menu Bar
+982:         menubar = tk.Menu(self)
+983:         
+984:         # 1. File Menu
+985:         file_menu = tk.Menu(menubar, tearoff=0)
+986:         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
+987:         file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+988:         file_menu.add_separator()
+989:         file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
+990:         file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
+991:         file_menu.add_separator()
+992:         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
+993:         menubar.add_cascade(label=_("File"), menu=file_menu)
+994:         
+995:         # 2. Options Menu
+996:         options_menu = tk.Menu(menubar, tearoff=0)
+997: 
+998:         # Submenu: Password type
+999:         password_menu = tk.Menu(options_menu, tearoff=0)
+1000:         password_menu.add_radiobutton(
+1001:             label=_("4 chữ số"),
+1002:             variable=self.pass_type_var, value=_("4 chữ số"),
+1003:             command=self.refresh_password
+1004:         )
+1005:         password_menu.add_radiobutton(
+1006:             label=_("5 chữ số"),
+1007:             variable=self.pass_type_var, value=_("5 chữ số"),
+1008:             command=self.refresh_password
+1009:         )
+1010:         password_menu.add_radiobutton(
+1011:             label=_("8 ký tự (chữ + số)"),
+1012:             variable=self.pass_type_var, value=_("8 ký tự (chữ + số)"),
+1013:             command=self.refresh_password
+1014:         )
+1015:         password_menu.add_separator()
+1016:         password_menu.add_command(
+1017:             label=_("Cài mật khẩu cố định..."),
+1018:             command=self.open_set_fixed_password_dialog
+1019:         )
+1020:         options_menu.add_cascade(label=_("Mật khẩu (Password)"), menu=password_menu)
+1021:         options_menu.add_separator()
+1022:         options_menu.add_checkbutton(
+1023:             label=_("Chạy khi mở máy (Run on Startup)"),
+1024:             variable=self.startup_var,
+1025:             command=self.toggle_startup
+1026:         )
+1027:         options_menu.add_command(
+1028:             label=_("Cài Zalo / Điện thoại"),
+1029:             command=self.open_set_zalo_phone_dialog
+1030:         )
+1031:         options_menu.add_separator()
+1032:         options_menu.add_command(
+1033:             label=_("Cài đặt máy chủ..."),
+1034:             command=self.show_server_settings_dialog
+1035:         )
+1036:         if sys.platform == "darwin":
+1037:             options_menu.add_separator()
+1038:             options_menu.add_command(
+1039:                 label=_("Sửa lỗi quyền macOS..."),
+1040:                 command=self.fix_mac_permissions
+1041:             )
+1042:         options_menu.add_separator()
+1043:         
+1044:         
+1045:         # Submenu: Language
+1046:         lang_menu = tk.Menu(options_menu, tearoff=0)
+1047:         langs = get_available_languages()
+1048:         for l in langs:
+1049:             lang_menu.add_radiobutton(label=get_language_name(l), variable=self.current_lang, value=l, command=self.change_language)
+1050:         
+1051:         # Export template
+1052:         lang_menu.add_separator()
+1053:         lang_menu.add_command(label=_("Xuất tệp ngôn ngữ mẫu..."), command=self.export_lang_template)
+1054:         lang_menu.add_command(label=_("Ngôn ngữ riêng của bạn"), command=self.import_custom_language)
+1055:         options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
+1056:         options_menu.add_separator()
+1057: 
+1058:         # Submenu: Theme
+1059:         theme_menu = tk.Menu(options_menu, tearoff=0)
+1060:         theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
+1061:         theme_menu.add_radiobutton(label=_("Tối"), variable=self.current_theme, value="dark", command=self.change_theme)
+1062:         theme_menu.add_radiobutton(label=_("Xám"), variable=self.current_theme, value="gray", command=self.change_theme)
+1063:         theme_menu.add_radiobutton(label=_("Hồng"), variable=self.current_theme, value="pink", command=self.change_theme)
+1064:         theme_menu.add_radiobutton(label=_("Pha lê"), variable=self.current_theme, value="crystal", command=self.change_theme)
+1065:         theme_menu.add_radiobutton(label=_("Cam"), variable=self.current_theme, value="orange", command=self.change_theme)
+1066:         theme_menu.add_radiobutton(label=_("Đỏ"), variable=self.current_theme, value="red", command=self.change_theme)
+1067:         theme_menu.add_separator()
+1068:         theme_menu.add_radiobutton(label=_("Tùy chỉnh"), variable=self.current_theme, value="custom", command=self.change_theme)
+1069:         options_menu.add_cascade(label=_("Giao diện"), menu=theme_menu)
+1070:  
+1071:         menubar.add_cascade(label=_("Options"), menu=options_menu)
+1072:         
+1073:         # 3. Help Menu
+1074:         help_menu = tk.Menu(menubar, tearoff=0)
+1075:         help_menu.add_command(label=_("Zalo"), command=self.open_zalo)
+1076:         help_menu.add_command(label=_("Điện thoại"), command=self.open_phone_dialog)
+1077:         help_menu.add_command(label=_("About"), command=self.show_about_dialog)
+1078:         menubar.add_cascade(label=_("Help"), menu=help_menu)
+1079:         
+1080:         self.config(menu=menubar)
+1081:         
+1082: 
+1083:         # Header Label
+1084:         header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color)
+1085:         header.pack(pady=(15, 5))
+1086:         
+1087:         # Sub-header
+1088:         subheader = tk.Label(self, text=_("Điều khiển trực tuyến máy tính bằng HWID"), font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+1089:         subheader.pack(pady=(0, 15))
+1090:         
+1091:         # Main Panels Container
+1092:         container = tk.Frame(self, bg=self.bg_color)
+1093:         self._main_container = container
+1094:         container.pack(fill=tk.BOTH, expand=True, padx=20)
+1095:         
+1096:         # LEFT PANEL: Allow Remote Control
+1097:         left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+1098:         self._left_panel = left_panel
+1099:         left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
+1100:         
+1101:         lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+1102:         lbl_allow.pack(pady=(15, 10))
+1103:         
+1104:         lbl_id = tk.Label(left_panel, text=_("Mã ID của bạn:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1105:         lbl_id.pack(anchor=tk.W, padx=20)
+1106:         
+1107:         id_frame = tk.Frame(left_panel, bg=self.card_color)
+1108:         self._id_frame = id_frame
+1109:         id_frame.pack(fill=tk.X, padx=20, pady=(5, 12))
+1110:         
+1111:         self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
+1112:         self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1113:         
+1114:         copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+1115:         copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1116:         ToolTip(copy_id_btn, _("Sao chép"))
+1117:         
+1118:         lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1119:         lbl_pass.pack(anchor=tk.W, padx=20)
+1120:         
+1121:         pass_frame = tk.Frame(left_panel, bg=self.card_color)
+1122:         self._pass_frame = pass_frame
+1123:         pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
+1124:         
+1125:         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
+1126:         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1127:         
+1128:         copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+1129:         copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1130:         ToolTip(copy_pass_btn, _("Sao chép"))
+1131:         
+1132:         refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=self.refresh_password)
+1133:         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
+1134:         ToolTip(refresh_btn, _("Đổi mật khẩu"))
+1135: 
+1136:         # Nhãn hiển thị trạng thái mật khẩu cố định
+1137:         self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
+1138:         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
+1139:         self.update_fixed_password_indicator()
+1140: 
+1141:         # Button to Copy both ID & Password at once
+1142:         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
+1143:         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
+1144: 
+1145:         # Nút gọi Danh sách máy tính đã lưu
+1146:         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+1147:         saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
+1148:         
+1149:         # RIGHT PANEL: Control Remote Computer
+1150:         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+1151:         self._right_panel = right_panel
+1152:         right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
+1153:         
+1154:         lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+1155:         lbl_control.pack(pady=(15, 10))
+1156:         
+1157:         lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1158:         lbl_p_id.pack(anchor=tk.W, padx=20)
+1159:         
+1160:         self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+1161:         self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
+1162:         
+1163:         lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+1164:         lbl_p_pass.pack(anchor=tk.W, padx=20)
+1165:         
+1166:         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+1167:         self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+1168:         
+1169:         # Bind Enter keys to trigger Connection immediately
+1170:         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
+1171:         self.entry_p_id.bind("<KP_Enter>", lambda event: self.click_connect())
+1172:         self.entry_p_pass.bind("<Return>", lambda event: self.click_connect())
+1173:         self.entry_p_pass.bind("<KP_Enter>", lambda event: self.click_connect())
+1174:         
+1175:         # Container to hold CONNECT & ADD (+) buttons
+1176:         btn_container = tk.Frame(right_panel, bg=self.card_color)
+1177:         btn_container.pack(padx=20, fill=tk.X)
+1178:         
+1179:         self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
+1180:         self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+1181:         
+1182:         # Add button with a blue "+"
+1183:         self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
+1184:         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
+1185:         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
+1186: 
+1187:         # LAN Discovery button - Quét máy trong mạng nội bộ
+1188:         lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+1189:         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
+1190: 
+1191:         # Attach Context Menus for Copy & Paste
+1192:         self.make_context_menu(self.entry_p_id)
+1193:         self.make_context_menu(self.entry_p_pass)
+1194:         
+1195:         # BOTTOM STATUS BAR
+1196:         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)
+1197:         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+1198:         
+1199:         self.lbl_status = tk.Label(status_bar, textvariable=self.status_var, font=(APP_FONT_NAME, 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W)
+1200:         self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
+1201:         
+1202:         # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
+1203:         if not self.is_headless:
+1204:             self.setup_tray_icon()
+1205:         
+1206:     # Auto formatting spaces inside ID: "123 456 789 012"
+1207:     def format_partner_id(self, *args):
+1208:         # Defer formatting to after the current key event is fully processed
+1209:         # This prevents cursor position conflicts when typing rapidly
+1210:         if hasattr(self, '_format_after_id') and self._format_after_id:
+1211:             try:
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+[Action: replace_file_content]
+  AllowMultiple: False
+  Description: Route setup_ui to OS-specific modules
+  EndLine: 1205
+  Instruction: Replace the large setup_ui method with dynamic routing logic
+  ReplacementContent:     def setup_ui(self):
+        import sys
+        if sys.platform == "darwin":
+            from gui.mac_ui import setup_mac_ui
+            setup_mac_ui(self)
+        elif sys.platform.startswith("lin...
+  StartLine: 913
+  TargetContent:     def setup_ui(self):
+        def create_flat_button(parent, **kwargs):
+            cmd = kwargs.pop('command', None)
+            active_bg = kwargs.pop('activebackground', kwargs.get('bg'))
+       ...
+  TargetFile: d:\Data\AG\remote_desktop\app.py
+  toolAction: Routing setup_ui
+  toolSummary: Modify app.py setup_ui
+
+========== MODEL ==========
+Created At: 2026-07-29T22:28:30Z
+Completed At: 2026-07-29T22:28:32Z
+The following changes were made by the replace_file_content tool to: d:\Data\AG\remote_desktop\app.py. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -911,297 +911,16 @@
+ 
+         
+     def setup_ui(self):
+-        def create_flat_button(parent, **kwargs):
+-            cmd = kwargs.pop('command', None)
+-            active_bg = kwargs.pop('activebackground', kwargs.get('bg'))
+-            kwargs.pop('relief', None)
+-            kwargs.pop('bd', None)
+-            kwargs.pop('highlightthickness', None)
+-            kwargs.pop('highlightbackground', None)
+-            if 'cursor' not in kwargs:
+-                kwargs['cursor'] = 'hand2'
+-            pady = kwargs.pop('pady', 5)
+-            padx = kwargs.pop('padx', 5)
+-            
+-            text = kwargs.get('text', '')
+-            if text and len(text) > 2 and text[0] in ['📋', '📁', '📡', '🔧', '🔄', '🔍', '➕', '❌', '❐', '≡', '⌂', '¤', '↻', '⌕']:
+-                icon_char = text[0]
+-                label_text = text[1:].strip()
+-                kwargs.pop('text')
+-                
+-                frame = tk.Frame(parent, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+-                inner = tk.Frame(frame, bg=kwargs.get('bg'), cursor=kwargs.get('cursor'))
+-                inner.pack(expand=True, pady=pady)
+-                
+-                font = kwargs.get('font')
+-                fg = kwargs.get('fg')
+-                bg = kwargs.get('bg')
+-                
+-                lbl_icon = tk.Label(inner, text=icon_char, font=font, fg=fg, bg=bg)
+-                lbl_text = tk.Label(inner, text=label_text, font=font, fg=fg, bg=bg)
+-                
+-                lbl_icon.pack(side=tk.LEFT, padx=(padx, 2), pady=(0, 4), anchor=tk.CENTER)
+-                lbl_text.pack(side=tk.LEFT, padx=(0, padx), anchor=tk.CENTER)
+-                
+-                def on_enter(e):
+-                    frame.config(bg=active_bg)
+-                    inner.config(bg=active_bg)
+-                    lbl_icon.config(bg=active_bg)
+-                    lbl_text.config(bg=active_bg)
+-                def on_leave(e):
+-                    frame.config(bg=bg)
+-                    inner.config(bg=bg)
+-                    lbl_icon.config(bg=bg)
+-                    lbl_text.config(bg=bg)
+-                    
+-                frame.bind("<Enter>", on_enter)
+-                inner.bind("<Enter>", on_enter)
+-                lbl_icon.bind("<Enter>", on_enter)
+-                lbl_text.bind("<Enter>", on_enter)
+-                frame.bind("<Leave>", on_leave)
+-                inner.bind("<Leave>", on_leave)
+-                lbl_icon.bind("<Leave>", on_leave)
+-                lbl_text.bind("<Leave>", on_leave)
+-                
+-                if cmd:
+-                    frame.bind("<Button-1>", lambda e: cmd())
+-                    inner.bind("<Button-1>", lambda e: cmd())
+-                    lbl_icon.bind("<Button-1>", lambda e: cmd())
+-                    lbl_text.bind("<Button-1>", lambda e: cmd())
+-                    
+-                return frame
+-
+-            lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
+-            lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
+-            lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+-            if cmd:
+-                lbl.bind("<Button-1>", lambda e, c=cmd: c())
+-            return lbl
+-
+-        # Setup Window Menu Bar
+-        menubar = tk.Menu(self)
+-        
+-        # 1. File Menu
+-        file_menu = tk.Menu(menubar, tearoff=0)
+-        file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
+-        file_menu.add_command(label=E(_("Quét mạng LAN (LAN Discovery)")), command=self.show_lan_computers_dialog)
+-        file_menu.add_separator()
+-        file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
+-        file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
+-        file_menu.add_separator()
+-        file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
+-        menubar.add_cascade(label=_("File"), menu=file_menu)
+-        
+-        # 2. Options Menu
+-        options_menu = tk.Menu(menubar, tearoff=0)
+-
+-        # Submenu: Password type
+-        password_menu = tk.Menu(options_menu, tearoff=0)
+-        password_menu.add_radiobutton(
+-            label=_("4 chữ số"),
+-            variable=self.pass_type_var, value=_("4 chữ số"),
+-            command=self.refresh_password
+-        )
+-        password_menu.add_radiobutton(
+-            label=_("5 chữ số"),
+-            variable=self.pass_type_var, value=_("5 chữ số"),
+-            command=self.refresh_password
+-        )
+-        password_menu.add_radiobutton(
+-            label=_("8 ký tự (chữ + số)"),
+-            variable=self.pass_type_var, value=_("8 ký tự (chữ + số)"),
+-            command=self.refresh_password
+-        )
+-        password_menu.add_separator()
+-        password_menu.add_command(
+-            label=_("Cài mật khẩu cố định..."),
+-            command=self.open_set_fixed_password_dialog
+-        )
+-        options_menu.add_cascade(label=_("Mật khẩu (Password)"), menu=password_menu)
+-        options_menu.add_separator()
+-        options_menu.add_checkbutton(
+-            label=_("Chạy khi mở máy (Run on Startup)"),
+-            variable=self.startup_var,
+-            command=self.toggle_startup
+-        )
+-        options_menu.add_command(
+-            label=_("Cài Zalo / Điện thoại"),
+-            command=self.open_set_zalo_phone_dialog
+-        )
+-        options_menu.add_separator()
+-        options_menu.add_command(
+-            label=_("Cài đặt máy chủ..."),
+-            command=self.show_server_settings_dialog
+-        )
++        import sys
+         if sys.platform == "darwin":
+-            options_menu.add_separator()
+-            options_menu.add_command(
+-                label=_("Sửa lỗi quyền macOS..."),
+-                command=self.fix_mac_permissions
+-            )
+-        options_menu.add_separator()
+-        
+-        
+-        # Submenu: Language
+-        lang_menu = tk.Menu(options_menu, tearoff=0)
+-        langs = get_available_languages()
+-        for l in langs:
+-            lang_menu.add_radiobutton(label=get_language_name(l), variable=self.current_lang, value=l, command=self.change_language)
+-        
+-        # Export template
+-        lang_menu.add_separator()
+-        lang_menu.add_command(label=_("Xuất tệp ngôn ngữ mẫu..."), command=self.export_lang_template)
+-        lang_menu.add_command(label=_("Ngôn ngữ riêng của bạn"), command=self.import_custom_language)
+-        options_menu.add_cascade(label=_("Ngôn ngữ (Language)"), menu=lang_menu) # Tạm thay thế
+-        options_menu.add_separator()
+-
+-        # Submenu: Theme
+-        theme_menu = tk.Menu(options_menu, tearoff=0)
+-        theme_menu.add_radiobutton(label=_("Sáng"), variable=self.current_theme, value="light", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Tối"), variable=self.current_theme, value="dark", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Xám"), variable=self.current_theme, value="gray", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Hồng"), variable=self.current_theme, value="pink", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Pha lê"), variable=self.current_theme, value="crystal", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Cam"), variable=self.current_theme, value="orange", command=self.change_theme)
+-        theme_menu.add_radiobutton(label=_("Đỏ"), variable=self.current_theme, value="red", command=self.change_theme)
+-        theme_menu.add_separator()
+-        theme_menu.add_radiobutton(label=_("Tùy chỉnh"), variable=self.current_theme, value="custom", command=self.change_theme)
+-        options_menu.add_cascade(label=_("Giao diện"), menu=theme_menu)
+- 
+-        menubar.add_cascade(label=_("Options"), menu=options_menu)
+-        
+-        # 3. Help Menu
+-        help_menu = tk.Menu(menubar, tearoff=0)
+-        help_menu.add_command(label=_("Zalo"), command=self.open_zalo)
+-        help_menu.add_command(label=_("Điện thoại"), command=self.open_phone_dialog)
+-        help_menu.add_command(label=_("About"), command=self.show_about_dialog)
+-        menubar.add_cascade(label=_("Help"), menu=help_menu)
+-        
+-        self.config(menu=menubar)
+-        
+-
+-        # Header Label
+-        header = tk.Label(self, text=_("P2P REMOTE DESKTOP"), font=(APP_FONT_NAME, 16, "bold"), fg=self.btn_color, bg=self.bg_color)
+-        header.pack(pady=(15, 5))
+-        
+-        # Sub-header
+-        subheader = tk.Label(self, text=_("Điều khiển trực tuyến máy tính bằng HWID"), font=(APP_FONT_NAME, 9, "italic"), fg=self.text_gray, bg=self.bg_color)
+-        subheader.pack(pady=(0, 15))
+-        
+-        # Main Panels Container
+-        container = tk.Frame(self, bg=self.bg_color)
+-        self._main_container = container
+-        container.pack(fill=tk.BOTH, expand=True, padx=20)
+-        
+-        # LEFT PANEL: Allow Remote Control
+-        left_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+-        self._left_panel = left_panel
+-        left_panel.place(relx=0.0, rely=0.0, relwidth=0.47, relheight=0.92)
+-        
+-        lbl_allow = tk.Label(left_panel, text=_("CHO PHÉP ĐIỀU KHIỂN"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+-        lbl_allow.pack(pady=(15, 10))
+-        
+-        lbl_id = tk.Label(left_panel, text=_("Mã ID của bạn:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+-        lbl_id.pack(anchor=tk.W, padx=20)
+-        
+-        id_frame = tk.Frame(left_panel, bg=self.card_color)
+-        self._id_frame = id_frame
+-        id_frame.pack(fill=tk.X, padx=20, pady=(5, 12))
+-        
+-        self.my_id_label = tk.Label(id_frame, text=self.my_id_formatted, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0, height=1)
+-        self.my_id_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+-        
+-        copy_id_btn = create_flat_button(id_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_id_formatted))
+-        copy_id_btn.pack(side=tk.RIGHT, padx=(5, 0))
+-        ToolTip(copy_id_btn, _("Sao chép"))
+-        
+-        lbl_pass = tk.Label(left_panel, text=_("Mật khẩu kết nối:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+-        lbl_pass.pack(anchor=tk.W, padx=20)
+-        
+-        pass_frame = tk.Frame(left_panel, bg=self.card_color)
+-        self._pass_frame = pass_frame
+-        pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
+-        
+-        self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
+-        self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+-        
+-        copy_pass_btn = create_flat_button(pass_frame, text=E("📋"), font=EMOJI_FONT_10, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=lambda: self.copy_to_clipboard(self.my_password))
+-        copy_pass_btn.pack(side=tk.RIGHT, padx=(5, 0))
+-        ToolTip(copy_pass_btn, _("Sao chép"))
+-        
+-        refresh_btn = create_flat_button(pass_frame, text="↻", font=(APP_FONT_NAME, 10, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=2, pady=1, width=3, command=self.refresh_password)
+-        refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
+-        ToolTip(refresh_btn, _("Đổi mật khẩu"))
+-
+-        # Nhãn hiển thị trạng thái mật khẩu cố định
+-        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
+-        self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
+-        self.update_fixed_password_indicator()
+-
+-        # Button to Copy both ID & Password at once
+-        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
+-        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
+-
+-        # Nút gọi Danh sách máy tính đã lưu
+-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+-        saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
+-        
+-        # RIGHT PANEL: Control Remote Computer
+-        right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
+-        self._right_panel = right_panel
+-        right_panel.place(relx=0.53, rely=0.0, relwidth=0.47, relheight=0.92)
+-        
+-        lbl_control = tk.Label(right_panel, text=_("ĐIỀU KHIỂN ĐỐI TÁC"), font=(APP_FONT_NAME, 11, "bold"), fg=self.btn_color, bg=self.card_color)
+-        lbl_control.pack(pady=(15, 10))
+-        
+-        lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+-        lbl_p_id.pack(anchor=tk.W, padx=20)
+-        
+-        self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+-        self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
+-        
+-        lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
+-        lbl_p_pass.pack(anchor=tk.W, padx=20)
+-        
+-        self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+-        self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+-        
+-        # Bind Enter keys to trigger Connection immediately
+-        self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
+-        self.entry_p_id.bind("<KP_Enter>", lambda event: self.click_connect())
+-        self.entry_p_pass.bind("<Return>", lambda event: self.click_connect())
+-        self.entry_p_pass.bind("<KP_Enter>", lambda event: self.click_connect())
+-        
+-        # Container to hold CONNECT & ADD (+) buttons
+-        btn_container = tk.Frame(right_panel, bg=self.card_color)
+-        btn_container.pack(padx=20, fill=tk.X)
+-        
+-        self.connect_btn = create_flat_button(btn_container, text=_("KẾT NỐI (CONNECT)"), font=(APP_FONT_NAME, 11, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, padx=10, pady=2, command=self.click_connect)
+-        self.connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+-        
+-        # Add button with a blue "+"
+-        self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
+-        self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
+-        ToolTip(self.add_partner_btn, _("Thêm máy tính"))
+-
+-        # LAN Discovery button - Quét máy trong mạng nội bộ
+-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN (LAN Only)")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+-        lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
+-
+-        # Attach Context Menus for Copy & Paste
+-        self.make_context_menu(self.entry_p_id)
+-        self.make_context_menu(self.entry_p_pass)
+-        
+-        # BOTTOM STATUS BAR
+-        status_bar = tk.Frame(self, bg=self.entry_bg, height=25)
+-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+-        
+-        self.lbl_status = tk.Label(status_bar, textvariable=self.status_var, font=(APP_FONT_NAME, 8, "italic"), fg="#8A8A9A", bg=self.entry_bg, anchor=tk.W)
+-        self.lbl_status.pack(fill=tk.BOTH, padx=10, pady=2)
+-        
+-        # Khởi chạy icon khay hệ thống ngay khi bật ứng dụng
+-        if not self.is_headless:
+-            self.setup_tray_icon()
++            from gui.mac_ui import setup_mac_ui
++            setup_mac_ui(self)
++        elif sys.platform.startswith("linux"):
++            from gui.linux_ui import setup_linux_ui
++            setup_linux_ui(self)
++        else:
++            from gui.windows_ui import setup_windows_ui
++            setup_windows_ui(self)
+         
+     # Auto formatting spaces inside ID: "123 456 789 012"
+     def format_partner_id(self, *args):
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+[Action: run_command]
+  CommandLine: python app.py
+  Cwd: d:\Data\AG\remote_desktop
+  WaitMsBeforeAsync: 5000
+  toolAction: Running app.py
+  toolSummary: Run app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:28:37Z
+Tool is running as a background task with task id: 9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/task-55
+Task Description: python app.py
+Task logs are available at: file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/.system_generated/tasks/task-55.log
+
+[Action: manage_task]
+  Action: kill
+  TaskId: 9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/task-55
+  toolAction: Killing task 55
+  toolSummary: Kill python app.py
+
+========== MODEL ==========
+Created At: 2026-07-29T22:28:49Z
+Completed At: 2026-07-29T22:28:49Z
+Task "9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/task-55" cancelled.
+
+[Action: write_to_file]
+  ArtifactMetadata: {'RequestFeedback': False, 'Summary': 'Updated task tracking for splitting UI into OS specific files', 'UserFacing': True}
+  CodeContent: - `[x]` Extract current `setup_ui` logic from `app.py`.
+- `[x]` Create `gui/windows_ui.py`.
+- `[x]` Create `gui/mac_ui.py`.
+- `[x]` Create `gui/linux_ui.py`.
+- `[x]` Modify `app.py`'s `setup_ui` to dy...
+  Description: Updated task tracker
+  Overwrite: True
+  TargetFile: C:\Users\Tuyen\.gemini\antigravity-ide\brain\9dd960e8-8324-46b8-b3cf-3a1b24afbc2a\task.md
+  toolAction: Updating task.md
+  toolSummary: Update task tracker
+[Action: write_to_file]
+  ArtifactMetadata: {'RequestFeedback': False, 'Summary': 'Walkthrough of changes to split UI into OS specific files', 'UserFacing': True}
+  CodeContent: # UI Split Walkthrough
+
+I have successfully separated the main application user interface logic into three separate OS-specific files.
+
+## Changes Made
+- Extracted the massive `setup_ui` method from `...
+  Description: Created walkthrough for UI OS split
+  Overwrite: True
+  TargetFile: C:\Users\Tuyen\.gemini\antigravity-ide\brain\9dd960e8-8324-46b8-b3cf-3a1b24afbc2a\walkthrough.md
+  toolAction: Writing to walkthrough.md
+  toolSummary: Create Walkthrough
+
+========== MODEL ==========
+Created At: 2026-07-29T22:28:58Z
+Completed At: 2026-07-29T22:28:58Z
+Created file file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/task.md with requested content.
+If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+
+========== MODEL ==========
+Created At: 2026-07-29T22:28:58Z
+Completed At: 2026-07-29T22:28:58Z
+Created file file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/walkthrough.md with requested content.
+If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+
+========== MODEL ==========
+I have finished splitting the app's User Interface into three separate files corresponding to the different operating systems.
+
+You can review the changes in the [walkthrough.md](file:///C:/Users/Tuyen/.gemini/antigravity-ide/brain/9dd960e8-8324-46b8-b3cf-3a1b24afbc2a/walkthrough.md) artifact!
+The UI components are now stored in:
+- [gui/windows_ui.py](file:///d:/Data/AG/remote_desktop/gui/windows_ui.py)
+- [gui/mac_ui.py](file:///d:/Data/AG/remote_desktop/gui/mac_ui.py)
+- [gui/linux_ui.py](file:///d:/Data/AG/remote_desktop/gui/linux_ui.py)
+
+And [app.py](file:///d:/Data/AG/remote_desktop/app.py) correctly determines which UI to load dynamically at startup based on your platform. Let me know if you would like to proceed with customizing the macOS or Linux specific layouts!
+
