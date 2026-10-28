@@ -429,15 +429,19 @@ class NetworkMixin:
         if self._is_host_only_app():
             return
         if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
+            if self.lan_computers_dialog.state() == 'withdrawn':
+                self.lan_computers_dialog.deiconify()
             self.lan_computers_dialog.lift()
             self.lan_computers_dialog.focus_force()
             return
             
         dialog = tk.Toplevel(self)
+        dialog.withdraw()  # Ẩn tạm thời để tính toán kích thước/vị trí tránh nháy hình
         self.lan_computers_dialog = dialog
         dialog.title(_("Máy tính trong mạng LAN & VPN"))
         dialog.resizable(True, True)
         dialog.configure(bg=self.bg_color)
+        dialog.transient(self)  # Gắn transient vào cửa sổ chính để không tạo thêm icon riêng trên Taskbar (giống Danh sách máy tính đã lưu)
 
         w, h = 640, 540
         parent_x = self.winfo_x()
@@ -460,6 +464,9 @@ class NetworkMixin:
 
         dialog.geometry(f"{w}x{h}+{x}+{y}")
         dialog.minsize(600, 480)
+        dialog.deiconify()
+        dialog.lift()
+        dialog.focus_force()
 
         # Title
         lbl_title = tk.Label(dialog, text=_("📡 MÁY TÍNH TRONG MẠNG LAN & VPN"), font=("Segoe UI", 11, "bold"), fg=self.btn_color, bg=self.bg_color)
