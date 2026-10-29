@@ -280,6 +280,16 @@ def main():
     shorten_openblas_dll(app_dist_dir)
     strip_host_unused(app_dist_dir)
 
+    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân vào bộ cài đặt Host phân phối
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt"):
+        pf_dist = os.path.join(app_dist_dir, personal_file)
+        if os.path.exists(pf_dist):
+            try:
+                os.remove(pf_dist)
+                log(f"Removed personal data file from Host app.dist: {personal_file}")
+            except Exception as e:
+                log(f"Warning: could not remove {personal_file} from Host app.dist: {e}")
+
     files_to_copy = [
         "app_icon.png", "app_icon.ico", "readme.txt",
         "disclaimer_vi.txt", "disclaimer_en.txt", "server.ini",

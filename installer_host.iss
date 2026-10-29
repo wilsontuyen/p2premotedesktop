@@ -39,7 +39,7 @@ Name: "{app}"; Permissions: users-modify
 Name: "{app}\Logs"; Permissions: users-modify
 
 [Files]
-Source: "dist_nuitka_host\app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist_nuitka_host\app.dist\*"; DestDir: "{app}"; Excludes: "saved_computers.xml,lan_peers.json,config.json,app.ini,window_config.json,custom_ip_range.json,session_pass.txt,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "disclaimer_vi.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "disclaimer_en.txt"; DestDir: "{app}"; Flags: ignoreversion
 

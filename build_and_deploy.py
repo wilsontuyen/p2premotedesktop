@@ -131,8 +131,8 @@ def main():
     shorten_openblas_dll(app_dist_dir)
     log_dist_size(app_dist_dir, "Full app.dist")
 
-    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân (saved_computers.xml, lan_peers.json, config.json, app.ini) vào bộ cài đặt phân phối
-    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini"):
+    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân vào bộ cài đặt phân phối
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt"):
         pf_dist = os.path.join(app_dist_dir, personal_file)
         if os.path.exists(pf_dist):
             try:

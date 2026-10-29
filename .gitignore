@@ -64,6 +64,8 @@ saved_computers.xml
 lan_peers.json
 config.json
 app.ini
+custom_ip_range.json
+session_pass.txt
 
 # Allow conversations directory and its txt files
 !/conversations/
