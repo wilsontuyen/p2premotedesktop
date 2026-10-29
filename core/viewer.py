@@ -81,6 +81,56 @@ def _blit_pil_to_screen(screen, pil_img, window_w, window_h):
         scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
     screen.blit(scaled_surf, (0, 0))
 
+
+def _draw_monitor_toggle_btn(screen, rect, is_on, is_hover, btn_border_color, pygame_theme="dark"):
+    import pygame
+    is_light_ui = pygame_theme in ("light", "pink", "crystal", "orange", "red")
+    if is_on:
+        bg_color = (0, 176, 198) if is_hover else (0, 142, 165)
+        border_col = (255, 255, 255)
+        bezel_col = (255, 255, 255)
+        screen_fill = (135, 242, 255)
+    else:
+        if is_light_ui:
+            bg_color = (205, 210, 220) if is_hover else (228, 230, 238)
+            bezel_col = (105, 110, 122)
+            screen_fill = (180, 185, 195)
+        else:
+            bg_color = (86, 90, 102) if is_hover else (52, 55, 64)
+            bezel_col = (150, 156, 168)
+            screen_fill = (34, 36, 42)
+        border_col = btn_border_color
+
+    pygame.draw.rect(screen, bg_color, rect, border_radius=4)
+    pygame.draw.rect(screen, border_col, rect, width=1, border_radius=4)
+
+    cx, cy = rect.center
+    mon_rect = pygame.Rect(cx - 7, cy - 6, 14, 10)
+    inner_rect = pygame.Rect(cx - 5, cy - 4, 10, 6)
+    pygame.draw.rect(screen, screen_fill, inner_rect)
+    pygame.draw.rect(screen, bezel_col, mon_rect, width=1, border_radius=2)
+    pygame.draw.line(screen, bezel_col, (cx, cy + 4), (cx, cy + 6), 2)
+    pygame.draw.line(screen, bezel_col, (cx - 4, cy + 6), (cx + 4, cy + 6), 2)
+
+    if not is_on:
+        pygame.draw.line(screen, (235, 85, 85), (cx - 5, cy + 3), (cx + 5, cy - 5), 2)
+
+
+def _draw_host_cursor_overlay(screen, vx, vy):
+    import pygame
+    pts = [
+        (vx, vy),
+        (vx, vy + 16),
+        (vx + 4, vy + 12),
+        (vx + 8, vy + 20),
+        (vx + 11, vy + 18),
+        (vx + 7, vy + 10),
+        (vx + 13, vy + 10),
+    ]
+    pygame.draw.polygon(screen, (255, 255, 255), pts)
+    pygame.draw.polygon(screen, (20, 20, 20), pts, width=1)
+
+
 # Shared client variables
 client_latest_frame = None
 client_last_recv_time = 0
@@ -93,10 +143,125 @@ client_last_switching_desktop_time = 0
 client_host_resolution = None
 client_host_did_shutdown = False
 client_host_computer_name_override = None
+client_host_monitor_count = 1
+client_host_sent_monitor_info = False
+        client_host_monitor_rects = []
+client_true_remote_res = None
+client_mon_left_on = True
+client_mon_right_on = True
+client_need_resync_monitors = False
+client_host_cursor_lock = threading.Lock()
+client_host_cursor_data = {"rx": 0.5, "ry": 0.5, "visible": False, "seq": 0}
+
+_DUAL_MON_STD_SIZES = {
+    3840: [2160],
+    2560: [1440, 1600, 1080],
+    1920: [1080, 1200],
+    1680: [1050],
+    1600: [900, 1200],
+    1440: [900],
+    1366: [768],
+    1360: [768],
+    1280: [720, 800, 1024],
+    1024: [768],
+    800: [600],
+}
+
+
+def _detect_black_padding_offset(img, w1, w2, h_full, h_target):
+    """Kiem tra xem man hinh nho hon bi chen vien den o tren (bottom-aligned) hay o duoi (top-aligned)."""
+    try:
+        import numpy as _np
+        arr = _np.array(img)
+        ih, iw = arr.shape[:2]
+        if ih < 10 or iw < 10:
+            return max(0, h_full - h_target)
+        diff = h_full - h_target
+        if diff <= 0:
+            return 0
+        
+        sx = iw / float(max(1, w1 + w2))
+        sy = ih / float(max(1, h_full))
+        
+        x_start = int(round((w1 + min(50, w2 // 4)) * sx))
+        x_end = int(round((w1 + w2 - min(50, w2 // 4)) * sx))
+        if x_end <= x_start:
+            x_start = int(round(w1 * sx))
+            x_end = iw
+        
+        top_y_end = max(1, int(round((diff // 2) * sy)))
+        top_slice = arr[0:top_y_end, x_start:x_end]
+        if top_slice.size > 0 and float(_np.mean(top_slice)) < 6.0:
+            return diff
+            
+        bot_y_start = min(ih - 1, int(round((h_full - diff // 2) * sy)))
+        bot_slice = arr[bot_y_start:ih, x_start:x_end]
+        if bot_slice.size > 0 and float(_np.mean(bot_slice)) < 6.0:
+            return 0
+    except Exception:
+        pass
+    return max(0, h_full - h_target)
+
+
+def _resolve_dual_monitor_subrects(total_w, total_h, monitors_meta=None, img_sample=None):
+    """
+    Tra ve (m1_rect, m2_rect, full_w, full_h).
+    Moi rect la (x, y, w, h) trong khong gian canvas goc khong bi scale.
+    """
+    if monitors_meta and len(monitors_meta) >= 2:
+        try:
+            sorted_m = sorted(monitors_meta, key=lambda m: (m.get("left", 0), m.get("top", 0)))
+            m1 = sorted_m[0]
+            m2 = sorted_m[1]
+            min_x = min(m1.get("left", 0), m2.get("left", 0))
+            min_y = min(m1.get("top", 0), m2.get("top", 0))
+            r1 = (int(m1.get("left", 0) - min_x), int(m1.get("top", 0) - min_y), max(1, int(m1.get("width", 1))), max(1, int(m1.get("height", 1))))
+            r2 = (int(m2.get("left", 0) - min_x), int(m2.get("top", 0) - min_y), max(1, int(m2.get("width", 1))), max(1, int(m2.get("height", 1))))
+            fw = max(r1[0] + r1[2], r2[0] + r2[2], int(total_w))
+            fh = max(r1[1] + r1[3], r2[1] + r2[3], int(total_h))
+            return r1, r2, fw, fh
+        except Exception:
+            pass
+
+    W = int(total_w)
+    H = int(total_h)
+    
+    best_pair = None
+    for w1 in sorted(_DUAL_MON_STD_SIZES.keys(), reverse=True):
+        w2 = W - w1
+        if w2 in _DUAL_MON_STD_SIZES:
+            h1 = _DUAL_MON_STD_SIZES[w1][0]
+            h2 = _DUAL_MON_STD_SIZES[w2][0]
+            score = 0
+            if h1 == H:
+                score += 10
+            if h2 == H:
+                score += 10
+            if w1 >= w2:
+                score += 1
+            if best_pair is None or score > best_pair[0]:
+                best_pair = (score, (w1, h1), (w2, h2))
+                
+    if best_pair:
+        (w1, h1), (w2, h2) = best_pair[1], best_pair[2]
+        if h2 < H:
+            y2 = _detect_black_padding_offset(img_sample, w1, w2, H, h2) if img_sample is not None else (H - h2)
+            y1 = 0
+        elif h1 < H:
+            y1 = (H - h1)
+            y2 = 0
+        else:
+            y1 = 0
+            y2 = 0
+        return (0, y1, w1, h1), (w1, y2, w2, h2), W, H
+
+    half_w = max(1, W // 2)
+    return (0, 0, half_w, H), (half_w, 0, W - half_w, H), W, H
 
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
     global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown, client_last_switching_desktop_time
+    global client_host_monitor_count, client_host_sent_monitor_info, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors
     client_pending_bbox = None
     ensure_session_socket_blocking(sock)
     while client_running:
@@ -124,6 +289,29 @@ def client_receiver_thread(sock, password):
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
                     if evt_type == "pong":
+                        continue
+                    elif evt_type == "host_cursor":
+                        rx_val = event.get("rx")
+                        ry_val = event.get("ry")
+                        if rx_val is not None and ry_val is not None:
+                            with client_host_cursor_lock:
+                                client_host_cursor_data["rx"] = max(0.0, min(1.0, float(rx_val)))
+                                client_host_cursor_data["ry"] = max(0.0, min(1.0, float(ry_val)))
+                                client_host_cursor_data["visible"] = bool(event.get("visible", True))
+                                client_host_cursor_data["seq"] = int(client_host_cursor_data.get("seq", 0)) + 1
+                        continue
+                    elif evt_type == "monitor_info":
+                        cnt = max(1, int(event.get("count", 1) or 1))
+                        client_host_sent_monitor_info = True
+                        client_host_monitor_count = cnt
+                        global client_host_monitor_rects
+                        client_host_monitor_rects = event.get("monitors", [])
+                        if cnt < 2:
+                            client_mon_left_on = True
+                            client_mon_right_on = True
+                            client_need_resync_monitors = False
+                        elif not client_mon_left_on or not client_mon_right_on:
+                            client_need_resync_monitors = True
                         continue
                     elif evt_type == "screen_cover_state":
                         globals()['viewer_cover_state'] = bool(event.get("active"))
@@ -168,8 +356,26 @@ def client_receiver_thread(sock, password):
                         new_w = event.get("w")
                         new_h = event.get("h")
                         if new_w and new_h:
+                            client_pending_bbox = None
+                            with client_frame_lock:
+                                client_latest_frame = None
+                            client_true_remote_res = (int(new_w), int(new_h))
                             global client_host_resolution
-                            client_host_resolution = (new_w, new_h)
+                            if (int(new_w) / max(1, int(new_h)) >= 2.0) and (not client_mon_left_on or not client_mon_right_on):
+                                _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(
+                                    int(new_w), int(new_h),
+                                    monitors_meta=client_host_monitor_rects
+                                )
+                                if client_mon_left_on and not client_mon_right_on:
+                                    client_host_resolution = (_m1_r[2], _m1_r[3])
+                                elif client_mon_right_on and not client_mon_left_on:
+                                    client_host_resolution = (_m2_r[2], _m2_r[3])
+                                else:
+                                    client_host_resolution = (int(new_w), int(new_h))
+
+
+                            else:
+                                client_host_resolution = (int(new_w), int(new_h))
                         continue
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
@@ -723,6 +929,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             uninstall_keyboard_hook()
             return
         
+        global client_host_monitor_count, client_host_sent_monitor_info, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors
+        client_host_monitor_count = 1
+        client_host_sent_monitor_info = False
+        client_host_monitor_rects = []
+        client_true_remote_res = (int(host_w), int(host_h))
+        client_mon_left_on = True
+        client_mon_right_on = True
+        client_need_resync_monitors = False
+        with client_host_cursor_lock:
+            client_host_cursor_data["visible"] = False
+            client_host_cursor_data["seq"] = 0
+
         while outer_running:
             exit_due_to_disconnect = True
             global client_latest_frame, client_running, client_is_domain, client_is_locked, client_last_recv_time, client_host_did_shutdown
@@ -842,6 +1060,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             send_event({"type": "check_domain"})
             send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
             send_event({"type": "quality_mode", "mode": client_quality_mode})
+            def _apply_monitor_selection(left_on, right_on):
+                global client_host_resolution
+                cur_tr_w, cur_tr_h = client_true_remote_res if client_true_remote_res else (host_w, host_h)
+                m1_rect, m2_rect, fw, fh = _resolve_dual_monitor_subrects(
+                    cur_tr_w, cur_tr_h,
+                    monitors_meta=client_host_monitor_rects,
+                    img_sample=client_latest_frame
+                )
+                if left_on and not right_on:
+                    client_host_resolution = (m1_rect[2], m1_rect[3])
+                elif right_on and not left_on:
+                    client_host_resolution = (m2_rect[2], m2_rect[3])
+                else:
+                    client_host_resolution = (fw, fh)
+
+            if (not is_android) and client_host_monitor_count >= 2 and (not client_mon_left_on or not client_mon_right_on):
+                send_event({"type": "set_monitors", "left": bool(client_mon_left_on), "right": bool(client_mon_right_on)})
             
             frame_counter = 0
             blink_frames_remaining = 0
@@ -852,6 +1087,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             drag_start_pos = None
             drag_start_time = 0
             drag_path = []
+            last_local_mouse_move_ts = 0.0
+            _warped_cursor_target = None
+            _warped_cursor_until = 0.0
+            last_applied_cursor_seq = 0
             
             last_seen_override = None
             
@@ -883,6 +1122,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 except Exception:
                     pass
      
+                if client_need_resync_monitors:
+                    client_need_resync_monitors = False
+                    if not is_android and client_host_monitor_count >= 2:
+                        send_event({"type": "set_monitors", "left": bool(client_mon_left_on), "right": bool(client_mon_right_on)})
+
                 if client_host_resolution is not None:
                     new_host_w, new_host_h = client_host_resolution
                     client_host_resolution = None
@@ -894,42 +1138,38 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         client_max_h = client_desktop_h - 100
                         
                         ratio = min(client_max_w / host_w, client_max_h / host_h, 1.0)
-                        window_w = int(host_w * ratio)
-                        window_h = int(host_h * ratio)
+                        if host_h > host_w:
+                            max_portrait_height = min(900, client_max_h)
+                            if host_h * ratio > max_portrait_height:
+                                ratio = max_portrait_height / host_h
+                        new_win_w = max(100, min(int(host_w * ratio), 3840))
+                        new_win_h = max(100, min(int(host_h * ratio), 2160))
                         
-                        window_w = max(100, window_w)
-                        window_h = max(100, window_h)
-                        
-                        uninstall_keyboard_hook()
-                        pygame.display.quit()
-                        pygame.display.init()
-                        screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
-                        
-                        comp_to_use = f"{computer_name} - {client_host_computer_name_override}" if (client_host_computer_name_override and computer_name and "MC-Android" in client_host_computer_name_override) else (client_host_computer_name_override or computer_name)
-                        if comp_to_use:
-                            pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_to_use))
-                        else:
-                            pygame.display.set_caption(_("P2P Remote Desktop Viewer"))
-                        try:
-                            icon_path = os.path.join(app_dir, "app_icon.png")
-                            if os.path.exists(icon_path):
-                                pygame.display.set_icon(pygame.image.load(icon_path))
-                        except Exception:
-                            pass
-                            
-                        hwnd = None
-                        try: hwnd = pygame.display.get_wm_info().get("window")
-                        except: pass
-                        if hwnd:
-                            if clipboard_sync_manager:
+                        if new_win_w != window_w or new_win_h != window_h:
+                            window_w, window_h = new_win_w, new_win_h
+                            screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                            try:
+                                hwnd = pygame.display.get_wm_info().get("window")
+                                if hwnd and sys.platform == "win32":
+                                    import ctypes.wintypes as _wt
+                                    _rc = _wt.RECT()
+                                    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(_rc))
+                                    outer_w = _rc.right - _rc.left
+                                    outer_h = _rc.bottom - _rc.top
+                                    pos_x = max(0, (client_desktop_w - outer_w) // 2)
+                                    pos_y = max(0, (client_desktop_h - outer_h) // 2)
+                                    # SWP_NOSIZE(0x0001) | SWP_NOZORDER(0x0004) | SWP_NOACTIVATE(0x0010)
+                                    ctypes.windll.user32.SetWindowPos(hwnd, 0, pos_x, pos_y, 0, 0, 0x0001 | 0x0004 | 0x0010)
+                            except Exception:
+                                pass
+                            if hwnd and clipboard_sync_manager:
                                 clipboard_sync_manager.is_client = True
                                 clipboard_sync_manager.pygame_hwnd = hwnd
-                            install_keyboard_hook(hwnd, send_event)
-
-                        send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
+                            send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
 
                 # Calculate floating button rectangle dynamically
                 min_btn_w, min_btn_h = 40, 22
+                mon_btn_w, mon_btn_h = 30, 22
                 cad_btn_w, cad_btn_h = 145, 22
                 eye_btn_w, eye_btn_h = 30, 22
                 file_btn_w, file_btn_h = 110, 22
@@ -945,6 +1185,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 show_cad_button = show_buttons and not is_android
                 show_file_button = show_buttons and is_android
                 show_power_button = show_buttons and is_android
+                tr_w, tr_h = client_true_remote_res if client_true_remote_res else (host_w, host_h)
+                is_legacy_dual_fallback = (
+                    (not is_android)
+                    and (not client_host_sent_monitor_info)
+                    and (tr_h > 0)
+                    and ((tr_w / float(tr_h)) >= 2.0)
+                )
+                show_mon_buttons = show_buttons and (not is_android) and (client_host_monitor_count >= 2 or is_legacy_dual_fallback)
                 
                 host_os = globals().get('client_host_os_release', '10')
                 is_host_windows = host_os in ["7", "8", "8.1", "10", "11", "XP", "Vista"] or "Server" in host_os
@@ -956,13 +1204,29 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 
                 total_w = 0
                 if show_toolbar:
-                    total_w = min_btn_w + 10 + (file_btn_w + 10 if show_file_button else 0) + (power_btn_w + 10 if show_power_button else 0) + (eye_btn_w + 10 if show_eye_button else 0) + (cad_btn_w + 10 if show_cad_button else 0) + rec_btn_w + 10 + close_btn_w
+                    total_w = (
+                        min_btn_w + 10
+                        + (mon_btn_w + 10 if show_mon_buttons else 0)
+                        + (file_btn_w + 10 if show_file_button else 0)
+                        + (power_btn_w + 10 if show_power_button else 0)
+                        + (eye_btn_w + 10 if show_eye_button else 0)
+                        + (cad_btn_w + 10 if show_cad_button else 0)
+                        + rec_btn_w + 10
+                        + (mon_btn_w + 10 if show_mon_buttons else 0)
+                        + close_btn_w
+                    )
                     
                 start_x = (window_w - total_w) // 2
                 
                 if show_toolbar:
                     min_btn_rect = pygame.Rect(start_x, 0, min_btn_w, min_btn_h)
                     current_x = start_x + min_btn_w + 10
+
+                    if show_mon_buttons:
+                        mon_left_btn_rect = pygame.Rect(current_x, 0, mon_btn_w, mon_btn_h)
+                        current_x += mon_btn_w + 10
+                    else:
+                        mon_left_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
                     
                     if show_power_button:
                         power_btn_rect = pygame.Rect(current_x, 0, power_btn_w, power_btn_h)
@@ -990,6 +1254,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         
                     rec_btn_rect = pygame.Rect(current_x, 0, rec_btn_w, rec_btn_h)
                     current_x += rec_btn_w + 10
+
+                    if show_mon_buttons:
+                        mon_right_btn_rect = pygame.Rect(current_x, 0, mon_btn_w, mon_btn_h)
+                        current_x += mon_btn_w + 10
+                    else:
+                        mon_right_btn_rect = pygame.Rect(-1000, -1000, 0, 0)
+
                     close_btn_rect = pygame.Rect(current_x, 0, close_btn_w, close_btn_h)
                     if show_cad_button:
                         fold_btn_rect = pygame.Rect(cad_btn_rect.centerx - fold_btn_w // 2, cad_btn_rect.bottom + 2, fold_btn_w, fold_btn_h)
@@ -997,11 +1268,13 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         fold_btn_rect = pygame.Rect(start_x + max(total_w, fold_btn_w) // 2 - fold_btn_w // 2, min_btn_h + 2, fold_btn_w, fold_btn_h)
                 else:
                     min_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    mon_left_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     file_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     power_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     eye_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     cad_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     rec_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
+                    mon_right_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     close_btn_rect = pygame.Rect(-1000, -1000, 0, 0) # Hidden
                     if show_buttons:
                         fold_btn_rect = pygame.Rect((window_w - fold_btn_w) // 2, 0, fold_btn_w, fold_btn_h)
@@ -1010,13 +1283,53 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
                 mx, my = pygame.mouse.get_pos()
                 min_is_hover = min_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                mon_left_is_hover = mon_left_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 file_is_hover = file_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 power_is_hover = power_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 eye_is_hover = eye_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 cad_is_hover = cad_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 rec_is_hover = rec_btn_rect.collidepoint(mx, my) if show_toolbar else False
+                mon_right_is_hover = mon_right_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 fold_is_hover = fold_btn_rect.collidepoint(mx, my) if show_buttons else False
+                def _calc_target_mouse_pos(mx_val, my_val):
+                    rx_n = max(0.0, min(1.0, mx_val / max(1, window_w - 1))) if window_w > 1 else 0.0
+                    ry_n = max(0.0, min(1.0, my_val / max(1, window_h - 1))) if window_h > 1 else 0.0
+                    is_dual = (not is_android) and (client_host_monitor_count >= 2 or is_legacy_dual_fallback)
+                    if is_dual:
+                        m1_r, m2_r, fw, fh = _resolve_dual_monitor_subrects(
+                            tr_w, tr_h,
+                            monitors_meta=client_host_monitor_rects,
+                            img_sample=client_latest_frame
+                        )
+                        if client_mon_left_on and not client_mon_right_on:
+                            ox, oy, mw, mh = m1_r
+                            hx = int(round(ox + rx_n * max(1, mw - 1)))
+                            hy = int(round(oy + ry_n * max(1, mh - 1)))
+                            rxs = hx / float(max(1, fw - 1))
+                            rys = hy / float(max(1, fh - 1))
+                        elif client_mon_right_on and not client_mon_left_on:
+                            ox, oy, mw, mh = m2_r
+                            hx = int(round(ox + rx_n * max(1, mw - 1)))
+                            hy = int(round(oy + ry_n * max(1, mh - 1)))
+                            rxs = hx / float(max(1, fw - 1))
+                            rys = hy / float(max(1, fh - 1))
+                        else:
+                            hx = int(round(rx_n * max(1, fw - 1)))
+                            hy = int(round(ry_n * max(1, fh - 1)))
+                            rxs = rx_n
+                            rys = ry_n
+                    else:
+                        rxs = rx_n
+                        rys = ry_n
+                        hx = int(mx_val * (host_w / window_w))
+                        hy = int(my_val * (host_h / window_h))
+                    return hx, hy, rxs, rys
+                any_toolbar_hover = (
+                    min_is_hover or mon_left_is_hover or file_is_hover or power_is_hover
+                    or eye_is_hover or cad_is_hover or rec_is_hover or mon_right_is_hover
+                    or close_is_hover or fold_is_hover
+                )
      
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -1031,11 +1344,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
-                        if show_buttons and (fold_btn_rect.collidepoint(event.pos) or (show_toolbar and (min_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or eye_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)))):
+                        if show_buttons and (fold_btn_rect.collidepoint(event.pos) or (show_toolbar and (min_btn_rect.collidepoint(event.pos) or mon_left_btn_rect.collidepoint(event.pos) or file_btn_rect.collidepoint(event.pos) or power_btn_rect.collidepoint(event.pos) or eye_btn_rect.collidepoint(event.pos) or cad_btn_rect.collidepoint(event.pos) or rec_btn_rect.collidepoint(event.pos) or mon_right_btn_rect.collidepoint(event.pos) or close_btn_rect.collidepoint(event.pos)))):
                             continue
                         mx_pos, my_pos = event.pos
-                        host_x = int(mx_pos * (host_w / window_w))
-                        host_y = int(my_pos * (host_h / window_h))
+                        now_mono = time.monotonic()
+                        if _warped_cursor_target is not None and now_mono < _warped_cursor_until:
+                            if abs(mx_pos - _warped_cursor_target[0]) <= 3 and abs(my_pos - _warped_cursor_target[1]) <= 3:
+                                _warped_cursor_target = None
+                                continue
+                        last_local_mouse_move_ts = now_mono
+                        host_x, host_y, rx_send, ry_send = _calc_target_mouse_pos(mx_pos, my_pos)
+                        if False:
+                        ry_norm = max(0.0, min(1.0, my_pos / max(1, window_h - 1))) if window_h > 1 else 0.0
+                        if is_legacy_dual_fallback:
+                            if client_mon_left_on and not client_mon_right_on:
+                                rx_send = rx_norm * 0.5
+                            elif client_mon_right_on and not client_mon_left_on:
+                                rx_send = 0.5 + rx_norm * 0.5
+                            else:
+                                rx_send = rx_norm
+                            host_x = int(round(rx_send * max(1, tr_w - 1)))
+                            host_y = int(round(ry_norm * max(1, tr_h - 1)))
+                        else:
+                            rx_send = rx_norm
+                            host_x = int(mx_pos * (host_w / window_w))
+                            host_y = int(my_pos * (host_h / window_h))
                         
                         if is_android and drag_start_pos is not None:
                             # Record drag path points for Android swipes/patterns
@@ -1047,7 +1380,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if (host_x - last_pt[0])**2 + (host_y - last_pt[1])**2 > 25:
                                 drag_path.append((host_x, host_y))
                         else:
-                            send_event({"type": "mouse_move", "x": host_x, "y": host_y})
+                            send_event({"type": "mouse_move", "x": host_x, "y": host_y, "rx": round(rx_send, 6), "ry": round(ry_norm, 6)})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
                         if show_buttons and fold_btn_rect.collidepoint(event.pos):
@@ -1058,6 +1391,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Minimize Button Clicked. Minimizing viewer.")
                                 pygame.display.iconify()
+                            continue
+                        if show_toolbar and show_mon_buttons and mon_left_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                if client_mon_left_on:
+                                    # Không cho phép tắt nếu màn hình bên phải cũng đang tắt
+                                    if client_mon_right_on:
+                                        client_mon_left_on = False
+                                        send_event({"type": "set_monitors", "left": False, "right": True})
+                                        _apply_monitor_selection(False, True)
+                                else:
+                                    client_mon_left_on = True
+                                    send_event({"type": "set_monitors", "left": True, "right": bool(client_mon_right_on)})
+                                    _apply_monitor_selection(True, bool(client_mon_right_on))
                             continue
                         if show_toolbar and file_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -1138,6 +1484,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 globals()['viewer_record_state'] = state
                             continue
 
+                        if show_toolbar and show_mon_buttons and mon_right_btn_rect.collidepoint(event.pos):
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                if client_mon_right_on:
+                                    # Không cho phép tắt nếu màn hình bên trái cũng đang tắt
+                                    if client_mon_left_on:
+                                        client_mon_right_on = False
+                                        send_event({"type": "set_monitors", "left": True, "right": False})
+                                        _apply_monitor_selection(True, False)
+                                else:
+                                    client_mon_right_on = True
+                                    send_event({"type": "set_monitors", "left": bool(client_mon_left_on), "right": True})
+                                    _apply_monitor_selection(bool(client_mon_left_on), True)
+                            continue
                         if show_toolbar and close_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 print("[Client] Close Button Clicked. Exiting viewer.")
@@ -1145,8 +1504,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             continue
                         if event.button in button_map:
                             mx_pos, my_pos = event.pos
-                            host_x = int(mx_pos * (host_w / window_w))
-                            host_y = int(my_pos * (host_h / window_h))
+                            last_local_mouse_move_ts = time.monotonic()
+                            host_x, host_y, rx_send, ry_send = _calc_target_mouse_pos(mx_pos, my_pos)
+                        if False:
+                            ry_norm = max(0.0, min(1.0, my_pos / max(1, window_h - 1))) if window_h > 1 else 0.0
+                            if is_legacy_dual_fallback:
+                                if client_mon_left_on and not client_mon_right_on:
+                                    rx_send = rx_norm * 0.5
+                                elif client_mon_right_on and not client_mon_left_on:
+                                    rx_send = 0.5 + rx_norm * 0.5
+                                else:
+                                    rx_send = rx_norm
+                                host_x = int(round(rx_send * max(1, tr_w - 1)))
+                                host_y = int(round(ry_norm * max(1, tr_h - 1)))
+                            else:
+                                rx_send = rx_norm
+                                host_x = int(mx_pos * (host_w / window_w))
+                                host_y = int(my_pos * (host_h / window_h))
                             
                             if event.type == pygame.MOUSEBUTTONDOWN:
                                 drag_start_pos = (host_x, host_y)
@@ -1156,7 +1530,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     "button": button_map[event.button],
                                     "pressed": True,
                                     "x": host_x,
-                                    "y": host_y
+                                    "y": host_y,
+                                    "rx": round(rx_send, 6),
+                                    "ry": round(ry_norm, 6),
                                 })
                             else: # MOUSEBUTTONUP
                                 if drag_start_pos and is_android:
@@ -1201,7 +1577,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     "button": button_map[event.button],
                                     "pressed": False,
                                     "x": host_x,
-                                    "y": host_y
+                                    "y": host_y,
+                                    "rx": round(rx_send, 6),
+                                    "ry": round(ry_norm, 6),
                                 })
                                 drag_start_pos = None
                                 drag_path = []
@@ -1283,9 +1661,18 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 if frame_to_draw is not None:
                     try:
                         frame_to_draw = _pil_to_rgb(frame_to_draw)
-                        w, h = frame_to_draw.size
-                        if w <= 0 or h <= 0:
+                        raw_w, raw_h = frame_to_draw.size
+                        if raw_w <= 0 or raw_h <= 0:
                             raise ValueError("empty frame size")
+                        if (not is_android) and (not client_host_sent_monitor_info) and ((raw_w / float(raw_h)) >= 2.25):
+                            cur_tr = client_true_remote_res
+                            if cur_tr is None or cur_tr[1] <= 0 or (cur_tr[0] / float(cur_tr[1])) < 2.25:
+                                client_true_remote_res = (raw_w, raw_h)
+                            if client_mon_left_on and not client_mon_right_on:
+                                frame_to_draw = frame_to_draw.crop((0, 0, max(1, raw_w // 2), raw_h))
+                            elif client_mon_right_on and not client_mon_left_on:
+                                frame_to_draw = frame_to_draw.crop((raw_w // 2, 0, raw_w, raw_h))
+                        w, h = frame_to_draw.size
                         if (w != host_w or h != host_h) and w > 100 and h > 100:
                             client_host_resolution = (w, h)
                         surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
@@ -1377,6 +1764,37 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.draw.rect(screen, (255, 0, 0), border_rect, width=10)
                     blink_frames_remaining -= 1
                     
+                # Đồng bộ vị trí chuột của Host lên cửa sổ Viewer
+                if not is_android and frame_to_draw is not None:
+                    with client_host_cursor_lock:
+                        cur_seq = client_host_cursor_data.get("seq", 0)
+                        cur_vis = bool(client_host_cursor_data.get("visible", False))
+                        cur_rx = float(client_host_cursor_data.get("rx", 0.5))
+                        cur_ry = float(client_host_cursor_data.get("ry", 0.5))
+                    if cur_vis and window_w > 1 and window_h > 1:
+                        vx = max(0, min(window_w - 1, int(round(cur_rx * (window_w - 1)))))
+                        vy = max(0, min(window_h - 1, int(round(cur_ry * (window_h - 1)))))
+                        if pygame.mouse.get_focused():
+                            if cur_seq != last_applied_cursor_seq:
+                                last_applied_cursor_seq = cur_seq
+                                now_m = time.monotonic()
+                                if (
+                                    (not any_toolbar_hover)
+                                    and (not any(pygame.mouse.get_pressed()))
+                                    and (now_m - last_local_mouse_move_ts >= 0.15)
+                                ):
+                                    cur_mx, cur_my = pygame.mouse.get_pos()
+                                    if abs(cur_mx - vx) > 1 or abs(cur_my - vy) > 1:
+                                        _warped_cursor_target = (vx, vy)
+                                        _warped_cursor_until = now_m + 0.12
+                                        try:
+                                            pygame.mouse.set_pos((vx, vy))
+                                        except Exception:
+                                            pass
+                        else:
+                            last_applied_cursor_seq = cur_seq
+                            _draw_host_cursor_overlay(screen, vx, vy)
+
                 # Draw floating buttons on top
                 if show_toolbar:
                     # Minimize button
@@ -1405,6 +1823,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         btn_border_color = (229, 57, 53)
                     else:
                         btn_border_color = (0, 173, 181)
+
+                    # Left Monitor toggle button (🖥️ kế bên phải nút Minimize)
+                    if show_mon_buttons:
+                        _draw_monitor_toggle_btn(screen, mon_left_btn_rect, client_mon_left_on, mon_left_is_hover, btn_border_color, pygame_theme)
 
                     # CAD / File buttons
                     if show_cad_button or show_file_button:
@@ -1522,6 +1944,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             dim_surf = pygame.Surface(rec_btn_rect.size, pygame.SRCALPHA)
                             dim_surf.fill((0, 0, 0, 128))
                             screen.blit(dim_surf, rec_btn_rect.topleft)
+
+                    # Right Monitor toggle button (🖥️ kế bên trái nút Close X)
+                    if show_mon_buttons:
+                        _draw_monitor_toggle_btn(screen, mon_right_btn_rect, client_mon_right_on, mon_right_is_hover, btn_border_color, pygame_theme)
 
                     # Close button (Red X)
                     close_bg_color = (255, 77, 77) if close_is_hover else (204, 0, 0)

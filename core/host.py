@@ -889,6 +889,142 @@ def _virtual_screen_rect():
     return left0, top0, w, h
 
 
+def _get_physical_monitor_rects(sct=None, dx_cams=None):
+    """Trả về danh sách (left, top, width, height) của các màn hình vật lý đang hoạt động,
+    sắp xếp theo (left, top) tăng dần: index 0 = Màn hình Trái, index 1 = Màn hình Phải."""
+    rects = []
+    seen = set()
+    expected_min = 1
+    if sys.platform == "win32":
+        try:
+            # SM_CMONITORS = 80: số màn hình hiển thị vật lý đang bật theo Windows Kernel
+            expected_min = max(1, int(ctypes.windll.user32.GetSystemMetrics(80)))
+        except Exception:
+            expected_min = 1
+        try:
+            user32 = ctypes.windll.user32
+            MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM
+            )
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+
+            _get_mon_info = user32.GetMonitorInfoW
+            _get_mon_info.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+            _get_mon_info.restype = wintypes.BOOL
+
+            _enum_mons = user32.EnumDisplayMonitors
+            _enum_mons.argtypes = [wintypes.HDC, ctypes.c_void_p, MONITORENUMPROC, wintypes.LPARAM]
+            _enum_mons.restype = wintypes.BOOL
+
+            def _mon_cb(hmon, _hdc, lprc, _lparam):
+                rc = None
+                try:
+                    mi = MONITORINFO()
+                    mi.cbSize = ctypes.sizeof(MONITORINFO)
+                    if _get_mon_info(hmon, ctypes.byref(mi)):
+                        rc = mi.rcMonitor
+                except Exception:
+                    rc = None
+                if rc is None and lprc:
+                    try:
+                        rc = lprc.contents
+                    except Exception:
+                        rc = None
+                if rc is not None:
+                    ml, mt = int(rc.left), int(rc.top)
+                    mw, mh = int(rc.right - rc.left), int(rc.bottom - rc.top)
+                    if mw > 0 and mh > 0:
+                        key = (ml, mt, mw, mh)
+                        if key not in seen:
+                            seen.add(key)
+                            rects.append(key)
+                return True
+
+            _cb_instance = MONITORENUMPROC(_mon_cb)
+            _enum_mons(None, None, _cb_instance, 0)
+        except Exception:
+            pass
+
+    if len(rects) < expected_min and dx_cams:
+        for cam in list(dx_cams):
+            try:
+                cam._output.update_desc()
+                rc = cam._output.desc.DesktopCoordinates
+                ml, mt = int(rc.left), int(rc.top)
+                mw, mh = int(rc.right - rc.left), int(rc.bottom - rc.top)
+                if mw > 0 and mh > 0:
+                    key = (ml, mt, mw, mh)
+                    if key not in seen:
+                        seen.add(key)
+                        rects.append(key)
+            except Exception:
+                pass
+
+    if not rects or len(rects) < expected_min:
+        try:
+            if sct is not None:
+                mons = getattr(sct, "monitors", None) or []
+                for m in mons[1:]:
+                    ml, mt = int(m.get("left", 0)), int(m.get("top", 0))
+                    mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
+                    if mw > 0 and mh > 0:
+                        key = (ml, mt, mw, mh)
+                        if key not in seen:
+                            seen.add(key)
+                            rects.append(key)
+            else:
+                with mss.mss() as _sct_tmp:
+                    for m in (_sct_tmp.monitors or [])[1:]:
+                        ml, mt = int(m.get("left", 0)), int(m.get("top", 0))
+                        mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
+                        if mw > 0 and mh > 0:
+                            key = (ml, mt, mw, mh)
+                            if key not in seen:
+                                seen.add(key)
+                                rects.append(key)
+        except Exception:
+            pass
+
+    rects.sort(key=lambda r: (r[0], r[1]))
+    return rects
+
+
+_pynput_mouse_ctrl = None
+
+
+def _get_host_cursor_pos():
+    """Đọc tọa độ chuột vật lý hiện tại trên máy Host."""
+    if sys.platform == "win32":
+        try:
+            user32 = ctypes.windll.user32
+            pt = wintypes.POINT()
+            if hasattr(user32, "GetPhysicalCursorPos") and user32.GetPhysicalCursorPos(ctypes.byref(pt)):
+                return int(pt.x), int(pt.y)
+            if user32.GetCursorPos(ctypes.byref(pt)):
+                return int(pt.x), int(pt.y)
+        except Exception:
+            pass
+        return None
+    try:
+        global _pynput_mouse_ctrl
+        if _pynput_mouse_ctrl is None:
+            from pynput.mouse import Controller as _MC
+            _pynput_mouse_ctrl = _MC()
+        pos = _pynput_mouse_ctrl.position
+        if pos is not None:
+            return int(pos[0]), int(pos[1])
+    except Exception:
+        pass
+    return None
+
+
 def _clip_tile_onto_canvas(canvas, tile, x, y, mask_black=False):
     if tile is None or getattr(tile, "size", 0) == 0:
         return False
@@ -1744,26 +1880,79 @@ def _open_dxcam_outputs():
     return cams
 
 
-def grab_dxcam_virtual_bgr(cams, canvas=None):
+def grab_gdi_monitor_bgr(monitor_mode="both"):
+    """Chụp GDI theo chế độ màn hình ('both', 'left', 'right')."""
+    if monitor_mode in ("left", "right"):
+        rects = _get_physical_monitor_rects()
+        if len(rects) >= 2:
+            idx = 0 if monitor_mode == "left" else 1
+            ml, mt, mw, mh = rects[idx]
+            cap = _bitblt_screen_rect_bgr(ml, mt, mw, mh)
+            if cap is not None:
+                return cap
+    return grab_gdi_primary_bgr()
+
+
+def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
     left0, top0, w, h = _virtual_screen_rect()
-    if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
+    cam_entries = []
+    for cam in list(cams):
+        try:
+            cam._output.update_desc()
+            rc = cam._output.desc.DesktopCoordinates
+            cl, ct = int(rc.left), int(rc.top)
+            cw = max(1, int(rc.right - rc.left))
+            ch = max(1, int(rc.bottom - rc.top))
+            cam_entries.append((cam, cl, ct, cw, ch))
+        except Exception:
+            cam_entries.append((cam, left0, top0, w, h))
+    cam_entries.sort(key=lambda it: (it[1], it[2]))
+
+    if monitor_mode in ("left", "right") and len(cam_entries) >= 2:
+        idx = 0 if monitor_mode == "left" else 1
+        target_cam, cl, ct, cw, ch = cam_entries[idx]
+        try:
+            tile = target_cam.grab()
+            if tile is not None and getattr(tile, "size", 0) > 0:
+                if tile.ndim == 2:
+                    tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
+                elif tile.shape[2] == 4:
+                    tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
+                target_cam._last_good_tile = tile
+                th, tw = tile.shape[:2]
+                return tile, tw, th, (cl, ct), True
+            cached = getattr(target_cam, "_last_good_tile", None)
+            if cached is not None and getattr(cached, "size", 0) > 0:
+                th, tw = cached.shape[:2]
+                return cached, tw, th, (cl, ct), True
+            return None, cw, ch, (cl, ct), False
+        except Exception as e:
+            print(f"[Host] dxcam single monitor grab failed: {e}")
+            try:
+                if target_cam in cams:
+                    cams.remove(target_cam)
+                target_cam.release()
+            except Exception:
+                pass
+            return None, cw, ch, (cl, ct), False
+
+    canvas_fresh = (canvas is None or canvas.shape[0] != h or canvas.shape[1] != w)
+    if canvas_fresh:
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
     any_ok = False
     bad_cams = []
     captured_tiles = []
-    for cam in list(cams):
+    for cam, cl, ct, _cw, _ch in cam_entries:
         try:
             tile = cam.grab()
+            if tile is not None and getattr(tile, "size", 0) > 0:
+                cam._last_good_tile = tile
+            elif canvas_fresh:
+                tile = getattr(cam, "_last_good_tile", None)
             if tile is None or getattr(tile, "size", 0) == 0:
                 continue
-            try:
-                cam._output.update_desc()
-                rc = cam._output.desc.DesktopCoordinates
-                x, y = int(rc.left) - left0, int(rc.top) - top0
-                orig_pos = (int(rc.left), int(rc.top))
-            except Exception:
-                x, y = 0, 0
-                orig_pos = (left0, top0)
+            x, y = cl - left0, ct - top0
+            orig_pos = (cl, ct)
 
             tile_is_black = _frame_is_nearly_black(tile)
             # Nếu màn hình này đen kịt (phantom/inactive) và đã có màn hình khác có nội dung -> bỏ qua
@@ -1794,7 +1983,7 @@ def grab_dxcam_virtual_bgr(cams, canvas=None):
     # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của màn hình có nội dung đó!
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if len(non_black) == 1 and len(captured_tiles) > 1:
+        if len(non_black) == 1 and len(captured_tiles) > 1 and len(cam_entries) <= 1:
             tile, (orig_x, orig_y) = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
@@ -1808,7 +1997,7 @@ def grab_dxcam_virtual_bgr(cams, canvas=None):
     return canvas, w, h, (left0, top0), any_ok
 
 
-def grab_virtual_desktop_bgr(sct, canvas=None):
+def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
     """Bắt từng màn rồi ghép. Không BitBlt cả monitors[0] (thường đen trên máy nhiều GPU)."""
     left0, top0, w, h = _virtual_screen_rect()
     mons = sct.monitors
@@ -1820,14 +2009,30 @@ def grab_virtual_desktop_bgr(sct, canvas=None):
         h = int(virt.get("height", h))
     if w < 1 or h < 1:
         raise RuntimeError("invalid virtual screen size")
-    if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
-        canvas = np.zeros((h, w, 3), dtype=np.uint8)
     parts = mons[1:] if mons and len(mons) > 1 else (mons[:1] if mons else [])
     
-    # Lọc bỏ các monitor không hợp lệ (width <= 0 hoặc height <= 0)
+    # Lọc bỏ các monitor không hợp lệ (width <= 0 hoặc height <= 0) và sắp xếp Trái -> Phải
     valid_parts = [m for m in parts if m.get("width", 0) > 0 and m.get("height", 0) > 0]
+    valid_parts.sort(key=lambda m: (int(m.get("left", 0)), int(m.get("top", 0))))
     if not valid_parts and mons:
         valid_parts = [mons[0]]
+
+    if monitor_mode in ("left", "right") and len(valid_parts) >= 2:
+        idx = 0 if monitor_mode == "left" else 1
+        mon = valid_parts[idx]
+        raw = sct.grab(mon)
+        tile = np.array(raw, dtype=np.uint8)
+        if tile is None or getattr(tile, "size", 0) == 0:
+            raise mss.exception.ScreenShotError("single monitor grab empty")
+        if tile.ndim == 2:
+            tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
+        elif tile.shape[2] == 4:
+            tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
+        th, tw = tile.shape[:2]
+        return tile, tw, th, (int(mon.get("left", 0)), int(mon.get("top", 0)))
+
+    if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
 
     any_ok = False
     captured_tiles = []
@@ -1860,7 +2065,7 @@ def grab_virtual_desktop_bgr(sct, canvas=None):
     # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của monitor có nội dung đó!
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if len(non_black) == 1 and len(captured_tiles) > 1:
+        if len(non_black) == 1 and len(captured_tiles) > 1 and len(valid_parts) <= 1:
             tile, mon = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
@@ -2390,10 +2595,14 @@ class HostMixin:
                 except:
                     pass
                     
+                init_mon_rects = [] if is_android else _get_physical_monitor_rects()
+                init_mon_cnt = 1 if is_android else max(1, len(init_mon_rects))
                 res_info = json.dumps({
                     "status": "ok",
                     "width": host_w,
                     "height": host_h,
+                    "monitor_count": init_mon_cnt,
+                    "monitors": [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in init_mon_rects],
                     "computer_name": computer_name,
                     "zalo_phone": self.load_zalo_phone_from_xml(),
                     "is_domain": is_domain,
@@ -2604,6 +2813,59 @@ class HostMixin:
         _last_lock_sync = 0
         _last_sent_locked = None
 
+        def _host_cursor_watcher():
+            last_sent_pos = None
+            last_visible = True
+            last_desk_attach = 0.0
+            while client_state.get("running", False):
+                try:
+                    now_m = time.monotonic() if hasattr(time, "monotonic") else time.time()
+                    if sys.platform == "win32" and (now_m - last_desk_attach >= 0.4):
+                        last_desk_attach = now_m
+                        try:
+                            attach_thread_for_remote_input()
+                        except Exception:
+                            pass
+                    pos = _get_host_cursor_pos()
+                    if pos is not None and pos != last_sent_pos:
+                        cx, cy = pos
+                        inj = client_state.get("last_injected_cursor")
+                        last_c_ts = client_state.get("last_client_mouse_ts", 0.0)
+                        is_client_echo = (
+                            (inj is not None and abs(cx - inj[0]) <= 4 and abs(cy - inj[1]) <= 4)
+                            or (now_m - last_c_ts < 0.12)
+                        )
+                        if is_client_echo:
+                            last_sent_pos = pos
+                        else:
+                            cap_rect = client_state.get("cap_rect")
+                            if cap_rect and cap_rect[2] > 1 and cap_rect[3] > 1:
+                                ox, oy, cw, ch = cap_rect
+                                inside = (ox <= cx < ox + cw) and (oy <= cy < oy + ch)
+                                if not inside:
+                                    last_sent_pos = pos
+                                    if last_visible:
+                                        pkt = json.dumps({"type": "host_cursor", "visible": False}).encode("utf-8")
+                                        if send_msg(conn, pkt, password, lock_timeout=0.015):
+                                            last_visible = False
+                                else:
+                                    rx = max(0.0, min(1.0, (cx - ox) / float(cw - 1)))
+                                    ry = max(0.0, min(1.0, (cy - oy) / float(ch - 1)))
+                                    pkt = json.dumps({
+                                        "type": "host_cursor",
+                                        "rx": round(rx, 5),
+                                        "ry": round(ry, 5),
+                                        "visible": True,
+                                    }).encode("utf-8")
+                                    if send_msg(conn, pkt, password, lock_timeout=0.015):
+                                        last_sent_pos = pos
+                                        last_visible = True
+                except Exception:
+                    pass
+                time.sleep(0.025)
+
+        threading.Thread(target=_host_cursor_watcher, name="HostCursorWatcher", daemon=True).start()
+
         def _sync_lock_status():
             nonlocal _last_lock_sync, _last_sent_locked
             try:
@@ -2798,7 +3060,35 @@ class HostMixin:
                                 break
                             if sys_w > 0 and sys_h > 0:
                                 last_vw, last_vh = sys_w, sys_h
-                                
+
+                            now_mon_chk = time.time()
+                            if now_mon_chk - client_state.get("_last_mon_info_chk", 0) >= 2.0:
+                                client_state["_last_mon_info_chk"] = now_mon_chk
+                                try:
+                                    mon_rects = _get_physical_monitor_rects(sct, dx_cams)
+                                    sm_cnt = 1
+                                    if sys.platform == "win32":
+                                        try:
+                                            sm_cnt = max(1, int(ctypes.windll.user32.GetSystemMetrics(80)))
+                                        except Exception:
+                                            sm_cnt = 1
+                                    mon_cnt = max(1, len(mon_rects), sm_cnt)
+                                    if mon_cnt != client_state.get("_last_sent_mon_count") or mon_rects != client_state.get("_last_sent_mon_rects"):
+                                        client_state["_last_sent_mon_count"] = mon_cnt
+                                        client_state["_last_sent_mon_rects"] = mon_rects
+                                        send_msg(conn, json.dumps({
+                                            "type": "monitor_info",
+                                            "count": mon_cnt,
+                                            "monitors": [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in mon_rects],
+                                        }).encode("utf-8"), password)
+                                        if mon_cnt < 2 and client_state.get("monitor_mode", "both") != "both":
+                                            client_state["monitor_mode"] = "both"
+                                            client_state["force_update"] = True
+                                            client_state.pop("prev_sent_img", None)
+                                except Exception:
+                                    pass
+
+                            mon_mode = client_state.get("monitor_mode", "both")
                             grabbed = False
                             on_winlogon = _should_capture_logon_ui()
                             on_uac = uac_consent_running()
@@ -2823,12 +3113,12 @@ class HostMixin:
                                         grabbed = False
                                 else:
                                     try:
-                                        frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                        frame_bgr, cap_w, cap_h, origin = grab_gdi_monitor_bgr(mon_mode)
                                         self._capture_origin = origin
                                         grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                         if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
                                             attach_disconnected_session_to_console()
-                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_monitor_bgr(mon_mode)
                                             self._capture_origin = origin
                                             grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                     except Exception as ge:
@@ -2864,9 +3154,10 @@ class HostMixin:
                                 retries = 8 if not client_state.get("_got_frame") else 1
                                 for _try in range(retries):
                                     frame_bgr, cap_w, cap_h, origin, grabbed = grab_dxcam_virtual_bgr(
-                                        dx_cams, client_state.get("_stitch_canvas")
+                                        dx_cams, client_state.get("_stitch_canvas"), monitor_mode=mon_mode
                                     )
-                                    client_state["_stitch_canvas"] = frame_bgr
+                                    if grabbed and mon_mode == "both":
+                                        client_state["_stitch_canvas"] = frame_bgr
                                     self._capture_origin = origin
                                     if grabbed:
                                         break
@@ -2877,7 +3168,7 @@ class HostMixin:
                                     grabbed = False
                                 if grabbed:
                                     client_state["_dxcam_fail_streak"] = 0
-                                else:
+                                elif mon_mode == "both":
                                     streak = client_state.get("_dxcam_fail_streak", 0) + 1
                                     client_state["_dxcam_fail_streak"] = streak
                                     if streak >= 3:
@@ -2905,9 +3196,10 @@ class HostMixin:
                                     if sct is not None:
                                         try:
                                             frame_bgr, cap_w, cap_h, origin = grab_virtual_desktop_bgr(
-                                                sct, client_state.get("_stitch_canvas")
+                                                sct, client_state.get("_stitch_canvas"), monitor_mode=mon_mode
                                             )
-                                            client_state["_stitch_canvas"] = frame_bgr
+                                            if mon_mode == "both":
+                                                client_state["_stitch_canvas"] = frame_bgr
                                             self._capture_origin = origin
                                             fb_ok = bool(
                                                 frame_bgr is not None 
@@ -2922,12 +3214,12 @@ class HostMixin:
                                     # Fallback 2: GDI (luôn hoạt động ổn định trên Windows Server / sau khi ngắt RDP)
                                     if not fb_ok:
                                         try:
-                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                            frame_bgr, cap_w, cap_h, origin = grab_gdi_monitor_bgr(mon_mode)
                                             self._capture_origin = origin
                                             grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                             if grabbed and (_frame_is_nearly_white(frame_bgr) or _frame_is_nearly_black(frame_bgr)):
                                                 attach_disconnected_session_to_console()
-                                                frame_bgr, cap_w, cap_h, origin = grab_gdi_primary_bgr()
+                                                frame_bgr, cap_w, cap_h, origin = grab_gdi_monitor_bgr(mon_mode)
                                                 self._capture_origin = origin
                                                 grabbed = bool(frame_bgr is not None and getattr(frame_bgr, "size", 0))
                                         except Exception as e:
@@ -2966,6 +3258,8 @@ class HostMixin:
                                 continue
                             else:
                                 client_state["_grab_fail_streak"] = 0
+                                orig_xy = origin if (origin and len(origin) >= 2) else (0, 0)
+                                client_state["cap_rect"] = (int(orig_xy[0]), int(orig_xy[1]), int(cap_w), int(cap_h))
 
                             if (
                                 not on_winlogon
@@ -3227,7 +3521,7 @@ class HostMixin:
                     event = input_queue.get(timeout=0.5)
                     if event == "STOP":
                         break
-                    self.host_handle_event(event, conn, password)
+                    self.host_handle_event(event, conn, password, client_state=client_state)
                 except queue.Empty:
                     pass
                 except Exception as e:
@@ -3278,7 +3572,7 @@ class HostMixin:
                             clipboard_sync_manager.enqueue_packet(event)
                     else:
                         input_queue.put(event)
-                        if evt_type in ("mouse_click", "mouse_scroll", "key_event"):
+                        if evt_type in ("mouse_click", "mouse_scroll", "key_event", "set_monitors"):
                             client_state["force_update"] = True
                             if "wake_event" in client_state:
                                 client_state["wake_event"].set()
@@ -3294,22 +3588,47 @@ class HostMixin:
         print("[Host] Client disconnected, forcing screen cover to disable.")
         self.disable_screen_cover()
         
-    def host_handle_event(self, event, conn, password):
+    def _resolve_client_mouse_target(self, event, client_state=None):
+        cap_rect = client_state.get("cap_rect") if isinstance(client_state, dict) else None
+        rx = event.get("rx")
+        ry = event.get("ry")
+        if cap_rect and len(cap_rect) == 4 and rx is not None and ry is not None:
+            ox, oy, cw, ch = cap_rect
+            rx_clamped = max(0.0, min(1.0, float(rx)))
+            ry_clamped = max(0.0, min(1.0, float(ry)))
+            tx = int(round(ox + rx_clamped * max(1, cw - 1)))
+            ty = int(round(oy + ry_clamped * max(1, ch - 1)))
+            return tx, ty
+        x, y = event.get("x"), event.get("y")
+        if x is None or y is None:
+            return None, None
+        if cap_rect and len(cap_rect) == 4:
+            ox, oy = int(cap_rect[0]), int(cap_rect[1])
+        else:
+            ox, oy = getattr(self, "_capture_origin", (0, 0))
+        return int(x) + int(ox), int(y) + int(oy)
+
+    def host_handle_event(self, event, conn, password, client_state=None):
         ev_type = event.get('type')
         if ev_type == 'mouse_move':
             self.ensure_input_thread_desktop(force=False)
-            x, y = event['x'], event['y']
-            ox, oy = getattr(self, "_capture_origin", (0, 0))
-            send_input_mouse_move(x + ox, y + oy)
+            tx, ty = self._resolve_client_mouse_target(event, client_state=client_state)
+            if tx is not None and ty is not None:
+                if isinstance(client_state, dict):
+                    client_state["last_injected_cursor"] = (tx, ty)
+                    client_state["last_client_mouse_ts"] = time.monotonic()
+                send_input_mouse_move(tx, ty)
                 
         elif ev_type == 'mouse_click':
             self.ensure_input_thread_desktop(force=True)
             button_name = event.get('button')
             pressed = event.get('pressed')
-            x, y = event.get('x'), event.get('y')
-            ox, oy = getattr(self, "_capture_origin", (0, 0))
-            if x is not None and y is not None:
-                send_input_mouse_click_at(int(x) + int(ox), int(y) + int(oy), button_name, pressed)
+            tx, ty = self._resolve_client_mouse_target(event, client_state=client_state)
+            if tx is not None and ty is not None:
+                if isinstance(client_state, dict):
+                    client_state["last_injected_cursor"] = (tx, ty)
+                    client_state["last_client_mouse_ts"] = time.monotonic()
+                send_input_mouse_click_at(tx, ty, button_name, pressed)
             else:
                 send_input_mouse_click(button_name, pressed)
             try:
@@ -3320,6 +3639,28 @@ class HostMixin:
                         clipboard_sync_manager.last_lbutton_time = time.time()
             except Exception as e:
                 pass
+
+        elif ev_type == 'set_monitors':
+            left_on = bool(event.get('left', True))
+            right_on = bool(event.get('right', True))
+            # Bắt buộc giữ ít nhất 1 màn hình bật (không cho tắt cả 2)
+            if not left_on and not right_on:
+                left_on = True
+            if left_on and right_on:
+                new_mode = "both"
+            elif left_on:
+                new_mode = "left"
+            else:
+                new_mode = "right"
+            if isinstance(client_state, dict):
+                if client_state.get("monitor_mode", "both") != new_mode:
+                    print(f"[Host] Client monitor mode changed to: {new_mode}")
+                client_state["monitor_mode"] = new_mode
+                client_state.pop("prev_sent_img", None)
+                client_state.pop("_stitch_canvas", None)
+                client_state["force_update"] = True
+                if "wake_event" in client_state:
+                    client_state["wake_event"].set()
                 
         elif ev_type == 'mouse_scroll':
             self.ensure_input_thread_desktop(force=True)
