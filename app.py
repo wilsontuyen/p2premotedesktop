@@ -1441,38 +1441,71 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def save_lan_peers(self):
-        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers
+        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers, match_saved_computer
         lan_file = get_lan_peers_json_path()
         try:
             from datetime import datetime
             import hashlib
-            with open(lan_file, 'w', encoding='utf-8') as f:
-                with self.lan_peers_lock:
-                    self.lan_peers = deduplicate_lan_peers(self.lan_peers)
-                    dump_data = {}
-                    for k, v in self.lan_peers.items():
-                        v_copy = dict(v)
-                        # 1. Format last_seen sang chuỗi ngày giờ full YYYY-MM-DD HH:MM:SS
-                        ls = v_copy.get("last_seen")
-                        if isinstance(ls, (int, float)):
-                            v_copy["last_seen"] = datetime.fromtimestamp(ls).strftime("%Y-%m-%d %H:%M:%S")
-                        elif not isinstance(ls, str) or "-" not in str(ls) or ":" not in str(ls):
-                            v_copy["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            import shutil
+            with self.lan_peers_lock:
+                self.lan_peers = deduplicate_lan_peers(self.lan_peers)
+                dump_data = {}
+                for k, v in self.lan_peers.items():
+                    v_copy = dict(v)
+                    if not v_copy.get("hwid"):
+                        v_copy["hwid"] = k
 
-                        # 2. Mã hóa MD5 cho saved_password, tuyệt đối không để plaintext
-                        spw = str(v_copy.get("saved_password") or "").strip()
-                        if spw:
-                            if not (len(spw) == 32 and all(c in "0123456789abcdefABCDEF" for c in spw)):
-                                v_copy["saved_password"] = hashlib.md5(spw.encode('utf-8')).hexdigest()
+                    # 1. Format last_seen sang chuỗi ngày giờ full YYYY-MM-DD HH:MM:SS
+                    ls = v_copy.get("last_seen")
+                    if isinstance(ls, (int, float)):
+                        v_copy["last_seen"] = datetime.fromtimestamp(ls).strftime("%Y-%m-%d %H:%M:%S")
+                    elif not isinstance(ls, str) or "-" not in str(ls) or ":" not in str(ls):
+                        v_copy["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    # 2. Tự động đồng bộ saved_password và saved_id từ saved_computers.xml nếu chưa có
+                    spw = str(v_copy.get("saved_password") or "").strip()
+                    if not spw:
+                        matched = match_saved_computer(v_copy.get("computer_name"), v_copy.get("hwid") or k, v_copy.get("saved_id"))
+                        if matched and matched.get("password"):
+                            spw = str(matched["password"]).strip()
+                            if matched.get("id") and not v_copy.get("saved_id"):
+                                v_copy["saved_id"] = matched["id"]
+
+                    # Mã hóa MD5 cho saved_password, tuyệt đối không để plaintext
+                    if spw:
+                        if not (len(spw) == 32 and all(c in "0123456789abcdefABCDEF" for c in spw)):
+                            v_copy["saved_password"] = hashlib.md5(spw.encode('utf-8')).hexdigest()
                         else:
-                            v_copy["saved_password"] = ""
+                            v_copy["saved_password"] = spw
+                        v["saved_password"] = v_copy["saved_password"]
+                    else:
+                        v_copy["saved_password"] = ""
 
-                        # 3. Đảm bảo saved_id luôn có ID (không bị rỗng)
-                        if not v_copy.get("saved_id"):
-                            v_copy["saved_id"] = v_copy.get("hwid") or k
+                    # 3. Đảm bảo saved_id luôn có ID (không bị rỗng)
+                    if not v_copy.get("saved_id"):
+                        v_copy["saved_id"] = v_copy.get("hwid") or k
+                    v["saved_id"] = v_copy["saved_id"]
 
-                        dump_data[k] = v_copy
-                    json.dump(dump_data, f, ensure_ascii=False, indent=4)
+                    dump_data[k] = v_copy
+
+            with open(lan_file, 'w', encoding='utf-8') as f:
+                json.dump(dump_data, f, ensure_ascii=False, indent=4)
+
+            # Đồng bộ sang cả thư mục cài đặt và APPDATA để mọi nơi luôn nhất quán
+            sync_targets = []
+            appdata = os.environ.get('APPDATA', '')
+            if appdata:
+                sync_targets.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
+            if sys.platform == "win32":
+                sync_targets.append(r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json")
+            for st in sync_targets:
+                try:
+                    if os.path.abspath(st) != os.path.abspath(lan_file):
+                        st_dir = os.path.dirname(st)
+                        if os.path.exists(st_dir) and os.access(st_dir, os.W_OK):
+                            shutil.copy2(lan_file, st)
+                except Exception:
+                    pass
         except Exception:
             pass
 

@@ -111,7 +111,7 @@ def get_computers_xml_path():
             else:
                 # Nếu không có quyền ghi trực tiếp vào thư mục cài đặt, đồng bộ sang user_path để có quyền ghi
                 try:
-                    if not os.path.exists(user_path) or os.path.getmtime(inst) > os.path.getmtime(user_path):
+                    if not os.path.exists(user_path):
                         os.makedirs(os.path.dirname(user_path), exist_ok=True)
                         shutil.copy2(inst, user_path)
                     return user_path
@@ -1202,9 +1202,9 @@ class SavedListMixin:
                 if os.path.abspath(computers_file) != os.path.abspath(user_path):
                     os.makedirs(os.path.dirname(user_path), exist_ok=True)
                     shutil.copy2(computers_file, user_path)
-                else:
-                    installed_p = r"C:\Program Files (x86)\Easy Remote Desktop\saved_computers.xml"
-                    if os.path.exists(installed_p) and os.access(installed_p, os.W_OK):
+                installed_p = r"C:\Program Files (x86)\Easy Remote Desktop\saved_computers.xml"
+                if os.path.abspath(computers_file) != os.path.abspath(installed_p):
+                    if os.path.exists(os.path.dirname(installed_p)) and os.access(os.path.dirname(installed_p), os.W_OK):
                         shutil.copy2(computers_file, installed_p)
             except Exception:
                 pass

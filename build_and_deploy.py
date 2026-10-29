@@ -131,8 +131,18 @@ def main():
     shorten_openblas_dll(app_dist_dir)
     log_dist_size(app_dist_dir, "Full app.dist")
 
-    # Copy icons, install.bat, uninstall.bat, readme.txt, disclaimer, and saved_computers.xml to app.dist
-    files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt", "saved_computers.xml"]
+    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân (saved_computers.xml, lan_peers.json, config.json, app.ini) vào bộ cài đặt phân phối
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini"):
+        pf_dist = os.path.join(app_dist_dir, personal_file)
+        if os.path.exists(pf_dist):
+            try:
+                os.remove(pf_dist)
+                log(f"Removed personal data file from app.dist: {personal_file}")
+            except Exception as e:
+                log(f"Warning: could not remove {personal_file} from app.dist: {e}")
+
+    # Copy icons, install.bat, uninstall.bat, readme.txt, and disclaimer to app.dist
+    files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt"]
     for file_name in files_to_copy:
         src = os.path.join(workspace_dir, file_name)
         dst = os.path.join(app_dist_dir, file_name)

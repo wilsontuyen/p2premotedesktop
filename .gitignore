@@ -58,8 +58,12 @@ test_clipboard_copy.txt
 /test/
 test/
 
-# Window configs
+# Window & User configs / personal data
 window_config.json
+saved_computers.xml
+lan_peers.json
+config.json
+app.ini
 
 # Allow conversations directory and its txt files
 !/conversations/

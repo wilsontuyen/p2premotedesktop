@@ -395,8 +395,10 @@ class NetworkMixin:
                     
                 peer_info = {
                     "computer_name": beacon.get("computer_name", "Unknown"),
+                    "name_verified": True,
                     "local_ip": beacon.get("local_ip", addr[0]),
                     "port": int(beacon.get("port", 12345)),
+                    "hwid": peer_hwid,
                     "macs": beacon.get("macs", ""),
                     "last_seen": time.time(),
                     "source_ip": addr[0],
@@ -408,13 +410,15 @@ class NetworkMixin:
                         if k == peer_hwid or are_same_machine(k, v, peer_hwid, peer_info):
                             matched_k = k
                             break
+                    old_ip = None
                     if matched_k:
                         old_info = self.lan_peers[matched_k]
+                        old_ip = old_info.get("local_ip")
                         peer_info = merge_peers(peer_info, old_info)
                         if matched_k != peer_hwid:
                             self.lan_peers.pop(matched_k, None)
                     is_new = matched_k is None
-                    should_save = is_new or (matched_k and (self.lan_peers.get(matched_k, {}).get("local_ip") != peer_info["local_ip"]))
+                    should_save = is_new or (old_ip != peer_info.get("local_ip"))
                     self.lan_peers[peer_hwid] = peer_info
                     
                 if should_save:
@@ -561,17 +565,80 @@ class NetworkMixin:
             "probe_gen": 0,
         }
 
+        def _persist_peer_password(target_hwid, peer_info, new_pw):
+            """Lưu mật khẩu đồng bộ vào cả saved_computers.xml và lan_peers.json."""
+            comp_name = str(peer_info.get("computer_name") or "").strip()
+            saved_id_val = str(peer_info.get("saved_id") or target_hwid or "").strip()
+            clean_h = ''.join(ch for ch in str(target_hwid or '') if ch.isdigit())
+            clean_sid = ''.join(ch for ch in str(saved_id_val or '') if ch.isdigit())
+
+            # 1. Cập nhật saved_computers.xml (cập nhật tất cả các bản ghi trùng ID hoặc tên để không sót mật khẩu cũ)
+            comps = self.load_saved_computers()
+            matched_existing = match_saved_computer(comp_name, target_hwid, saved_id_val)
+            matched_existing_id = ''.join(ch for ch in str(matched_existing.get('id', '')) if ch.isdigit()) if matched_existing else ''
+            matched_existing_name = str(matched_existing.get('name', '')).strip().lower() if matched_existing else ''
+
+            id_targets = {x for x in (clean_h, clean_sid, matched_existing_id) if x}
+            name_targets = {x for x in (comp_name.lower(), matched_existing_name) if x and x not in ('unknown', 'không rõ')}
+
+            updated_any = False
+            final_saved_id = saved_id_val or target_hwid
+            for idx, c in enumerate(comps):
+                c_id_clean = ''.join(ch for ch in str(c.get('id', '')) if ch.isdigit())
+                c_name_lower = str(c.get('name', '')).strip().lower()
+                if (c_id_clean and c_id_clean in id_targets) or (c_name_lower and c_name_lower in name_targets):
+                    comps[idx]["password"] = new_pw
+                    if not comps[idx].get("id"):
+                        comps[idx]["id"] = final_saved_id
+                    else:
+                        final_saved_id = comps[idx]["id"]
+                    updated_any = True
+
+            group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
+            if not updated_any:
+                comps.append({
+                    "name": comp_name or target_hwid,
+                    "id": final_saved_id,
+                    "password": new_pw,
+                    "group": group_label
+                })
+            self.save_saved_computers(comps)
+            if hasattr(self, '_reorder_saved_computers_func'):
+                self.after(50, self._reorder_saved_computers_func)
+
+            # 2. Cập nhật trực tiếp vào peer_info và toàn bộ bản ghi tương ứng trong self.lan_peers rồi ghi ra lan_peers.json
+            pw_md5 = hash_password_md5(new_pw)
+            peer_info["saved_password"] = pw_md5
+            peer_info["saved_id"] = final_saved_id
+            if not peer_info.get("hwid"):
+                peer_info["hwid"] = target_hwid
+
+            with self.lan_peers_lock:
+                found_in_peers = False
+                for k, v in list(self.lan_peers.items()):
+                    if k == target_hwid or are_same_machine(k, v, target_hwid, peer_info):
+                        v["saved_password"] = pw_md5
+                        v["saved_id"] = final_saved_id
+                        if not v.get("hwid"):
+                            v["hwid"] = k
+                        found_in_peers = True
+                if not found_in_peers and target_hwid:
+                    self.lan_peers[target_hwid] = dict(peer_info)
+
+            self.save_lan_peers()
+
         def connect_to_peer(hwid, peer_info, force_prompt=False):
             # Lưu lại hàm gọi để có thể mở lại khi sai mật khẩu
             self._last_lan_connect_fn = lambda fp=True: connect_to_peer(hwid, peer_info, force_prompt=fp)
 
-            # 1. Tìm đối chiếu máy tính trong saved_computers (chỉ khớp chính xác HWID hoặc tên)
-            existing_comp = match_saved_computer(peer_info.get("computer_name"), hwid)
+            # 1. Tìm đối chiếu máy tính trong saved_computers (chỉ khớp chính xác HWID, saved_id hoặc tên)
+            existing_comp = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
             saved_pw = existing_comp.get("password", "") if existing_comp else ""
-            saved_id = (existing_comp.get("id", "") if existing_comp else "") or hwid
+            saved_id = (existing_comp.get("id", "") if existing_comp else "") or peer_info.get("saved_id") or hwid
 
-            # Đồng bộ lại thông tin vào peer_info (mã hóa MD5 mật khẩu, không lưu plaintext)
-            peer_info["saved_password"] = hash_password_md5(saved_pw)
+            # Đồng bộ lại thông tin vào peer_info (mã hóa MD5 mật khẩu, không xóa hash cũ nếu chưa khớp)
+            if saved_pw:
+                peer_info["saved_password"] = hash_password_md5(saved_pw)
             peer_info["saved_id"] = saved_id
 
             clean_id = ''.join(ch for ch in str(saved_id) if ch.isdigit()) if saved_id else ''.join(ch for ch in str(hwid) if ch.isdigit())
@@ -592,15 +659,24 @@ class NetworkMixin:
                 return
 
             """Mở dialog nhập mật khẩu rồi kết nối trực tiếp qua LAN/VPN."""
+            if hasattr(self, '_active_lan_pass_dialog') and self._active_lan_pass_dialog:
+                try:
+                    if self._active_lan_pass_dialog.winfo_exists():
+                        self._active_lan_pass_dialog.destroy()
+                except Exception:
+                    pass
+
             pass_dialog = tk.Toplevel(dialog)
+            self._active_lan_pass_dialog = pass_dialog
+            pass_dialog.withdraw()
             pass_dialog.title(_("Kết nối tới ") + str(peer_info['computer_name']))
             pass_dialog.resizable(False, False)
             pass_dialog.configure(bg=self.bg_color)
             pass_dialog.transient(dialog)
-            pass_dialog.grab_set()
             pass_dialog.bind("<Escape>", lambda e: pass_dialog.destroy())
 
             pw, ph = 360, 230
+            dialog.update_idletasks()
             px = dialog.winfo_x() + (dialog.winfo_width() - pw) // 2
             py = dialog.winfo_y() + (dialog.winfo_height() - ph) // 2
             pass_dialog.geometry(f"{pw}x{ph}+{px}+{py}")
@@ -619,7 +695,10 @@ class NetworkMixin:
             save_cb = tk.Checkbutton(pass_dialog, text=_("Lưu mật khẩu máy tính này"), variable=save_var, font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color, selectcolor=self.bg_color, activebackground=self.bg_color, activeforeground=self.text_gray, cursor="hand2")
             save_cb.pack(anchor=tk.W, padx=25, pady=(0, 10))
             
-            pass_entry.focus()
+            pass_dialog.deiconify()
+            pass_dialog.lift()
+            pass_dialog.grab_set()
+            pass_entry.focus_set()
             if saved_pw:
                 pass_entry.select_range(0, tk.END)
             
@@ -630,41 +709,7 @@ class NetworkMixin:
                     return
                     
                 if save_var.get():
-                    comps = self.load_saved_computers()
-                    clean_h = ''.join(ch for ch in str(hwid) if ch.isdigit())
-                    comp_name = peer_info.get('computer_name', '')
-                    
-                    comp_idx = -1
-                    if clean_h:
-                        comp_idx = next((i for i, c in enumerate(comps) if ''.join(ch for ch in c.get('id', '') if ch.isdigit()) == clean_h), -1)
-                    if comp_idx < 0 and comp_name:
-                        comp_idx = next((i for i, c in enumerate(comps) if c.get('name', '').strip().lower() == comp_name.strip().lower()), -1)
-
-                    group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
-                    if comp_idx >= 0:
-                        comps[comp_idx]["password"] = password
-                        comps[comp_idx]["name"] = comp_name
-                        if not comps[comp_idx].get("id"):
-                            comps[comp_idx]["id"] = hwid
-                        if group_label:
-                            comps[comp_idx]["group"] = group_label
-                    else:
-                        comps.append({
-                            "name": comp_name,
-                            "id": hwid,
-                            "password": password,
-                            "group": group_label
-                        })
-                    self.save_saved_computers(comps)
-                    if hasattr(self, '_reorder_saved_computers_func'):
-                        self.after(50, self._reorder_saved_computers_func)
-
-                    # Cập nhật thông tin đã lưu cho máy này trong lan_peers (mã hóa MD5)
-                    with self.lan_peers_lock:
-                        if hwid in self.lan_peers:
-                            self.lan_peers[hwid]["saved_password"] = hash_password_md5(password)
-                            self.lan_peers[hwid]["saved_id"] = hwid
-                    self.save_lan_peers()
+                    _persist_peer_password(hwid, peer_info, password)
                     refresh_list()
                         
                 pass_dialog.destroy()
@@ -683,7 +728,7 @@ class NetworkMixin:
 
         def open_change_lan_password_dialog(hwid, peer_info):
             """Hộp thoại thay đổi mật khẩu cho máy trong danh sách LAN & VPN."""
-            existing = match_saved_computer(peer_info.get("computer_name"), hwid)
+            existing = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
             current_pw = existing.get("password", "") if existing else ""
             
             pwd_win = tk.Toplevel(dialog)
@@ -702,8 +747,9 @@ class NetworkMixin:
             pwd_win.deiconify()
 
             comp_name = peer_info.get("computer_name", _("Máy tính"))
-            clean_h = ''.join(ch for ch in str(hwid) if ch.isdigit())
-            fmt_id = f"{clean_h[:3]} {clean_h[3:6]} {clean_h[6:9]} {clean_h[9:]}" if len(clean_h) == 12 else hwid
+            disp_id = peer_info.get("saved_id") or hwid
+            clean_h = ''.join(ch for ch in str(disp_id) if ch.isdigit())
+            fmt_id = f"{clean_h[:3]} {clean_h[3:6]} {clean_h[6:9]} {clean_h[9:]}" if len(clean_h) == 12 else disp_id
 
             lbl_title = tk.Label(pwd_win, text=_("🔑 THAY ĐỔI MẬT KHẨU"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(15, 4))
@@ -725,39 +771,8 @@ class NetworkMixin:
                 if not new_pw:
                     self.show_custom_error(_("Lỗi"), _("Mật khẩu không được để trống!"), parent=pwd_win)
                     return
-                
-                # Lưu vào saved_computers.xml
-                comps = self.load_saved_computers()
-                clean_h = ''.join(ch for ch in str(hwid) if ch.isdigit())
-                comp_idx = -1
-                if clean_h:
-                    comp_idx = next((i for i, c in enumerate(comps) if ''.join(ch for ch in c.get('id', '') if ch.isdigit()) == clean_h), -1)
-                if comp_idx < 0 and comp_name:
-                    comp_idx = next((i for i, c in enumerate(comps) if c.get('name', '').strip().lower() == comp_name.strip().lower()), -1)
 
-                group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
-                if comp_idx >= 0:
-                    comps[comp_idx]["password"] = new_pw
-                    comps[comp_idx]["name"] = comp_name
-                    if not comps[comp_idx].get("id"):
-                        comps[comp_idx]["id"] = hwid
-                else:
-                    comps.append({
-                        "name": comp_name,
-                        "id": hwid,
-                        "password": new_pw,
-                        "group": group_label
-                    })
-                self.save_saved_computers(comps)
-                if hasattr(self, '_reorder_saved_computers_func'):
-                    self.after(50, self._reorder_saved_computers_func)
-
-                # Cập nhật lan_peers (mã hóa MD5)
-                with self.lan_peers_lock:
-                    if hwid in self.lan_peers:
-                        self.lan_peers[hwid]["saved_password"] = hash_password_md5(new_pw)
-                        self.lan_peers[hwid]["saved_id"] = hwid
-                self.save_lan_peers()
+                _persist_peer_password(hwid, peer_info, new_pw)
 
                 # Cập nhật partner_pass_var nếu ID khớp
                 if hasattr(self, 'partner_pass_var'):
@@ -1235,8 +1250,8 @@ class NetworkMixin:
                 else:
                     status_str = _("Đang kiểm tra kết nối...")
 
-                matched_c = match_saved_computer(h_info.get("computer_name"), h_info.get("hwid"))
-                sp = matched_c.get("password", "") if matched_c else ""
+                matched_c = match_saved_computer(h_info.get("computer_name"), h_info.get("hwid"), h_info.get("saved_id"))
+                sp = (matched_c.get("password", "") if matched_c else "") or h_info.get("saved_password", "")
                 pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠️ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
 
                 tip_lines = [
@@ -1266,16 +1281,32 @@ class NetworkMixin:
                     )
                 )
 
+            any_peer_synced = False
             for hwid, info in sorted_items:
                 row = tk.Frame(scroll_frame, bg=self.card_color, bd=0)
                 row.pack(fill=tk.X, padx=5, pady=2)
 
                 # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
-                matched = match_saved_computer(info.get("computer_name"), hwid)
+                matched = match_saved_computer(info.get("computer_name"), hwid, info.get("saved_id"))
                 saved_pw = matched.get("password", "") if matched else ""
-                saved_id = (matched.get("id", "") if matched else "") or hwid
-                info["saved_password"] = hash_password_md5(saved_pw)
+                saved_id = (matched.get("id", "") if matched else "") or info.get("saved_id") or hwid
+                if saved_pw:
+                    pw_hash = hash_password_md5(saved_pw)
+                    if info.get("saved_password") != pw_hash or info.get("saved_id") != saved_id:
+                        any_peer_synced = True
+                    info["saved_password"] = pw_hash
                 info["saved_id"] = saved_id
+                if not info.get("hwid"):
+                    info["hwid"] = hwid
+
+                with self.lan_peers_lock:
+                    if hwid in self.lan_peers:
+                        if info.get("saved_password"):
+                            self.lan_peers[hwid]["saved_password"] = info["saved_password"]
+                        if saved_id:
+                            self.lan_peers[hwid]["saved_id"] = saved_id
+                        if not self.lan_peers[hwid].get("hwid"):
+                            self.lan_peers[hwid]["hwid"] = hwid
 
                 clean_hwid = ''.join(ch for ch in str(saved_id) if ch.isdigit()) if saved_id else ''.join(ch for ch in str(hwid) if ch.isdigit())
                 fmt_id = f"{clean_hwid[:3]} {clean_hwid[3:6]} {clean_hwid[6:9]} {clean_hwid[9:]}" if len(clean_hwid) == 12 else (saved_id or hwid)
@@ -1329,7 +1360,7 @@ class NetworkMixin:
 
                 # 2. Huy hiệu "🔑 Đã lưu MK" nằm về bên phải, gần sát cạnh phải
                 lbl_key = None
-                if saved_pw:
+                if saved_pw or info.get("saved_password"):
                     lbl_key = tk.Label(right_box, text="🔑 " + _("Đã lưu MK"), font=("Segoe UI", 8, "bold"), bg="#145A32", fg="#2ECC71", padx=6, pady=2)
                     lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
 
@@ -1409,6 +1440,9 @@ class NetworkMixin:
                     except Exception:
                         pass
 
+            if any_peer_synced:
+                self.save_lan_peers()
+
             # Khôi phục vị trí cuộn mượt mà
             try:
                 canvas.yview_moveto(cur_scroll[0])
@@ -1432,10 +1466,12 @@ class NetworkMixin:
                 if d and d.winfo_exists():
                     d.config(fg="#2ECC71" if is_on else "#FF4D4D")
 
-                # 2. Cập nhật tooltip
+                # 2. Cập nhật tooltip (gộp an toàn qua merge_peers để không bao giờ mất saved_password hay tên máy verified)
                 inf = ui_item.get("info", {})
                 if u_data:
-                    inf.update(u_data)
+                    merged_ui = merge_peers(u_data, inf)
+                    merged_ui["hwid"] = inf.get("hwid") or h_id
+                    inf.update(merged_ui)
                 tip = ui_item.get("tooltip")
                 if tip:
                     tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
@@ -1468,7 +1504,9 @@ class NetworkMixin:
                     if is_on and u_data:
                         with self.lan_peers_lock:
                             if h in self.lan_peers:
-                                self.lan_peers[h].update(u_data)
+                                merged = merge_peers(u_data, self.lan_peers[h])
+                                merged["hwid"] = self.lan_peers[h].get("hwid") or h
+                                self.lan_peers[h] = merged
                     if dialog.winfo_exists() and scan_state.get("probe_gen") == gen:
                         dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
 
@@ -1698,14 +1736,20 @@ class NetworkMixin:
                 self.update_status(_("Sẵn sàng kết nối"))
                 comp_name = peer_info.get('computer_name', '')
                 err_msg = _("Không thể hoàn tất xác thực kết nối tới {name}.\nNguyên nhân có thể do mật khẩu không chính xác hoặc đối tác ngắt kết nối.\n\nVui lòng kiểm tra lại mật khẩu (nhấp chuột phải chọn 'Thay đổi mật khẩu').").format(name=comp_name)
-                self.after(0, lambda: self.show_custom_error(_("Sai mật khẩu hoặc lỗi xác thực"), err_msg))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
-                # Tự động mở lại dialog nhập mật khẩu nếu đang mở dialog LAN
-                if hasattr(self, '_last_lan_connect_fn') and self._last_lan_connect_fn:
-                    if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
-                        fn = self._last_lan_connect_fn
-                        self.after(500, lambda: fn(fp=True))
+                socket_passwords.pop(sock, None)
+                def _on_auth_empty():
+                    if hasattr(self, 'connect_btn'):
+                        self.connect_btn.config(state=tk.NORMAL)
+                    parent_win = self.lan_computers_dialog if (hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists()) else None
+                    # Hiển thị dialog báo lỗi trước và chờ người dùng bấm OK (wait_window bên trong show_custom_error)
+                    self.show_custom_error(_("Sai mật khẩu hoặc lỗi xác thực"), err_msg, parent=parent_win)
+                    # Chỉ sau khi bấm OK đóng thông báo lỗi thì mới mở dialog nhập mật khẩu lên
+                    if hasattr(self, '_last_lan_connect_fn') and self._last_lan_connect_fn:
+                        if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
+                            fn = self._last_lan_connect_fn
+                            fn(fp=True)
+                self.after(0, _on_auth_empty)
                 return
 
             res = json.loads(res_msg.decode('utf-8'))
@@ -1737,15 +1781,20 @@ class NetworkMixin:
                 else:
                     err_title = _("Từ chối kết nối")
                     err_msg = _("Kết nối tới {name} bị từ chối:\n{msg}").format(name=comp_name, msg=msg)
-                self.after(0, lambda t=err_title, m=err_msg: self.show_custom_error(t, m))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
-                # Tự động mở lại dialog nhập mật khẩu
-                if hasattr(self, '_last_lan_connect_fn') and self._last_lan_connect_fn:
-                    if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
-                        fn = self._last_lan_connect_fn
-                        self.after(500, lambda: fn(fp=True))
+                def _on_auth_rejected(t=err_title, m=err_msg):
+                    if hasattr(self, 'connect_btn'):
+                        self.connect_btn.config(state=tk.NORMAL)
+                    parent_win = self.lan_computers_dialog if (hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists()) else None
+                    # Hiển thị dialog báo sai mật khẩu trước và chờ người dùng bấm OK
+                    self.show_custom_error(t, m, parent=parent_win)
+                    # Chỉ sau khi bấm OK đóng thông báo lỗi thì mới mở dialog nhập mật khẩu lên
+                    if hasattr(self, '_last_lan_connect_fn') and self._last_lan_connect_fn:
+                        if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
+                            fn = self._last_lan_connect_fn
+                            fn(fp=True)
+                self.after(0, _on_auth_rejected)
         except Exception as e:
             self.update_status(_("Sẵn sàng kết nối"))
             comp_name = peer_info.get('computer_name', '')

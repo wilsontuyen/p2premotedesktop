@@ -380,12 +380,17 @@ def resolve_hostname_safe(ip, timeout=0.6):
 def get_lan_peers_json_path():
     """Lấy đường dẫn đầy đủ tới file lan_peers.json, ưu tiên thư mục cài đặt app rồi tới APPDATA."""
     candidates = []
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
         app_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     inst = os.path.join(app_dir, "lan_peers.json")
     candidates.append(inst)
+
+    if sys.platform == "win32":
+        pf_inst = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
+        if pf_inst not in candidates:
+            candidates.append(pf_inst)
 
     appdata = os.environ.get('APPDATA', '')
     if appdata:
@@ -394,18 +399,28 @@ def get_lan_peers_json_path():
     else:
         user_path = inst
 
-    candidates.append(os.path.abspath("lan_peers.json"))
+    for c_path in candidates:
+        if os.path.exists(c_path):
+            if os.access(c_path, os.W_OK):
+                return c_path
+            else:
+                try:
+                    os.makedirs(os.path.dirname(user_path), exist_ok=True)
+                    if not os.path.exists(user_path):
+                        import shutil
+                        shutil.copy2(c_path, user_path)
+                    return user_path
+                except Exception:
+                    return c_path
 
-    if os.path.exists(inst):
-        if os.access(inst, os.W_OK):
-            return inst
-        else:
-            return user_path if os.path.exists(user_path) else inst
-
-    if os.path.exists(user_path):
+    # Nếu chưa có file nào tồn tại, kiểm tra quyền ghi của thư mục app_dir trước
+    if os.access(app_dir, os.W_OK):
+        return inst
+    try:
+        os.makedirs(os.path.dirname(user_path), exist_ok=True)
         return user_path
-
-    return candidates[0] if candidates else user_path
+    except Exception:
+        return inst
 
 
 def hash_password_md5(pw):
@@ -469,7 +484,7 @@ def normalize_name_tokens(s):
     return filtered, ''.join(filtered)
 
 
-def match_saved_computer(comp_name=None, hwid=None):
+def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
     """Tìm máy tính trong danh sách đã lưu:
     1. Trùng HWID/ID chính xác (100% an toàn theo đúng yêu cầu).
     2. Trùng tên máy tính chính xác (case-insensitive).
@@ -486,12 +501,17 @@ def match_saved_computer(comp_name=None, hwid=None):
     if not saved:
         return None
 
-    # 1. Khớp theo HWID/ID chính xác (chính xác từng chữ số)
-    clean_hwid = ''.join(ch for ch in str(hwid or '') if ch.isdigit())
-    if clean_hwid:
-        for c in saved:
+    # 1. Khớp theo HWID hoặc saved_id chính xác (ưu tiên bản ghi mới nhất ở cuối danh sách nếu trùng ID)
+    id_candidates = [''.join(ch for ch in str(x or '') if ch.isdigit()) for x in (saved_id, hwid) if x]
+    id_candidates = [x for x in id_candidates if x]
+    for cand_id in id_candidates:
+        for c in reversed(saved):
             c_clean_id = ''.join(ch for ch in c.get('id', '') if ch.isdigit())
-            if c_clean_id and c_clean_id == clean_hwid:
+            if c_clean_id and c_clean_id == cand_id and c.get('password'):
+                return c
+        for c in reversed(saved):
+            c_clean_id = ''.join(ch for ch in c.get('id', '') if ch.isdigit())
+            if c_clean_id and c_clean_id == cand_id:
                 return c
 
     if not comp_name:
@@ -500,8 +520,12 @@ def match_saved_computer(comp_name=None, hwid=None):
     if not cn or re.match(r"^pc-\d+$", cn) or cn in ("unknown", "không rõ"):
         return None
 
-    # 2. Khớp tên chính xác hoàn toàn (case-insensitive)
-    for c in saved:
+    # 2. Khớp tên chính xác hoàn toàn (case-insensitive, ưu tiên bản ghi mới nhất có mật khẩu)
+    for c in reversed(saved):
+        c_raw = c.get("name", "").strip().lower()
+        if c_raw and c_raw == cn and c.get("password"):
+            return c
+    for c in reversed(saved):
         c_raw = c.get("name", "").strip().lower()
         if c_raw and c_raw == cn:
             return c
@@ -509,22 +533,30 @@ def match_saved_computer(comp_name=None, hwid=None):
     # 3. Khớp theo token tên cốt lõi (loại trừ các hậu tố/tiền tố generic: server, pc, laptop, năm 20xx)
     cn_tokens, cn_str = normalize_name_tokens(cn)
     if cn_tokens:
-        # Ưu tiên khớp tập token giống hệt nhau 100%
-        for c in saved:
+        # Ưu tiên khớp tập token giống hệt nhau 100% (ưu tiên có password mới nhất)
+        for c in reversed(saved):
+            sn_tokens, sn_str = normalize_name_tokens(c.get("name", ""))
+            if sn_tokens and cn_tokens == sn_tokens and c.get("password"):
+                return c
+        for c in reversed(saved):
             sn_tokens, sn_str = normalize_name_tokens(c.get("name", ""))
             if sn_tokens and cn_tokens == sn_tokens:
                 return c
 
         # Khớp chuỗi ký tự cốt lõi (ví dụ 'binhdinh' vs 'binh dinh')
         if len(cn_str) >= 4:
-            for c in saved:
+            for c in reversed(saved):
+                sn_tokens, sn_str = normalize_name_tokens(c.get("name", ""))
+                if sn_str and cn_str == sn_str and c.get("password"):
+                    return c
+            for c in reversed(saved):
                 sn_tokens, sn_str = normalize_name_tokens(c.get("name", ""))
                 if sn_str and cn_str == sn_str:
                     return c
 
         # 4. Khớp theo token cốt lõi mang ý nghĩa định danh (độ dài >= 4 ký tự, ví dụ 'thuong' trong HATHUONG <-> THUONG DN)
         candidates = []
-        for c in saved:
+        for c in reversed(saved):
             sn_tokens, sn_str = normalize_name_tokens(c.get("name", ""))
             common = set(cn_tokens).intersection(set(sn_tokens))
             meaningful_common = [t for t in common if len(t) >= 4 and t not in ('dinh', 'quang', 'ninh', 'nam')]
@@ -533,15 +565,22 @@ def match_saved_computer(comp_name=None, hwid=None):
 
         if candidates:
             # Nếu có nhiều ứng viên (ví dụ THUONG DN và THUONG LAPTOP):
-            # Ưu tiên khớp đúng chủng loại thiết bị (laptop vs desktop)
+            # Ưu tiên khớp đúng chủng loại thiết bị (laptop vs desktop) và có password
             is_laptop = 'laptop' in cn
             matched_c = None
             for c, _ in candidates:
                 c_name_lower = c.get('name', '').lower()
                 c_is_laptop = 'laptop' in c_name_lower
-                if is_laptop == c_is_laptop:
+                if is_laptop == c_is_laptop and c.get('password'):
                     matched_c = c
                     break
+            if not matched_c:
+                for c, _ in candidates:
+                    c_name_lower = c.get('name', '').lower()
+                    c_is_laptop = 'laptop' in c_name_lower
+                    if is_laptop == c_is_laptop:
+                        matched_c = c
+                        break
             if not matched_c:
                 matched_c = candidates[0][0]
             return matched_c
@@ -708,12 +747,15 @@ def make_stable_hwid(ip, comp_name="", mac=""):
     return str(twelve)
 
 
-def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, recv_timeout=0.6):
+def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, recv_timeout=0.6, known_peer=None):
     """
     Thăm dò một địa chỉ IP xem có đang chạy EasyRemoteDesktop không:
     - Gửi gói tin probe với APP_KEY.
     - Hỗ trợ cả bản mới (trả về probe_pong kèm computer_name, hwid)
       lẫn bản cũ (trả về error 'Sai mật khẩu kết nối!' hoặc 'Sai mat khau').
+    - Nếu truyền known_peer (khi kiểm tra trạng thái Online của máy đã biết), giữ lại
+      thông tin tên máy đã xác thực, HWID, MAC và mật khẩu đã lưu để không gọi nbtstat chậm
+      và không bao giờ ghi đè mất dữ liệu cũ.
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
@@ -729,33 +771,47 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
             except Exception:
                 data = {}
 
+            known_name = str(known_peer.get("computer_name") or "").strip() if known_peer else ""
+            known_verified = bool(known_peer.get("name_verified")) if known_peer else False
+            known_has_real_name = bool(known_name and known_name.lower() not in ("unknown", "không rõ") and not re.match(r"^pc-\d+$", known_name.lower()))
+            known_mac = str(known_peer.get("macs") or "").strip() if known_peer else ""
+            known_os = str(known_peer.get("os") or "").strip() if known_peer else ""
+            known_hwid = str(known_peer.get("hwid") or "").strip() if known_peer else ""
+            known_saved_pw = str(known_peer.get("saved_password") or "").strip() if known_peer else ""
+            known_saved_id = str(known_peer.get("saved_id") or "").strip() if known_peer else ""
+
             # Bản mới phản hồi probe_pong
             if data.get("type") == "probe_pong":
                 comp_name = data.get("computer_name")
                 is_verified = bool(comp_name)
-                nb_mac = data.get("macs", "")
-                os_name = data.get("os", "")
+                nb_mac = data.get("macs", "") or known_mac
+                os_name = data.get("os", "") or known_os
                 if not comp_name:
-                    r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
-                    comp_name = r_name
-                    is_verified = r_ver
-                    if not nb_mac:
-                        nb_mac = r_mac
-                    if not os_name:
-                        os_name = r_os
+                    if known_has_real_name:
+                        comp_name = known_name
+                        is_verified = known_verified or True
+                    else:
+                        r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
+                        comp_name = r_name
+                        is_verified = r_ver
+                        if not nb_mac:
+                            nb_mac = r_mac
+                        if not os_name:
+                            os_name = r_os
 
-                hwid = data.get("hwid") or make_stable_hwid(ip, comp_name, nb_mac)
+                hwid = data.get("hwid") or known_hwid or make_stable_hwid(ip, comp_name, nb_mac)
                 full_local_ip = data.get("local_ip") or ip
                 # Đảm bảo IP đang thăm dò nằm trong danh sách local_ip
                 if ip not in [x.strip() for x in full_local_ip.split(',')]:
                     full_local_ip = f"{full_local_ip},{ip}"
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
-                matched_comp = match_saved_computer(comp_name, hwid)
+                matched_comp = match_saved_computer(comp_name, hwid, known_saved_id)
                 saved_pw = matched_comp.get("password", "") if matched_comp else ""
-                saved_id = (matched_comp.get("id", "") if matched_comp else "") or hwid
+                saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
 
-                return {
+                res_dict = {
                     "computer_name": comp_name,
                     "name_verified": is_verified,
                     "os": os_name,
@@ -766,21 +822,36 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     "network_type": vpn_type_label,
                     "last_seen": format_last_seen_str(),
                     "source_ip": ip,
-                    "saved_password": hash_password_md5(saved_pw),
+                    "saved_password": final_pw_hash,
                     "saved_id": saved_id
                 }
+                if known_peer:
+                    res_dict = merge_peers(res_dict, known_peer)
+                return res_dict
 
             # Bản cũ hoặc phản hồi mật khẩu sai (xác nhận 100% đang chạy app)
             if data.get("status") == "error":
-                comp_name, nb_mac, os_name, is_verified = resolve_host_info_safe(ip)
-                hwid = make_stable_hwid(ip, comp_name, nb_mac)
+                if known_has_real_name:
+                    comp_name = known_name
+                    nb_mac = known_mac
+                    os_name = known_os
+                    is_verified = known_verified or True
+                else:
+                    comp_name, nb_mac, os_name, is_verified = resolve_host_info_safe(ip)
+                    if not nb_mac:
+                        nb_mac = known_mac
+                    if not os_name:
+                        os_name = known_os
+
+                hwid = known_hwid or make_stable_hwid(ip, comp_name, nb_mac)
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
-                matched_comp = match_saved_computer(comp_name, hwid)
+                matched_comp = match_saved_computer(comp_name, hwid, known_saved_id)
                 saved_pw = matched_comp.get("password", "") if matched_comp else ""
-                saved_id = (matched_comp.get("id", "") if matched_comp else "") or hwid
+                saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
 
-                return {
+                res_dict = {
                     "computer_name": comp_name,
                     "name_verified": is_verified,
                     "os": os_name,
@@ -791,9 +862,12 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     "network_type": vpn_type_label,
                     "last_seen": format_last_seen_str(),
                     "source_ip": ip,
-                    "saved_password": hash_password_md5(saved_pw),
+                    "saved_password": final_pw_hash,
                     "saved_id": saved_id
                 }
+                if known_peer:
+                    res_dict = merge_peers(res_dict, known_peer)
+                return res_dict
     except Exception:
         pass
     finally:
@@ -833,13 +907,13 @@ def probe_peer_direct(peer_info, timeout=0.35):
     vpn_label = peer_info.get("network_type") or "LAN"
 
     for ip in candidate_ips:
-        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45)
+        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45, known_peer=peer_info)
         if res:
             return True, res
 
     if port != 12345:
         for ip in candidate_ips:
-            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45)
+            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45, known_peer=peer_info)
             if res:
                 return True, res
 
