@@ -929,7 +929,7 @@ class NetworkMixin:
                 b = get_app_data_dir()
             except Exception:
                 b = os.path.dirname(os.path.abspath(__file__))
-            if sys.platform == "win32" and ("Program Files" in b or not os.access(b, os.W_OK)):
+            if sys.platform == "win32" and not os.access(b, os.W_OK):
                 appdata = os.environ.get("APPDATA")
                 if appdata:
                     folder = os.path.join(appdata, "EasyRemoteDesktop")

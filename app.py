@@ -1491,14 +1491,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             with open(lan_file, 'w', encoding='utf-8') as f:
                 json.dump(dump_data, f, ensure_ascii=False, indent=4)
 
-            # Đồng bộ sang cả thư mục cài đặt và APPDATA để mọi nơi luôn nhất quán
-            sync_targets = []
-            appdata = os.environ.get('APPDATA', '')
-            if appdata:
-                sync_targets.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
             if sys.platform == "win32":
-                sync_targets.append(r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json")
-            for st in sync_targets:
+                st = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
                 try:
                     if os.path.abspath(st) != os.path.abspath(lan_file):
                         st_dir = os.path.dirname(st)

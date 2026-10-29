@@ -55,7 +55,15 @@ def get_app_data_dir():
             pass
         return path
 
-    # Windows: ưu tiên thư mục APPDATA của người dùng (luôn có quyền đọc/ghi)
+    # Windows: ưu tiên thư mục cài đặt của app nếu có quyền ghi, chỉ fallback sang APPDATA khi bị chặn quyền ghi
+    if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False) or ("__compiled__" in globals()):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if os.path.exists(exe_dir) and os.access(exe_dir, os.W_OK):
+        return exe_dir
+
     appdata = os.environ.get("APPDATA")
     if appdata:
         path = os.path.join(appdata, "EasyRemoteDesktop")
@@ -65,19 +73,15 @@ def get_app_data_dir():
         except Exception:
             pass
 
-    if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    return exe_dir
 
 
 def get_computers_xml_path():
     """Resolve saved_computers.xml (ưu tiên thư mục của app/installed copy, sau đó là user APPDATA)."""
-    user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
-
     # Thu thập các đường dẫn file saved_computers.xml trong thư mục của app
     candidates = []
-    if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False):
-        exe_dir = os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False) or ("__compiled__" in globals()):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         exe_dir = os.path.dirname(os.path.abspath(__file__))
     candidates.append(os.path.join(exe_dir, "saved_computers.xml"))
@@ -98,31 +102,15 @@ def get_computers_xml_path():
     # 1. Kiểm tra các thư mục của app trước: nếu có file, ưu tiên sử dụng
     for inst in candidates:
         if os.path.exists(inst):
-            # Nếu file trong thư mục của app có quyền ghi trực tiếp, dùng luôn file này
             if os.access(inst, os.W_OK):
-                # Đồng thời nếu user_path tồn tại nhưng cũ hơn hoặc khác kích thước, đồng bộ sang user_path
-                try:
-                    if not os.path.exists(user_path) or (os.path.getmtime(inst) > os.path.getmtime(user_path) and os.path.getsize(inst) != os.path.getsize(user_path)):
-                        os.makedirs(os.path.dirname(user_path), exist_ok=True)
-                        shutil.copy2(inst, user_path)
-                except Exception:
-                    pass
                 return inst
-            else:
-                # Nếu không có quyền ghi trực tiếp vào thư mục cài đặt, đồng bộ sang user_path để có quyền ghi
-                try:
-                    if not os.path.exists(user_path):
-                        os.makedirs(os.path.dirname(user_path), exist_ok=True)
-                        shutil.copy2(inst, user_path)
-                    return user_path
-                except Exception:
-                    return inst
 
-    # 2. Nếu trong thư mục của app chưa có, sử dụng file trong user APPDATA
-    if os.path.exists(user_path):
-        return user_path
+    # Nếu chưa có file nhưng thư mục exe_dir có quyền ghi, tạo tại exe_dir
+    if os.path.exists(exe_dir) and os.access(exe_dir, os.W_OK):
+        return os.path.join(exe_dir, "saved_computers.xml")
 
-    return candidates[0] if candidates else user_path
+    user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
+    return user_path
 
 
 class SavedListMixin:
@@ -1196,12 +1184,7 @@ class SavedListMixin:
             except Exception:
                 self._saved_computers_mtime = None
 
-            # Đồng bộ hai chiều giữa thư mục app và APPDATA để cả 2 nơi đều có dữ liệu mới nhất
             try:
-                user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
-                if os.path.abspath(computers_file) != os.path.abspath(user_path):
-                    os.makedirs(os.path.dirname(user_path), exist_ok=True)
-                    shutil.copy2(computers_file, user_path)
                 installed_p = r"C:\Program Files (x86)\Easy Remote Desktop\saved_computers.xml"
                 if os.path.abspath(computers_file) != os.path.abspath(installed_p):
                     if os.path.exists(os.path.dirname(installed_p)) and os.access(os.path.dirname(installed_p), os.W_OK):
