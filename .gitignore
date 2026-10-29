@@ -67,8 +67,6 @@ app.ini
 custom_ip_range.json
 session_pass.txt
 
-# Allow conversations directory and its txt files
-!/conversations/
-!/conversations/**/*.txt
-!/conversations/*.txt
-!/conversations/README.md
+# Chat logs & internal conversation data (keep locally, never upload to git)
+_internal_data/
+conversations/
