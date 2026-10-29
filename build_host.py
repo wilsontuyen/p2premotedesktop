@@ -5,7 +5,7 @@ import shutil
 import time
 import glob
 
-from build_and_deploy import log, run_cmd, shorten_openblas_dll, try_authenticode_sign
+from build_and_deploy import log, run_cmd, shorten_openblas_dll, try_authenticode_sign, verify_project_syntax
 
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 output_dir = os.path.join(workspace_dir, "dist_nuitka_host")
@@ -175,6 +175,11 @@ def main():
             pass
 
     log("=== STARTING SLIM HOST BUILD (GUI + SYSTEM service, no viewer/pygame) ===")
+    # BẮT BUỘC: Kiểm tra toàn bộ cú pháp mã nguồn trước khi bắt đầu biên dịch
+    if not verify_project_syntax():
+        log("Aborting Host build due to syntax check failure.")
+        show_build_done_popup(False, "Phát hiện lỗi cú pháp mã nguồn. Đã hủy tiến trình build.")
+        return 1
     # Không tắt Host đang chạy — build ra dist riêng.
 
     company_name = "P2P Remote Desktop"

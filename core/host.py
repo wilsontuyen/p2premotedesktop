@@ -24,6 +24,10 @@ import numpy as np
 from core.i18n import _
 
 from core.config import *
+try:
+    from host_build_flag import HOST_ONLY_BUILD
+except Exception:
+    HOST_ONLY_BUILD = False
 from network.socket_utils import socket_passwords, force_close_socket, APP_KEY
 from utils.input_simulator import INPUT, INPUT_KEYBOARD, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP, _remote_modifier_keys
 from PIL import Image

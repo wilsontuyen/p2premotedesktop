@@ -43,12 +43,55 @@ def run_cmd(cmd, cwd=workspace_dir):
         return False
     return True
 
+def verify_project_syntax(ws_dir=workspace_dir, log_fn=log):
+    import py_compile
+    if log_fn:
+        log_fn("Checking Python syntax across official project files before build...")
+    
+    official_root = [
+        "app.py", "host.py", "client.py", "signaling_server.py", "windows_service.py",
+        "windows_service_loop.py", "linux_service_loop.py", "clipboard_agent.py",
+        "clipboardtext.py", "filecopyhost.py", "filecopyclient.py", "pclist.py",
+        "host_build_flag.py", "build_and_deploy.py", "build_host.py", "build_signaling.py"
+    ]
+    files_to_check = [os.path.join(ws_dir, f) for f in official_root if os.path.exists(os.path.join(ws_dir, f))]
+    
+    for sub in ["core", "gui", "os_utils", "utils", "network"]:
+        sub_dir = os.path.join(ws_dir, sub)
+        if os.path.isdir(sub_dir):
+            for fname in os.listdir(sub_dir):
+                if fname.endswith(".py"):
+                    files_to_check.append(os.path.join(sub_dir, fname))
+
+    errors = []
+    for fpath in files_to_check:
+        try:
+            py_compile.compile(fpath, doraise=True)
+        except py_compile.PyCompileError as pe:
+            err_msg = f"SYNTAX ERROR in {os.path.relpath(fpath, ws_dir)}: {pe}"
+            if log_fn:
+                log_fn(f"CRITICAL: {err_msg}")
+            errors.append(err_msg)
+            
+    if errors:
+        if log_fn:
+            log_fn(f"ABORTING BUILD: Found {len(errors)} syntax error(s). Please fix before building!")
+        return False
+    if log_fn:
+        log_fn(f"All {len(files_to_check)} official project source files passed syntax check successfully.")
+    return True
+
 def main():
     if os.path.exists(log_path):
         try: os.remove(log_path)
         except: pass
 
     log("=== STARTING BUILD AND DEPLOYMENT ===")
+
+    # BẮT BUỘC: Kiểm tra toàn bộ cú pháp mã nguồn trước khi bắt đầu biên dịch
+    if not verify_project_syntax():
+        log("Aborting build due to syntax check failure.")
+        return False
     # Đảm bảo full client build (không phải host-only)
     flag_file = os.path.join(workspace_dir, "host_build_flag.py")
     try:

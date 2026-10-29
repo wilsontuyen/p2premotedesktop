@@ -145,7 +145,7 @@ client_host_did_shutdown = False
 client_host_computer_name_override = None
 client_host_monitor_count = 1
 client_host_sent_monitor_info = False
-        client_host_monitor_rects = []
+client_host_monitor_rects = []
 client_true_remote_res = None
 client_mon_left_on = True
 client_mon_right_on = True
@@ -169,7 +169,6 @@ _DUAL_MON_STD_SIZES = {
 
 
 def _detect_black_padding_offset(img, w1, w2, h_full, h_target):
-    """Kiem tra xem man hinh nho hon bi chen vien den o tren (bottom-aligned) hay o duoi (top-aligned)."""
     try:
         import numpy as _np
         arr = _np.array(img)
@@ -203,6 +202,84 @@ def _detect_black_padding_offset(img, w1, w2, h_full, h_target):
     return max(0, h_full - h_target)
 
 
+def _find_split_from_image(img, total_w, total_h):
+    if img is None:
+        return None
+    try:
+        import numpy as _np
+        arr = _np.array(img)
+        ih, iw = arr.shape[:2]
+        if ih < 20 or iw < 40:
+            return None
+        band_h = max(2, min(40, ih // 5))
+        top_col_means = arr[:band_h, :, :].mean(axis=(0, 2))
+        bot_col_means = arr[ih - band_h:, :, :].mean(axis=(0, 2))
+        top_black = top_col_means < 8.0
+        bot_black = bot_col_means < 8.0
+        for is_black, is_top in ((top_black, True), (bot_black, False)):
+            diff = _np.diff(is_black.astype(int))
+            trans = _np.where(diff != 0)[0] + 1
+            valid = [x for x in trans if int(iw * 0.20) <= x <= int(iw * 0.80)]
+            if valid:
+                x_split_img = valid[0]
+                sx = total_w / float(iw)
+                sy = total_h / float(ih)
+                x_split = int(round(x_split_img * sx))
+                check_x = min(iw - 1, x_split_img + 10)
+                if is_black[check_x]:
+                    w1 = x_split
+                    w2 = total_w - x_split
+                    h1 = total_h
+                    right_rows = arr[:, min(iw - 1, x_split_img + 20):, :].mean(axis=(1, 2))
+                    black_rows = right_rows < 8.0
+                    row_diff = _np.diff(black_rows.astype(int))
+                    y_trans = _np.where(row_diff != 0)[0] + 1
+                    if len(y_trans) > 0:
+                        y_split_img = y_trans[0]
+                        if is_top:
+                            y2 = int(round(y_split_img * sy))
+                            h2 = total_h - y2
+                            y1 = 0
+                        else:
+                            h2 = int(round(y_split_img * sy))
+                            y2 = 0
+                            y1 = 0
+                    else:
+                        h2 = total_h
+                        y2 = 0
+                        y1 = 0
+                    if w1 > 100 and w2 > 100 and h1 > 100 and h2 > 100:
+                        return (0, y1, w1, h1), (w1, y2, w2, h2), total_w, total_h
+                else:
+                    w1 = x_split
+                    w2 = total_w - x_split
+                    h2 = total_h
+                    left_rows = arr[:, :max(1, x_split_img - 20), :].mean(axis=(1, 2))
+                    black_rows = left_rows < 8.0
+                    row_diff = _np.diff(black_rows.astype(int))
+                    y_trans = _np.where(row_diff != 0)[0] + 1
+                    if len(y_trans) > 0:
+                        y_split_img = y_trans[0]
+                        if is_top:
+                            y1 = int(round(y_split_img * sy))
+                            h1 = total_h - y1
+                            y2 = 0
+                        else:
+                            h1 = int(round(y_split_img * sy))
+                            y1 = 0
+                            y2 = 0
+                    else:
+                        h1 = total_h
+                        y1 = 0
+                        y2 = 0
+                    if w1 > 100 and w2 > 100 and h1 > 100 and h2 > 100:
+                        return (0, y1, w1, h1), (w1, y2, w2, h2), total_w, total_h
+    except Exception:
+        pass
+    return None
+
+
+
 def _resolve_dual_monitor_subrects(total_w, total_h, monitors_meta=None, img_sample=None):
     """
     Tra ve (m1_rect, m2_rect, full_w, full_h).
@@ -225,6 +302,11 @@ def _resolve_dual_monitor_subrects(total_w, total_h, monitors_meta=None, img_sam
 
     W = int(total_w)
     H = int(total_h)
+    
+    if img_sample is not None:
+        dyn_split = _find_split_from_image(img_sample, W, H)
+        if dyn_split is not None:
+            return dyn_split
     
     best_pair = None
     for w1 in sorted(_DUAL_MON_STD_SIZES.keys(), reverse=True):
@@ -929,7 +1011,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             uninstall_keyboard_hook()
             return
         
-        global client_host_monitor_count, client_host_sent_monitor_info, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors
+        global client_host_monitor_count, client_host_sent_monitor_info, client_host_monitor_rects, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors
         client_host_monitor_count = 1
         client_host_sent_monitor_info = False
         client_host_monitor_rects = []
@@ -1354,21 +1436,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 continue
                         last_local_mouse_move_ts = now_mono
                         host_x, host_y, rx_send, ry_send = _calc_target_mouse_pos(mx_pos, my_pos)
-                        if False:
-                        ry_norm = max(0.0, min(1.0, my_pos / max(1, window_h - 1))) if window_h > 1 else 0.0
-                        if is_legacy_dual_fallback:
-                            if client_mon_left_on and not client_mon_right_on:
-                                rx_send = rx_norm * 0.5
-                            elif client_mon_right_on and not client_mon_left_on:
-                                rx_send = 0.5 + rx_norm * 0.5
-                            else:
-                                rx_send = rx_norm
-                            host_x = int(round(rx_send * max(1, tr_w - 1)))
-                            host_y = int(round(ry_norm * max(1, tr_h - 1)))
-                        else:
-                            rx_send = rx_norm
-                            host_x = int(mx_pos * (host_w / window_w))
-                            host_y = int(my_pos * (host_h / window_h))
                         
                         if is_android and drag_start_pos is not None:
                             # Record drag path points for Android swipes/patterns
@@ -1380,7 +1447,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if (host_x - last_pt[0])**2 + (host_y - last_pt[1])**2 > 25:
                                 drag_path.append((host_x, host_y))
                         else:
-                            send_event({"type": "mouse_move", "x": host_x, "y": host_y, "rx": round(rx_send, 6), "ry": round(ry_norm, 6)})
+                            send_event({"type": "mouse_move", "x": host_x, "y": host_y, "rx": round(rx_send, 6), "ry": round(ry_send, 6)})
                         
                     elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
                         if show_buttons and fold_btn_rect.collidepoint(event.pos):
@@ -1506,21 +1573,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             mx_pos, my_pos = event.pos
                             last_local_mouse_move_ts = time.monotonic()
                             host_x, host_y, rx_send, ry_send = _calc_target_mouse_pos(mx_pos, my_pos)
-                        if False:
-                            ry_norm = max(0.0, min(1.0, my_pos / max(1, window_h - 1))) if window_h > 1 else 0.0
-                            if is_legacy_dual_fallback:
-                                if client_mon_left_on and not client_mon_right_on:
-                                    rx_send = rx_norm * 0.5
-                                elif client_mon_right_on and not client_mon_left_on:
-                                    rx_send = 0.5 + rx_norm * 0.5
-                                else:
-                                    rx_send = rx_norm
-                                host_x = int(round(rx_send * max(1, tr_w - 1)))
-                                host_y = int(round(ry_norm * max(1, tr_h - 1)))
-                            else:
-                                rx_send = rx_norm
-                                host_x = int(mx_pos * (host_w / window_w))
-                                host_y = int(my_pos * (host_h / window_h))
                             
                             if event.type == pygame.MOUSEBUTTONDOWN:
                                 drag_start_pos = (host_x, host_y)
@@ -1532,7 +1584,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     "x": host_x,
                                     "y": host_y,
                                     "rx": round(rx_send, 6),
-                                    "ry": round(ry_norm, 6),
+                                    "ry": round(ry_send, 6),
                                 })
                             else: # MOUSEBUTTONUP
                                 if drag_start_pos and is_android:
@@ -1579,7 +1631,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     "x": host_x,
                                     "y": host_y,
                                     "rx": round(rx_send, 6),
-                                    "ry": round(ry_norm, 6),
+                                    "ry": round(ry_send, 6),
                                 })
                                 drag_start_pos = None
                                 drag_path = []
@@ -1664,14 +1716,32 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         raw_w, raw_h = frame_to_draw.size
                         if raw_w <= 0 or raw_h <= 0:
                             raise ValueError("empty frame size")
-                        if (not is_android) and (not client_host_sent_monitor_info) and ((raw_w / float(raw_h)) >= 2.25):
-                            cur_tr = client_true_remote_res
-                            if cur_tr is None or cur_tr[1] <= 0 or (cur_tr[0] / float(cur_tr[1])) < 2.25:
+                        tr_w, tr_h = client_true_remote_res if client_true_remote_res else (host_w, host_h)
+                        is_stitched_frame = (raw_w / float(raw_h) >= 2.0) or (tr_h > 0 and (tr_w / float(tr_h) >= 2.0) and abs(raw_w / float(raw_h) - tr_w / float(tr_h)) < 0.25)
+                        if (not is_android) and is_stitched_frame and (not client_mon_left_on or not client_mon_right_on):
+                            if client_true_remote_res is None or client_true_remote_res[1] <= 0:
                                 client_true_remote_res = (raw_w, raw_h)
+                            m1_rect, m2_rect, fw, fh = _resolve_dual_monitor_subrects(
+                                tr_w, tr_h,
+                                monitors_meta=client_host_monitor_rects,
+                                img_sample=frame_to_draw
+                            )
+                            sx = raw_w / float(max(1, fw))
+                            sy = raw_h / float(max(1, fh))
                             if client_mon_left_on and not client_mon_right_on:
-                                frame_to_draw = frame_to_draw.crop((0, 0, max(1, raw_w // 2), raw_h))
+                                cx1 = max(0, int(round(m1_rect[0] * sx)))
+                                cy1 = max(0, int(round(m1_rect[1] * sy)))
+                                cx2 = min(raw_w, int(round((m1_rect[0] + m1_rect[2]) * sx)))
+                                cy2 = min(raw_h, int(round((m1_rect[1] + m1_rect[3]) * sy)))
+                                if cx2 > cx1 and cy2 > cy1:
+                                    frame_to_draw = frame_to_draw.crop((cx1, cy1, cx2, cy2))
                             elif client_mon_right_on and not client_mon_left_on:
-                                frame_to_draw = frame_to_draw.crop((raw_w // 2, 0, raw_w, raw_h))
+                                cx1 = max(0, int(round(m2_rect[0] * sx)))
+                                cy1 = max(0, int(round(m2_rect[1] * sy)))
+                                cx2 = min(raw_w, int(round((m2_rect[0] + m2_rect[2]) * sx)))
+                                cy2 = min(raw_h, int(round((m2_rect[1] + m2_rect[3]) * sy)))
+                                if cx2 > cx1 and cy2 > cy1:
+                                    frame_to_draw = frame_to_draw.crop((cx1, cy1, cx2, cy2))
                         w, h = frame_to_draw.size
                         if (w != host_w or h != host_h) and w > 100 and h > 100:
                             client_host_resolution = (w, h)
@@ -1772,28 +1842,59 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         cur_rx = float(client_host_cursor_data.get("rx", 0.5))
                         cur_ry = float(client_host_cursor_data.get("ry", 0.5))
                     if cur_vis and window_w > 1 and window_h > 1:
-                        vx = max(0, min(window_w - 1, int(round(cur_rx * (window_w - 1)))))
-                        vy = max(0, min(window_h - 1, int(round(cur_ry * (window_h - 1)))))
-                        if pygame.mouse.get_focused():
-                            if cur_seq != last_applied_cursor_seq:
-                                last_applied_cursor_seq = cur_seq
-                                now_m = time.monotonic()
-                                if (
-                                    (not any_toolbar_hover)
-                                    and (not any(pygame.mouse.get_pressed()))
-                                    and (now_m - last_local_mouse_move_ts >= 0.15)
-                                ):
-                                    cur_mx, cur_my = pygame.mouse.get_pos()
-                                    if abs(cur_mx - vx) > 1 or abs(cur_my - vy) > 1:
-                                        _warped_cursor_target = (vx, vy)
-                                        _warped_cursor_until = now_m + 0.12
-                                        try:
-                                            pygame.mouse.set_pos((vx, vy))
-                                        except Exception:
-                                            pass
+                        tr_w, tr_h = client_true_remote_res if client_true_remote_res else (host_w, host_h)
+                        is_dual_mode = (not is_android) and ((tr_h > 0 and (tr_w / float(tr_h) >= 2.0)) or client_host_monitor_count >= 2)
+                        cur_in_view = True
+                        if is_dual_mode:
+                            m1_rect, m2_rect, fw, fh = _resolve_dual_monitor_subrects(
+                                tr_w, tr_h,
+                                monitors_meta=client_host_monitor_rects,
+                                img_sample=client_latest_frame
+                            )
+                            cur_hx = cur_rx * float(max(1, fw - 1))
+                            cur_hy = cur_ry * float(max(1, fh - 1))
+                            if client_mon_left_on and not client_mon_right_on:
+                                ox, oy, mw, mh = m1_rect
+                                if ox <= cur_hx <= (ox + mw) and oy <= cur_hy <= (oy + mh):
+                                    vx = max(0, min(window_w - 1, int(round((cur_hx - ox) / max(1, mw - 1) * (window_w - 1)))))
+                                    vy = max(0, min(window_h - 1, int(round((cur_hy - oy) / max(1, mh - 1) * (window_h - 1)))))
+                                else:
+                                    cur_in_view = False
+                            elif client_mon_right_on and not client_mon_left_on:
+                                ox, oy, mw, mh = m2_rect
+                                if ox <= cur_hx <= (ox + mw) and oy <= cur_hy <= (oy + mh):
+                                    vx = max(0, min(window_w - 1, int(round((cur_hx - ox) / max(1, mw - 1) * (window_w - 1)))))
+                                    vy = max(0, min(window_h - 1, int(round((cur_hy - oy) / max(1, mh - 1) * (window_h - 1)))))
+                                else:
+                                    cur_in_view = False
+                            else:
+                                vx = max(0, min(window_w - 1, int(round(cur_rx * (window_w - 1)))))
+                                vy = max(0, min(window_h - 1, int(round(cur_ry * (window_h - 1)))))
                         else:
-                            last_applied_cursor_seq = cur_seq
-                            _draw_host_cursor_overlay(screen, vx, vy)
+                            vx = max(0, min(window_w - 1, int(round(cur_rx * (window_w - 1)))))
+                            vy = max(0, min(window_h - 1, int(round(cur_ry * (window_h - 1)))))
+
+                        if cur_in_view:
+                            if pygame.mouse.get_focused():
+                                if cur_seq != last_applied_cursor_seq:
+                                    last_applied_cursor_seq = cur_seq
+                                    now_m = time.monotonic()
+                                    if (
+                                        (not any_toolbar_hover)
+                                        and (not any(pygame.mouse.get_pressed()))
+                                        and (now_m - last_local_mouse_move_ts >= 0.15)
+                                    ):
+                                        cur_mx, cur_my = pygame.mouse.get_pos()
+                                        if abs(cur_mx - vx) > 1 or abs(cur_my - vy) > 1:
+                                            _warped_cursor_target = (vx, vy)
+                                            _warped_cursor_until = now_m + 0.12
+                                            try:
+                                                pygame.mouse.set_pos((vx, vy))
+                                            except Exception:
+                                                pass
+                            else:
+                                last_applied_cursor_seq = cur_seq
+                                _draw_host_cursor_overlay(screen, vx, vy)
 
                 # Draw floating buttons on top
                 if show_toolbar:
