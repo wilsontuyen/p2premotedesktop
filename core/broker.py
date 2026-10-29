@@ -67,14 +67,14 @@ def _decrypt_fixed_password(encrypted_text, key="AntigravityP2P"):
         return ""
 
 
-def notify_broker_password_update(session_password=None, fixed_password=None):
+def notify_broker_password_update(session_password=None, fixed_password=None, persist_disk=True):
     """GUI báo trực tiếp cho Broker (Session 0) cập nhật ngay mật khẩu phiên / mật khẩu cố định mà không cần khởi động lại."""
-    payload = {"role": "password_update"}
+    payload = {"role": "password_update", "persist_disk": bool(persist_disk)}
     if session_password is not None:
         payload["session_password"] = str(session_password).strip()
     if fixed_password is not None:
         payload["fixed_password"] = str(fixed_password).strip()
-    if len(payload) <= 1:
+    if "session_password" not in payload and "fixed_password" not in payload:
         return False
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -357,61 +357,47 @@ class Broker:
         return file_val
 
     def _persist_fixed_password_in_app_dir(self, password):
-        """Ghi mật khẩu cố định vào saved_computers.xml trong _app_dir() bằng quyền SYSTEM của Broker."""
+        """Cập nhật DUY NHẤT thẻ <fixed_password> tại chỗ trong saved_computers.xml (giữ nguyên 100% <group>, <group_states>, <computer>, <zalo_phone>)."""
         try:
             import xml.etree.ElementTree as ET
             xml_path = os.path.join(_app_dir(), "saved_computers.xml")
-            computers = []
-            zalo_node_text = ""
             if os.path.exists(xml_path):
-                try:
-                    root_old = ET.parse(xml_path).getroot()
-                    for comp_node in root_old.findall("computer"):
-                        n_node = comp_node.find("name")
-                        i_node = comp_node.find("id")
-                        p_node = comp_node.find("password")
-                        m_node = comp_node.find("mac")
-                        computers.append({
-                            "name": n_node.text if n_node is not None else "",
-                            "id": i_node.text if i_node is not None else "",
-                            "password": p_node.text if p_node is not None else "",
-                            "mac": m_node.text if m_node is not None else "",
-                        })
-                    z_node = root_old.find("zalo_phone")
-                    if z_node is not None and z_node.text:
-                        zalo_node_text = z_node.text
-                except Exception:
-                    pass
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+            else:
+                if not password:
+                    return
+                root = ET.Element("computers")
+                tree = ET.ElementTree(root)
 
-            root = ET.Element("computers")
+            old_fp = root.find("fixed_password")
+            old_val = _decrypt_fixed_password(old_fp.text).strip() if (old_fp is not None and old_fp.text) else ""
+            if old_val == (password or "").strip():
+                return
+
+            if old_fp is not None:
+                root.remove(old_fp)
             if password:
-                f_node = ET.SubElement(root, "fixed_password")
+                f_node = ET.Element("fixed_password")
                 f_node.text = _encrypt_fixed_password(password)
-            if zalo_node_text:
-                z_node = ET.SubElement(root, "zalo_phone")
-                z_node.text = zalo_node_text
-            for comp in computers:
-                comp_node = ET.SubElement(root, "computer")
-                ET.SubElement(comp_node, "name").text = comp["name"]
-                ET.SubElement(comp_node, "id").text = comp["id"]
-                ET.SubElement(comp_node, "password").text = comp["password"]
-                if comp.get("mac"):
-                    ET.SubElement(comp_node, "mac").text = comp["mac"]
+                root.insert(0, f_node)
+
             if hasattr(ET, "indent"):
                 ET.indent(root, space="  ")
-            ET.ElementTree(root).write(xml_path, encoding="utf-8", xml_declaration=True)
+            tree.write(xml_path, encoding="utf-8", xml_declaration=True)
         except Exception as e:
             print(f"[Broker] persist fixed_password loi: {e}")
 
     def _on_password_update(self, info):
         """Nhận cập nhật mật khẩu tức thời từ Host GUI qua IPC, vô hiệu hóa ngay mật khẩu cũ của worker."""
         now_ts = time.time()
+        persist_disk = bool(info.get("persist_disk", True))
         has_sp = "session_password" in info
         has_fp = "fixed_password" in info
         sp_val = str(info.get("session_password") or "").strip() if has_sp else None
         fp_val = str(info.get("fixed_password") or "").strip() if has_fp else None
 
-        if has_sp and sp_val:
+        if persist_disk and has_sp and sp_val:
             try:
                 p = os.path.join(_app_dir(), "session_pass.txt")
                 with open(p, "w", encoding="utf-8") as f:
@@ -420,7 +406,7 @@ class Broker:
             except Exception as e:
                 print(f"[Broker] ghi session_pass.txt tu IPC loi: {e}")
 
-        if has_fp:
+        if persist_disk and has_fp:
             self._persist_fixed_password_in_app_dir(fp_val)
             try:
                 xp = os.path.join(_app_dir(), "saved_computers.xml")

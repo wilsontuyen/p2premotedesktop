@@ -748,12 +748,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         else:
             self.fixed_password = self.load_fixed_password_from_xml()
 
-        # Đồng bộ tức thời mật khẩu phiên & mật khẩu cố định xuống Broker (Session 0) khi mở GUI
+        # Đồng bộ tức thời mật khẩu phiên & mật khẩu cố định xuống RAM của Broker (Session 0) khi mở GUI (KHÔNG ghi đè saved_computers.xml)
         if not self.is_headless and sys.platform == "win32":
             def _sync_broker_init_pw(sp=self.my_password, fp=self.fixed_password):
                 try:
                     from core.broker import notify_broker_password_update
-                    notify_broker_password_update(session_password=sp, fixed_password=fp or "")
+                    notify_broker_password_update(session_password=sp, fixed_password=fp or "", persist_disk=False)
                 except Exception:
                     pass
             threading.Thread(target=_sync_broker_init_pw, daemon=True).start()
@@ -1544,59 +1544,27 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def save_fixed_password_to_xml(self, password):
         computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
-        
-        computers = []
-        zalo_node_text = ""
-        if os.path.exists(computers_file):
-            try:
+        try:
+            if os.path.exists(computers_file):
                 tree = ET.parse(computers_file)
                 root = tree.getroot()
-                for comp_node in root.findall("computer"):
-                    name_node = comp_node.find("name")
-                    id_node = comp_node.find("id")
-                    pass_node = comp_node.find("password")
-                    mac_node = comp_node.find("mac")
-                    computers.append({
-                        "name": name_node.text if name_node is not None else "",
-                        "id": id_node.text if id_node is not None else "",
-                        "password": pass_node.text if pass_node is not None else "",
-                        "mac": mac_node.text if mac_node is not None else ""
-                    })
-                z_node = root.find("zalo_phone")
-                if z_node is not None:
-                    zalo_node_text = z_node.text
-            except:
-                pass
-                
-        root = ET.Element("computers")
-        
-        if password:
-            fixed_node = ET.SubElement(root, "fixed_password")
-            fixed_node.text = encrypt_text(password)
-            
-        if zalo_node_text:
-            z_node = ET.SubElement(root, "zalo_phone")
-            z_node.text = zalo_node_text
-            
-        for comp in computers:
-            comp_node = ET.SubElement(root, "computer")
-            name_node = ET.SubElement(comp_node, "name")
-            name_node.text = comp["name"]
-            
-            id_node = ET.SubElement(comp_node, "id")
-            id_node.text = comp["id"]
-            
-            pass_node = ET.SubElement(comp_node, "password")
-            pass_node.text = comp["password"]
-            if comp.get("mac"):
-                mac_node = ET.SubElement(comp_node, "mac")
-                mac_node.text = comp["mac"]
-            
-        if hasattr(ET, "indent"):
-            ET.indent(root, space="  ")
-            
-        try:
-            tree = ET.ElementTree(root)
+            else:
+                if not password:
+                    return
+                root = ET.Element("computers")
+                tree = ET.ElementTree(root)
+
+            old_fp = root.find("fixed_password")
+            if old_fp is not None:
+                root.remove(old_fp)
+            if password:
+                fixed_node = ET.Element("fixed_password")
+                fixed_node.text = encrypt_text(password)
+                root.insert(0, fixed_node)
+
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
             app_xml = os.path.join(app_dir, "saved_computers.xml")
             if os.path.abspath(app_xml) != os.path.abspath(computers_file):
@@ -1636,59 +1604,28 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def save_zalo_phone_to_xml(self, value):
         computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
-        
-        computers = []
-        fixed_node_text = ""
-        if os.path.exists(computers_file):
-            try:
+        try:
+            if os.path.exists(computers_file):
                 tree = ET.parse(computers_file)
                 root = tree.getroot()
-                for comp_node in root.findall("computer"):
-                    name_node = comp_node.find("name")
-                    id_node = comp_node.find("id")
-                    pass_node = comp_node.find("password")
-                    mac_node = comp_node.find("mac")
-                    computers.append({
-                        "name": name_node.text if name_node is not None else "",
-                        "id": id_node.text if id_node is not None else "",
-                        "password": pass_node.text if pass_node is not None else "",
-                        "mac": mac_node.text if mac_node is not None else ""
-                    })
-                f_node = root.find("fixed_password")
-                if f_node is not None:
-                    fixed_node_text = f_node.text
-            except:
-                pass
-                
-        root = ET.Element("computers")
-        
-        if fixed_node_text:
-            f_node = ET.SubElement(root, "fixed_password")
-            f_node.text = fixed_node_text
-            
-        if value:
-            zalo_node = ET.SubElement(root, "zalo_phone")
-            zalo_node.text = value
-            
-        for comp in computers:
-            comp_node = ET.SubElement(root, "computer")
-            name_node = ET.SubElement(comp_node, "name")
-            name_node.text = comp["name"]
-            
-            id_node = ET.SubElement(comp_node, "id")
-            id_node.text = comp["id"]
-            
-            pass_node = ET.SubElement(comp_node, "password")
-            pass_node.text = comp["password"]
-            if comp.get("mac"):
-                mac_node = ET.SubElement(comp_node, "mac")
-                mac_node.text = comp["mac"]
-            
-        if hasattr(ET, "indent"):
-            ET.indent(root, space="  ")
-            
-        try:
-            tree = ET.ElementTree(root)
+            else:
+                if not value:
+                    return
+                root = ET.Element("computers")
+                tree = ET.ElementTree(root)
+
+            old_zalo = root.find("zalo_phone")
+            if old_zalo is not None:
+                root.remove(old_zalo)
+            if value:
+                zalo_node = ET.Element("zalo_phone")
+                zalo_node.text = value
+                insert_idx = 1 if root.find("fixed_password") is not None else 0
+                root.insert(insert_idx, zalo_node)
+
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
         except Exception as e:
             print(f"[Config] Lỗi lưu Zalo/Điện thoại vào XML: {e}")

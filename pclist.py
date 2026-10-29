@@ -1136,27 +1136,31 @@ class SavedListMixin:
         try:
             fixed_node = None
             zalo_node = None
+            old_gs_node = None
             if os.path.exists(computers_file):
                 try:
                     tree = ET.parse(computers_file)
                     root = tree.getroot()
                     fixed_node = root.find("fixed_password")
                     zalo_node = root.find("zalo_phone")
+                    old_gs_node = root.find("group_states")
                 except:
                     pass
-            
+
             root = ET.Element("computers")
-            
+
             if fixed_node is not None:
                 root.append(fixed_node)
             if zalo_node is not None:
                 root.append(zalo_node)
-                
+
             if hasattr(self, 'collapsed_groups'):
                 gs_node = ET.SubElement(root, "group_states")
                 for grp in self.collapsed_groups:
                     g_node = ET.SubElement(gs_node, "collapsed_group")
                     g_node.text = encrypt_text(grp)
+            elif old_gs_node is not None:
+                root.append(old_gs_node)
                 
 
             for comp in lst:
