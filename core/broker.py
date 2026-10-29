@@ -48,6 +48,14 @@ AGENT_IPC_PORT = 12400          # 127.0.0.1 only: worker <-> broker
 VIEWER_PORT = 12345             # LAN-direct viewer (Phase 1)
 
 
+def _encrypt_fixed_password(text, key="AntigravityP2P"):
+    if not text:
+        return ""
+    import base64
+    xored = "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
+    return base64.b64encode(xored.encode("utf-8")).decode("utf-8")
+
+
 def _decrypt_fixed_password(encrypted_text, key="AntigravityP2P"):
     if not encrypted_text:
         return ""
@@ -57,6 +65,30 @@ def _decrypt_fixed_password(encrypted_text, key="AntigravityP2P"):
         return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(decoded))
     except Exception:
         return ""
+
+
+def notify_broker_password_update(session_password=None, fixed_password=None):
+    """GUI báo trực tiếp cho Broker (Session 0) cập nhật ngay mật khẩu phiên / mật khẩu cố định mà không cần khởi động lại."""
+    payload = {"role": "password_update"}
+    if session_password is not None:
+        payload["session_password"] = str(session_password).strip()
+    if fixed_password is not None:
+        payload["fixed_password"] = str(fixed_password).strip()
+    if len(payload) <= 1:
+        return False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect(("127.0.0.1", AGENT_IPC_PORT))
+        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        try:
+            s.close()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f"[Broker] notify password_update loi: {e}")
+        return False
 
 
 def notify_broker_power_event(kind="shutdown"):
@@ -80,8 +112,8 @@ def notify_broker_power_event(kind="shutdown"):
 
 
 def _app_dir():
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False) or hasattr(sys, "__compiled__") or ("__compiled__" in globals()):
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -173,6 +205,11 @@ class Broker:
         self.active_viewers = []  # [(sock, password), ...]
         self.viewers_lock = threading.Lock()
         self._shutdown_sent = False
+        self._password_lock = threading.Lock()
+        self._ipc_session_password = None
+        self._ipc_session_mtime = 0.0
+        self._ipc_fixed_password = None
+        self._ipc_fixed_mtime = 0.0
         threading.Thread(target=self._load_identity, daemon=True).start()
 
     def _register_viewer(self, conn, password):
@@ -254,35 +291,167 @@ class Broker:
 
     # ---------- password ----------
     def _current_password(self):
+        file_val = None
+        file_mtime = 0.0
         try:
             p = os.path.join(_app_dir(), "session_pass.txt")
             if os.path.exists(p):
+                file_mtime = os.path.getmtime(p)
                 with open(p, "r", encoding="utf-8-sig") as f:
                     v = f.read().strip()
                     if v:
-                        return v
+                        file_val = v
         except Exception as e:
             print(f"[Broker] doc session_pass.txt loi: {e}")
-        return None
+
+        with self._password_lock:
+            ipc_val = self._ipc_session_password
+            ipc_mt = self._ipc_session_mtime
+
+        if ipc_val is not None and (file_val is None or ipc_mt >= file_mtime):
+            return ipc_val or None
+        return file_val
 
     def _fixed_password(self):
+        file_val = None
+        file_mtime = 0.0
+        has_xml = False
         try:
-            xml_path = os.path.join(_app_dir(), "saved_computers.xml")
-            if not os.path.exists(xml_path):
-                return None
+            import glob
             import xml.etree.ElementTree as ET
-            root = ET.parse(xml_path).getroot()
-            node = root.find("fixed_password")
-            if node is not None and node.text:
-                v = _decrypt_fixed_password(node.text)
-                v = (v or "").strip()
-                return v or None
+            xml_candidates = [os.path.join(_app_dir(), "saved_computers.xml")]
+            if os.name == "nt":
+                # Fallback tương thích ngược cho các máy Host từng lưu ở APPDATA
+                for up in glob.glob(r"C:\Users\*\AppData\Roaming\EasyRemoteDesktop\saved_computers.xml"):
+                    if up not in xml_candidates:
+                        xml_candidates.append(up)
+            existing_xmls = [xp for xp in xml_candidates if os.path.exists(xp)]
+            # Ưu tiên file có thời gian sửa đổi mới nhất có chứa fixed_password (hoặc file ở _app_dir)
+            existing_xmls.sort(key=lambda xp: os.path.getmtime(xp), reverse=True)
+            for xp in existing_xmls:
+                try:
+                    mt = os.path.getmtime(xp)
+                    root = ET.parse(xp).getroot()
+                    has_xml = True
+                    if mt > file_mtime:
+                        file_mtime = mt
+                    node = root.find("fixed_password")
+                    if node is not None and node.text:
+                        v = _decrypt_fixed_password(node.text)
+                        v = (v or "").strip()
+                        if v:
+                            file_val = v
+                            file_mtime = mt
+                            break
+                except Exception:
+                    continue
         except Exception as e:
             print(f"[Broker] doc mat khau co dinh loi: {e}")
-        return None
+
+        with self._password_lock:
+            ipc_val = self._ipc_fixed_password
+            ipc_mt = self._ipc_fixed_mtime
+
+        if ipc_val is not None and (not has_xml or ipc_mt >= file_mtime):
+            return ipc_val or None
+        return file_val
+
+    def _persist_fixed_password_in_app_dir(self, password):
+        """Ghi mật khẩu cố định vào saved_computers.xml trong _app_dir() bằng quyền SYSTEM của Broker."""
+        try:
+            import xml.etree.ElementTree as ET
+            xml_path = os.path.join(_app_dir(), "saved_computers.xml")
+            computers = []
+            zalo_node_text = ""
+            if os.path.exists(xml_path):
+                try:
+                    root_old = ET.parse(xml_path).getroot()
+                    for comp_node in root_old.findall("computer"):
+                        n_node = comp_node.find("name")
+                        i_node = comp_node.find("id")
+                        p_node = comp_node.find("password")
+                        m_node = comp_node.find("mac")
+                        computers.append({
+                            "name": n_node.text if n_node is not None else "",
+                            "id": i_node.text if i_node is not None else "",
+                            "password": p_node.text if p_node is not None else "",
+                            "mac": m_node.text if m_node is not None else "",
+                        })
+                    z_node = root_old.find("zalo_phone")
+                    if z_node is not None and z_node.text:
+                        zalo_node_text = z_node.text
+                except Exception:
+                    pass
+
+            root = ET.Element("computers")
+            if password:
+                f_node = ET.SubElement(root, "fixed_password")
+                f_node.text = _encrypt_fixed_password(password)
+            if zalo_node_text:
+                z_node = ET.SubElement(root, "zalo_phone")
+                z_node.text = zalo_node_text
+            for comp in computers:
+                comp_node = ET.SubElement(root, "computer")
+                ET.SubElement(comp_node, "name").text = comp["name"]
+                ET.SubElement(comp_node, "id").text = comp["id"]
+                ET.SubElement(comp_node, "password").text = comp["password"]
+                if comp.get("mac"):
+                    ET.SubElement(comp_node, "mac").text = comp["mac"]
+            if hasattr(ET, "indent"):
+                ET.indent(root, space="  ")
+            ET.ElementTree(root).write(xml_path, encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"[Broker] persist fixed_password loi: {e}")
+
+    def _on_password_update(self, info):
+        """Nhận cập nhật mật khẩu tức thời từ Host GUI qua IPC, vô hiệu hóa ngay mật khẩu cũ của worker."""
+        now_ts = time.time()
+        has_sp = "session_password" in info
+        has_fp = "fixed_password" in info
+        sp_val = str(info.get("session_password") or "").strip() if has_sp else None
+        fp_val = str(info.get("fixed_password") or "").strip() if has_fp else None
+
+        if has_sp and sp_val:
+            try:
+                p = os.path.join(_app_dir(), "session_pass.txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(sp_val)
+                now_ts = max(now_ts, os.path.getmtime(p))
+            except Exception as e:
+                print(f"[Broker] ghi session_pass.txt tu IPC loi: {e}")
+
+        if has_fp:
+            self._persist_fixed_password_in_app_dir(fp_val)
+            try:
+                xp = os.path.join(_app_dir(), "saved_computers.xml")
+                if os.path.exists(xp):
+                    now_ts = max(now_ts, os.path.getmtime(xp))
+            except Exception:
+                pass
+
+        with self._password_lock:
+            if has_sp:
+                self._ipc_session_password = sp_val
+                self._ipc_session_mtime = now_ts
+            if has_fp:
+                self._ipc_fixed_password = fp_val
+                self._ipc_fixed_mtime = now_ts
+
+        # Xóa ngay mật khẩu đóng băng lúc khởi động trong các worker đang kết nối
+        fresh_pwds = []
+        cur_sp = self._current_password()
+        cur_fp = self._fixed_password()
+        if cur_sp:
+            fresh_pwds.append(cur_sp)
+        if cur_fp and cur_fp not in fresh_pwds:
+            fresh_pwds.append(cur_fp)
+        with self.worker_lock:
+            for w in self.workers:
+                w.passwords = list(fresh_pwds)
+        print(f"[Broker] Da cap nhat mat khau tuc thoi qua IPC (session={'y' if cur_sp else 'n'}, fixed={'y' if cur_fp else 'n'}).")
 
     def _handshake_passwords(self, worker):
-        """Reload session + fixed luc bat tay (khong dung mat khau worker dong bang luc start)."""
+        """Reload session + fixed lúc bắt tay — KHÔNG dùng mật khẩu cũ đóng băng trong worker khi đã có mật khẩu mới."""
         cands = []
 
         def add(p):
@@ -292,11 +461,12 @@ class Broker:
             if p and p not in cands:
                 cands.append(p)
 
-        if worker:
-            for p in (worker.passwords or []):
-                add(p)
         add(self._current_password())
         add(self._fixed_password())
+        # Chỉ fallback sang worker.passwords nếu cả session_pass và fixed_password đều rỗng/chưa đọc được
+        if not cands and worker:
+            for p in (worker.passwords or []):
+                add(p)
         return cands
 
     def _next_token(self):
@@ -345,6 +515,10 @@ class Broker:
                 except: pass
             elif role == "power_event":
                 self._on_power_event(info)
+                try: conn.close()
+                except: pass
+            elif role == "password_update":
+                self._on_password_update(info)
                 try: conn.close()
                 except: pass
             else:

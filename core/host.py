@@ -39,8 +39,8 @@ from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_click_at, send_input_mouse_move, send_input_mouse_scroll
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, CLIPBOARD_PKT_TYPES
 
-if getattr(sys, 'frozen', False):
-    app_dir = os.path.dirname(sys.executable)
+if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
+    app_dir = os.path.dirname(os.path.abspath(sys.executable))
 else:
     app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -2222,26 +2222,27 @@ class HostMixin:
         # We now support multiple clients, so we don't block new connections if active_clients is non-empty.
             
         try:
-            # If we are headless, let's reload the random password from session_pass.txt to stay in sync with GUI
+            # Reload random password from session_pass.txt (headless) and ALWAYS reload fixed_password from XML during handshake
             if self.is_headless:
                 try:
                     pass_path = os.path.join(app_dir, "session_pass.txt")
                     if os.path.exists(pass_path):
-                        with open(pass_path, "r", encoding="utf-8") as f:
+                        with open(pass_path, "r", encoding="utf-8-sig") as f:
                             val = f.read().strip()
                             if val:
                                 self.my_password = val
                 except Exception as e:
                     print(f"[Host Service] Failed to reload password from session_pass.txt during handshake: {e}")
-                    
-                try:
-                    self.fixed_password = self.load_fixed_password_from_xml()
-                except Exception as e:
-                    print(f"[Host Service] Failed to reload fixed password from XML during handshake: {e}")
 
-            # Register the socket with candidate passwords so recv_msg can decrypt client's handshake
-            socket_passwords[conn] = [self.my_password, self.fixed_password, APP_KEY]
-            msg = recv_msg(conn, [self.my_password, self.fixed_password, APP_KEY])
+            try:
+                self.fixed_password = self.load_fixed_password_from_xml()
+            except Exception as e:
+                print(f"[Host] Failed to reload fixed password from XML during handshake: {e}")
+
+            # Register the socket with non-empty candidate passwords so recv_msg can decrypt client's handshake
+            cand_keys = [k for k in (self.my_password, self.fixed_password, APP_KEY) if k]
+            socket_passwords[conn] = cand_keys
+            msg = recv_msg(conn, cand_keys)
             if not msg:
                 print("[Host] Failed to decrypt handshake. Sending error using APP_KEY.")
                 try:

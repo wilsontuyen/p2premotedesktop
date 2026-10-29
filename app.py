@@ -284,13 +284,13 @@ if sys.platform != "win32":
         os.umask(0) # Đảm bảo file cấu hình tạo bởi root (systemd) có quyền rw-rw-rw-
     except:
         pass
-if getattr(sys, 'frozen', False):
-    app_dir = os.path.dirname(sys.executable)
+if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
+    app_dir = os.path.dirname(os.path.abspath(sys.executable))
 else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
 
-is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__')
+is_compiled = getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals())
 
 # Hỗ trợ DPI High-Scaling trên Windows 10/11 để tránh chữ mờ và co giãn sai tỉ lệ cửa sổ
 if sys.platform == "win32":
@@ -747,6 +747,17 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
         else:
             self.fixed_password = self.load_fixed_password_from_xml()
+
+        # Đồng bộ tức thời mật khẩu phiên & mật khẩu cố định xuống Broker (Session 0) khi mở GUI
+        if not self.is_headless and sys.platform == "win32":
+            def _sync_broker_init_pw(sp=self.my_password, fp=self.fixed_password):
+                try:
+                    from core.broker import notify_broker_password_update
+                    notify_broker_password_update(session_password=sp, fixed_password=fp or "")
+                except Exception:
+                    pass
+            threading.Thread(target=_sync_broker_init_pw, daemon=True).start()
+
         self.pass_type_var = tk.StringVar(value=_("4 chữ số"))
         self.server_socket = None
         self.running_server = True
@@ -1408,19 +1419,29 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             self.my_password = ''.join(random.choices(chars, k=8))
         else:  # Mặc định: 4 chữ số
             self.my_password = str(random.randint(1000, 9999))
-            
-        # Write to session_pass.txt if service is active or we are headless
-        if self.is_headless or getattr(self, "is_service_active", False):
+
+        wrote_file = False
+        try:
+            pass_path = os.path.join(app_dir, "session_pass.txt")
+            with open(pass_path, "w", encoding="utf-8") as f:
+                f.write(self.my_password)
+            wrote_file = True
+            print(f"[Host] Saved refreshed session password to {pass_path}")
+        except Exception as e:
+            print(f"[Host] Failed to save refreshed session password to file: {e}")
+
+        notified_broker = False
+        if sys.platform == "win32":
             try:
-                pass_path = os.path.join(app_dir, "session_pass.txt")
-                with open(pass_path, "w", encoding="utf-8") as f:
-                    f.write(self.my_password)
-                print(f"[Host] Saved refreshed session password to {pass_path}")
+                from core.broker import notify_broker_password_update
+                notified_broker = notify_broker_password_update(session_password=self.my_password)
             except Exception as e:
-                print(f"[Host] Failed to save refreshed session password: {e}")
-                self.my_password = old_password
-                self.show_custom_error(_("Lỗi"), _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"))
-                
+                print(f"[Host] Failed to notify broker of refreshed password: {e}")
+
+        if not wrote_file and not notified_broker and (self.is_headless or getattr(self, "is_service_active", False)):
+            self.my_password = old_password
+            self.show_custom_error(_("Lỗi"), _("Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!"))
+
         self.my_pass_label.config(text=self.my_password)
         
 
@@ -1534,10 +1555,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     name_node = comp_node.find("name")
                     id_node = comp_node.find("id")
                     pass_node = comp_node.find("password")
+                    mac_node = comp_node.find("mac")
                     computers.append({
                         "name": name_node.text if name_node is not None else "",
                         "id": id_node.text if id_node is not None else "",
-                        "password": pass_node.text if pass_node is not None else ""
+                        "password": pass_node.text if pass_node is not None else "",
+                        "mac": mac_node.text if mac_node is not None else ""
                     })
                 z_node = root.find("zalo_phone")
                 if z_node is not None:
@@ -1565,6 +1588,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             
             pass_node = ET.SubElement(comp_node, "password")
             pass_node.text = comp["password"]
+            if comp.get("mac"):
+                mac_node = ET.SubElement(comp_node, "mac")
+                mac_node.text = comp["mac"]
             
         if hasattr(ET, "indent"):
             ET.indent(root, space="  ")
@@ -1572,6 +1598,11 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         try:
             tree = ET.ElementTree(root)
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+            app_xml = os.path.join(app_dir, "saved_computers.xml")
+            if os.path.abspath(app_xml) != os.path.abspath(computers_file):
+                if os.path.exists(app_dir) and os.access(app_dir, os.W_OK):
+                    import shutil
+                    shutil.copy2(computers_file, app_xml)
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
 
@@ -1579,6 +1610,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def save_fixed_password(self, password):
         self.fixed_password = password
         self.save_fixed_password_to_xml(password)
+        if sys.platform == "win32":
+            try:
+                from core.broker import notify_broker_password_update
+                notify_broker_password_update(fixed_password=password or "")
+            except Exception as e:
+                print(f"[Config] Lỗi báo Broker cập nhật mật khẩu cố định: {e}")
 
 
     def load_zalo_phone_from_xml(self):
@@ -1610,10 +1647,12 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     name_node = comp_node.find("name")
                     id_node = comp_node.find("id")
                     pass_node = comp_node.find("password")
+                    mac_node = comp_node.find("mac")
                     computers.append({
                         "name": name_node.text if name_node is not None else "",
                         "id": id_node.text if id_node is not None else "",
-                        "password": pass_node.text if pass_node is not None else ""
+                        "password": pass_node.text if pass_node is not None else "",
+                        "mac": mac_node.text if mac_node is not None else ""
                     })
                 f_node = root.find("fixed_password")
                 if f_node is not None:
@@ -1641,6 +1680,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             
             pass_node = ET.SubElement(comp_node, "password")
             pass_node.text = comp["password"]
+            if comp.get("mac"):
+                mac_node = ET.SubElement(comp_node, "mac")
+                mac_node.text = comp["mac"]
             
         if hasattr(ET, "indent"):
             ET.indent(root, space="  ")
