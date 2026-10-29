@@ -157,6 +157,23 @@ def _hide_win_path(path):
         pass
 
 
+def _staging_has_pending_files(path):
+    """True nếu thư mục .rdxfer_* còn file (>0 byte) chưa được chuyển đi."""
+    try:
+        if not os.path.isdir(path):
+            return False
+        for _r, _d, files in os.walk(path):
+            for fn in files:
+                try:
+                    if os.path.getsize(os.path.join(_r, fn)) > 0:
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        return False
+    return False
+
+
 def _purge_rdxfer_staging(dest_dir=None, xfer_id=None, extra_paths=None, force_all=False):
     """Xóa .rdxfer_* sau khi file đã ra thư mục đích — không để lại folder tạm."""
     targets = []
@@ -211,6 +228,10 @@ def _purge_rdxfer_staging(dest_dir=None, xfer_id=None, extra_paths=None, force_a
             continue
         seen.add(key)
         if not os.path.basename(t).startswith(".rdxfer_"):
+            continue
+        if not force_all and _staging_has_pending_files(t):
+            # Con file chua chuyen ra dich (vd. dich da co file trung ten) - khong xoa, tranh mat du lieu.
+            log_debug(f"[purge_staging] Giu {t}: con file chua chuyen ra dich")
             continue
         _retry_remove_path(t, retries=12)
         if os.path.lexists(t):
@@ -438,7 +459,13 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
                 moved.append(os.path.abspath(dest_path))
                 continue
             if os.path.exists(dest_path):
-                if not _is_transfer_junk_at_dest(dest_path) and dest_key not in allow_replace:
+                try:
+                    src_expected = os.path.getsize(src_abs) if os.path.isfile(src_abs) else None
+                except Exception:
+                    src_expected = None
+                # Stub nho (Explorer/probe de lai cung ten) khong phai file user - thay bang file that,
+                # neu khong staging bi purge va mat file (paste nhieu file chi con file cuoi).
+                if not _is_transfer_junk_at_dest(dest_path, src_expected) and dest_key not in allow_replace:
                     log_debug(f"[relocate] Bo ghi de (chua hoi Replace): {dest_path}")
                     # Giữ bản staging — caller (agent) sẽ relocate sau khi có replace_keys.
                     moved.append(src_abs)
