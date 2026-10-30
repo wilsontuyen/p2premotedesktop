@@ -501,8 +501,8 @@ def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
     if not saved:
         return None
 
-    # 1. Khớp theo HWID hoặc saved_id chính xác (ưu tiên bản ghi mới nhất ở cuối danh sách nếu trùng ID)
-    id_candidates = [''.join(ch for ch in str(x or '') if ch.isdigit()) for x in (saved_id, hwid) if x]
+    # 1. Khớp theo HWID hoặc saved_id chính xác (ưu tiên HWID thực tế trước, ưu tiên bản ghi mới nhất ở cuối danh sách nếu trùng ID)
+    id_candidates = [''.join(ch for ch in str(x or '') if ch.isdigit()) for x in (hwid, saved_id) if x]
     id_candidates = [x for x in id_candidates if x]
     for cand_id in id_candidates:
         for c in reversed(saved):
@@ -668,12 +668,22 @@ def merge_peers(p_winner, p_loser):
     # 3. Tên máy tính (ưu tiên tên đã verified hoặc tên rõ ràng, không generic)
     w_name = str(res.get("computer_name") or "").strip()
     l_name = str(p_loser.get("computer_name") or "").strip()
-    if p_loser.get("name_verified") and not res.get("name_verified") and l_name:
+    loser_is_verified = bool(p_loser.get("name_verified"))
+    winner_is_verified = bool(res.get("name_verified"))
+    if loser_is_verified and not winner_is_verified and l_name:
         res["computer_name"] = l_name
         res["name_verified"] = True
+        # Nếu loser đã có danh tính verified còn winner chỉ là probe fallback unverified,
+        # giữ lại HWID và saved_id chuẩn của loser
+        if p_loser.get("hwid"):
+            res["hwid"] = p_loser["hwid"]
+        if p_loser.get("saved_id"):
+            res["saved_id"] = p_loser["saved_id"]
     elif (not w_name or w_name.lower() in ("unknown", "không rõ") or re.match(r"^pc-\d+$", w_name.lower())) and l_name and not re.match(r"^pc-\d+$", l_name.lower()):
         res["computer_name"] = l_name
         res["name_verified"] = p_loser.get("name_verified", False)
+        if p_loser.get("saved_id") and not res.get("saved_id"):
+            res["saved_id"] = p_loser["saved_id"]
 
     # 4. OS
     if not res.get("os") and p_loser.get("os"):
@@ -682,8 +692,25 @@ def merge_peers(p_winner, p_loser):
     # 5. Saved Password & Saved ID
     if not res.get("saved_password") and p_loser.get("saved_password"):
         res["saved_password"] = p_loser["saved_password"]
-    if not res.get("saved_id") and p_loser.get("saved_id"):
-        res["saved_id"] = p_loser["saved_id"]
+    w_hwid = ''.join(ch for ch in str(res.get("hwid") or "") if ch.isdigit())
+    l_hwid = ''.join(ch for ch in str(p_loser.get("hwid") or "") if ch.isdigit())
+    winner_is_synthetic = (res.get("hwid_verified") is False)
+    loser_is_synthetic = (p_loser.get("hwid_verified") is False)
+
+    # Bảo vệ HWID đã xác thực không bao giờ bị ghi đè bởi synthetic hash
+    if winner_is_synthetic and not loser_is_synthetic and len(l_hwid) == 12:
+        res["hwid"] = l_hwid
+        res["saved_id"] = p_loser.get("saved_id") or l_hwid
+        res["hwid_verified"] = True
+    elif w_hwid and len(w_hwid) == 12:
+        l_sid = ''.join(ch for ch in str(p_loser.get("saved_id") or "") if ch.isdigit())
+        if l_sid == w_hwid:
+            res["saved_id"] = p_loser["saved_id"]
+        elif not res.get("saved_id") or ''.join(ch for ch in str(res.get("saved_id") or "") if ch.isdigit()) != w_hwid:
+            res["saved_id"] = w_hwid
+    else:
+        if not res.get("saved_id") and p_loser.get("saved_id"):
+            res["saved_id"] = p_loser["saved_id"]
 
     # 6. Network type (ưu tiên nhãn chi tiết hơn LAN mặc định)
     w_net = str(res.get("network_type") or "").strip()
@@ -757,6 +784,14 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
       thông tin tên máy đã xác thực, HWID, MAC và mật khẩu đã lưu để không gọi nbtstat chậm
       và không bao giờ ghi đè mất dữ liệu cũ.
     """
+    if not ip or ip.startswith('127.'):
+        return None
+    try:
+        if ip in get_all_local_ipv4():
+            return None
+    except Exception:
+        pass
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -799,16 +834,38 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                         if not os_name:
                             os_name = r_os
 
-                hwid = data.get("hwid") or known_hwid or make_stable_hwid(ip, comp_name, nb_mac)
+                pong_hwid_raw = str(data.get("hwid") or "").strip()
+                clean_pong_hwid = ''.join(ch for ch in pong_hwid_raw if ch.isdigit())
+                if len(clean_pong_hwid) == 12:
+                    hwid = clean_pong_hwid
+                    # HWID đã xác thực từ gói tin probe_pong -> Không dùng known_saved_id lỗi thời
+                    matched_comp = match_saved_computer(comp_name, hwid, None)
+                    saved_pw = matched_comp.get("password", "") if matched_comp else ""
+                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or hwid
+                    hwid_verified = True
+                else:
+                    matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
+                    m_clean_id = ''.join(ch for ch in str(matched_comp.get("id", "")) if ch.isdigit()) if matched_comp else ""
+                    clean_kh = ''.join(ch for ch in str(known_hwid or "") if ch.isdigit())
+                    if m_clean_id and len(m_clean_id) == 12:
+                        hwid = m_clean_id
+                        saved_id = m_clean_id
+                        hwid_verified = True
+                    elif clean_kh and len(clean_kh) == 12:
+                        hwid = clean_kh
+                        saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                        hwid_verified = True
+                    else:
+                        hwid = make_stable_hwid(ip, comp_name, nb_mac)
+                        saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                        hwid_verified = False
+                    saved_pw = matched_comp.get("password", "") if matched_comp else ""
+
                 full_local_ip = data.get("local_ip") or ip
                 # Đảm bảo IP đang thăm dò nằm trong danh sách local_ip
                 if ip not in [x.strip() for x in full_local_ip.split(',')]:
                     full_local_ip = f"{full_local_ip},{ip}"
 
-                # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
-                matched_comp = match_saved_computer(comp_name, hwid, known_saved_id)
-                saved_pw = matched_comp.get("password", "") if matched_comp else ""
-                saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
                 final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
 
                 res_dict = {
@@ -823,7 +880,8 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     "last_seen": format_last_seen_str(),
                     "source_ip": ip,
                     "saved_password": final_pw_hash,
-                    "saved_id": saved_id
+                    "saved_id": saved_id,
+                    "hwid_verified": hwid_verified
                 }
                 if known_peer:
                     res_dict = merge_peers(res_dict, known_peer)
@@ -843,17 +901,31 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     if not os_name:
                         os_name = known_os
 
-                hwid = known_hwid or make_stable_hwid(ip, comp_name, nb_mac)
-
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
-                matched_comp = match_saved_computer(comp_name, hwid, known_saved_id)
+                matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
                 saved_pw = matched_comp.get("password", "") if matched_comp else ""
-                saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                m_clean_id = ''.join(ch for ch in str(matched_comp.get("id", "")) if ch.isdigit()) if matched_comp else ""
+                clean_kh = ''.join(ch for ch in str(known_hwid or "") if ch.isdigit())
+
+                if m_clean_id and len(m_clean_id) == 12:
+                    hwid = m_clean_id
+                    saved_id = m_clean_id
+                    hwid_verified = True
+                elif clean_kh and len(clean_kh) == 12:
+                    hwid = clean_kh
+                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                    hwid_verified = True
+                else:
+                    hwid = make_stable_hwid(ip, comp_name, nb_mac)
+                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                    hwid_verified = False
+
                 final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
 
                 res_dict = {
                     "computer_name": comp_name,
                     "name_verified": is_verified,
+                    "hwid_verified": hwid_verified,
                     "os": os_name,
                     "local_ip": ip,
                     "port": port,
@@ -920,12 +992,13 @@ def probe_peer_direct(peer_info, timeout=0.35):
     return False, None
 
 
-def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None):
+def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
     """
     Quét toàn bộ dải IP của một mạng VPN.
     vpn_info: dict trả về từ detect_vpn_interfaces().
     ports: danh sách cổng cần quét (mặc định [12345, 12346]).
     peer_found_callback: hàm gọi ngay khi phát hiện 1 máy (để UI cập nhật tức thì).
+    known_peers: dict máy đã biết để truyền known_peer vào probe_single_host bảo vệ HWID.
     """
     if ports is None:
         ports = DEFAULT_SCAN_PORTS
@@ -954,12 +1027,36 @@ def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=Non
         if cancel_event and cancel_event.is_set():
             return None
         res = None
+        kp = None
+        if known_peers and isinstance(known_peers, dict):
+            for p_info in known_peers.values():
+                p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
+                if target_ip in p_ips:
+                    kp = p_info
+                    break
+
         for port in ports:
             if cancel_event and cancel_event.is_set():
                 break
-            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_type, timeout=0.45)
+            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_type, timeout=0.45, known_peer=kp)
             if res:
                 break
+
+        if res:
+            my_clean = ""
+            try:
+                from utils.hwid import load_saved_hwid, get_hwid
+                my_clean = ''.join(ch for ch in str(load_saved_hwid() or get_hwid()[0] or "") if ch.isdigit())
+            except Exception:
+                pass
+            res_hwid = ''.join(ch for ch in str(res.get("hwid") or "") if ch.isdigit())
+            res_saved_id = ''.join(ch for ch in str(res.get("saved_id") or "") if ch.isdigit())
+            res_name = str(res.get("computer_name") or "").strip().lower()
+            my_hostname = socket.gethostname().strip().lower()
+            if my_clean and (my_clean == res_hwid or my_clean == res_saved_id):
+                res = None
+            elif res_name and res_name == my_hostname and res_name not in ("unknown", "không rõ", "localhost"):
+                res = None
 
         should_notify = False
         with _lock:
@@ -988,7 +1085,7 @@ def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=Non
     return found_peers
 
 
-def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None):
+def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
     """Quét dải IP tùy chỉnh do người dùng nhập (ví dụ 192.168.1.1 -> 192.168.1.50)."""
     if ports is None:
         ports = DEFAULT_SCAN_PORTS
@@ -1030,12 +1127,36 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_cal
         if cancel_event and cancel_event.is_set():
             return None
         res = None
+        kp = None
+        if known_peers and isinstance(known_peers, dict):
+            for p_info in known_peers.values():
+                p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
+                if target_ip in p_ips:
+                    kp = p_info
+                    break
+
         for port in ports:
             if cancel_event and cancel_event.is_set():
                 break
-            res = probe_single_host(target_ip, port=port, vpn_type_label="Custom IP", timeout=0.45)
+            res = probe_single_host(target_ip, port=port, vpn_type_label="Custom IP", timeout=0.45, known_peer=kp)
             if res:
                 break
+
+        if res:
+            my_clean = ""
+            try:
+                from utils.hwid import load_saved_hwid, get_hwid
+                my_clean = ''.join(ch for ch in str(load_saved_hwid() or get_hwid()[0] or "") if ch.isdigit())
+            except Exception:
+                pass
+            res_hwid = ''.join(ch for ch in str(res.get("hwid") or "") if ch.isdigit())
+            res_saved_id = ''.join(ch for ch in str(res.get("saved_id") or "") if ch.isdigit())
+            res_name = str(res.get("computer_name") or "").strip().lower()
+            my_hostname = socket.gethostname().strip().lower()
+            if my_clean and (my_clean == res_hwid or my_clean == res_saved_id):
+                res = None
+            elif res_name and res_name == my_hostname and res_name not in ("unknown", "không rõ", "localhost"):
+                res = None
 
         should_notify = False
         with _lock:

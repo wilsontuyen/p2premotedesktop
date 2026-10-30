@@ -1473,8 +1473,25 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 dump_data = {}
                 for k, v in self.lan_peers.items():
                     v_copy = dict(v)
-                    if not v_copy.get("hwid"):
-                        v_copy["hwid"] = k
+                    k_clean = ''.join(ch for ch in str(k) if ch.isdigit())
+                    h_clean = ''.join(ch for ch in str(v_copy.get("hwid") or "") if ch.isdigit())
+                    canonical_k = k_clean if len(k_clean) == 12 else (h_clean if len(h_clean) == 12 else k)
+                    v_copy["hwid"] = canonical_k
+
+                    # Nhận diện máy tính hiện tại (self)
+                    p_name = str(v_copy.get("computer_name") or "").strip().lower()
+                    my_hostname = socket.gethostname().strip().lower()
+                    my_hwid = getattr(self, "my_id_clean", "") or ""
+                    if not my_hwid:
+                        try:
+                            from utils.hwid import get_hwid
+                            my_hwid = get_hwid()[0]
+                        except Exception:
+                            my_hwid = ""
+                    clean_my_hwid = ''.join(ch for ch in str(my_hwid) if ch.isdigit())
+                    if clean_my_hwid and (p_name == my_hostname or canonical_k == clean_my_hwid):
+                        # Bỏ qua máy hiện tại, không lưu vào lan_peers.json
+                        continue
 
                     # 1. Format last_seen sang chuỗi ngày giờ full YYYY-MM-DD HH:MM:SS
                     ls = v_copy.get("last_seen")
@@ -1485,12 +1502,20 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
                     # 2. Tự động đồng bộ saved_password và saved_id từ saved_computers.xml nếu chưa có
                     spw = str(v_copy.get("saved_password") or "").strip()
-                    if not spw:
-                        matched = match_saved_computer(v_copy.get("computer_name"), v_copy.get("hwid") or k, v_copy.get("saved_id"))
-                        if matched and matched.get("password"):
-                            spw = str(matched["password"]).strip()
-                            if matched.get("id") and not v_copy.get("saved_id"):
-                                v_copy["saved_id"] = matched["id"]
+                    matched = match_saved_computer(v_copy.get("computer_name"), canonical_k, v_copy.get("saved_id"))
+                    if not spw and matched and matched.get("password"):
+                        spw = str(matched["password"]).strip()
+
+                    # 3. Đảm bảo saved_id đồng bộ chuẩn với HWID 12 số
+                    if len(canonical_k) == 12:
+                        v_copy["saved_id"] = canonical_k
+                    elif matched and matched.get("id"):
+                        m_clean = ''.join(ch for ch in str(matched["id"]) if ch.isdigit())
+                        if len(m_clean) == 12:
+                            v_copy["saved_id"] = m_clean
+                            v_copy["hwid"] = m_clean
+                    elif not v_copy.get("saved_id"):
+                        v_copy["saved_id"] = canonical_k
 
                     # Mã hóa MD5 cho saved_password, tuyệt đối không để plaintext
                     if spw:
@@ -1502,12 +1527,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     else:
                         v_copy["saved_password"] = ""
 
-                    # 3. Đảm bảo saved_id luôn có ID (không bị rỗng)
-                    if not v_copy.get("saved_id"):
-                        v_copy["saved_id"] = v_copy.get("hwid") or k
                     v["saved_id"] = v_copy["saved_id"]
-
-                    dump_data[k] = v_copy
+                    v["hwid"] = v_copy["hwid"]
+                    dump_data[canonical_k] = v_copy
 
             with open(lan_file, 'w', encoding='utf-8') as f:
                 json.dump(dump_data, f, ensure_ascii=False, indent=4)

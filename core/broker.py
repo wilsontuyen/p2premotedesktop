@@ -836,6 +836,33 @@ class Broker:
                     pass
                 conn.close(); return
             data = json.loads(msg.decode("utf-8"))
+
+            # Check if this is a LAN / VPN discovery probe
+            if data.get("action") == "probe":
+                try:
+                    import platform
+                    from core.config import LAN_APP_SIGNATURE
+                    hw = (self.identity or {}).get("hwid", "")
+                    if not hw:
+                        from utils.hwid import load_saved_hwid
+                        hw = load_saved_hwid() or ""
+                    pong_data = json.dumps({
+                        "status": "ok",
+                        "type": "probe_pong",
+                        "sig": LAN_APP_SIGNATURE,
+                        "hwid": hw,
+                        "computer_name": platform.node(),
+                        "os": platform.system(),
+                        "port": VIEWER_PORT,
+                        "local_ip": (self.identity or {}).get("ip", ""),
+                        "macs": (self.identity or {}).get("macs", "")
+                    }).encode("utf-8")
+                    send_msg(conn, pong_data, APP_KEY)
+                except Exception as probe_err:
+                    print(f"[Broker] Probe response error: {probe_err}")
+                conn.close()
+                return
+
             client_pass = data.get("password")
             if client_pass not in candidates:
                 print("[Broker] handshake: sai mat khau.")

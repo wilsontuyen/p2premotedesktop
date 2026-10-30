@@ -2474,11 +2474,18 @@ class HostMixin:
                 try:
                     import platform
                     from core.config import LAN_APP_SIGNATURE
+                    hw = getattr(self, "my_id_clean", "")
+                    if not hw:
+                        try:
+                            from utils.hwid import load_saved_hwid, get_hwid
+                            hw = load_saved_hwid() or get_hwid()[0] or ""
+                        except Exception:
+                            hw = ""
                     pong_data = json.dumps({
                         "status": "ok",
                         "type": "probe_pong",
                         "sig": LAN_APP_SIGNATURE,
-                        "hwid": getattr(self, "my_id_clean", ""),
+                        "hwid": hw,
                         "computer_name": platform.node(),
                         "os": platform.system(),
                         "port": BOUND_PORT,

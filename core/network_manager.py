@@ -568,37 +568,37 @@ class NetworkMixin:
         def _persist_peer_password(target_hwid, peer_info, new_pw):
             """Lưu mật khẩu đồng bộ vào cả saved_computers.xml và lan_peers.json."""
             comp_name = str(peer_info.get("computer_name") or "").strip()
-            saved_id_val = str(peer_info.get("saved_id") or target_hwid or "").strip()
-            clean_h = ''.join(ch for ch in str(target_hwid or '') if ch.isdigit())
-            clean_sid = ''.join(ch for ch in str(saved_id_val or '') if ch.isdigit())
+            # Ưu tiên HWID thực tế 12 số của peer
+            p_hw = ''.join(ch for ch in str(peer_info.get("hwid") or target_hwid or "") if ch.isdigit())
+            p_sid = ''.join(ch for ch in str(peer_info.get("saved_id") or "") if ch.isdigit())
+            canonical_id = p_hw if len(p_hw) == 12 else (p_sid if len(p_sid) == 12 else (p_hw or p_sid or target_hwid))
 
             # 1. Cập nhật saved_computers.xml (cập nhật tất cả các bản ghi trùng ID hoặc tên để không sót mật khẩu cũ)
             comps = self.load_saved_computers()
-            matched_existing = match_saved_computer(comp_name, target_hwid, saved_id_val)
+            matched_existing = match_saved_computer(comp_name, canonical_id, canonical_id)
             matched_existing_id = ''.join(ch for ch in str(matched_existing.get('id', '')) if ch.isdigit()) if matched_existing else ''
             matched_existing_name = str(matched_existing.get('name', '')).strip().lower() if matched_existing else ''
 
-            id_targets = {x for x in (clean_h, clean_sid, matched_existing_id) if x}
+            id_targets = {x for x in (canonical_id, matched_existing_id) if x}
             name_targets = {x for x in (comp_name.lower(), matched_existing_name) if x and x not in ('unknown', 'không rõ')}
 
+            fmt_saved_id = f"{canonical_id[:3]} {canonical_id[3:6]} {canonical_id[6:9]} {canonical_id[9:]}" if len(canonical_id) == 12 else canonical_id
             updated_any = False
-            final_saved_id = saved_id_val or target_hwid
             for idx, c in enumerate(comps):
                 c_id_clean = ''.join(ch for ch in str(c.get('id', '')) if ch.isdigit())
                 c_name_lower = str(c.get('name', '')).strip().lower()
                 if (c_id_clean and c_id_clean in id_targets) or (c_name_lower and c_name_lower in name_targets):
                     comps[idx]["password"] = new_pw
-                    if not comps[idx].get("id"):
-                        comps[idx]["id"] = final_saved_id
-                    else:
-                        final_saved_id = comps[idx]["id"]
+                    # Cập nhật ID chuẩn nếu bản ghi cũ bị sai hoặc thiếu
+                    if len(canonical_id) == 12:
+                        comps[idx]["id"] = fmt_saved_id
                     updated_any = True
 
             group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
             if not updated_any:
                 comps.append({
                     "name": comp_name or target_hwid,
-                    "id": final_saved_id,
+                    "id": fmt_saved_id,
                     "password": new_pw,
                     "group": group_label
                 })
@@ -609,21 +609,19 @@ class NetworkMixin:
             # 2. Cập nhật trực tiếp vào peer_info và toàn bộ bản ghi tương ứng trong self.lan_peers rồi ghi ra lan_peers.json
             pw_md5 = hash_password_md5(new_pw)
             peer_info["saved_password"] = pw_md5
-            peer_info["saved_id"] = final_saved_id
-            if not peer_info.get("hwid"):
-                peer_info["hwid"] = target_hwid
+            peer_info["saved_id"] = canonical_id
+            peer_info["hwid"] = canonical_id
 
             with self.lan_peers_lock:
                 found_in_peers = False
                 for k, v in list(self.lan_peers.items()):
-                    if k == target_hwid or are_same_machine(k, v, target_hwid, peer_info):
+                    if k == target_hwid or k == canonical_id or are_same_machine(k, v, canonical_id, peer_info):
                         v["saved_password"] = pw_md5
-                        v["saved_id"] = final_saved_id
-                        if not v.get("hwid"):
-                            v["hwid"] = k
+                        v["saved_id"] = canonical_id
+                        v["hwid"] = canonical_id
                         found_in_peers = True
-                if not found_in_peers and target_hwid:
-                    self.lan_peers[target_hwid] = dict(peer_info)
+                if not found_in_peers and canonical_id:
+                    self.lan_peers[canonical_id] = dict(peer_info)
 
             self.save_lan_peers()
 
@@ -747,7 +745,7 @@ class NetworkMixin:
             pwd_win.deiconify()
 
             comp_name = peer_info.get("computer_name", _("Máy tính"))
-            disp_id = peer_info.get("saved_id") or hwid
+            disp_id = peer_info.get("hwid") or peer_info.get("saved_id") or hwid
             clean_h = ''.join(ch for ch in str(disp_id) if ch.isdigit())
             fmt_id = f"{clean_h[:3]} {clean_h[3:6]} {clean_h[6:9]} {clean_h[9:]}" if len(clean_h) == 12 else disp_id
 
@@ -894,8 +892,49 @@ class NetworkMixin:
                     pass
             refresh_timer[0] = dialog.after(delay_ms, refresh_list)
 
+        def _is_self_peer(p_hwid, p_info):
+            """Kiểm tra xem peer có phải là máy tính hiện tại (self) hay không."""
+            my_clean = ''.join(ch for ch in str(getattr(self, "my_id_clean", "") or "") if ch.isdigit())
+            if not my_clean:
+                try:
+                    from utils.hwid import get_hwid
+                    my_clean = ''.join(ch for ch in str(get_hwid()[0] or "") if ch.isdigit())
+                except Exception:
+                    my_clean = ""
+            k_clean = ''.join(ch for ch in str(p_hwid or "") if ch.isdigit())
+            h_clean = ''.join(ch for ch in str((p_info or {}).get("hwid") or "") if ch.isdigit())
+            s_clean = ''.join(ch for ch in str((p_info or {}).get("saved_id") or "") if ch.isdigit())
+            if my_clean and (my_clean == k_clean or my_clean == h_clean or my_clean == s_clean):
+                return True
+            p_name = str((p_info or {}).get("computer_name") or "").strip().lower()
+            my_hostname = socket.gethostname().strip().lower()
+            if p_name and p_name == my_hostname and p_name not in ("unknown", "không rõ", "localhost"):
+                return True
+            p_ips = [x.strip() for x in (str((p_info or {}).get("local_ip", "")) + "," + str((p_info or {}).get("source_ip", ""))).split(",") if x.strip()]
+            try:
+                my_ips = get_all_local_ipv4()
+            except Exception:
+                my_ips = set()
+            if any(ip in my_ips for ip in p_ips if not ip.startswith("127.")):
+                return True
+            my_macs_raw = str(getattr(self, "my_macs", "") or "")
+            if not my_macs_raw:
+                try:
+                    from utils.hwid import get_hwid
+                    my_macs_raw = str(get_hwid()[2] or "")
+                except Exception:
+                    pass
+            my_mac_list = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in my_macs_raw.split(',') if len(m) >= 12]
+            p_macs = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str((p_info or {}).get("macs") or "").split(',') if len(m) >= 12]
+            if any(m in my_mac_list for m in p_macs if not all(c == '0' for c in m)):
+                return True
+            return False
+
         def _on_peer_found(p):
             if not p or not p.get("hwid"):
+                return
+            # Loại bỏ hoàn toàn nếu là ID/máy tính của chính mình
+            if _is_self_peer(p.get("hwid"), p):
                 return
             with self.lan_peers_lock:
                 # Kiểm tra máy này đã tồn tại chưa bằng are_same_machine (trùng HWID, MAC, tên máy hoặc IP)
@@ -909,16 +948,18 @@ class NetworkMixin:
                     old = self.lan_peers[existing_key]
                     # p vừa được dò trực tiếp (mới nhất), gộp thông tin bổ sung từ old vào p
                     p = merge_peers(p, old)
-                    if existing_key != p["hwid"]:
+                    target_key = p.get("hwid") or existing_key
+                    if existing_key != target_key:
                         try:
                             del self.lan_peers[existing_key]
                         except Exception:
                             pass
                         scan_state.setdefault("online_status", {}).pop(existing_key, None)
-                    self.lan_peers[p["hwid"]] = p
+                    self.lan_peers[target_key] = p
+                    scan_state.setdefault("online_status", {})[target_key] = True
                 else:
                     self.lan_peers[p["hwid"]] = p
-                scan_state.setdefault("online_status", {})[p["hwid"]] = True
+                    scan_state.setdefault("online_status", {})[p["hwid"]] = True
 
             if dialog.winfo_exists():
                 schedule_refresh(150)
@@ -1006,13 +1047,16 @@ class NetworkMixin:
                                     text=_("Đang quét {vpn} ({tip} - {c}/{t})...").format(vpn=v, tip=tip, c=c, t=t)
                                 ))
 
+                        with self.lan_peers_lock:
+                            current_known = dict(self.lan_peers)
                         found = scan_vpn_network(
                             vpn, 
                             ports=[12345, 12346], 
                             max_workers=60, 
                             progress_callback=_prog, 
                             cancel_event=scan_state["cancel_event"],
-                            peer_found_callback=_on_peer_found
+                            peer_found_callback=_on_peer_found,
+                            known_peers=current_known
                         )
                         
                         if found:
@@ -1110,13 +1154,16 @@ class NetworkMixin:
                                 dialog.after(0, lambda c=cur, t=tot, ip=tip: progress_label.config(
                                     text=_("Đang quét {ip} ({c}/{t})...").format(ip=ip, c=c, t=t)
                                 ))
+                        with self.lan_peers_lock:
+                            current_known = dict(self.lan_peers)
                         found = scan_custom_range(
                             s_ip, e_ip, 
                             ports=[12345, 12346], 
                             max_workers=60, 
                             progress_callback=_prog, 
                             cancel_event=scan_state["cancel_event"],
-                            peer_found_callback=_on_peer_found
+                            peer_found_callback=_on_peer_found,
+                            known_peers=current_known
                         )
                         if found:
                             for p in found:
@@ -1202,7 +1249,14 @@ class NetworkMixin:
 
             with self.lan_peers_lock:
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
-                peers = dict(self.lan_peers)
+                # Loại bỏ hoàn toàn ID và máy hiện tại ra khỏi danh sách
+                self_keys = [k for k, v in list(self.lan_peers.items()) if _is_self_peer(k, v)]
+                for sk in self_keys:
+                    try:
+                        del self.lan_peers[sk]
+                    except Exception:
+                        pass
+                peers = {h: i for h, i in self.lan_peers.items() if not _is_self_peer(h, i)}
 
             if not peers:
                 tk.Label(scroll_frame, text=_("Chưa có máy tính nào trong danh sách.\nBấm nút 'Làm mới' hoặc 'Quét VPN' bên dưới để dò tìm các máy trong mạng."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
@@ -1282,34 +1336,66 @@ class NetworkMixin:
                 )
 
             any_peer_synced = False
+            my_clean_id = ''.join(ch for ch in str(getattr(self, "my_id_clean", "") or "") if ch.isdigit())
+            if not my_clean_id:
+                try:
+                    from utils.hwid import get_hwid
+                    my_clean_id = ''.join(ch for ch in str(get_hwid()[0] or "") if ch.isdigit())
+                except Exception:
+                    my_clean_id = ""
+            my_hostname_lower = socket.gethostname().strip().lower()
+            try:
+                my_ips_set = get_all_local_ipv4()
+            except Exception:
+                my_ips_set = set()
+
             for hwid, info in sorted_items:
+                if _is_self_peer(hwid, info):
+                    continue
                 row = tk.Frame(scroll_frame, bg=self.card_color, bd=0)
                 row.pack(fill=tk.X, padx=5, pady=2)
 
+                clean_hwid_key = ''.join(ch for ch in str(hwid) if ch.isdigit())
+                clean_info_hwid = ''.join(ch for ch in str(info.get("hwid") or "") if ch.isdigit())
+
+                # Ưu tiên HWID thực tế 12 số của peer (từ probe_pong hoặc key 12 số)
+                actual_hwid = clean_info_hwid if len(clean_info_hwid) == 12 else (clean_hwid_key if len(clean_hwid_key) == 12 else "")
+
                 # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
-                matched = match_saved_computer(info.get("computer_name"), hwid, info.get("saved_id"))
+                matched = match_saved_computer(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
                 saved_pw = matched.get("password", "") if matched else ""
-                saved_id = (matched.get("id", "") if matched else "") or info.get("saved_id") or hwid
+                m_id_clean = ''.join(ch for ch in str(matched.get("id", "")) if ch.isdigit()) if matched else ""
+
+                is_hwid_verified = bool(info.get("hwid_verified", False))
+                if is_hwid_verified and actual_hwid:
+                    clean_hwid = actual_hwid
+                elif m_id_clean and len(m_id_clean) == 12:
+                    clean_hwid = m_id_clean
+                    info["hwid_verified"] = True
+                elif actual_hwid:
+                    clean_hwid = actual_hwid
+                else:
+                    clean_hwid = ''.join(ch for ch in str(info.get("saved_id") or hwid) if ch.isdigit())
+
+                info["saved_id"] = clean_hwid
+                info["hwid"] = clean_hwid
+
                 if saved_pw:
                     pw_hash = hash_password_md5(saved_pw)
-                    if info.get("saved_password") != pw_hash or info.get("saved_id") != saved_id:
+                    if info.get("saved_password") != pw_hash or info.get("saved_id") != clean_hwid:
                         any_peer_synced = True
                     info["saved_password"] = pw_hash
-                info["saved_id"] = saved_id
-                if not info.get("hwid"):
-                    info["hwid"] = hwid
 
                 with self.lan_peers_lock:
                     if hwid in self.lan_peers:
                         if info.get("saved_password"):
                             self.lan_peers[hwid]["saved_password"] = info["saved_password"]
-                        if saved_id:
-                            self.lan_peers[hwid]["saved_id"] = saved_id
-                        if not self.lan_peers[hwid].get("hwid"):
-                            self.lan_peers[hwid]["hwid"] = hwid
+                        if clean_hwid:
+                            self.lan_peers[hwid]["saved_id"] = clean_hwid
+                            self.lan_peers[hwid]["hwid"] = clean_hwid
 
-                clean_hwid = ''.join(ch for ch in str(saved_id) if ch.isdigit()) if saved_id else ''.join(ch for ch in str(hwid) if ch.isdigit())
-                fmt_id = f"{clean_hwid[:3]} {clean_hwid[3:6]} {clean_hwid[6:9]} {clean_hwid[9:]}" if len(clean_hwid) == 12 else (saved_id or hwid)
+                clean_disp = clean_hwid if clean_hwid else ''.join(ch for ch in str(info.get("saved_id") or hwid) if ch.isdigit())
+                fmt_id = f"{clean_disp[:3]} {clean_disp[3:6]} {clean_disp[6:9]} {clean_disp[9:]}" if len(clean_disp) == 12 else (clean_disp or info.get("saved_id") or hwid)
 
                 # Trạng thái trực tuyến (None = đang kiểm tra, True = online, False = offline)
                 online_state = scan_state.get("online_status", {})
