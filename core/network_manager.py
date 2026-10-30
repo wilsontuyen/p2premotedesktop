@@ -1416,6 +1416,7 @@ class NetworkMixin:
                 tooltip_obj = RowTooltip(bind_targets, tooltip_text)
 
                 row_ui_map[hwid] = {
+                    "row": row,
                     "dot": lbl_dot,
                     "wol_container": wol_container,
                     "info": info,
@@ -1427,6 +1428,13 @@ class NetworkMixin:
 
                 def on_row_click(e, h=hwid, i=info):
                     connect_to_peer(h, i)
+
+                # Dòng máy OFFLINE được làm tối hơn để phân biệt trực quan
+                try:
+                    from gui.components import apply_row_online_state
+                    apply_row_online_state(row, peer_online, self.card_color, (self.text_white, self.text_gray))
+                except Exception:
+                    pass
 
                 for w in bind_targets:
                     w.bind("<Button-1>", on_row_click)
@@ -1465,6 +1473,12 @@ class NetworkMixin:
                 d = ui_item.get("dot")
                 if d and d.winfo_exists():
                     d.config(fg="#2ECC71" if is_on else "#FF4D4D")
+
+                try:
+                    from gui.components import apply_row_online_state
+                    apply_row_online_state(ui_item.get("row"), is_on, self.card_color, (self.text_white, self.text_gray))
+                except Exception:
+                    pass
 
                 # 2. Cập nhật tooltip (gộp an toàn qua merge_peers để không bao giờ mất saved_password hay tên máy verified)
                 inf = ui_item.get("info", {})

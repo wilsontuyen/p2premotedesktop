@@ -17,6 +17,71 @@ install_toplevel_app_icon()
 
 from gui.windows_ui import ProgressDialog  # re-export; class lives in windows_ui
 
+
+def _blend_hex(widget, color, target, ratio):
+    """Trộn màu `color` về phía `target` theo `ratio` (0..1); trả về chuỗi #RRGGBB."""
+    try:
+        r1, g1, b1 = [v // 257 for v in widget.winfo_rgb(color)]
+        r2, g2, b2 = [v // 257 for v in widget.winfo_rgb(target)]
+    except Exception:
+        return color
+    r = int(r1 + (r2 - r1) * ratio)
+    g = int(g1 + (g2 - g1) * ratio)
+    b = int(b1 + (b2 - b1) * ratio)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
+    """Làm tối dòng máy tính OFFLINE để phân biệt trực quan (theo mọi giao diện).
+
+    - Nền các widget đang dùng `base_bg` được pha tối ~22% khi offline, trả về `base_bg` khi online.
+    - Chữ (Label có fg trùng `fg_names`) được pha mờ ~35% về phía nền tối khi offline.
+    Các widget có màu riêng (badge LAN/VPN, nút, chấm trạng thái) được giữ nguyên.
+    is_online=None (đang kiểm tra) được xem như online (không làm tối).
+    """
+    try:
+        if row_root is None or not row_root.winfo_exists():
+            return
+        off_bg = _blend_hex(row_root, base_bg, "#000000", 0.22)
+        want_off = (is_online is False)
+        target_bg = off_bg if want_off else base_bg
+        base_rgb = row_root.winfo_rgb(base_bg)
+        off_rgb = row_root.winfo_rgb(off_bg)
+        fg_rgbs = set()
+        for n in fg_names:
+            try:
+                fg_rgbs.add(row_root.winfo_rgb(n))
+            except Exception:
+                pass
+
+        def walk(w):
+            try:
+                cur_bg = w.cget("bg")
+                cur_rgb = w.winfo_rgb(cur_bg)
+            except Exception:
+                cur_bg, cur_rgb = None, None
+            if cur_rgb is not None and cur_rgb in (base_rgb, off_rgb):
+                try:
+                    w.config(bg=target_bg)
+                except Exception:
+                    pass
+                if isinstance(w, tk.Label):
+                    try:
+                        orig = getattr(w, "_orig_fg", None)
+                        cur_fg = w.cget("fg")
+                        if orig is None and w.winfo_rgb(cur_fg) in fg_rgbs:
+                            w._orig_fg = orig = cur_fg
+                        if orig is not None:
+                            w.config(fg=_blend_hex(w, orig, off_bg, 0.35) if want_off else orig)
+                    except Exception:
+                        pass
+            for ch in w.winfo_children():
+                walk(ch)
+
+        walk(row_root)
+    except Exception:
+        pass
+
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
 else:

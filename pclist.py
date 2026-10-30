@@ -793,6 +793,13 @@ class SavedListMixin:
                     if clean_id not in self.status_dots_widgets:
                         self.status_dots_widgets[clean_id] = []
                     self.status_dots_widgets[clean_id].append(dot_lbl)
+                    dot_lbl._row_root = card
+                    if dot_color == "#E05252":
+                        try:
+                            from gui.components import apply_row_online_state
+                            apply_row_online_state(card, False, self.card_color, (self.text_white, self.text_gray))
+                        except Exception:
+                            pass
                     self._saved_id_groups[clean_id] = card.comp_group
             finally:
                 dialog._building_list = False
@@ -1867,6 +1874,8 @@ class SavedListMixin:
                 try:
                     if dot_widget.winfo_exists() and dot_widget.cget("fg") != new_color:
                         dot_widget.config(fg=new_color)
+                        from gui.components import apply_row_online_state
+                        apply_row_online_state(getattr(dot_widget, "_row_root", None), bool(is_online), self.card_color, (self.text_white, self.text_gray))
                 except Exception:
                     pass
         if status_changed and hasattr(self, '_reorder_saved_computers_func'):
