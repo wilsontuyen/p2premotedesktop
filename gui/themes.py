@@ -222,3 +222,63 @@ def change_app_theme(app):
         pass
         
     os._exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Nút / nhãn có NỀN ĐỎ luôn dùng chữ TRẮNG (mọi giao diện, kể cả giao diện "Đỏ")
+# ---------------------------------------------------------------------------
+def _is_red_color(color):
+    """True nếu màu hex #RRGGBB là màu đỏ đậm/tươi (nền nút đỏ)."""
+    try:
+        if not isinstance(color, str) or not color.startswith("#") or len(color) != 7:
+            return False
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        return r >= 170 and g <= 120 and b <= 120 and (r - g) >= 80 and (r - b) >= 80
+    except Exception:
+        return False
+
+
+def install_red_button_white_text():
+    """Vá tk.Button / tk.Label: khi nền là màu đỏ thì tự đặt chữ trắng (kể cả khi hover đổi màu nền)."""
+    import tkinter as tk
+    if getattr(tk, "_red_white_text_installed", False):
+        return
+    tk._red_white_text_installed = True
+
+    def _fix_kw(widget, kw):
+        bg = kw.get("bg", kw.get("background"))
+        if bg is None and ("fg" in kw or "foreground" in kw):
+            try:
+                bg = widget.cget("bg")
+            except Exception:
+                bg = None
+        if _is_red_color(bg):
+            kw.pop("foreground", None)
+            kw["fg"] = "#FFFFFF"
+            if isinstance(widget, tk.Button):
+                kw["activeforeground"] = "#FFFFFF"
+        return kw
+
+    for cls in (tk.Button, tk.Label):
+        orig_init = cls.__init__
+        orig_conf = cls.configure
+
+        def make_init(orig):
+            def __init__(self, master=None, cnf={}, **kw):
+                _fix_kw(self, kw) if ("bg" in kw or "background" in kw) else None
+                orig(self, master, cnf, **kw)
+            return __init__
+
+        def make_conf(orig):
+            def configure(self, cnf=None, **kw):
+                if kw:
+                    _fix_kw(self, kw)
+                return orig(self, cnf, **kw)
+            return configure
+
+        cls.__init__ = make_init(orig_init)
+        cls.configure = make_conf(orig_conf)
+        cls.config = cls.configure
+
+
+install_red_button_white_text()
