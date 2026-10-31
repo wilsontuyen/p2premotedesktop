@@ -423,16 +423,13 @@ def client_receiver_thread(sock, password):
                             client_switching_desktop_countdown = 10
                         continue
                     elif evt_type in ("host_shutdown", "host_restart"):
-                        print(f"[Client] Received {evt_type}. Closing viewer (no reconnect).")
+                        print(f"[Client] Received {evt_type}. Host is shutting down/restarting — maintaining display until host connection is lost.")
                         try:
                             if clipboard_sync_manager:
                                 clipboard_sync_manager.handle_received_packet({"type": "clear_clipboard"})
                         except Exception:
                             pass
                         client_host_did_shutdown = True
-                        client_running = False
-                        import pygame
-                        pygame.event.post(pygame.event.Event(pygame.QUIT))
                         continue
                     elif evt_type == "resolution_change":
                         new_w = event.get("w")
@@ -2149,6 +2146,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 effective_ping = ping_limit
                 if current_countdown > 0 or globals().get('client_is_locked', False):
                     effective_ping = max(ping_limit, 45.0)
+                if client_host_did_shutdown:
+                    effective_ping = min(effective_ping, 20.0)
                 if client_last_recv_time > 0 and time.time() - client_last_recv_time > effective_ping:
                     print("[Client] Connection ping timeout. Disconnecting.")
                     if _non_windows_close_is_shutdown():
