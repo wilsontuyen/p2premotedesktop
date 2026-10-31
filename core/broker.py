@@ -1357,10 +1357,18 @@ def run_broker():
 
 def _worker_screen_size():
     try:
+        from core.host import _get_active_monitors_and_virtual_rect
+        m, _rects = _get_active_monitors_and_virtual_rect()
+        mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
+        if mw > 0 and mh > 0:
+            return mw, mh, dict(m)
+    except Exception:
+        pass
+    try:
         import mss
         with mss.mss() as sct:
             valid_mons = [m for m in sct.monitors[1:] if m.get("width", 0) > 0 and m.get("height", 0) > 0]
-            if len(valid_mons) == 1:
+            if len(valid_mons) >= 1:
                 m = valid_mons[0]
             else:
                 m = sct.monitors[0]
@@ -1371,13 +1379,11 @@ def _worker_screen_size():
         pass
     try:
         import ctypes
-        w = int(ctypes.windll.user32.GetSystemMetrics(78)) or int(ctypes.windll.user32.GetSystemMetrics(0))
-        h = int(ctypes.windll.user32.GetSystemMetrics(79)) or int(ctypes.windll.user32.GetSystemMetrics(1))
-        left = int(ctypes.windll.user32.GetSystemMetrics(76))
-        top = int(ctypes.windll.user32.GetSystemMetrics(77))
+        w = int(ctypes.windll.user32.GetSystemMetrics(0)) or int(ctypes.windll.user32.GetSystemMetrics(78))
+        h = int(ctypes.windll.user32.GetSystemMetrics(1)) or int(ctypes.windll.user32.GetSystemMetrics(79))
         if w < 1 or h < 1:
             w, h = 1024, 768
-        return w, h, {"left": left, "top": top, "width": w, "height": h}
+        return w, h, {"left": 0, "top": 0, "width": w, "height": h}
     except Exception:
         return 1024, 768, {"left": 0, "top": 0, "width": 1024, "height": 768}
 
@@ -1453,6 +1459,12 @@ def _run_worker_session(app, cmd):
         app._capture_origin = (int(monitor.get("left", 0)), int(monitor.get("top", 0)))
     except Exception:
         app._capture_origin = (0, 0)
+    try:
+        ctrl_sock = getattr(app, "_broker_ctrl_sock", None)
+        if ctrl_sock is not None and w > 0 and h > 0:
+            _write_line(ctrl_sock, {"width": int(w), "height": int(h)})
+    except Exception:
+        pass
 
     client_state = {
         "running": True,
@@ -1510,6 +1522,7 @@ def run_capture_worker(app):
         try:
             ctrl = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             ctrl.connect(("127.0.0.1", AGENT_IPC_PORT))
+            app._broker_ctrl_sock = ctrl
             w, h, _m = _worker_screen_size()
             pwds = []
             try:

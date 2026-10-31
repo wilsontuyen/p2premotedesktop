@@ -787,6 +787,8 @@ def _frame_is_nearly_black(frame, max_mean=6.0):
     try:
         if frame is None or getattr(frame, "size", 0) == 0:
             return True
+        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] >= 4:
+            frame = frame[:, :, :3]
         # Nếu frame có điểm sáng rõ rệt (chữ Admin, icon, avatar, text trong dark theme flyout như Network flyout):
         # np.max > 35 và có ít nhất 30 pixel sáng -> Đây là giao diện dark theme có nội dung, không phải màn hình đen rỗng!
         if float(np.max(frame)) > 35.0:
@@ -801,6 +803,8 @@ def _frame_is_nearly_white(frame, min_mean=235.0):
     try:
         if frame is None or getattr(frame, "size", 0) == 0:
             return False
+        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] >= 4:
+            frame = frame[:, :, :3]
         return float(np.mean(frame)) > min_mean
     except Exception:
         return False
@@ -944,6 +948,79 @@ def _virtual_screen_rect():
     return left0, top0, w, h
 
 
+# Danh sách (left, top, width, height) của các màn hình thực sự có hình (không phải màn hình ma đen kịt)
+_active_monitor_rects_last = []
+
+
+def _filter_active_mss_monitors(sct):
+    """Trả về (active_mons, valid_mons) từ đối tượng mss.
+    Khi hệ thống báo >= 2 màn hình, chụp thử từng màn hình để loại bỏ màn hình ma (đen kịt)."""
+    global _active_monitor_rects_last
+    mons = getattr(sct, "monitors", None) or []
+    valid_mons = [
+        m for m in mons[1:]
+        if int(m.get("width", 0)) > 0 and int(m.get("height", 0)) > 0
+    ]
+    valid_mons.sort(key=lambda m: (int(m.get("left", 0)), int(m.get("top", 0))))
+    if len(valid_mons) <= 1:
+        if len(valid_mons) == 1:
+            m = valid_mons[0]
+            _active_monitor_rects_last = [
+                (int(m.get("left", 0)), int(m.get("top", 0)), int(m.get("width", 0)), int(m.get("height", 0)))
+            ]
+        return valid_mons, valid_mons
+
+    active_mons = []
+    active_rects = []
+    for m in valid_mons:
+        mrect = (int(m.get("left", 0)), int(m.get("top", 0)), int(m.get("width", 0)), int(m.get("height", 0)))
+        try:
+            raw = sct.grab(m)
+            tile = np.array(raw, dtype=np.uint8)
+            if tile is not None and getattr(tile, "size", 0) > 0 and not _frame_is_nearly_black(tile):
+                active_mons.append(m)
+                active_rects.append(mrect)
+        except Exception:
+            pass
+    if active_rects:
+        _active_monitor_rects_last = active_rects
+    return active_mons, valid_mons
+
+
+def _get_active_monitors_and_virtual_rect(sct=None):
+    """Xác định monitor hiệu dụng (loại bỏ màn hình ma đen kịt) cho Handshake và Worker.
+    Trả về (monitor_dict, active_rects_list)."""
+    try:
+        if sct is not None:
+            active_mons, valid_mons = _filter_active_mss_monitors(sct)
+            mons = getattr(sct, "monitors", None) or []
+        else:
+            with mss.mss() as _sct_tmp:
+                active_mons, valid_mons = _filter_active_mss_monitors(_sct_tmp)
+                mons = getattr(_sct_tmp, "monitors", None) or []
+        chosen = active_mons if active_mons else (valid_mons[:1] if valid_mons else (mons[:1] if mons else []))
+        if len(chosen) == 1:
+            m = chosen[0]
+            ml, mt = int(m.get("left", 0)), int(m.get("top", 0))
+            mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
+            return {"left": ml, "top": mt, "width": mw, "height": mh}, [(ml, mt, mw, mh)]
+        elif len(chosen) >= 2:
+            min_l = min(int(m.get("left", 0)) for m in chosen)
+            min_t = min(int(m.get("top", 0)) for m in chosen)
+            max_r = max(int(m.get("left", 0)) + int(m.get("width", 0)) for m in chosen)
+            max_b = max(int(m.get("top", 0)) + int(m.get("height", 0)) for m in chosen)
+            rects = [
+                (int(m.get("left", 0)), int(m.get("top", 0)), int(m.get("width", 0)), int(m.get("height", 0)))
+                for m in chosen
+            ]
+            rects.sort(key=lambda r: (r[0], r[1]))
+            return {"left": min_l, "top": min_t, "width": max_r - min_l, "height": max_b - min_t}, rects
+    except Exception:
+        pass
+    l0, t0, w0, h0 = _virtual_screen_rect()
+    return {"left": l0, "top": t0, "width": w0, "height": h0}, [(l0, t0, w0, h0)]
+
+
 def _get_physical_monitor_rects(sct=None, dx_cams=None):
     """Trả về danh sách (left, top, width, height) của các màn hình vật lý đang hoạt động,
     sắp xếp theo (left, top) tăng dần: index 0 = Màn hình Trái, index 1 = Màn hình Phải."""
@@ -1048,6 +1125,10 @@ def _get_physical_monitor_rects(sct=None, dx_cams=None):
             pass
 
     rects.sort(key=lambda r: (r[0], r[1]))
+    if len(rects) > 1 and _active_monitor_rects_last:
+        verified = [r for r in rects if r in _active_monitor_rects_last]
+        if verified:
+            rects = verified
     return rects
 
 
@@ -2057,9 +2138,23 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
     for cam, cl, ct, _cw, _ch in cam_entries:
         try:
             tile = cam.grab()
+            if (tile is None or getattr(tile, "size", 0) == 0) and not getattr(cam, "_init_probed", False):
+                cam._init_probed = True
+                if sys.platform == "win32" and len(cam_entries) > 1:
+                    try:
+                        cap_g = _bitblt_screen_rect_bgr(cl, ct, _cw, _ch)
+                        if cap_g is not None and cap_g[0] is not None and getattr(cap_g[0], "size", 0) > 0:
+                            tile = cap_g[0]
+                    except Exception:
+                        pass
             if tile is not None and getattr(tile, "size", 0) > 0:
-                cam._last_good_tile = tile
-            elif canvas_fresh:
+                if tile.ndim == 2:
+                    tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
+                elif tile.shape[2] == 4:
+                    tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
+                if not _frame_is_nearly_black(tile):
+                    cam._last_good_tile = tile
+            else:
                 tile = getattr(cam, "_last_good_tile", None)
             if tile is None or getattr(tile, "size", 0) == 0:
                 continue
@@ -2091,11 +2186,17 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
             except Exception:
                 pass
 
-    # Nếu có nhiều màn hình nhưng chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt),
+    # Nếu chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt / lỗi grab),
     # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của màn hình có nội dung đó!
+    global _active_monitor_rects_last
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if len(non_black) == 1 and len(captured_tiles) > 1 and len(cam_entries) <= 1:
+        if non_black:
+            _active_monitor_rects_last = [
+                (int(pos[0]), int(pos[1]), int(t.shape[1]), int(t.shape[0]))
+                for (t, pos) in non_black
+            ]
+        if len(non_black) == 1:
             tile, (orig_x, orig_y) = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
@@ -2154,6 +2255,10 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
             tile = np.array(raw, dtype=np.uint8)
             if tile is None or getattr(tile, "size", 0) == 0:
                 continue
+            if tile.ndim == 2:
+                tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
+            elif tile.shape[2] == 4:
+                tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
 
             tile_is_black = _frame_is_nearly_black(tile)
             # Nếu màn hình này đen kịt (phantom/inactive) nhưng đã có màn hình khác có nội dung -> bỏ qua không cho đè
@@ -2173,11 +2278,17 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
         except Exception as e:
             print(f"[Host] Monitor grab failed ({mon}): {e}")
 
-    # Nếu có nhiều màn hình nhưng chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt),
+    # Nếu chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt / lỗi grab),
     # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của monitor có nội dung đó!
+    global _active_monitor_rects_last
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if len(non_black) == 1 and len(captured_tiles) > 1 and len(valid_parts) <= 1:
+        if non_black:
+            _active_monitor_rects_last = [
+                (int(m.get("left", 0)), int(m.get("top", 0)), int(t.shape[1]), int(t.shape[0]))
+                for (t, m) in non_black
+            ]
+        if len(non_black) == 1:
             tile, mon = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
@@ -2659,20 +2770,19 @@ class HostMixin:
                         host_w, host_h = 1024, 768
                     self._capture_origin = (0, 0)
                     monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
+                    active_mon_rects = [(0, 0, host_w, host_h)]
                     print(f"[Host] Win7 GDI handshake size {host_w}x{host_h}")
                 else:
+                    active_mon_rects = []
                     with mss.mss() as sct:
-                        valid_mons = [m for m in sct.monitors[1:] if m.get("width", 0) > 0 and m.get("height", 0) > 0]
-                        if len(valid_mons) == 1:
-                            monitor = valid_mons[0]
-                        else:
-                            monitor = sct.monitors[0] if sct.monitors else {"left": 0, "top": 0, "width": 1280, "height": 720}
+                        monitor, active_mon_rects = _get_active_monitors_and_virtual_rect(sct)
                         host_w = int(monitor.get('width', 0))
                         host_h = int(monitor.get('height', 0))
                         if host_w < 1 or host_h < 1:
                             host_w = int(ctypes.windll.user32.GetSystemMetrics(0)) or 1280
                             host_h = int(ctypes.windll.user32.GetSystemMetrics(1)) or 720
                             monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
+                            active_mon_rects = [(0, 0, host_w, host_h)]
                         self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
                 import platform
@@ -2714,7 +2824,7 @@ class HostMixin:
                 except:
                     pass
                     
-                init_mon_rects = [] if is_android else _get_physical_monitor_rects()
+                init_mon_rects = [] if is_android else (active_mon_rects if active_mon_rects else _get_physical_monitor_rects())
                 init_mon_cnt = 1 if is_android else max(1, len(init_mon_rects))
                 res_info = json.dumps({
                     "status": "ok",
@@ -3180,33 +3290,6 @@ class HostMixin:
                             if sys_w > 0 and sys_h > 0:
                                 last_vw, last_vh = sys_w, sys_h
 
-                            now_mon_chk = time.time()
-                            if now_mon_chk - client_state.get("_last_mon_info_chk", 0) >= 2.0:
-                                client_state["_last_mon_info_chk"] = now_mon_chk
-                                try:
-                                    mon_rects = _get_physical_monitor_rects(sct, dx_cams)
-                                    sm_cnt = 1
-                                    if sys.platform == "win32":
-                                        try:
-                                            sm_cnt = max(1, int(ctypes.windll.user32.GetSystemMetrics(80)))
-                                        except Exception:
-                                            sm_cnt = 1
-                                    mon_cnt = max(1, len(mon_rects), sm_cnt)
-                                    if mon_cnt != client_state.get("_last_sent_mon_count") or mon_rects != client_state.get("_last_sent_mon_rects"):
-                                        client_state["_last_sent_mon_count"] = mon_cnt
-                                        client_state["_last_sent_mon_rects"] = mon_rects
-                                        send_msg(conn, json.dumps({
-                                            "type": "monitor_info",
-                                            "count": mon_cnt,
-                                            "monitors": [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in mon_rects],
-                                        }).encode("utf-8"), password)
-                                        if mon_cnt < 2 and client_state.get("monitor_mode", "both") != "both":
-                                            client_state["monitor_mode"] = "both"
-                                            client_state["force_update"] = True
-                                            client_state.pop("prev_sent_img", None)
-                                except Exception:
-                                    pass
-
                             mon_mode = client_state.get("monitor_mode", "both")
                             grabbed = False
                             on_winlogon = _should_capture_logon_ui()
@@ -3380,6 +3463,40 @@ class HostMixin:
                                 orig_xy = origin if (origin and len(origin) >= 2) else (0, 0)
                                 client_state["cap_rect"] = (int(orig_xy[0]), int(orig_xy[1]), int(cap_w), int(cap_h))
 
+                            now_mon_chk = time.time()
+                            if now_mon_chk - client_state.get("_last_mon_info_chk", 0) >= 2.0:
+                                client_state["_last_mon_info_chk"] = now_mon_chk
+                                try:
+                                    mon_rects = _get_physical_monitor_rects(sct, dx_cams)
+                                    if mon_mode == "both" and len(mon_rects) > 1 and cap_w > 0 and cap_h > 0:
+                                        matched_single = [r for r in mon_rects if r[2] == int(cap_w) and r[3] == int(cap_h)]
+                                        if len(matched_single) == 1:
+                                            mon_rects = matched_single
+                                    if _active_monitor_rects_last:
+                                        mon_cnt = max(1, len(mon_rects))
+                                    else:
+                                        sm_cnt = 1
+                                        if sys.platform == "win32" and len(mon_rects) > 1:
+                                            try:
+                                                sm_cnt = max(1, int(ctypes.windll.user32.GetSystemMetrics(80)))
+                                            except Exception:
+                                                sm_cnt = 1
+                                        mon_cnt = max(1, len(mon_rects), sm_cnt) if len(mon_rects) > 1 else 1
+                                    if mon_cnt != client_state.get("_last_sent_mon_count") or mon_rects != client_state.get("_last_sent_mon_rects"):
+                                        client_state["_last_sent_mon_count"] = mon_cnt
+                                        client_state["_last_sent_mon_rects"] = mon_rects
+                                        send_msg(conn, json.dumps({
+                                            "type": "monitor_info",
+                                            "count": mon_cnt,
+                                            "monitors": [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in mon_rects],
+                                        }).encode("utf-8"), password)
+                                        if mon_cnt < 2 and client_state.get("monitor_mode", "both") != "both":
+                                            client_state["monitor_mode"] = "both"
+                                            client_state["force_update"] = True
+                                            client_state.pop("prev_sent_img", None)
+                                except Exception:
+                                    pass
+
                             if (
                                 not on_winlogon
                                 and (get_desktop_name() or "default") in ("default", "")
@@ -3457,6 +3574,13 @@ class HostMixin:
                                 client_state["last_cap_w"] = cap_w
                                 client_state["last_cap_h"] = cap_h
                                 force_update = True
+                                if mon_mode == "both":
+                                    ctrl_sock = getattr(self, "_broker_ctrl_sock", None)
+                                    if ctrl_sock is not None:
+                                        try:
+                                            ctrl_sock.sendall((json.dumps({"width": int(cap_w), "height": int(cap_h)}) + "\n").encode("utf-8"))
+                                        except Exception:
+                                            pass
                                 try:
                                     res_meta = {"type": "resolution_change", "w": cap_w, "h": cap_h}
                                     if not send_msg(conn, json.dumps(res_meta).encode('utf-8'), password):

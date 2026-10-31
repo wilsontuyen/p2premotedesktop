@@ -435,14 +435,16 @@ def client_receiver_thread(sock, password):
                         new_w = event.get("w")
                         new_h = event.get("h")
                         if new_w and new_h:
-                            client_pending_bbox = None
-                            with client_frame_lock:
-                                client_latest_frame = None
-                            client_true_remote_res = (int(new_w), int(new_h))
+                            nw_i, nh_i = int(new_w), int(new_h)
+                            if client_true_remote_res != (nw_i, nh_i):
+                                client_pending_bbox = None
+                                with client_frame_lock:
+                                    client_latest_frame = None
+                            client_true_remote_res = (nw_i, nh_i)
                             global client_host_resolution
-                            if (int(new_w) / max(1, int(new_h)) >= 2.0) and (not client_mon_left_on or not client_mon_right_on):
+                            if (nw_i / max(1, nh_i) >= 2.0) and (not client_mon_left_on or not client_mon_right_on):
                                 _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(
-                                    int(new_w), int(new_h),
+                                    nw_i, nh_i,
                                     monitors_meta=client_host_monitor_rects
                                 )
                                 if client_mon_left_on and not client_mon_right_on:
@@ -450,11 +452,9 @@ def client_receiver_thread(sock, password):
                                 elif client_mon_right_on and not client_mon_left_on:
                                     client_host_resolution = (_m2_r[2], _m2_r[3])
                                 else:
-                                    client_host_resolution = (int(new_w), int(new_h))
-
-
+                                    client_host_resolution = (nw_i, nh_i)
                             else:
-                                client_host_resolution = (int(new_w), int(new_h))
+                                client_host_resolution = (nw_i, nh_i)
                         continue
                     elif evt_type == "partial_frame":
                         client_pending_bbox = event.get("bbox")
@@ -896,11 +896,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     max_portrait_height = min(900, client_max_h)
                                     if host_h * ratio > max_portrait_height:
                                         ratio = max_portrait_height / host_h
-                                window_w = int(host_w * ratio)
-                                window_h = int(host_h * ratio)
-                                window_w = max(100, min(window_w, 3840))
-                                window_h = max(100, min(window_h, 2160))
-                                screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                                new_win_w = max(100, min(int(host_w * ratio), 3840))
+                                new_win_h = max(100, min(int(host_h * ratio), 2160))
+                                if new_win_w != window_w or new_win_h != window_h:
+                                    window_w, window_h = new_win_w, new_win_h
+                                    screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                                 try:
                                     hwnd = pygame.display.get_wm_info().get("window")
                                     if hwnd and sys.platform == "win32":
@@ -1741,7 +1741,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     frame_to_draw = frame_to_draw.crop((cx1, cy1, cx2, cy2))
                         w, h = frame_to_draw.size
                         if (w != host_w or h != host_h) and w > 100 and h > 100:
-                            client_host_resolution = (w, h)
+                            is_transport_scaled = (
+                                client_mon_left_on and client_mon_right_on
+                                and client_true_remote_res == (host_w, host_h)
+                                and host_h > 0 and h > 0
+                                and abs((w / float(h)) - (host_w / float(host_h))) < 0.05
+                            )
+                            if not is_transport_scaled:
+                                client_host_resolution = (w, h)
                         surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                         if w == window_w and h == window_h:
                             scaled_surf = surf
