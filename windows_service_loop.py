@@ -533,6 +533,41 @@ def is_logon_ui_running(session_id):
         log(f"Lỗi kiểm tra LogonUI: {e}")
     return False
 
+def is_session_locked(session_id):
+    """
+    Kiểm tra chính xác xem session có đang bị khóa màn hình (Lock Screen) hay không.
+    Sử dụng WTSQuerySessionInformationW với WTSSessionInfoEx (25).
+    SessionFlags: 0 = WTS_SESSIONSTATE_LOCK, 1 = WTS_SESSIONSTATE_UNLOCK.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        buf = ctypes.c_void_p()
+        bytes_ret = wintypes.DWORD()
+        if ctypes.windll.wtsapi32.WTSQuerySessionInformationW(0, session_id, 25, ctypes.byref(buf), ctypes.byref(bytes_ret)):
+            try:
+                flags = ctypes.c_long.from_address(buf.value + 16).value
+                if flags == 0:  # WTS_SESSIONSTATE_LOCK
+                    return True
+                elif flags == 1:  # WTS_SESSIONSTATE_UNLOCK
+                    return False
+            finally:
+                ctypes.windll.wtsapi32.WTSFreeMemory(buf)
+    except Exception:
+        pass
+    # Fallback: chỉ coi là lock khi có LogonUI mà KHÔNG có explorer
+    return is_logon_ui_running(session_id) and (not is_explorer_running_in_session(session_id))
+
+def is_explorer_running_in_session(session_id):
+    try:
+        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        for p in procs:
+            if p[0] == session_id and p[2].lower() == "explorer.exe":
+                return True
+    except Exception:
+        pass
+    return False
+
 def find_winlogon_pid(session_id, retries=3):
     for attempt in range(max(1, retries)):
         try:
@@ -1196,26 +1231,31 @@ def main():
                     ev_sid_int = None
 
                 if kind == "logoff":
-                    # Signing out: Default còn sống nhưng UI đã sang Winlogon (thường
-                    # session mới). Spawn Winlogon ngay, không đợi mutex Default mất.
-                    force_logoff_until = time.time() + 20.0
-                    lock_pending_until = 0.0
-                    log(
-                        f"WTS_SESSION_LOGOFF session={ev_sid_int}: "
-                        "spawn Winlogon song song (không kill Default)."
-                    )
-                    if BROKER_MODE:
-                        sids = []
-                        if ev_sid_int not in (None, 0xFFFFFFFF, -1, 0):
-                            sids.append(ev_sid_int)
-                        if active_session_id not in (None, 0xFFFFFFFF, -1, 0) and active_session_id not in sids:
-                            sids.append(active_session_id)
-                        for sid in sids:
-                            pid = spawn_winlogon_for_logoff(sid)
-                            last_winlogon_spawn_ts = time.time()
-                            if pid:
-                                current_agent_pid = pid
-                                last_agent_spawn_ts = time.time()
+                    has_exp = is_explorer_running_in_session(active_session_id)
+                    if not has_exp:
+                        force_logoff_until = time.time() + 20.0
+                        lock_pending_until = 0.0
+                        log(
+                            f"WTS_SESSION_LOGOFF session={ev_sid_int}: "
+                            "explorer đã tắt, spawn Winlogon song song."
+                        )
+                        if BROKER_MODE:
+                            sids = []
+                            if ev_sid_int not in (None, 0xFFFFFFFF, -1, 0):
+                                sids.append(ev_sid_int)
+                            if active_session_id not in (None, 0xFFFFFFFF, -1, 0) and active_session_id not in sids:
+                                sids.append(active_session_id)
+                            for sid in sids:
+                                pid = spawn_winlogon_for_logoff(sid)
+                                last_winlogon_spawn_ts = time.time()
+                                if pid:
+                                    current_agent_pid = pid
+                                    last_agent_spawn_ts = time.time()
+                    else:
+                        log(
+                            f"WTS_SESSION_LOGOFF session={ev_sid_int}: "
+                            "explorer vẫn sống (BSDR hoặc app chặn shutdown), giữ Default desktop."
+                        )
                 elif kind == "lock":
                     # Khóa máy: LogonUI, không phải khoảng Signing out.
                     lock_pending_until = time.time() + 8.0
@@ -1257,12 +1297,13 @@ def main():
             except Exception:
                 pass
 
-            # Check if screen is locked (LogonUI is running)
-            is_screen_locked = is_logon_ui_running(active_session_id)
+            # Check if screen is locked (Lock screen vs interactive)
+            is_screen_locked = is_session_locked(active_session_id) if is_logged_in else True
+            has_explorer = is_explorer_running_in_session(active_session_id)
 
             session_changed = (last_session_id is not None and last_session_id != active_session_id)
-            in_signing_out = time.time() < force_logoff_until
-            in_lock_transition = (time.time() < lock_pending_until) or is_screen_locked
+            in_signing_out = (time.time() < force_logoff_until) and (not has_explorer)
+            in_lock_transition = (time.time() < lock_pending_until) or (is_screen_locked and not in_signing_out)
             want_winlogon = (not is_logged_in) or in_signing_out or in_lock_transition
             target_desktop = "winlogon" if want_winlogon else "default"
 

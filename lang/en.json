@@ -471,5 +471,6 @@
   "Mật khẩu: đã lưu": "Password: saved",
   "Mật khẩu: chưa lưu": "Password: not saved",
   "Đang bật máy {name} - {id}": "Waking up {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Wake-on-LAN signal sent over network..."
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Wake-on-LAN signal sent over network...",
+  "Có phiên điều khiển từ xa đang kết nối": "A remote desktop session is currently connected."
 }

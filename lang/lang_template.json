@@ -1,6 +1,11 @@
 {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",
   "\n- Chứa: Không rõ (Remote)": "\n- Chứa: Không rõ (Remote)",
-  "\n- Chứa: {fc} tệp, {dc} thư mục": "\n- Chứa: {fc} tệp, {dc} thư mục",
+  "\n- Chứa: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",fc} tệp, {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dc} thư mục": "\n- Chứa: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",fc} tệp, {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dc} thư mục",
   "  •  IP: ": "  •  IP: ",
   " (Dịch vụ hoạt động)": " (Dịch vụ hoạt động)",
   " - Thất bại": " - Thất bại",
@@ -10,8 +15,20 @@
   " giây": " giây",
   " giây...": " giây...",
   " máy trong mạng LAN": " máy trong mạng LAN",
-  " và {count} mục khác": " và {count} mục khác",
-  "({done} trên {total})  {percent}%  {speed}  {eta}": "({done} trên {total})  {percent}%  {speed}  {eta}",
+  " và {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục khác": " và {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục khác",
+  "({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",done} trên {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",total})  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",percent}%  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",speed}  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",eta}": "({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",done} trên {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",total})  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",percent}%  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",speed}  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",eta}",
   ").\nKiểm tra Tường lửa (Firewall) hoặc đảm bảo máy đích đang chạy ứng dụng.": ").\nKiểm tra Tường lửa (Firewall) hoặc đảm bảo máy đích đang chạy ứng dụng.",
   "+ Thêm Mới": "+ Thêm Mới",
   "-- MB/s": "-- MB/s",
@@ -24,10 +41,18 @@
   "AI Pro Version": "AI Pro Version",
   "About": "About",
   "Bạn có chắc muốn xóa": "Bạn có chắc muốn xóa",
-  "Bạn có chắc muốn xóa '{item_name}' không?": "Bạn có chắc muốn xóa '{item_name}' không?",
-  "Bạn có chắc muốn xóa '{item_name}' khỏi máy điều khiển không?": "Bạn có chắc muốn xóa '{item_name}' khỏi máy điều khiển không?",
-  "Bạn có chắc muốn xóa {count} mục đã chọn không?": "Bạn có chắc muốn xóa {count} mục đã chọn không?",
-  "Bạn có chắc muốn xóa {count} mục đã chọn khỏi máy điều khiển không?": "Bạn có chắc muốn xóa {count} mục đã chọn khỏi máy điều khiển không?",
+  "Bạn có chắc muốn xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}' không?": "Bạn có chắc muốn xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}' không?",
+  "Bạn có chắc muốn xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}' khỏi máy điều khiển không?": "Bạn có chắc muốn xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}' khỏi máy điều khiển không?",
+  "Bạn có chắc muốn xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục đã chọn không?": "Bạn có chắc muốn xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục đã chọn không?",
+  "Bạn có chắc muốn xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục đã chọn khỏi máy điều khiển không?": "Bạn có chắc muốn xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục đã chọn khỏi máy điều khiển không?",
   "Bạn có thể sao chép và đổi tên thành 'yourown.json' để dịch.\nGợi ý: dùng ChatGPT để dịch tự động là 1 lựa chọn\nThank you!": "Bạn có thể sao chép và đổi tên thành 'yourown.json' để dịch.\nGợi ý: dùng ChatGPT để dịch tự động là 1 lựa chọn\nThank you!",
   "Bạn không thể kết nối tới chính bạn :-)": "Bạn không thể kết nối tới chính bạn :-)",
   "Bạn muốn làm gì?": "Bạn muốn làm gì?",
@@ -51,13 +76,19 @@
   "Chưa kết nối Máy chủ Tín hiệu!": "Chưa kết nối Máy chủ Tín hiệu!",
   "Chưa kết nối Signaling": "Chưa kết nối Signaling",
   "Chưa kết nối Signaling Server!": "Chưa kết nối Signaling Server!",
-  "Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {suffix}": "Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {suffix}",
+  "Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}": "Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}",
   "Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng.": "Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng.",
   "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS.": "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng hoặc VPS.",
   "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng.": "Chưa kết nối đến Server Báo hiệu. Vui lòng kiểm tra lại mạng.",
   "Chưa phân nhóm": "Chưa phân nhóm",
   "Chạy khi mở máy (Run on Startup)": "Chạy khi mở máy (Run on Startup)",
-  "Chấp nhận kết nối từ ID {id} ({comp})": "Chấp nhận kết nối từ ID {id} ({comp})",
+  "Chấp nhận kết nối từ ID {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp})": "Chấp nhận kết nối từ ID {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp})",
   "Chất lượng 4K": "Chất lượng 4K",
   "Chất lượng hình ảnh": "Chất lượng hình ảnh",
   "Chọn tất cả (Select All)": "Chọn tất cả (Select All)",
@@ -110,21 +141,29 @@
   "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng.": "Không thể chạy server! Các cổng mạng đều bị chiếm dụng hoặc bị chặn bởi Tường lửa.\nVui lòng kiểm tra lại cấu hình mạng hoặc tắt bớt ứng dụng chiếm cổng.",
   "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!": "Không thể cập nhật mật khẩu. Vui lòng chạy ứng dụng bằng quyền Administrator!",
   "Không thể ghi đè tệp ngôn ngữ mặc định!": "Không thể ghi đè tệp ngôn ngữ mặc định!",
-  "Không thể gửi lệnh: {ex}": "Không thể gửi lệnh: {ex}",
+  "Không thể gửi lệnh: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ex}": "Không thể gửi lệnh: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ex}",
   "Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại).": "Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại).",
   "Không thể kết nối Signaling": "Không thể kết nối Signaling",
   "Không thể kết nối Signaling Server": "Không thể kết nối Signaling Server",
   "Không thể kết nối tới ": "Không thể kết nối tới ",
-  "Không thể lưu danh sách máy tính. Vui lòng kiểm tra quyền ghi tệp (Administrator/Root)!\nChi tiết: {err}": "Không thể lưu danh sách máy tính. Vui lòng kiểm tra quyền ghi tệp (Administrator/Root)!\nChi tiết: {err}",
+  "Không thể lưu danh sách máy tính. Vui lòng kiểm tra quyền ghi tệp (Administrator/Root)!\nChi tiết: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",err}": "Không thể lưu danh sách máy tính. Vui lòng kiểm tra quyền ghi tệp (Administrator/Root)!\nChi tiết: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",err}",
   "Không thể lưu file server.ini: ": "Không thể lưu file server.ini: ",
-  "Không thể lưu: {e}": "Không thể lưu: {e}",
+  "Không thể lưu: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",e}": "Không thể lưu: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",e}",
   "Không thể lấy thuộc tính": "Không thể lấy thuộc tính",
   "Không thể reset quyền tự động: ": "Không thể reset quyền tự động: ",
   "Không thể thay đổi cài đặt Registry: ": "Không thể thay đổi cài đặt Registry: ",
   "Không thể thay đổi cài đặt autostart: ": "Không thể thay đổi cài đặt autostart: ",
   "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối.": "Không thể tìm thấy hoặc đối tác đang Offline / Từ chối kết nối.",
   "Không thể tìm thấy hoặc đối tác đang Offline.": "Không thể tìm thấy hoặc đối tác đang Offline.",
-  "Không thể xem thư mục '{name}' bằng Notepad!": "Không thể xem thư mục '{name}' bằng Notepad!",
+  "Không thể xem thư mục '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' bằng Notepad!": "Không thể xem thư mục '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' bằng Notepad!",
   "Không thể đọc tệp": "Không thể đọc tệp",
   "Không tìm thấy danh sách máy tính để xuất khẩu.": "Không tìm thấy danh sách máy tính để xuất khẩu.",
   "Không tìm thấy máy tính nào trong mạng LAN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.": "Không tìm thấy máy tính nào trong mạng LAN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.",
@@ -139,17 +178,29 @@
   "Kiểm tra phần mềm diệt virus / VPN": "Kiểm tra phần mềm diệt virus / VPN",
   "Kích thước": "Kích thước",
   "Kích thước:": "Kích thước:",
-  "Kích thước: {size}": "Kích thước: {size}",
+  "Kích thước: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",size}": "Kích thước: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",size}",
   "KẾT NỐI (CONNECT)": "KẾT NỐI (CONNECT)",
   "Kết nối": "Kết nối",
   "Kết nối LAN thành công! Đang khởi động màn hình...": "Kết nối LAN thành công! Đang khởi động màn hình...",
   "Kết nối LAN thất bại!": "Kết nối LAN thất bại!",
-  "Kết nối Signaling & Mở cổng Router thành công (Cổng {port})!{suffix}": "Kết nối Signaling & Mở cổng Router thành công (Cổng {port})!{suffix}",
-  "Kết nối Signaling thành công (Cổng {port})! Sẵn sàng kết nối.{suffix}": "Kết nối Signaling thành công (Cổng {port})! Sẵn sàng kết nối.{suffix}",
+  "Kết nối Signaling & Mở cổng Router thành công (Cổng {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port})!{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}": "Kết nối Signaling & Mở cổng Router thành công (Cổng {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port})!{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}",
+  "Kết nối Signaling thành công (Cổng {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port})! Sẵn sàng kết nối.{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}": "Kết nối Signaling thành công (Cổng {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port})! Sẵn sàng kết nối.{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",suffix}",
   "Kết nối Signaling thành công! Sẵn sàng kết nối.": "Kết nối Signaling thành công! Sẵn sàng kết nối.",
   "Kết nối TCP trực tiếp qua Local IP (LAN)": "Kết nối TCP trực tiếp qua Local IP (LAN)",
   "Kết nối bị hủy.": "Kết nối bị hủy.",
-  "Kết nối bị từ chối:\n{msg}": "Kết nối bị từ chối:\n{msg}",
+  "Kết nối bị từ chối:\n{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",msg}": "Kết nối bị từ chối:\n{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",msg}",
   "Kết nối mạng LAN thất bại": "Kết nối mạng LAN thất bại",
   "Kết nối thành công! Đang khởi động màn hình...": "Kết nối thành công! Đang khởi động màn hình...",
   "Kết nối trực tiếp không qua Signaling Server": "Kết nối trực tiếp không qua Signaling Server",
@@ -178,14 +229,26 @@
   "Lỗi lưu file": "Lỗi lưu file",
   "Lỗi lưu tệp từ xa": "Lỗi lưu tệp từ xa",
   "Lỗi nhập liệu": "Lỗi nhập liệu",
-  "Lỗi tạo Notepad: {ex}": "Lỗi tạo Notepad: {ex}",
-  "Lỗi xác thực handshake:\n{err}": "Lỗi xác thực handshake:\n{err}",
-  "Lỗi xóa {name}: {e}": "Lỗi xóa {name}: {e}",
+  "Lỗi tạo Notepad: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ex}": "Lỗi tạo Notepad: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ex}",
+  "Lỗi xác thực handshake:\n{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",err}": "Lỗi xác thực handshake:\n{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",err}",
+  "Lỗi xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",e}": "Lỗi xóa {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",e}",
   "Lỗi xảy ra trên máy Host:\n": "Lỗi xảy ra trên máy Host:\n",
   "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...": "Màn hình bảo mật (UAC / Lock Screen) đang hiển thị ở máy Host...",
   "Máy của bạn (Local)": "Máy của bạn (Local)",
-  "Máy tính [{comp}] đang điều khiển máy bạn": "Máy tính [{comp}] đang điều khiển máy bạn",
-  "Máy tính có ID [{id}] đang điều khiển máy bạn": "Máy tính có ID [{id}] đang điều khiển máy bạn",
+  "Máy tính [{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp}] đang điều khiển máy bạn": "Máy tính [{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp}] đang điều khiển máy bạn",
+  "Máy tính có ID [{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id}] đang điều khiển máy bạn": "Máy tính có ID [{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id}] đang điều khiển máy bạn",
   "Máy tính này đã tồn tại trong danh sách!": "Máy tính này đã tồn tại trong danh sách!",
   "Máy tính trong mạng LAN": "Máy tính trong mạng LAN",
   "Máy điều khiển (Remote Host)": "Máy điều khiển (Remote Host)",
@@ -194,7 +257,9 @@
   "Mạng LAN": "Mạng LAN",
   "Mất kết nối toàn bộ Signaling Server. Đang thử lại...": "Mất kết nối toàn bộ Signaling Server. Đang thử lại...",
   "Mất kết nối.": "Mất kết nối.",
-  "Mất kết nối. Đang thử kết nối lại lần {count}/30...": "Mất kết nối. Đang thử kết nối lại lần {count}/30...",
+  "Mất kết nối. Đang thử kết nối lại lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count}/30...": "Mất kết nối. Đang thử kết nối lại lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count}/30...",
   "Mật khẩu (Password)": "Mật khẩu (Password)",
   "Mật khẩu cố định": "Mật khẩu cố định",
   "Mật khẩu kết nối:": "Mật khẩu kết nối:",
@@ -203,10 +268,16 @@
   "Nguồn": "Nguồn",
   "Nguồn (Máy bạn):": "Nguồn (Máy bạn):",
   "Nguồn (Máy từ xa):": "Nguồn (Máy từ xa):",
-  "Ngày sửa đổi: {date}": "Ngày sửa đổi: {date}",
+  "Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",date}": "Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",date}",
   "Ngôn ngữ (Language)": "Ngôn ngữ (Language)",
   "Ngôn ngữ riêng của bạn": "Ngôn ngữ riêng của bạn",
-  "Ngắt kết nối với ID {id} ({comp})": "Ngắt kết nối với ID {id} ({comp})",
+  "Ngắt kết nối với ID {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp})": "Ngắt kết nối với ID {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp})",
   "Ngừng điều khiển ID ": "Ngừng điều khiển ID ",
   "Nhóm (Tùy chọn):": "Nhóm (Tùy chọn):",
   "Nhận file: ": "Nhận file: ",
@@ -219,15 +290,21 @@
   "Nhập khẩu danh sách máy tính": "Nhập khẩu danh sách máy tính",
   "Nhập mật khẩu:": "Nhập mật khẩu:",
   "Nhập số điện thoại hoặc liên kết Zalo của bạn. Client điều khiển máy bạn có thể click Help -> Zalo để trực tiếp nhắn tin cho bạn.": "Nhập số điện thoại hoặc liên kết Zalo của bạn. Client điều khiển máy bạn có thể click Help -> Zalo để trực tiếp nhắn tin cho bạn.",
-  "Nhập tên mới cho '{name}':": "Nhập tên mới cho '{name}':",
+  "Nhập tên mới cho '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}':": "Nhập tên mới cho '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}':",
   "Nhập tên mới cho nhóm:": "Nhập tên mới cho nhóm:",
   "Nhập tên thư mục mới:": "Nhập tên thư mục mới:",
   "OK": "OK",
   "Options": "Options",
   "P2P REMOTE DESKTOP": "P2P REMOTE DESKTOP",
   "P2P REMOTE HOST": "P2P REMOTE HOST",
-  "P2P Remote Desktop  |  {comp}": "P2P Remote Desktop  |  {comp}",
-  "P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}": "P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}",
+  "P2P Remote Desktop  |  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp}": "P2P Remote Desktop  |  {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",comp}",
+  "P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",host_title}": "P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",host_title}",
   "P2P Remote Desktop Viewer": "P2P Remote Desktop Viewer",
   "Pha lê": "Pha lê",
   "Phương thức thử": "Phương thức thử",
@@ -238,12 +315,20 @@
   "Sai mật khẩu!": "Sai mật khẩu!",
   "Sao chép": "Sao chép",
   "Sao chép (Copy)": "Sao chép (Copy)",
-  "Sao chép thư mục \"{name}\"": "Sao chép thư mục \"{name}\"",
+  "Sao chép thư mục \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}\"": "Sao chép thư mục \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}\"",
   "Sao chép tệp": "Sao chép tệp",
-  "Sao chép tệp \"{name}\"": "Sao chép tệp \"{name}\"",
+  "Sao chép tệp \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}\"": "Sao chép tệp \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}\"",
   "Sao chép và thay thế": "Sao chép và thay thế",
-  "Soạn thảo (Local) - {name}": "Soạn thảo (Local) - {name}",
-  "Soạn thảo (Remote) - {name}": "Soạn thảo (Remote) - {name}",
+  "Soạn thảo (Local) - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}": "Soạn thảo (Local) - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}",
+  "Soạn thảo (Remote) - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}": "Soạn thảo (Remote) - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}",
   "Sáng": "Sáng",
   "Sẵn sàng kết nối": "Sẵn sàng kết nối",
   "SỐ ĐIỆN THOẠI LIÊN HỆ": "SỐ ĐIỆN THOẠI LIÊN HỆ",
@@ -263,7 +348,11 @@
   "Thêm máy tính": "Thêm máy tính",
   "Thông báo": "Thông báo",
   "Thư mục": "Thư mục",
-  "Thư mục \"{new_name}\" đã tồn tại trên \"{current_dir}\"": "Thư mục \"{new_name}\" đã tồn tại trên \"{current_dir}\"",
+  "Thư mục \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",new_name}\" đã tồn tại trên \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",current_dir}\"": "Thư mục \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",new_name}\" đã tồn tại trên \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",current_dir}\"",
   "Thư mục mới": "Thư mục mới",
   "Thư mục đích": "Thư mục đích",
   "Thư mục ứng dụng": "Thư mục ứng dụng",
@@ -290,7 +379,11 @@
   "Tệp ngôn ngữ mẫu đã được lưu tại:": "Tệp ngôn ngữ mẫu đã được lưu tại:",
   "Tệp tin": "Tệp tin",
   "Tệp:": "Tệp:",
-  "Tệp: {file_count}, Thư mục: {folder_count}": "Tệp: {file_count}, Thư mục: {folder_count}",
+  "Tệp: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",file_count}, Thư mục: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",folder_count}": "Tệp: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",file_count}, Thư mục: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",folder_count}",
   "Tốc độ": "Tốc độ",
   "Tốc độ: -- KB/s | Thời gian dự kiến: --:--": "Tốc độ: -- KB/s | Thời gian dự kiến: --:--",
   "Tối": "Tối",
@@ -331,31 +424,91 @@
   "openclipboard thất bại": "openclipboard thất bại",
   "thành công": "thành công",
   "tìm kiếm theo tên hoặc id...": "tìm kiếm theo tên hoặc id...",
-  "{dst_title}\n- Vị trí: {dst_path}\n- Dung lượng: {dst_sz}{dst_extra}\n- Ngày sửa đổi: {dst_mtime}": "{dst_title}\n- Vị trí: {dst_path}\n- Dung lượng: {dst_sz}{dst_extra}\n- Ngày sửa đổi: {dst_mtime}",
-  "{dst_title}\\n- Vị trí: {dst_path}\\n- Dung lượng: {dst_sz}{dst_extra}\\n- Ngày sửa đổi: {dst_mtime}": "{dst_title}\\n- Vị trí: {dst_path}\\n- Dung lượng: {dst_sz}{dst_extra}\\n- Ngày sửa đổi: {dst_mtime}",
-  "{item_type} với tên \"{item_name}\" đã tồn tại.": "{item_type} với tên \"{item_name}\" đã tồn tại.",
-  "{m} phút {n} giây": "{m} phút {n} giây",
-  "{n} giây": "{n} giây",
-  "{src_title}\n- Vị trí: {src_path}\n- Dung lượng: {src_sz}{src_extra}\n- Ngày sửa đổi: {src_mtime}": "{src_title}\n- Vị trí: {src_path}\n- Dung lượng: {src_sz}{src_extra}\n- Ngày sửa đổi: {src_mtime}",
-  "{src_title}\\n- Vị trí: {src_path}\\n- Dung lượng: {src_sz}{src_extra}\\n- Ngày sửa đổi: {src_mtime}": "{src_title}\\n- Vị trí: {src_path}\\n- Dung lượng: {src_sz}{src_extra}\\n- Ngày sửa đổi: {src_mtime}",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_title}\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_path}\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_extra}\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_mtime}": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_title}\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_path}\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_extra}\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_mtime}",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_title}\\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_path}\\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_extra}\\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_mtime}": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_title}\\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_path}\\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_extra}\\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",dst_mtime}",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_type} với tên \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}\" đã tồn tại.": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_type} với tên \"{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",item_name}\" đã tồn tại.",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",m} phút {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n} giây": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",m} phút {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n} giây",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n} giây": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n} giây",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_title}\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_path}\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_extra}\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_mtime}": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_title}\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_path}\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_extra}\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_mtime}",
+  "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_title}\\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_path}\\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_extra}\\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_mtime}": "{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_title}\\n- Vị trí: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_path}\\n- Dung lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_sz}{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_extra}\\n- Ngày sửa đổi: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",src_mtime}",
   "Áp dụng cho mọi xung đột": "Áp dụng cho mọi xung đột",
   "ĐIỀU KHIỂN ĐỐI TÁC": "ĐIỀU KHIỂN ĐỐI TÁC",
   "ĐIỆN THOẠI:": "ĐIỆN THOẠI:",
-  "Đang bị điều khiển bởi {addrs}": "Đang bị điều khiển bởi {addrs}",
+  "Đang bị điều khiển bởi {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",addrs}": "Đang bị điều khiển bởi {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",addrs}",
   "Đang chuyển giao diện... Vui lòng đợi ": "Đang chuyển giao diện... Vui lòng đợi ",
   "Đang chuyển vào thư mục đích...": "Đang chuyển vào thư mục đích...",
   "Đang chuẩn bị... 0%": "Đang chuẩn bị... 0%",
   "Đang chờ kết nối": "Đang chờ kết nối",
-  "Đang dùng máy chủ {addrs}": "Đang dùng máy chủ {addrs}",
-  "Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...": "Đang hiển thị cửa sổ điều khiển đã kết nối của {partner_id}...",
+  "Đang dùng máy chủ {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",addrs}": "Đang dùng máy chủ {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",addrs}",
+  "Đang hiển thị cửa sổ điều khiển đã kết nối của {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",partner_id}...": "Đang hiển thị cửa sổ điều khiển đã kết nối của {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",partner_id}...",
   "Đang khởi động Server lắng nghe...": "Đang khởi động Server lắng nghe...",
   "Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...": "Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 1/2...",
   "Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...": "Đang kiểm tra chất lượng mạng (Ping & Băng thông) lần 2/2...",
   "Đang kiểm tra chất lượng mạng...": "Đang kiểm tra chất lượng mạng...",
   "Đang kết nối / Đang chờ màn hình từ máy chủ...": "Đang kết nối / Đang chờ màn hình từ máy chủ...",
-  "Đang kết nối LAN trực tiếp tới {name}...": "Đang kết nối LAN trực tiếp tới {name}...",
+  "Đang kết nối LAN trực tiếp tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}...": "Đang kết nối LAN trực tiếp tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}...",
   "Đang kết nối Signaling": "Đang kết nối Signaling",
-  "Đang kết nối Signaling Server... ({sec}s)": "Đang kết nối Signaling Server... ({sec}s)",
+  "Đang kết nối Signaling Server... ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",sec}s)": "Đang kết nối Signaling Server... ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",sec}s)",
   "Đang kết nối tới các Signaling Server...": "Đang kết nối tới các Signaling Server...",
   "Đang kết nối tới mạng đăng ký...": "Đang kết nối tới mạng đăng ký...",
   "Đang lấy IP...": "Đang lấy IP...",
@@ -363,11 +516,15 @@
   "Đang nhận màn hình máy Android...": "Đang nhận màn hình máy Android...",
   "Đang quét... (0 máy)": "Đang quét... (0 máy)",
   "Đang thử kết nối LAN trực tiếp...": "Đang thử kết nối LAN trực tiếp...",
-  "Đang thử kết nối lại lần {count}/30...": "Đang thử kết nối lại lần {count}/30...",
+  "Đang thử kết nối lại lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count}/30...": "Đang thử kết nối lại lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count}/30...",
   "Đang thử kết nối lại, tiếp tục tải...": "Đang thử kết nối lại, tiếp tục tải...",
   "Đang thử kết nối lại... ": "Đang thử kết nối lại... ",
   "Đang thử lại": "Đang thử lại",
-  "Đang tìm máy trong mạng LAN (lần {n}/5)...": "Đang tìm máy trong mạng LAN (lần {n}/5)...",
+  "Đang tìm máy trong mạng LAN (lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n}/5)...": "Đang tìm máy trong mạng LAN (lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n}/5)...",
   "Đang tìm và chờ đối tác phản hồi...": "Đang tìm và chờ đối tác phản hồi...",
   "Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...": "Đang tìm địa chỉ IP của đối tác trên dịch vụ danh bạ...",
   "Đang tìm địa chỉ đối tác trên server danh bạ...": "Đang tìm địa chỉ đối tác trên server danh bạ...",
@@ -376,24 +533,40 @@
   "Đang tự động cấu hình Router (UPnP)...": "Đang tự động cấu hình Router (UPnP)...",
   "Đang tự động kết nối lại...": "Đang tự động kết nối lại...",
   "Đang đăng nhập...": "Đang đăng nhập...",
-  "Đang đục lỗ Tường lửa lần {n}/10...": "Đang đục lỗ Tường lửa lần {n}/10...",
-  "Đang đục lỗ Tường lửa tới {ip}:{port}...": "Đang đục lỗ Tường lửa tới {ip}:{port}...",
+  "Đang đục lỗ Tường lửa lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n}/10...": "Đang đục lỗ Tường lửa lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",n}/10...",
+  "Đang đục lỗ Tường lửa tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ip}:{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port}...": "Đang đục lỗ Tường lửa tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ip}:{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",port}...",
   "Đi": "Đi",
   "Điều khiển trực tuyến máy tính bằng HWID": "Điều khiển trực tuyến máy tính bằng HWID",
   "Điện thoại": "Điện thoại",
   "Điện thoại liên hệ": "Điện thoại liên hệ",
-  "Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.": "Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.",
+  "Đo tốc độ: Ping {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ping:.1f}ms, Băng thông {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",bw:.2f} Mbps. Chất lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",quality}.": "Đo tốc độ: Ping {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ping:.1f}ms, Băng thông {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",bw:.2f} Mbps. Chất lượng: {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",quality}.",
   "Đã bật chạy khi mở máy.\nDịch vụ nền vẫn luôn chạy để điều khiển màn hình khóa / đăng nhập.": "Đã bật chạy khi mở máy.\nDịch vụ nền vẫn luôn chạy để điều khiển màn hình khóa / đăng nhập.",
   "Đã bật chạy khi mở máy.\\nDịch vụ nền vẫn luôn chạy để điều khiển màn hình khóa / đăng nhập.": "Đã bật chạy khi mở máy.\\nDịch vụ nền vẫn luôn chạy để điều khiển màn hình khóa / đăng nhập.",
   "Đã bật tính năng chạy khi mở máy thành công!": "Đã bật tính năng chạy khi mở máy thành công!",
   "Đã có tệp cùng tên trong thư mục này.": "Đã có tệp cùng tên trong thư mục này.",
   "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.": "Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo.",
-  "Đã gửi Wake-On-Lan tới MAC {mac}": "Đã gửi Wake-On-Lan tới MAC {mac}",
+  "Đã gửi Wake-On-Lan tới MAC {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",mac}": "Đã gửi Wake-On-Lan tới MAC {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",mac}",
   "Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển.": "Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển.",
   "Đã hiểu": "Đã hiểu",
   "Đã hủy truyền tải file.": "Đã hủy truyền tải file.",
   "Đã kết nối qua Relay Server!": "Đã kết nối qua Relay Server!",
-  "Đã lưu máy tính '{name}' vào danh sách thành công!": "Đã lưu máy tính '{name}' vào danh sách thành công!",
+  "Đã lưu máy tính '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' vào danh sách thành công!": "Đã lưu máy tính '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' vào danh sách thành công!",
   "Đã lưu mật khẩu cố định thành công!": "Đã lưu mật khẩu cố định thành công!",
   "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!": "Đã lưu thông tin liên hệ Zalo / Điện thoại thành công!",
   "Đã lưu tệp!": "Đã lưu tệp!",
@@ -405,7 +578,11 @@
   "Đã tắt tính năng chạy khi mở máy thành công!": "Đã tắt tính năng chạy khi mở máy thành công!",
   "Đã tự động reset lại quyền bảo mật cho ứng dụng!\n\nVui lòng tích xanh (kích hoạt) lại quyền trên cửa sổ cài đặt vừa mở, sau đó KHỞI ĐỘNG LẠI phần mềm này để có tác dụng.": "Đã tự động reset lại quyền bảo mật cho ứng dụng!\n\nVui lòng tích xanh (kích hoạt) lại quyền trên cửa sổ cài đặt vừa mở, sau đó KHỞI ĐỘNG LẠI phần mềm này để có tác dụng.",
   "Đã xuất khẩu danh sách máy tính thành công!": "Đã xuất khẩu danh sách máy tính thành công!",
-  "Đã đóng kết nối với Client {client} lúc {time} (Sẵn sàng kết nối)": "Đã đóng kết nối với Client {client} lúc {time} (Sẵn sàng kết nối)",
+  "Đã đóng kết nối với Client {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",client} lúc {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",time} (Sẵn sàng kết nối)": "Đã đóng kết nối với Client {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",client} lúc {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",time} (Sẵn sàng kết nối)",
   "Đích (Máy bạn):": "Đích (Máy bạn):",
   "Đích (Máy từ xa):": "Đích (Máy từ xa):",
   "Đóng": "Đóng",
@@ -422,7 +599,9 @@
   "Đổi tên": "Đổi tên",
   "Đổi tên nhóm": "Đổi tên nhóm",
   "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...": "Đục lỗ thất bại. Đang chuyển hướng qua Relay Server...",
-  "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...": "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...",
+  "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",host})...": "Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",host})...",
   "Ổ đĩa": "Ổ đĩa",
   "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống": "Ứng dụng P2P Remote Desktop đang chạy ở khay hệ thống",
   "Ứng dụng dùng cổng": "Ứng dụng dùng cổng",
@@ -446,12 +625,16 @@
   "Kết nối thành công! Đang chuyển sang màn hình Host...": "Kết nối thành công! Đang chuyển sang màn hình Host...",
   "Mở thư mục Log (Logs)": "Mở thư mục Log (Logs)",
   "Mở thư mục Logs": "Mở thư mục Logs",
-  "Đang thử kết nối lại (lần {x}/5)...": "Đang thử kết nối lại (lần {x}/5)...",
+  "Đang thử kết nối lại (lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",x}/5)...": "Đang thử kết nối lại (lần {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",x}/5)...",
   "Nhật ký (Logs)": "Nhật ký (Logs)",
   "Xóa Logs...": "Xóa Logs...",
   "Xóa tệp tạm...": "Xóa tệp tạm...",
   "Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?": "Bạn có chắc chắn muốn xóa toàn bộ các file nhật ký (*.log, *.txt) trong thư mục Logs không?",
-  "Đã xóa thành công các file nhật ký ({count} mục).": "Đã xóa thành công các file nhật ký ({count} mục).",
+  "Đã xóa thành công các file nhật ký ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục).": "Đã xóa thành công các file nhật ký ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",count} mục).",
   "Không thể xóa logs:": "Không thể xóa logs:",
   "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?": "Bạn có chắc chắn muốn xóa các tệp tạm (*.tmp) trong thư mục Logs không?",
   "Không thể xóa tệp tạm:": "Không thể xóa tệp tạm:",
@@ -464,26 +647,46 @@
   "🌐 Dải IP...": "🌐 Dải IP...",
   "Phát hiện VPN: ": "Phát hiện VPN: ",
   "VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)": "VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)",
-  "Đang quét {vpn} ({tip} - {c}/{t})...": "Đang quét {vpn} ({tip} - {c}/{t})...",
+  "Đang quét {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",vpn} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",tip} - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",c}/{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",t})...": "Đang quét {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",vpn} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",tip} - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",c}/{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",t})...",
   "Quét VPN hoàn tất!": "Quét VPN hoàn tất!",
   "Quét dải IP tùy chọn": "Quét dải IP tùy chọn",
   "Nhập dải IP mạng cần quét": "Nhập dải IP mạng cần quét",
   "Từ IP:": "Từ IP:",
   "Đến IP:": "Đến IP:",
   "Quét ngay": "Quét ngay",
-  "Đang quét {ip} ({c}/{t})...": "Đang quét {ip} ({c}/{t})...",
+  "Đang quét {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ip} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",c}/{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",t})...": "Đang quét {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",ip} ({
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",c}/{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",t})...",
   "Quét dải IP hoàn tất!": "Quét dải IP hoàn tất!",
   "Không tìm thấy máy tính nào trong mạng LAN hoặc VPN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.": "Không tìm thấy máy tính nào trong mạng LAN hoặc VPN.\nĐảm bảo các máy đều đang chạy Easy Remote Desktop.",
   " máy trong mạng LAN & VPN": " máy trong mạng LAN & VPN",
   "🔄 Quét lại LAN": "🔄 Quét lại LAN",
-  "Đang kết nối trực tiếp tới {name}...": "Đang kết nối trực tiếp tới {name}...",
+  "Đang kết nối trực tiếp tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}...": "Đang kết nối trực tiếp tới {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}...",
   "Đã xóa sạch danh sách máy đã quét!": "Đã xóa sạch danh sách máy đã quét!",
   "Thay đổi mật khẩu": "Thay đổi mật khẩu",
   "🔑 THAY ĐỔI MẬT KHẨU": "🔑 THAY ĐỔI MẬT KHẨU",
   "Nhập mật khẩu mới:": "Nhập mật khẩu mới:",
   "Mật khẩu không được để trống!": "Mật khẩu không được để trống!",
-  "Đã cập nhật mật khẩu cho {name}!": "Đã cập nhật mật khẩu cho {name}!",
-  "Đã xóa '{name}' khỏi danh sách!": "Đã xóa '{name}' khỏi danh sách!",
+  "Đã cập nhật mật khẩu cho {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}!": "Đã cập nhật mật khẩu cho {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}!",
+  "Đã xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' khỏi danh sách!": "Đã xóa '{
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name}' khỏi danh sách!",
   "💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy": "💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy",
   "🚀 Kết nối": "🚀 Kết nối",
   "⚡ Bật nguồn (WOL)": "⚡ Bật nguồn (WOL)",
@@ -492,6 +695,11 @@
   "Sai mật khẩu kết nối": "Sai mật khẩu kết nối",
   "Mật khẩu: đã lưu": "Mật khẩu: đã lưu",
   "Mật khẩu: chưa lưu": "Mật khẩu: chưa lưu",
-  "Đang bật máy {name} - {id}": "Đang bật máy {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Đã gửi tín hiệu Wake-on-LAN qua mạng..."
+  "Đang bật máy {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name} - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id}": "Đang bật máy {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name} - {
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Đã gửi tín hiệu Wake-on-LAN qua mạng...",
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối"
 }

@@ -201,7 +201,7 @@ def attach_thread_for_remote_input():
     attach_process_window_station("WinSta0")
     user32 = ctypes.windll.user32
     h_input = None
-    for access_mask in _THREAD_DESKTOP_ACCESS_MASKS:
+    for access_mask in _DESKTOP_ACCESS_MASKS:
         try:
             h_input = user32.OpenInputDesktop(0, False, access_mask)
             if h_input:
@@ -211,7 +211,7 @@ def attach_thread_for_remote_input():
     if not h_input:
         thread_name = get_desktop_name()
         target_name = "Winlogon" if thread_name == "default" else "Default"
-        for access_mask in _THREAD_DESKTOP_ACCESS_MASKS:
+        for access_mask in _DESKTOP_ACCESS_MASKS:
             try:
                 h_input = user32.OpenDesktopW(target_name, 0, False, access_mask)
                 if h_input:
@@ -223,7 +223,7 @@ def attach_thread_for_remote_input():
     try:
         name_input = _desktop_name_from_handle(h_input)
         name_thread = get_desktop_name()
-        if name_input and name_input != name_thread:
+        if (not name_input) or (name_input != name_thread):
             result = user32.SetThreadDesktop(h_input)
             if result:
                 old_h = _last_input_thread_desktop_handle
@@ -357,15 +357,7 @@ def check_desktop_change():
             finally:
                 ctypes.windll.user32.CloseDesktop(h_input)
             if input_name and input_name != thread_name:
-                for access_mask in (0x01FF, 0x02000000, 0x80000000, 0x0001, 0x0040, 0):
-                    try:
-                        h_target = ctypes.windll.user32.OpenDesktopW(input_name, 0, False, access_mask)
-                        if h_target:
-                            ctypes.windll.user32.CloseDesktop(h_target)
-                            return True, False
-                    except Exception:
-                        pass
-                return False, True
+                return True, False
             return False, False
 
         # Khi OpenInputDesktop trả về None (màn hình ngủ DPMS / tắt hiển thị / RDP ngắt kết nối / Logoff):

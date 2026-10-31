@@ -183,6 +183,7 @@ class Worker:
 class Broker:
     def __init__(self):
         self.active_worker = None            # Worker hien dang capture
+        self.session_phase = "none"
         self.workers = []                    # tat ca worker control (broadcast logoff)
         self.worker_lock = threading.Lock()
         self.pending_data = {}               # token -> data socket (worker vua mo)
@@ -553,12 +554,24 @@ class Broker:
         kind = (info.get("kind") or "").lower()
         sid = info.get("session")
         print(f"[Broker] session_event kind={kind} session={sid}")
+        self.session_phase = kind
         if kind == "logoff":
             self._broadcast_workers({"cmd": "session_phase", "phase": "logoff"})
         elif kind == "lock":
             self._broadcast_workers({"cmd": "session_phase", "phase": "lock"})
+            with self.worker_lock:
+                wl = next((x for x in self.workers if x.alive and x.desktop == "winlogon"), None)
+                if wl and self.active_worker is not wl:
+                    self.active_worker = wl
+                    self._bump_handoff("screen locked: switch to winlogon")
         elif kind in ("interactive", "logon", "unlock", "connect"):
+            self.session_phase = "none"
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
+            with self.worker_lock:
+                df = next((x for x in self.workers if x.alive and x.desktop == "default"), None)
+                if df and self.active_worker is not df:
+                    self.active_worker = df
+                    self._bump_handoff("unlocked: switch to default")
         elif kind == "session_switch":
             self._broadcast_workers({"cmd": "session_phase", "phase": "none"})
             self._bump_handoff(f"session_switch to session {sid}")
@@ -609,12 +622,13 @@ class Broker:
                 ENDSESSION_LOGOFF = 0x80000000
 
                 def wnd_proc(hwnd, msg, wparam, lparam):
-                    if msg in (win32con.WM_QUERYENDSESSION, win32con.WM_ENDSESSION):
-                        if msg == win32con.WM_ENDSESSION and not wparam:
+                    if msg == win32con.WM_QUERYENDSESSION:
+                        # Allow query; do not kill viewer here because apps may block shutdown (BSDR screen).
+                        return True
+                    elif msg == win32con.WM_ENDSESSION:
+                        if not wparam or (lparam & ENDSESSION_LOGOFF):
                             return True
-                        if lparam & ENDSESSION_LOGOFF:
-                            return True
-                        print("[Broker] WM_QUERYENDSESSION/ENDSESSION shutdown or restart")
+                        print("[Broker] WM_ENDSESSION: shutdown or restart confirmed by OS")
                         self.notify_viewers_shutdown("shutdown")
                         return True
                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
@@ -669,14 +683,14 @@ class Broker:
               f"desktop={w.desktop} {w.width}x{w.height}"
               + (f" (thay pid={old.pid})" if old else ""))
         # Khi worker moi thuoc session khac (vi du Windows Server chuyen Console sang Ms RDP hoac nguoc lai)
-        # hoac khi logon hoan tat (winlogon -> default): bump handoff ngay de viewer cap nhat data channel sang worker moi.
+        # hoac khi desktop thay doi (default <-> winlogon cho Lock / BSDR shutdown): bump handoff ngay.
         if old and old is not w:
             if old.session != w.session:
                 print(f"[Broker] Session worker thay doi ({old.session} -> {w.session}). Handoff sang worker moi.")
                 self._bump_handoff(f"session changed {old.session} -> {w.session}")
-            elif old.desktop == "winlogon" and w.desktop == "default":
-                print(f"[Broker] Desktop logon xong ({old.desktop} -> {w.desktop}). Handoff sang default worker.")
-                self._bump_handoff("login completed to default")
+            elif old.desktop != w.desktop:
+                print(f"[Broker] Desktop thay doi ({old.desktop} -> {w.desktop}). Handoff sang worker moi.")
+                self._bump_handoff(f"desktop changed {old.desktop} -> {w.desktop}")
         # Giu control socket song; neu worker chet, doc se loi -> danh dau
         try:
             while True:
@@ -696,8 +710,11 @@ class Broker:
         with self.worker_lock:
             self.workers = [x for x in self.workers if x is not w]
             if self.active_worker is w:
-                # khong xoa active_worker ngay: co the worker moi chua ket noi
-                pass
+                fallback = next((x for x in self.workers if x.alive), None)
+                self.active_worker = fallback
+                if fallback:
+                    print(f"[Broker] Worker active pid={w.pid} đóng, fallback sang pid={fallback.pid} ({fallback.desktop}).")
+                    self._bump_handoff(f"active worker exited, switch to {fallback.desktop}")
         print(f"[Broker] Worker pid={w.pid} control dong.")
 
     def _get_active_worker(self, timeout=15.0, exclude=None):

@@ -278,7 +278,12 @@ def send_input_keyboard_event(key_name, pressed):
             inject_vk = generic_vks.get(vk, vk)
                 
             inp.union.ki = KEYBDINPUT(inject_vk, scan, flags, 0, None)
-            _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+            if not res:
+                try:
+                    ctypes.windll.user32.keybd_event(inject_vk, scan, flags, 0)
+                except Exception:
+                    pass
         elif len(key_name) == 1 and not is_modifier:
             # Fallback: Use KEYEVENTF_UNICODE only for characters without a VK code
             # (e.g. pre-composed Unicode characters, emoji, special symbols)
@@ -345,17 +350,48 @@ def send_input_mouse_click(button_name, pressed):
     return 0
 
 def send_input_mouse_click_at(x, y, button_name, pressed):
-    """Di chuyển rồi click — cùng cách Fix UAC dialog Win11 (e57ebbc)."""
+    """Di chuyển rồi click tuyệt đối (nguyên tử) — tương thích hoàn toàn XAML/UAC/BSDR Shutdown."""
     try:
-        send_input_mouse_move(int(x), int(y))
+        nx, ny = _mouse_abs_norm(x, y)
+        flags = 0
+        if button_name == 'left':
+            flags = MOUSEEVENTF_LEFTDOWN if pressed else MOUSEEVENTF_LEFTUP
+        elif button_name == 'right':
+            flags = MOUSEEVENTF_RIGHTDOWN if pressed else MOUSEEVENTF_RIGHTUP
+        elif button_name == 'middle':
+            flags = MOUSEEVENTF_MIDDLEDOWN if pressed else MOUSEEVENTF_MIDDLEUP
+
+        if not flags:
+            return 0
+
         try:
             ctypes.windll.user32.SetCursorPos(int(x), int(y))
         except Exception:
             pass
-        send_input_mouse_click(button_name, pressed)
+
+        inp = INPUT()
+        inp.type = INPUT_MOUSE
+        inp.union.mi = MOUSEINPUT(
+            nx, ny, 0,
+            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
+            0, None
+        )
+        res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+        # Driver-level mouse_event fallback if SendInput failed
+        if not res:
+            try:
+                ctypes.windll.user32.mouse_event(
+                    MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
+                    nx, ny, 0, 0
+                )
+            except Exception:
+                pass
+
+        return res
     except Exception as e:
         print(f"[SendInput] Mouse click-at injection failed: {e}")
-        send_input_mouse_click(button_name, pressed)
+        return send_input_mouse_click(button_name, pressed)
 
 def send_input_mouse_scroll(dx, dy):
     try:
@@ -370,6 +406,10 @@ def send_input_mouse_scroll(dx, dy):
 def send_input_mouse_move(x, y):
     try:
         nx, ny = _mouse_abs_norm(x, y)
+        try:
+            ctypes.windll.user32.SetCursorPos(int(x), int(y))
+        except Exception:
+            pass
         inp = INPUT()
         inp.type = INPUT_MOUSE
         inp.union.mi = MOUSEINPUT(
@@ -377,7 +417,15 @@ def send_input_mouse_move(x, y):
             MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
             0, None
         )
-        _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        try:
+            ctypes.windll.user32.mouse_event(
+                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                nx, ny, 0, 0
+            )
+        except Exception:
+            pass
+        return res
     except Exception as e:
         print(f"[SendInput] Mouse move injection failed: {e}")
 

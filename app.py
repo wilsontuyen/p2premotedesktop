@@ -555,34 +555,85 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.title(title_text)
         self.resizable(False, False)
         
-        # Shutdown listener for closing client cleanly
+        # Shutdown listener for closing client cleanly or blocking shutdown if remote is connected
         if sys.platform == "win32":
             try:
                 import win32gui, win32con, win32api
+                import ctypes
+                from ctypes import wintypes
+
+                # Setup ShutdownBlockReason APIs
+                try:
+                    _user32 = ctypes.windll.user32
+                    _user32.ShutdownBlockReasonCreate.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+                    _user32.ShutdownBlockReasonCreate.restype = wintypes.BOOL
+                    _user32.ShutdownBlockReasonDestroy.argtypes = [wintypes.HWND]
+                    _user32.ShutdownBlockReasonDestroy.restype = wintypes.BOOL
+                except Exception:
+                    pass
+
                 def WndProc(hwnd, msg, wparam, lparam):
                     if msg == win32con.WM_QUERYENDSESSION:
-                        if not (lparam & 0x80000000):  # 0x80000000 is ENDSESSION_LOGOFF — Signing Out giu viewer
-                            print("[Host] System Shutdown/Restart detected!")
+                        # 0x80000000 is ENDSESSION_LOGOFF (Signing Out giu viewer)
+                        if not (lparam & 0x80000000):
+                            print("[Host] System Shutdown/Restart query detected (WM_QUERYENDSESSION)!")
+                            has_active_remote = False
                             try:
-                                from core.broker import notify_broker_power_event
-                                notify_broker_power_event("shutdown")
+                                from network.socket_utils import socket_passwords
+                                has_active_remote = len(socket_passwords) > 0
                             except Exception:
                                 pass
-                            if not getattr(self, "is_service_active", False):
+                            if not has_active_remote and (getattr(self, "is_host_running", False) or getattr(self, "is_service_active", False)):
+                                has_active_remote = True
+
+                            if has_active_remote:
+                                print("[Host] Remote session or host is active. Registering shutdown block reason and returning FALSE.")
+                                reason_text = "Có phiên điều khiển từ xa đang kết nối"
                                 try:
-                                    from network.socket_utils import socket_passwords, send_msg
-                                    from core.clipboard_agent import clipboard_sync_manager
-                                    import json
-                                    if clipboard_sync_manager:
-                                        clipboard_sync_manager.clear_local_and_notify_peers()
-                                    for conn in list(socket_passwords.keys()):
-                                        try:
-                                            send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
-                                        except Exception:
-                                            pass
+                                    from core.i18n import _
+                                    reason_text = _("Có phiên điều khiển từ xa đang kết nối")
                                 except Exception:
                                     pass
-                        return True
+                                try:
+                                    ctypes.windll.user32.ShutdownBlockReasonCreate(hwnd, ctypes.c_wchar_p(reason_text))
+                                except Exception as e:
+                                    print(f"[Host] ShutdownBlockReasonCreate failed: {e}")
+                                # Return FALSE (0) so Windows blocks shutdown and displays the BSDR screen!
+                                return 0
+                        return 1
+
+                    elif msg == win32con.WM_ENDSESSION:
+                        if not (lparam & 0x80000000):
+                            # wparam == 0 means user clicked "Cancel" on BSDR screen
+                            if not wparam:
+                                print("[Host] WM_ENDSESSION: User clicked Cancel on BSDR screen. Shutdown aborted.")
+                                try:
+                                    ctypes.windll.user32.ShutdownBlockReasonDestroy(hwnd)
+                                except Exception as e:
+                                    print(f"[Host] ShutdownBlockReasonDestroy failed: {e}")
+                                return 0
+                            else:
+                                print("[Host] WM_ENDSESSION: User confirmed shutdown/restart. Cleaning up...")
+                                try:
+                                    from core.broker import notify_broker_power_event
+                                    notify_broker_power_event("shutdown")
+                                except Exception:
+                                    pass
+                                if not getattr(self, "is_service_active", False):
+                                    try:
+                                        from network.socket_utils import socket_passwords, send_msg
+                                        from core.clipboard_agent import clipboard_sync_manager
+                                        import json
+                                        if clipboard_sync_manager:
+                                            clipboard_sync_manager.clear_local_and_notify_peers()
+                                        for conn in list(socket_passwords.keys()):
+                                            try:
+                                                send_msg(conn, json.dumps({"type": "host_shutdown"}).encode('utf-8'), socket_passwords[conn])
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+                                return 0
                     return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
                 self._shutdown_wnd_proc = WndProc
@@ -592,7 +643,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 wc.hInstance = win32api.GetModuleHandle(None)
                 try: win32gui.RegisterClass(wc)
                 except: pass
-                self.shutdown_hwnd = win32gui.CreateWindow(wc.lpszClassName, "ShutdownListener", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
+                self.shutdown_hwnd = win32gui.CreateWindow(
+                    wc.lpszClassName, title_text, 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None
+                )
             except Exception as e:
                 print(f"[Host] Failed to setup shutdown listener: {e}")
         elif sys.platform.startswith("linux") or sys.platform == "darwin":

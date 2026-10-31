@@ -220,6 +220,56 @@ def _pid_image_is_logonui(pid):
 def _pid_is_secure_ui(pid):
     return _pid_image_basename(pid) in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe")
 
+def _hwnd_class_and_title(hwnd):
+    if sys.platform != "win32" or not hwnd:
+        return "", ""
+    user32 = ctypes.windll.user32
+    c_buf = ctypes.create_unicode_buffer(256)
+    t_buf = ctypes.create_unicode_buffer(256)
+    try:
+        user32.GetClassNameW(hwnd, c_buf, 255)
+    except Exception:
+        pass
+    try:
+        user32.GetWindowTextW(hwnd, t_buf, 255)
+    except Exception:
+        pass
+    return (c_buf.value or ""), (t_buf.value or "")
+
+def _is_bsdr_hwnd(hwnd):
+    """Kiểm tra cửa sổ Blocked Shutdown Resolver ('Closing X apps and restarting') trên Winlogon."""
+    cls, title = _hwnd_class_and_title(hwnd)
+    cl = cls.lower()
+    tl = title.lower()
+    return ("blockedshutdown" in cl) or ("blocked shutdown" in tl) or ("blockedshutdown" in tl)
+
+def _filter_winlogon_top_hwnds(items, sw, sh):
+    """Khi trên Winlogon có nhiều cửa sổ fullscreen (ví dụ 'BlockedShutdownUX XAML Host' đè lên
+    'LogonUI Logon Window' đang quay 'Restarting'):
+    1. Nếu có cửa sổ BSDR ('BlockedShutdownUX XAML Host'), loại bỏ mọi cửa sổ fullscreen khác.
+    2. Nếu không có BSDR, chỉ giữ cửa sổ fullscreen đầu tiên (trên cùng theo Z-order của EnumDesktopWindows)
+       để cửa sổ nền phía sau không vẽ đè lên cửa sổ trước mặt."""
+    if not items:
+        return items
+    has_bsdr = any(_is_bsdr_hwnd(it[0]) for it in items)
+    out = []
+    kept_fullscreen = False
+    for it in items:
+        hwnd, w, h = it[0], it[1], it[2]
+        is_full = (w >= int(sw * 0.75) and h >= int(sh * 0.75))
+        if not is_full:
+            out.append(it)
+            continue
+        if has_bsdr:
+            if _is_bsdr_hwnd(hwnd) and not kept_fullscreen:
+                out.append(it)
+                kept_fullscreen = True
+        else:
+            if not kept_fullscreen:
+                out.append(it)
+                kept_fullscreen = True
+    return out
+
 def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
     """Cửa sổ visible trên HDESK (không cần thread đang gắn desktop đó)."""
     out = []
@@ -231,6 +281,8 @@ def _enum_desktop_hwnds(hdesk, min_w=80, min_h=40):
 
     def _cb(hwnd, _lp):
         if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+            return True
+        if _hwnd_is_dwm_cloaked(hwnd):
             return True
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return True
@@ -272,15 +324,18 @@ def _winlogon_secure_ui_hwnds():
     try:
         h_wl = open_named_desktop_handle("Winlogon")
         if h_wl:
-            desks.append(h_wl)
+            if _desktop_name_from_handle(h_wl) == "winlogon":
+                desks.append(h_wl)
             desks_to_close.append(h_wl)
         h_in = open_input_desktop_handle()
         if h_in:
-            desks.append(h_in)
+            if _desktop_name_from_handle(h_in) == "winlogon":
+                desks.append(h_in)
             desks_to_close.append(h_in)
         h_cur = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
         if h_cur and h_cur not in desks:
-            desks.append(h_cur)
+            if _desktop_name_from_handle(h_cur) == "winlogon":
+                desks.append(h_cur)
 
         for hd in desks:
             for hwnd, w, h, pid, x, y in _enum_desktop_hwnds(hd, 20, 20):
@@ -291,12 +346,16 @@ def _winlogon_secure_ui_hwnds():
                 is_fullscreen = (w >= int(sw * 0.85) and h >= int(sh * 0.85))
                 if not is_fullscreen:
                     # Bất kỳ flyout, popup, menu con (mạng LAN/Wifi, nguồn, accessibility...) trên Winlogon
-                    found.append((hwnd, w, h, pid, x, y))
+                    if name in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe", ""):
+                        found.append((hwnd, w, h, pid, x, y))
                 elif name in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not name:
                     found.append((hwnd, w, h, pid, x, y))
                 elif name == "winlogon.exe":
                     if logoff:
                         found.append((hwnd, w, h, pid, x, y))
+
+        found = _filter_winlogon_top_hwnds(found, sw, sh)
+        seen = {item[0] for item in found}
 
         # Enum child windows của mọi cửa sổ tìm thấy (Network Flyout, DirectUIHWND, popup con)
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -639,28 +698,20 @@ def _should_capture_logon_ui():
     logonui = _logonui_running() or secure_ui
     saw = _user_desktop_was_shown()
 
-    # Logoff: khoảng Signing out — không chờ LogonUI như lúc Lock.
-    if phase == "logoff":
+    # Khi Input Desktop thực tế đang là Winlogon -> Màn hình người dùng (BSDR / Lock / Logon) đang ở Winlogon!
+    if input_name == "winlogon":
         return True
+
+    if explorer:
+        if phase == "lock" and logonui:
+            return True
+        return False
+
     if logged_in is False:
         _user_desktop_was_shown(False)
         return True
-    # Win11 OpenInputDesktop đôi khi báo winlogon dù user đang ở Default + Explorer.
-    if input_name == "winlogon":
-        if explorer and not logonui and phase == "none":
-            return False
-        return True
-    # Lock: LogonUI trên Winlogon, explorer thường vẫn sống.
-    if phase == "lock" and (logonui or secure_ui or input_name == "winlogon"):
-        return True
     if not explorer:
         return True
-    if saw and secure_ui:
-        return True
-    if saw and logonui:
-        return True
-    if input_name in ("default", "", "agprivacydesk") and (explorer or logged_in is True):
-        return False
     if logonui:
         return True
     return False
@@ -1374,6 +1425,20 @@ def _printwindow_hwnd_bgr(hwnd, w, h):
         bmi.bmiHeader.biCompression = 0
         buf = (ctypes.c_ubyte * (w * h * 4))()
 
+        def _is_uniform_solid(bgr):
+            if bgr is None or not getattr(bgr, "size", 0):
+                return True
+            try:
+                hf, wf = bgr.shape[:2]
+                if wf < 160 or hf < 100:
+                    return False
+                sub = bgr[::2, ::2]
+                med = np.median(sub.reshape(-1, 3), axis=0)
+                diff = np.max(np.abs(sub.astype(np.int16) - med.astype(np.int16)), axis=2)
+                return int(np.count_nonzero(diff > 18)) < 20
+            except Exception:
+                return False
+
         def _fetch_frame(target_hwnd):
             for flag in (2, 0, 3, 1): # PW_RENDERFULLCONTENT, standard, client+render, clientonly
                 try:
@@ -1382,7 +1447,7 @@ def _printwindow_hwnd_bgr(hwnd, w, h):
                         if got != 0:
                             img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
                             f = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                            if not _frame_is_nearly_black(f):
+                            if not _frame_is_nearly_black(f) and not _is_uniform_solid(f):
                                 return f
                 except Exception:
                     pass
@@ -1391,7 +1456,6 @@ def _printwindow_hwnd_bgr(hwnd, w, h):
         # 1. Thử trực tiếp trên cửa sổ target
         frame = _fetch_frame(hwnd)
 
-        # 2. Nếu cửa sổ cha là container rỗng (như ApplicationFrameWindow của UWP Network Flyout):
         # 2. Nếu cửa sổ cha là container rỗng (như ApplicationFrameWindow của UWP Network Flyout):
         # Duyệt qua các cửa sổ con bên trong để tìm nơi chứa DirectComposition content
         if frame is None:
@@ -1522,39 +1586,44 @@ def _logonui_window_captures():
     try:
         user32 = ctypes.windll.user32
         existing = {item[0] for item in hwnds_info}
-        hdesk_cur = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
-        if hdesk_cur:
-            for item in _enum_desktop_hwnds(hdesk_cur, 20, 20):
-                if item[0] not in existing:
-                    hwnd, w, h, pid, x, y = item
-                    name = _pid_image_basename(pid)
-                    is_fullscreen = (w >= int(sw * 0.85) and h >= int(sh * 0.85))
-                    if not is_fullscreen or name in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not name:
-                        existing.add(hwnd)
-                        hwnds_info.append(item)
+        thread_desk = (get_desktop_name() or "").lower()
+        if thread_desk == "winlogon":
+            hdesk_cur = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+            if hdesk_cur:
+                for item in _enum_desktop_hwnds(hdesk_cur, 20, 20):
+                    if item[0] not in existing:
+                        hwnd, w, h, pid, x, y = item
+                        name = _pid_image_basename(pid)
+                        is_fullscreen = (w >= int(sw * 0.85) and h >= int(sh * 0.85))
+                        if not is_fullscreen or name in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not name:
+                            existing.add(hwnd)
+                            hwnds_info.append(item)
             
-        def _cur_top_cb(h, _lp):
-            if h not in existing:
-                is_vis = user32.IsWindowVisible(h) or bool(user32.GetWindowLongW(h, -16) & 0x10000000)
-                if is_vis and not user32.IsIconic(h) and not _hwnd_is_dwm_cloaked(h):
-                    r = wintypes.RECT()
-                    if user32.GetWindowRect(h, ctypes.byref(r)):
-                        cw = int(r.right - r.left)
-                        ch = int(r.bottom - r.top)
-                        if cw >= 20 and ch >= 20:
-                            cpid = wintypes.DWORD()
-                            user32.GetWindowThreadProcessId(h, ctypes.byref(cpid))
-                            cname = _pid_image_basename(cpid.value)
-                            c_full = (cw >= int(sw * 0.85) and ch >= int(sh * 0.85))
-                            if not c_full or cname in ("logonui.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not cname:
-                                existing.add(h)
-                                hwnds_info.append((h, cw, ch, int(cpid.value), int(r.left), int(r.top)))
-            return True
+            def _cur_top_cb(h, _lp):
+                if h not in existing:
+                    is_vis = user32.IsWindowVisible(h) or bool(user32.GetWindowLongW(h, -16) & 0x10000000)
+                    if is_vis and not user32.IsIconic(h) and not _hwnd_is_dwm_cloaked(h):
+                        r = wintypes.RECT()
+                        if user32.GetWindowRect(h, ctypes.byref(r)):
+                            cw = int(r.right - r.left)
+                            ch = int(r.bottom - r.top)
+                            if cw >= 20 and ch >= 20:
+                                cpid = wintypes.DWORD()
+                                user32.GetWindowThreadProcessId(h, ctypes.byref(cpid))
+                                cname = _pid_image_basename(cpid.value)
+                                c_full = (cw >= int(sw * 0.85) and ch >= int(sh * 0.85))
+                                if not c_full or cname in ("logonui.exe", "winlogon.exe", "consent.exe", "lockapp.exe", "applicationframehost.exe", "shellexperiencehost.exe") or not cname:
+                                    existing.add(h)
+                                    hwnds_info.append((h, cw, ch, int(cpid.value), int(r.left), int(r.top)))
+                return True
 
-        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-        top_proc = WNDENUMPROC(_cur_top_cb)
-        user32.EnumDesktopWindows(None, top_proc, 0)
-        user32.EnumWindows(top_proc, 0)
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+            top_proc = WNDENUMPROC(_cur_top_cb)
+            user32.EnumDesktopWindows(None, top_proc, 0)
+            user32.EnumWindows(top_proc, 0)
+
+        hwnds_info = _filter_winlogon_top_hwnds(hwnds_info, sw, sh)
+        existing = {item[0] for item in hwnds_info}
 
         # Duyệt child windows của mọi cửa sổ tìm thấy (Network Flyout, DirectUIHWND, popup con)
         def _child_cb(ch, _lp):
@@ -1599,7 +1668,7 @@ def grab_current_desktop_printwindow():
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
     def _cb(hwnd, _lp):
-        if user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd):
+        if user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd) and not _hwnd_is_dwm_cloaked(hwnd):
             hwnds.append(hwnd)
         return True
 
@@ -1620,13 +1689,13 @@ def grab_current_desktop_printwindow():
         def _cb_pid(hwnd, _lp):
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            if pid.value in extra_pids and user32.IsWindowVisible(hwnd):
+            if pid.value in extra_pids and user32.IsWindowVisible(hwnd) and not _hwnd_is_dwm_cloaked(hwnd):
                 hwnds.append(hwnd)
             return True
         user32.EnumWindows(WNDENUMPROC(_cb_pid), 0)
 
     best = None
-    best_area = 0
+    best_score = (0, 0)
     rect = wintypes.RECT()
     seen = set()
     for hwnd in hwnds:
@@ -1638,9 +1707,11 @@ def grab_current_desktop_printwindow():
         w = int(rect.right - rect.left)
         h = int(rect.bottom - rect.top)
         area = w * h
-        if w >= 200 and h >= 200 and area > best_area:
-            best_area = area
-            best = (hwnd, w, h)
+        if w >= 200 and h >= 200:
+            score = (1 if _is_bsdr_hwnd(hwnd) else 0, area)
+            if score > best_score:
+                best_score = score
+                best = (hwnd, w, h)
     if not best:
         return None
     hwnd, w, h = best
@@ -1649,6 +1720,25 @@ def grab_current_desktop_printwindow():
 
 def grab_logonui_printwindow():
     return grab_current_desktop_printwindow()
+
+
+def _bsdr_band_detail(bgr):
+    """Đếm số pixel chi tiết giao diện (chữ trắng/nút/icon khác màu nền trung vị) ở dải trên (tiêu đề BSDR),
+    dải dưới (nút Restart anyway / Cancel) và toàn màn hình."""
+    if bgr is None or not getattr(bgr, "size", 0):
+        return 0, 0, 0
+    try:
+        sub = bgr[::2, ::2]
+        sh_f = sub.shape[0]
+        med = np.median(sub.reshape(-1, 3), axis=0)
+        diff = np.max(np.abs(sub.astype(np.int16) - med.astype(np.int16)), axis=2)
+        mask = diff > 22
+        top_nz = int(np.count_nonzero(mask[int(sh_f * 0.08):int(sh_f * 0.35), :]))
+        bot_nz = int(np.count_nonzero(mask[int(sh_f * 0.65):int(sh_f * 0.92), :]))
+        tot_nz = int(np.count_nonzero(mask))
+        return top_nz, bot_nz, tot_nz
+    except Exception:
+        return 0, 0, 0
 
 
 def _grab_secure_desktop_bgr_here():
@@ -1694,6 +1784,24 @@ def _grab_secure_desktop_bgr_here():
             if _frame_is_nearly_black(tile):
                 continue
             is_large = (_tw >= sw * 0.75 and _th >= sh * 0.75)
+            if is_large and not _frame_is_nearly_black(frame_bgr):
+                # Nếu tile là màn hình nền đặc (như nền xanh 'Restarting' của LogonUI, không phải nền đen trong suốt của Login),
+                # tuyệt đối không cho phép nó đè xóa mất màn hình BSDR ('Closing X apps and restarting') đã có trên frame_bgr!
+                try:
+                    sub_t = tile[::4, ::4]
+                    black_pixels = np.count_nonzero(
+                        (sub_t[:, :, 0] <= 12) & (sub_t[:, :, 1] <= 12) & (sub_t[:, :, 2] <= 12)
+                    )
+                    black_ratio = float(black_pixels) / max(1, sub_t.shape[0] * sub_t.shape[1])
+                    if black_ratio < 0.25:
+                        c_top, c_bot, c_tot = _bsdr_band_detail(frame_bgr)
+                        t_top, t_bot, t_tot = _bsdr_band_detail(tile)
+                        if (c_top > 150 and c_bot > 150 and t_top < c_top * 0.35) or (
+                            c_tot > 300 and t_tot < c_tot * 0.45
+                        ):
+                            continue
+                except Exception:
+                    pass
             if not is_large and (int(x) >= int(sw * 0.45)) and (int(y) >= int(sh * 0.35)):
                 has_small_bottom_right_overlay = True
             _clip_tile_onto_canvas(frame_bgr, tile, int(x) - left0, int(y) - top0, mask_black=is_large)
