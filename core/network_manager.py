@@ -803,9 +803,12 @@ class NetworkMixin:
 
         class RowTooltip:
             """Hiển thị tooltip chi tiết khi rê chuột vào hàng hoặc tên máy tính."""
-            def __init__(self, widgets, text):
+            def __init__(self, widgets, text, bg=None, fg=None, border_color=None):
                 self.widgets = widgets if isinstance(widgets, (list, tuple)) else [widgets]
                 self.text = text
+                self.bg = bg or "#1E202B"
+                self.fg = fg or "#E6EDF3"
+                self.border_color = border_color or "#374151"
                 self.tw = None
                 self.after_id = None
                 self.lbl_widget = None
@@ -851,14 +854,16 @@ class NetworkMixin:
                     self.tw = tk.Toplevel(w0)
                     self.tw.wm_overrideredirect(True)
                     self.tw.wm_geometry(f"+{x}+{y}")
-                    self.tw.configure(bg="#374151") # Viền màu xám đậm hiện đại
+                    self.tw.configure(bg=self.border_color)
                     
-                    inner = tk.Frame(self.tw, bg="#1E202B", padx=10, pady=8)
+                    pad_x = 8 if self.bg == "#FFFFFF" else 10
+                    pad_y = 4 if self.bg == "#FFFFFF" else 8
+                    inner = tk.Frame(self.tw, bg=self.bg, padx=pad_x, pady=pad_y)
                     inner.pack(padx=1, pady=1)
                     
                     self.lbl_widget = tk.Label(
                         inner, text=self.text, font=("Segoe UI", 8),
-                        fg="#E6EDF3", bg="#1E202B", justify=tk.LEFT, anchor="w"
+                        fg=self.fg, bg=self.bg, justify=tk.LEFT, anchor="w"
                     )
                     self.lbl_widget.pack()
                 except Exception:
@@ -1325,15 +1330,52 @@ class NetworkMixin:
                 tip_lines.append(_("💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy"))
                 return "\n".join(tip_lines)
 
+            def _create_wol_icon():
+                try:
+                    from PIL import Image, ImageDraw, ImageTk
+                    scale = 2
+                    size = 14
+                    canvas_size = size * scale
+                    img = Image.new('RGBA', (canvas_size, canvas_size), (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(img)
+                    cx, cy = canvas_size / 2, canvas_size / 2
+                    r = int(canvas_size * 0.36)
+                    width = max(2, int(scale * 1.5))
+                    draw.arc([cx - r, cy - r, cx + r, cy + r], start=315, end=225, fill=(255, 255, 255, 255), width=width)
+                    draw.line([cx, cy - r - 2, cx, cy + 1], fill=(255, 255, 255, 255), width=width)
+                    resized = img.resize((size, size), Image.Resampling.LANCZOS)
+                    return ImageTk.PhotoImage(resized)
+                except Exception:
+                    return None
+
             def _build_wol_button(container, h_info):
-                return tk.Button(
-                    container, text=_("Bật nguồn (WOL)"), font=("Segoe UI", 8, "bold"),
-                    fg="#FFFFFF", activeforeground="#FFFFFF", bg="#D35400", activebackground="#E67E22",
-                    relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2",
-                    command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
-                        m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                wol_icon = getattr(self, "_wol_power_icon", None)
+                if wol_icon is None:
+                    wol_icon = _create_wol_icon()
+                    if wol_icon:
+                        self._wol_power_icon = wol_icon
+
+                if wol_icon:
+                    btn = tk.Button(
+                        container, image=wol_icon, width=28, height=20,
+                        bg="#D35400", activebackground="#E67E22",
+                        relief=tk.FLAT, bd=0, cursor="hand2",
+                        command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
+                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                        )
                     )
-                )
+                    btn.image = wol_icon
+                else:
+                    btn = tk.Button(
+                        container, text="⏻", font=("Segoe UI Symbol", 10, "bold"),
+                        fg="#FFFFFF", activeforeground="#FFFFFF", bg="#D35400", activebackground="#E67E22",
+                        relief=tk.FLAT, bd=0, padx=6, pady=2, cursor="hand2",
+                        command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
+                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                        )
+                    )
+                RowTooltip(btn, _("Bật nguồn (WOL)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+                return btn
 
             any_peer_synced = False
             my_clean_id = ''.join(ch for ch in str(getattr(self, "my_id_clean", "") or "") if ch.isdigit())
@@ -1444,13 +1486,21 @@ class NetworkMixin:
                     btn = _build_wol_button(wol_container, info)
                     btn.pack()
 
-                # 2. Huy hiệu "🔑 Đã lưu MK" nằm về bên phải, gần sát cạnh phải
-                lbl_key = None
-                if saved_pw or info.get("saved_password"):
-                    lbl_key = tk.Label(right_box, text="🔑 " + _("Đã lưu MK"), font=("Segoe UI", 8, "bold"), bg="#145A32", fg="#2ECC71", padx=6, pady=2)
-                    lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
+                # 2. Biểu tượng 🔑 (Đã lưu: nền xanh lá, Chưa lưu: nền xám)
+                has_saved_pw = bool(saved_pw or info.get("saved_password"))
+                k_bg = "#145A32" if has_saved_pw else "#4A5568"
+                k_fg = "#2ECC71" if has_saved_pw else "#D1D5DB"
+                k_tip = _("Mật khẩu: đã lưu") if has_saved_pw else _("Mật khẩu: chưa lưu")
 
-                # 3. ID máy tính canh gần sát về bên phải, ngay cạnh "🔑 Đã lưu MK"
+                lbl_key = tk.Label(
+                    right_box, text="🔑", font=("Segoe UI", 9, "bold"),
+                    bg=k_bg, fg=k_fg, padx=6, pady=2, cursor="hand2"
+                )
+                lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
+                key_tooltip_obj = RowTooltip(lbl_key, k_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+                lbl_key.bind("<Button-1>", lambda e, h=hwid, i=info: open_change_lan_password_dialog(h, i))
+
+                # 3. ID máy tính canh gần sát về bên phải, ngay cạnh biểu tượng 🔑
                 lbl_id = tk.Label(right_box, text="ID: " + str(fmt_id), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
                 lbl_id.pack(side=tk.RIGHT, padx=(8, 0))
 
@@ -1494,17 +1544,22 @@ class NetworkMixin:
                     finally:
                         m.grab_release()
 
-                # Gắn sự kiện click và hover tooltip cho toàn hàng (bỏ nút Kết nối, nhấp chuột trực tiếp để kết nối)
-                bind_targets = [row, lbl_name, lbl_id, lbl_badge, lbl_dot, right_box]
-                if lbl_key:
-                    bind_targets.append(lbl_key)
+                lbl_key.bind("<Button-3>", show_context)
+                lbl_key.bind("<ButtonRelease-3>", show_context)
 
-                tooltip_obj = RowTooltip(bind_targets, tooltip_text)
+                # Chỉ hiển thị tooltip thông tin máy khi chuột trỏ vào Tên máy hoặc ID (tránh che hoặc xung đột với tooltip Mật khẩu, WOL)
+                tooltip_targets = [lbl_name, lbl_id]
+                tooltip_obj = RowTooltip(tooltip_targets, tooltip_text)
+
+                # Gắn sự kiện click và menu chuột phải cho toàn hàng (bỏ nút Kết nối, nhấp chuột trực tiếp để kết nối)
+                bind_targets = [row, lbl_name, lbl_id, lbl_badge, lbl_dot, right_box]
 
                 row_ui_map[hwid] = {
                     "row": row,
                     "dot": lbl_dot,
                     "wol_container": wol_container,
+                    "lbl_key": lbl_key,
+                    "key_tooltip": key_tooltip_obj,
                     "info": info,
                     "tooltip": tooltip_obj,
                     "menu": row_menu,
@@ -1575,6 +1630,20 @@ class NetworkMixin:
                 tip = ui_item.get("tooltip")
                 if tip:
                     tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
+
+                # Cập nhật biểu tượng 🔑 (mật khẩu)
+                k_lbl = ui_item.get("lbl_key")
+                k_tip = ui_item.get("key_tooltip")
+                if k_lbl and k_lbl.winfo_exists():
+                    matched_c = match_saved_computer(inf.get("computer_name"), inf.get("hwid"), inf.get("saved_id"))
+                    sp = (matched_c.get("password", "") if matched_c else "") or inf.get("saved_password", "")
+                    h_pw = bool(sp)
+                    k_lbl.config(
+                        bg="#145A32" if h_pw else "#4A5568",
+                        fg="#2ECC71" if h_pw else "#D1D5DB"
+                    )
+                    if k_tip:
+                        k_tip.update_text(_("Mật khẩu: đã lưu") if h_pw else _("Mật khẩu: chưa lưu"))
 
                 # 3. Nút Bật nguồn WOL: Chỉ hiển thị khi máy XÁC NHẬN NGOẠI TUYẾN và có địa chỉ MAC
                 w_box = ui_item.get("wol_container")

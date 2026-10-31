@@ -446,5 +446,7 @@
   "🔄 Làm mới (30s)": "🔄 Aktualisieren (30s)",
   "🔧  Cách khắc phục": "🔧  Lösung",
   "Mở thư mục Logs": "Protokollordner öffnen",
-  "Đang thử kết nối lại (lần {x}/5)...": "Verbindungsversuch wiederholen (Mal {x}/5)..."
+  "Đang thử kết nối lại (lần {x}/5)...": "Verbindungsversuch wiederholen (Mal {x}/5)...",
+  "Mật khẩu: đã lưu": "Passwort: gespeichert",
+  "Mật khẩu: chưa lưu": "Passwort: nicht gespeichert"
 }

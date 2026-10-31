@@ -467,5 +467,7 @@
   "⚡ Bật nguồn (WOL)": "⚡ Wake on LAN (WOL)",
   "🗑️ Xóa": "🗑️ Delete",
   "Sai mật khẩu hoặc lỗi xác thực": "Wrong password or authentication error",
-  "Sai mật khẩu kết nối": "Incorrect connection password"
+  "Sai mật khẩu kết nối": "Incorrect connection password",
+  "Mật khẩu: đã lưu": "Password: saved",
+  "Mật khẩu: chưa lưu": "Password: not saved"
 }
