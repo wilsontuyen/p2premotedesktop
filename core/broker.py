@@ -163,6 +163,8 @@ class Worker:
         self.desktop = info.get("desktop", "default")
         self.width = int(info.get("width", 0) or 0)
         self.height = int(info.get("height", 0) or 0)
+        self.monitor_count = max(1, int(info.get("monitor_count", 1) or 1))
+        self.monitors = list(info.get("monitors") or [])
         self.pid = info.get("pid")
         self.passwords = [p for p in (info.get("passwords") or []) if p]
         self.beacon = info.get("beacon") or {}
@@ -702,6 +704,10 @@ class Broker:
                     upd = json.loads(line.decode("utf-8"))
                     if upd.get("width"):
                         w.width = int(upd["width"]); w.height = int(upd["height"])
+                    if upd.get("monitor_count") is not None:
+                        w.monitor_count = max(1, int(upd["monitor_count"] or 1))
+                    if upd.get("monitors") is not None:
+                        w.monitors = list(upd.get("monitors") or [])
                 except Exception:
                     pass
         except Exception:
@@ -907,11 +913,15 @@ class Broker:
                     print(f"[Broker] Kiem tra session disconnect viewer loi: {e}")
             host_w = (worker.width if worker else 0) or 1920
             host_h = (worker.height if worker else 0) or 1080
+            host_mon_cnt = max(1, int(getattr(worker, "monitor_count", 1) or 1)) if worker else 1
+            host_mons = list(getattr(worker, "monitors", None) or []) if worker else []
             import platform
             res_info = json.dumps({
                 "status": "ok",
                 "width": host_w,
                 "height": host_h,
+                "monitor_count": host_mon_cnt,
+                "monitors": host_mons,
                 "computer_name": platform.node(),
                 "zalo_phone": "",
                 "is_domain": False,
@@ -1361,7 +1371,8 @@ def _worker_screen_size():
         m, _rects = _get_active_monitors_and_virtual_rect()
         mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
         if mw > 0 and mh > 0:
-            return mw, mh, dict(m)
+            mon_list = [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in (_rects or [(0, 0, mw, mh)])]
+            return mw, mh, dict(m), mon_list
     except Exception:
         pass
     try:
@@ -1373,8 +1384,9 @@ def _worker_screen_size():
             else:
                 m = sct.monitors[0]
             mw, mh = int(m["width"]), int(m["height"])
+            ml, mt = int(m.get("left", 0)), int(m.get("top", 0))
             if mw > 0 and mh > 0:
-                return mw, mh, dict(m)
+                return mw, mh, dict(m), [{"left": ml, "top": mt, "width": mw, "height": mh}]
     except Exception:
         pass
     try:
@@ -1383,9 +1395,9 @@ def _worker_screen_size():
         h = int(ctypes.windll.user32.GetSystemMetrics(1)) or int(ctypes.windll.user32.GetSystemMetrics(79))
         if w < 1 or h < 1:
             w, h = 1024, 768
-        return w, h, {"left": 0, "top": 0, "width": w, "height": h}
+        return w, h, {"left": 0, "top": 0, "width": w, "height": h}, [{"left": 0, "top": 0, "width": w, "height": h}]
     except Exception:
-        return 1024, 768, {"left": 0, "top": 0, "width": 1024, "height": 768}
+        return 1024, 768, {"left": 0, "top": 0, "width": 1024, "height": 768}, [{"left": 0, "top": 0, "width": 1024, "height": 768}]
 
 
 def _worker_local_ip():
@@ -1454,7 +1466,7 @@ def _run_worker_session(app, cmd):
     except Exception:
         pass
 
-    w, h, monitor = _worker_screen_size()
+    w, h, monitor, mon_list = _worker_screen_size()
     try:
         app._capture_origin = (int(monitor.get("left", 0)), int(monitor.get("top", 0)))
     except Exception:
@@ -1462,7 +1474,12 @@ def _run_worker_session(app, cmd):
     try:
         ctrl_sock = getattr(app, "_broker_ctrl_sock", None)
         if ctrl_sock is not None and w > 0 and h > 0:
-            _write_line(ctrl_sock, {"width": int(w), "height": int(h)})
+            _write_line(ctrl_sock, {
+                "width": int(w),
+                "height": int(h),
+                "monitor_count": max(1, len(mon_list)),
+                "monitors": mon_list,
+            })
     except Exception:
         pass
 
@@ -1523,7 +1540,7 @@ def run_capture_worker(app):
             ctrl = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             ctrl.connect(("127.0.0.1", AGENT_IPC_PORT))
             app._broker_ctrl_sock = ctrl
-            w, h, _m = _worker_screen_size()
+            w, h, _m, _mon_list = _worker_screen_size()
             pwds = []
             try:
                 if getattr(app, "my_password", None):
@@ -1552,6 +1569,8 @@ def run_capture_worker(app):
                 "session": _worker_session_id(),
                 "desktop": _worker_desktop_name(),
                 "width": w, "height": h,
+                "monitor_count": max(1, len(_mon_list)),
+                "monitors": _mon_list,
                 "pid": os.getpid(),
                 "passwords": pwds,
                 "beacon": beacon,

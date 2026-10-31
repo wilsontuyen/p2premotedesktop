@@ -933,6 +933,20 @@ def _windows_has_dxgi_duplication():
     return sys.platform == "win32" and not _is_legacy_windows_host() and not _is_server_or_remote_session()
 
 
+def _primary_screen_rect():
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080
+    try:
+        user32 = ctypes.windll.user32
+        w = int(user32.GetSystemMetrics(0))
+        h = int(user32.GetSystemMetrics(1))
+        if w > 0 and h > 0:
+            return 0, 0, w, h
+    except Exception:
+        pass
+    return 0, 0, 1920, 1080
+
+
 def _virtual_screen_rect():
     if sys.platform != "win32":
         return 0, 0, 1920, 1080
@@ -948,19 +962,146 @@ def _virtual_screen_rect():
     return left0, top0, w, h
 
 
+def _enum_win32_monitors():
+    """Lấy danh sách các màn hình trên Windows thông qua pywin32 (win32api.EnumDisplayMonitors)
+    kèm fallback ctypes. Trả về danh sách dict {'left', 'top', 'width', 'height', 'is_primary'}."""
+    if sys.platform != "win32":
+        return []
+    mons_out = []
+    seen = set()
+    try:
+        import win32api
+        raw_mons = win32api.EnumDisplayMonitors()
+        for hmon, _hdc, rc_tuple in (raw_mons or []):
+            is_prim = False
+            ml, mt, mr, mb = int(rc_tuple[0]), int(rc_tuple[1]), int(rc_tuple[2]), int(rc_tuple[3])
+            try:
+                info = win32api.GetMonitorInfo(hmon)
+                rc_m = info.get("Monitor") or rc_tuple
+                ml, mt, mr, mb = int(rc_m[0]), int(rc_m[1]), int(rc_m[2]), int(rc_m[3])
+                is_prim = bool(int(info.get("Flags", 0)) & 1)
+            except Exception:
+                is_prim = (ml == 0 and mt == 0)
+            mw, mh = mr - ml, mb - mt
+            if mw > 0 and mh > 0:
+                key = (ml, mt, mw, mh)
+                if key not in seen:
+                    seen.add(key)
+                    mons_out.append({
+                        "left": ml, "top": mt, "width": mw, "height": mh,
+                        "is_primary": is_prim,
+                    })
+    except Exception:
+        pass
+
+    if not mons_out:
+        try:
+            user32 = ctypes.windll.user32
+            MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM
+            )
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+
+            _get_mon_info = user32.GetMonitorInfoW
+            _get_mon_info.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+            _get_mon_info.restype = wintypes.BOOL
+
+            _enum_mons = user32.EnumDisplayMonitors
+            _enum_mons.argtypes = [wintypes.HDC, ctypes.c_void_p, MONITORENUMPROC, wintypes.LPARAM]
+            _enum_mons.restype = wintypes.BOOL
+
+            def _mon_cb(hmon, _hdc, lprc, _lparam):
+                rc = None
+                is_prim = False
+                try:
+                    mi = MONITORINFO()
+                    mi.cbSize = ctypes.sizeof(MONITORINFO)
+                    if _get_mon_info(hmon, ctypes.byref(mi)):
+                        rc = mi.rcMonitor
+                        is_prim = bool(int(mi.dwFlags) & 1)
+                except Exception:
+                    rc = None
+                if rc is None and lprc:
+                    try:
+                        rc = lprc.contents
+                    except Exception:
+                        rc = None
+                if rc is not None:
+                    ml, mt = int(rc.left), int(rc.top)
+                    mw, mh = int(rc.right - rc.left), int(rc.bottom - rc.top)
+                    if mw > 0 and mh > 0:
+                        key = (ml, mt, mw, mh)
+                        if key not in seen:
+                            seen.add(key)
+                            mons_out.append({
+                                "left": ml, "top": mt, "width": mw, "height": mh,
+                                "is_primary": is_prim or (ml == 0 and mt == 0),
+                            })
+                return True
+
+            _cb_instance = MONITORENUMPROC(_mon_cb)
+            _enum_mons(None, None, _cb_instance, 0)
+        except Exception:
+            pass
+
+    mons_out.sort(key=lambda m: (int(m.get("left", 0)), int(m.get("top", 0))))
+    return mons_out
+
+
+def is_multi_monitor_windows():
+    """Kiểm tra máy Host Windows có nhiều hơn 1 màn hình hay không qua win32api.EnumDisplayMonitors()."""
+    if sys.platform != "win32":
+        return False
+    mons = _enum_win32_monitors()
+    return len(mons) > 1
+
+
 # Danh sách (left, top, width, height) của các màn hình thực sự có hình (không phải màn hình ma đen kịt)
 _active_monitor_rects_last = []
 
 
+def _pick_primary_monitor_dict(valid_mons):
+    """Chọn màn hình chính (is_primary hoặc gốc tọa độ 0,0 hoặc phần tử đầu tiên)."""
+    if not valid_mons:
+        l0, t0, w0, h0 = _primary_screen_rect()
+        return {"left": l0, "top": t0, "width": w0, "height": h0}
+    for m in valid_mons:
+        if m.get("is_primary"):
+            return m
+    for m in valid_mons:
+        if int(m.get("left", 0)) == 0 and int(m.get("top", 0)) == 0:
+            return m
+    return valid_mons[0]
+
+
 def _filter_active_mss_monitors(sct):
-    """Trả về (active_mons, valid_mons) từ đối tượng mss.
-    Khi hệ thống báo >= 2 màn hình, chụp thử từng màn hình để loại bỏ màn hình ma (đen kịt)."""
+    """Trả về (active_mons, valid_mons) từ đối tượng mss kết hợp win32api.EnumDisplayMonitors().
+    Chỉ khi có >= 2 màn hình thực sự có nội dung (không đen kịt) mới coi là đa màn hình;
+    nếu <= 1 màn hình có nội dung thì luôn trả về đúng 1 màn hình để không bị nháy 2 màn hình."""
     global _active_monitor_rects_last
     mons = getattr(sct, "monitors", None) or []
     valid_mons = [
         m for m in mons[1:]
         if int(m.get("width", 0)) > 0 and int(m.get("height", 0)) > 0
     ]
+    if sys.platform == "win32":
+        win32_mons = _enum_win32_monitors()
+        if len(win32_mons) == 1:
+            m = win32_mons[0]
+            _active_monitor_rects_last = [
+                (int(m["left"]), int(m["top"]), int(m["width"]), int(m["height"]))
+            ]
+            return [m], [m]
+        elif win32_mons and not valid_mons:
+            valid_mons = win32_mons
+
     valid_mons.sort(key=lambda m: (int(m.get("left", 0)), int(m.get("top", 0))))
     if len(valid_mons) <= 1:
         if len(valid_mons) == 1:
@@ -982,15 +1123,32 @@ def _filter_active_mss_monitors(sct):
                 active_rects.append(mrect)
         except Exception:
             pass
-    if active_rects:
+    if len(active_mons) >= 2:
         _active_monitor_rects_last = active_rects
-    return active_mons, valid_mons
+        return active_mons, valid_mons
+    elif len(active_mons) == 1:
+        _active_monitor_rects_last = active_rects
+        return active_mons, valid_mons
+    else:
+        # Khi màn hình đang ngủ / vừa khởi động (chưa chụp được màn nào có nội dung),
+        # TUYỆT ĐỐI chỉ mặc định 1 màn hình chính, không mặc định ghép 2 màn hình!
+        prim = _pick_primary_monitor_dict(valid_mons)
+        _active_monitor_rects_last = [
+            (int(prim.get("left", 0)), int(prim.get("top", 0)), int(prim.get("width", 0)), int(prim.get("height", 0)))
+        ]
+        return [prim], valid_mons
 
 
 def _get_active_monitors_and_virtual_rect(sct=None):
     """Xác định monitor hiệu dụng (loại bỏ màn hình ma đen kịt) cho Handshake và Worker.
     Trả về (monitor_dict, active_rects_list)."""
     try:
+        if sys.platform == "win32":
+            win32_mons = _enum_win32_monitors()
+            if len(win32_mons) == 1:
+                m = win32_mons[0]
+                ml, mt, mw, mh = int(m["left"]), int(m["top"]), int(m["width"]), int(m["height"])
+                return {"left": ml, "top": mt, "width": mw, "height": mh}, [(ml, mt, mw, mh)]
         if sct is not None:
             active_mons, valid_mons = _filter_active_mss_monitors(sct)
             mons = getattr(sct, "monitors", None) or []
@@ -998,12 +1156,22 @@ def _get_active_monitors_and_virtual_rect(sct=None):
             with mss.mss() as _sct_tmp:
                 active_mons, valid_mons = _filter_active_mss_monitors(_sct_tmp)
                 mons = getattr(_sct_tmp, "monitors", None) or []
-        chosen = active_mons if active_mons else (valid_mons[:1] if valid_mons else (mons[:1] if mons else []))
+        if len(active_mons) >= 2:
+            chosen = active_mons
+        elif len(active_mons) == 1:
+            chosen = active_mons
+        elif valid_mons:
+            chosen = [_pick_primary_monitor_dict(valid_mons)]
+        elif mons:
+            chosen = [mons[1] if len(mons) > 1 else mons[0]]
+        else:
+            chosen = []
         if len(chosen) == 1:
             m = chosen[0]
             ml, mt = int(m.get("left", 0)), int(m.get("top", 0))
             mw, mh = int(m.get("width", 0)), int(m.get("height", 0))
-            return {"left": ml, "top": mt, "width": mw, "height": mh}, [(ml, mt, mw, mh)]
+            if mw > 0 and mh > 0:
+                return {"left": ml, "top": mt, "width": mw, "height": mh}, [(ml, mt, mw, mh)]
         elif len(chosen) >= 2:
             min_l = min(int(m.get("left", 0)) for m in chosen)
             min_t = min(int(m.get("top", 0)) for m in chosen)
@@ -1017,7 +1185,7 @@ def _get_active_monitors_and_virtual_rect(sct=None):
             return {"left": min_l, "top": min_t, "width": max_r - min_l, "height": max_b - min_t}, rects
     except Exception:
         pass
-    l0, t0, w0, h0 = _virtual_screen_rect()
+    l0, t0, w0, h0 = _primary_screen_rect()
     return {"left": l0, "top": t0, "width": w0, "height": h0}, [(l0, t0, w0, h0)]
 
 
@@ -1824,21 +1992,23 @@ def _bsdr_band_detail(bgr):
 
 def _grab_secure_desktop_bgr_here():
     """PrintWindow HWND LogonUI/winlogon → BitBlt HWND → BitBlt cả desktop Winlogon."""
-    # Ưu tiên BitBlt toàn bộ màn hình Winlogon để lấy trọn vẹn nền, hộp đăng nhập và nút Power/Restart menu ở góc
+    # Ưu tiên BitBlt màn hình chính Winlogon (LogonUI luôn nằm ở màn hình chính 0,0)
     frame_bgr = None
     cap_w = cap_h = 0
     origin = (0, 0)
     try:
         sw = int(ctypes.windll.user32.GetSystemMetrics(0))
         sh = int(ctypes.windll.user32.GetSystemMetrics(1))
-        left = int(ctypes.windll.user32.GetSystemMetrics(76))
-        top = int(ctypes.windll.user32.GetSystemMetrics(77))
-        vw = int(ctypes.windll.user32.GetSystemMetrics(78))
-        vh = int(ctypes.windll.user32.GetSystemMetrics(79))
-        if vw > 0 and vh > 0:
-            sw, sh = vw, vh
-        else:
-            left, top = 0, 0
+        left, top = 0, 0
+        if sw <= 0 or sh <= 0:
+            left = int(ctypes.windll.user32.GetSystemMetrics(76))
+            top = int(ctypes.windll.user32.GetSystemMetrics(77))
+            vw = int(ctypes.windll.user32.GetSystemMetrics(78))
+            vh = int(ctypes.windll.user32.GetSystemMetrics(79))
+            if vw > 0 and vh > 0:
+                sw, sh = vw, vh
+            else:
+                left, top = 0, 0
         frame_bgr, cap_w, cap_h, origin = _bitblt_screen_rect_bgr(left, top, sw, sh)
     except Exception:
         frame_bgr = None
@@ -2101,8 +2271,9 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
             cam_entries.append((cam, left0, top0, w, h))
     cam_entries.sort(key=lambda it: (it[1], it[2]))
 
-    if monitor_mode in ("left", "right") and len(cam_entries) >= 2:
-        idx = 0 if monitor_mode == "left" else 1
+    global _active_monitor_rects_last
+    if len(cam_entries) == 1 or (monitor_mode in ("left", "right") and len(cam_entries) >= 2):
+        idx = 0 if len(cam_entries) == 1 else (0 if monitor_mode == "left" else 1)
         target_cam, cl, ct, cw, ch = cam_entries[idx]
         try:
             tile = target_cam.grab()
@@ -2111,12 +2282,26 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
                     tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
                 elif tile.shape[2] == 4:
                     tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
-                target_cam._last_good_tile = tile
                 th, tw = tile.shape[:2]
-                return tile, tw, th, (cl, ct), True
+                if not _frame_is_nearly_black(tile):
+                    target_cam._last_good_tile = tile
+                    if len(cam_entries) == 1:
+                        _active_monitor_rects_last = [(int(cl), int(ct), int(tw), int(th))]
+                    return tile, tw, th, (cl, ct), True
+                cached = getattr(target_cam, "_last_good_tile", None)
+                if cached is not None and getattr(cached, "size", 0) > 0:
+                    th, tw = cached.shape[:2]
+                    if len(cam_entries) == 1:
+                        _active_monitor_rects_last = [(int(cl), int(ct), int(tw), int(th))]
+                    return cached, tw, th, (cl, ct), True
+                if len(cam_entries) == 1:
+                    _active_monitor_rects_last = [(int(cl), int(ct), int(tw), int(th))]
+                return tile, tw, th, (cl, ct), False
             cached = getattr(target_cam, "_last_good_tile", None)
             if cached is not None and getattr(cached, "size", 0) > 0:
                 th, tw = cached.shape[:2]
+                if len(cam_entries) == 1:
+                    _active_monitor_rects_last = [(int(cl), int(ct), int(tw), int(th))]
                 return cached, tw, th, (cl, ct), True
             return None, cw, ch, (cl, ct), False
         except Exception as e:
@@ -2186,26 +2371,31 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
             except Exception:
                 pass
 
-    # Nếu chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt / lỗi grab),
-    # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của màn hình có nội dung đó!
-    global _active_monitor_rects_last
+    # QUY TẮC CHỐNG NHÁY 2 MÀN HÌNH:
+    # Chỉ khi có >= 2 màn hình thực sự có hình (len(non_black) >= 2) mới trả về canvas ghép đa màn hình.
+    # Khi <= 1 màn hình có nội dung (hoặc lúc vừa wake_display màn hình đang thức dậy nên non_black rỗng),
+    # LUÔN trả về đúng 1 tile màn hình đơn lẻ, TUYỆT ĐỐI không trả về canvas ghép 2 màn hình!
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if non_black:
+        if len(non_black) >= 2:
             _active_monitor_rects_last = [
                 (int(pos[0]), int(pos[1]), int(t.shape[1]), int(t.shape[0]))
                 for (t, pos) in non_black
             ]
-        if len(non_black) == 1:
+        elif len(non_black) == 1:
             tile, (orig_x, orig_y) = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
             left0, top0 = orig_x, orig_y
-        elif _frame_is_nearly_black(canvas) and non_black:
-            tile, (orig_x, orig_y) = non_black[0]
+            _active_monitor_rects_last = [(int(orig_x), int(orig_y), int(w), int(h))]
+        else:
+            tile, (orig_x, orig_y) = captured_tiles[0]
             canvas = tile
             h, w = tile.shape[:2]
             left0, top0 = orig_x, orig_y
+            if not _active_monitor_rects_last:
+                _active_monitor_rects_last = [(int(orig_x), int(orig_y), int(w), int(h))]
+            any_ok = False
 
     return canvas, w, h, (left0, top0), any_ok
 
@@ -2230,8 +2420,9 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
     if not valid_parts and mons:
         valid_parts = [mons[0]]
 
-    if monitor_mode in ("left", "right") and len(valid_parts) >= 2:
-        idx = 0 if monitor_mode == "left" else 1
+    global _active_monitor_rects_last
+    if len(valid_parts) == 1 or (monitor_mode in ("left", "right") and len(valid_parts) >= 2):
+        idx = 0 if len(valid_parts) == 1 else (0 if monitor_mode == "left" else 1)
         mon = valid_parts[idx]
         raw = sct.grab(mon)
         tile = np.array(raw, dtype=np.uint8)
@@ -2242,7 +2433,10 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
         elif tile.shape[2] == 4:
             tile = cv2.cvtColor(tile, cv2.COLOR_BGRA2BGR)
         th, tw = tile.shape[:2]
-        return tile, tw, th, (int(mon.get("left", 0)), int(mon.get("top", 0)))
+        ml, mt = int(mon.get("left", 0)), int(mon.get("top", 0))
+        if len(valid_parts) == 1:
+            _active_monitor_rects_last = [(ml, mt, int(tw), int(th))]
+        return tile, tw, th, (ml, mt)
 
     if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
@@ -2278,28 +2472,32 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
         except Exception as e:
             print(f"[Host] Monitor grab failed ({mon}): {e}")
 
-    # Nếu chỉ có 1 màn hình có hình thật (còn lại là màn ma / đen kịt / lỗi grab),
-    # hoặc canvas tổng bị đen kịt -> lấy trực tiếp tile của monitor có nội dung đó!
-    global _active_monitor_rects_last
+    # QUY TẮC CHỐNG NHÁY 2 MÀN HÌNH:
+    # Chỉ khi có >= 2 màn hình thực sự có nội dung (len(non_black) >= 2) mới trả về canvas ghép đa màn hình.
+    # Khi <= 1 màn hình có nội dung (hoặc non_black rỗng khi màn hình đang ngủ/thức dậy),
+    # LUÔN trả về đúng 1 tile màn hình đơn lẻ, TUYỆT ĐỐI không trả về canvas ghép 2 màn hình!
     if any_ok and captured_tiles:
         non_black = [t for t in captured_tiles if not _frame_is_nearly_black(t[0])]
-        if non_black:
+        if len(non_black) >= 2:
             _active_monitor_rects_last = [
                 (int(m.get("left", 0)), int(m.get("top", 0)), int(t.shape[1]), int(t.shape[0]))
                 for (t, m) in non_black
             ]
-        if len(non_black) == 1:
+        elif len(non_black) == 1:
             tile, mon = non_black[0]
             canvas = tile
             h, w = tile.shape[:2]
             left0 = int(mon.get("left", 0))
             top0 = int(mon.get("top", 0))
-        elif _frame_is_nearly_black(canvas) and non_black:
-            tile, mon = non_black[0]
+            _active_monitor_rects_last = [(left0, top0, int(w), int(h))]
+        else:
+            tile, mon = captured_tiles[0]
             canvas = tile
             h, w = tile.shape[:2]
             left0 = int(mon.get("left", 0))
             top0 = int(mon.get("top", 0))
+            if not _active_monitor_rects_last:
+                _active_monitor_rects_last = [(left0, top0, int(w), int(h))]
 
     if not any_ok:
         raise mss.exception.ScreenShotError("all monitor grabs failed")
@@ -3574,15 +3772,29 @@ class HostMixin:
                                 client_state["last_cap_w"] = cap_w
                                 client_state["last_cap_h"] = cap_h
                                 force_update = True
+                                cur_mon_cnt = int(client_state.get("_last_sent_mon_count") or (len(_active_monitor_rects_last) if _active_monitor_rects_last else 1))
+                                cur_mon_rects = client_state.get("_last_sent_mon_rects") or list(_active_monitor_rects_last or [])
+                                cur_mon_dicts = [{"left": r[0], "top": r[1], "width": r[2], "height": r[3]} for r in cur_mon_rects]
                                 if mon_mode == "both":
                                     ctrl_sock = getattr(self, "_broker_ctrl_sock", None)
                                     if ctrl_sock is not None:
                                         try:
-                                            ctrl_sock.sendall((json.dumps({"width": int(cap_w), "height": int(cap_h)}) + "\n").encode("utf-8"))
+                                            ctrl_sock.sendall((json.dumps({
+                                                "width": int(cap_w),
+                                                "height": int(cap_h),
+                                                "monitor_count": max(1, cur_mon_cnt),
+                                                "monitors": cur_mon_dicts,
+                                            }) + "\n").encode("utf-8"))
                                         except Exception:
                                             pass
                                 try:
-                                    res_meta = {"type": "resolution_change", "w": cap_w, "h": cap_h}
+                                    res_meta = {
+                                        "type": "resolution_change",
+                                        "w": cap_w,
+                                        "h": cap_h,
+                                        "monitor_count": max(1, cur_mon_cnt),
+                                        "monitors": cur_mon_dicts,
+                                    }
                                     if not send_msg(conn, json.dumps(res_meta).encode('utf-8'), password):
                                         client_state["running"] = False
                                         break

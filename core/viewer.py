@@ -340,6 +340,70 @@ def _resolve_dual_monitor_subrects(total_w, total_h, monitors_meta=None, img_sam
     half_w = max(1, W // 2)
     return (0, 0, half_w, H), (half_w, 0, W - half_w, H), W, H
 
+
+def _pil_region_is_nearly_black(pil_img, max_mean=6.0):
+    try:
+        if pil_img is None or pil_img.width <= 0 or pil_img.height <= 0:
+            return True
+        import numpy as _np
+        arr = _np.asarray(pil_img)
+        if arr.ndim == 3 and arr.shape[2] >= 4:
+            arr = arr[:, :, :3]
+        if float(_np.max(arr)) > 35.0:
+            if int(_np.count_nonzero(arr > 30)) > 30:
+                return False
+        return float(_np.mean(arr)) < max_mean
+    except Exception:
+        return False
+
+
+def _strip_phantom_black_monitor_pil(pil_img, total_w, total_h, monitors_meta=None):
+    """Nếu ảnh nhận về có tỉ lệ ghép >= 2 màn hình (w/h >= 2.0) nhưng 1 trong 2 nửa màn hình
+    đen kịt hoàn toàn (màn hình ma / màn hình tắt), tự động cắt giữ lại đúng 1 màn hình có nội dung.
+    Trả về (pil_img_out, active_res_tuple_or_None, detected_mon_count)."""
+    try:
+        if pil_img is None:
+            return pil_img, None, 1
+        iw, ih = pil_img.size
+        if ih <= 0 or (iw / float(ih)) < 2.0:
+            return pil_img, None, 1
+        tw = int(total_w) if total_w and int(total_w) >= iw else iw
+        th = int(total_h) if total_h and int(total_h) >= ih else ih
+        if (tw / float(max(1, th))) < 2.0:
+            tw, th = iw, ih
+        m1_r, m2_r, fw, fh = _resolve_dual_monitor_subrects(
+            tw, th, monitors_meta=monitors_meta, img_sample=pil_img
+        )
+        sx = iw / float(max(1, fw))
+        sy = ih / float(max(1, fh))
+        b1 = (
+            max(0, int(round(m1_r[0] * sx))),
+            max(0, int(round(m1_r[1] * sy))),
+            min(iw, int(round((m1_r[0] + m1_r[2]) * sx))),
+            min(ih, int(round((m1_r[1] + m1_r[3]) * sy))),
+        )
+        b2 = (
+            max(0, int(round(m2_r[0] * sx))),
+            max(0, int(round(m2_r[1] * sy))),
+            min(iw, int(round((m2_r[0] + m2_r[2]) * sx))),
+            min(ih, int(round((m2_r[1] + m2_r[3]) * sy))),
+        )
+        if b1[2] <= b1[0] or b1[3] <= b1[1] or b2[2] <= b2[0] or b2[3] <= b2[1]:
+            return pil_img, None, 1
+        c1 = pil_img.crop(b1)
+        c2 = pil_img.crop(b2)
+        blk1 = _pil_region_is_nearly_black(c1)
+        blk2 = _pil_region_is_nearly_black(c2)
+        if not blk1 and blk2:
+            return c1, (int(m1_r[2]), int(m1_r[3])), 1
+        if not blk2 and blk1:
+            return c2, (int(m2_r[2]), int(m2_r[3])), 1
+        if not blk1 and not blk2:
+            return pil_img, (int(tw), int(th)), 2
+    except Exception:
+        pass
+    return pil_img, None, 1
+
 # Client Screen Receiver Thread
 def client_receiver_thread(sock, password):
     global client_latest_frame, client_running, client_switching_desktop_countdown, client_is_domain, client_is_locked, client_host_did_shutdown, client_last_switching_desktop_time
@@ -434,8 +498,23 @@ def client_receiver_thread(sock, password):
                     elif evt_type == "resolution_change":
                         new_w = event.get("w")
                         new_h = event.get("h")
+                        evt_mon_cnt = event.get("monitor_count")
+                        evt_mons = event.get("monitors")
+                        if evt_mon_cnt is not None:
+                            client_host_monitor_count = max(1, int(evt_mon_cnt or 1))
+                            client_host_sent_monitor_info = True
+                        if evt_mons:
+                            client_host_monitor_rects = list(evt_mons)
                         if new_w and new_h:
                             nw_i, nh_i = int(new_w), int(new_h)
+                            is_andr_host = bool(globals().get('client_host_is_android', False))
+                            if (not is_andr_host) and (nw_i / float(max(1, nh_i)) >= 2.0) and client_host_monitor_count < 2:
+                                _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(
+                                    nw_i, nh_i,
+                                    monitors_meta=client_host_monitor_rects
+                                )
+                                if _m1_r[2] > 100 and _m1_r[3] > 100:
+                                    nw_i, nh_i = int(_m1_r[2]), int(_m1_r[3])
                             if client_true_remote_res != (nw_i, nh_i):
                                 client_pending_bbox = None
                                 with client_frame_lock:
@@ -486,6 +565,29 @@ def client_receiver_thread(sock, password):
                 pil_img = Image.open(io.BytesIO(msg))
                 pil_img.load()  # Force decode in receiver thread
                 pil_img = _pil_to_rgb(pil_img)
+                if (
+                    client_pending_bbox is None
+                    and not bool(globals().get('client_host_is_android', False))
+                    and client_mon_left_on and client_mon_right_on
+                    and pil_img.height > 0
+                    and (pil_img.width / float(pil_img.height)) >= 2.0
+                ):
+                    tr_w0 = client_true_remote_res[0] if client_true_remote_res else pil_img.width
+                    tr_h0 = client_true_remote_res[1] if client_true_remote_res else pil_img.height
+                    pil_img, active_res, det_cnt = _strip_phantom_black_monitor_pil(
+                        pil_img, tr_w0, tr_h0, monitors_meta=client_host_monitor_rects
+                    )
+                    if det_cnt == 1 and active_res is not None:
+                        client_true_remote_res = active_res
+                        client_host_monitor_count = 1
+                        client_host_sent_monitor_info = True
+                        client_host_resolution = active_res
+                    elif det_cnt >= 2:
+                        if client_host_monitor_count < 2:
+                            client_host_monitor_count = 2
+                        if active_res is not None and client_true_remote_res != active_res:
+                            client_true_remote_res = active_res
+                            client_host_resolution = active_res
                 with client_frame_lock:
                     if client_pending_bbox is not None:
                         if client_latest_frame is not None:
@@ -645,7 +747,7 @@ def format_id_groups(pid):
     return s
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None, monitor_count=None, monitors=None):
     cmd_queue = boot_sock_queue
     import sys
     import os
@@ -682,6 +784,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         host_w, host_h = 0, 0
     if host_w <= 0 or host_h <= 0:
         host_w, host_h = (720, 1280) if is_android else (1280, 720)
+    elif (not is_android) and host_h > 0 and (host_w / float(host_h)) >= 2.0:
+        if monitor_count is None or int(monitor_count or 1) < 2:
+            _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(host_w, host_h, monitors_meta=monitors)
+            if _m1_r[2] > 100 and _m1_r[3] > 100:
+                host_w, host_h = int(_m1_r[2]), int(_m1_r[3])
     
     try:
         pygame_theme = "dark"
@@ -869,7 +976,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if isinstance(msg, str) and msg.startswith("STATUS|"):
                                 connecting_status = msg.split("|", 1)[1]
                             elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
-                                msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg
+                                msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg[:9]
+                                if len(msg) > 9 and msg[9] is not None:
+                                    monitor_count = int(msg[9] or 1)
+                                if len(msg) > 10 and msg[10] is not None:
+                                    monitors = list(msg[10] or [])
                                 if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
                                     sock = socket.fromshare(sock_item[1])
                                 elif hasattr(sock_item, 'fileno'):
@@ -882,6 +993,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 host_h = int(real_h or 720)
                                 is_domain = is_dom
                                 is_android = is_andr
+                                if (not is_android) and host_h > 0 and (host_w / float(host_h)) >= 2.0:
+                                    if monitor_count is None or int(monitor_count or 1) < 2:
+                                        _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(host_w, host_h, monitors_meta=monitors)
+                                        if _m1_r[2] > 100 and _m1_r[3] > 100:
+                                            host_w, host_h = int(_m1_r[2]), int(_m1_r[3])
                                 globals()['client_host_is_android'] = bool(is_android)
                                 globals()['client_host_os_release'] = os_rel if os_rel else ("android" if is_android else "10")
                                 if comp_n:
@@ -1009,9 +1125,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             return
         
         global client_host_monitor_count, client_host_sent_monitor_info, client_host_monitor_rects, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors
-        client_host_monitor_count = 1
-        client_host_sent_monitor_info = False
-        client_host_monitor_rects = []
+        client_host_monitor_count = max(1, int(monitor_count or 1)) if monitor_count is not None else 1
+        client_host_sent_monitor_info = (monitor_count is not None)
+        client_host_monitor_rects = list(monitors or [])
         client_true_remote_res = (int(host_w), int(host_h))
         client_mon_left_on = True
         client_mon_right_on = True
@@ -2218,7 +2334,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 if cmd_queue:
                     try: cmd_queue.put(req_msg)
                     except Exception as e: print(f"[Client] Failed to put to cmd_queue: {e}")
-                if reconnect_queue:
+                elif reconnect_queue:
                     try: reconnect_queue.put(req_msg)
                     except: pass
                 
@@ -2270,8 +2386,19 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         sock = socket.fromshare(sock_item[1])
                                     elif hasattr(sock_item, 'fileno'):
                                         sock = sock_item
+                                    if len(new_sock) > 9 and new_sock[9] is not None:
+                                        client_host_monitor_count = max(1, int(new_sock[9] or 1))
+                                        client_host_sent_monitor_info = True
+                                    if len(new_sock) > 10 and new_sock[10] is not None:
+                                        client_host_monitor_rects = list(new_sock[10] or [])
                                     if len(new_sock) > 3 and new_sock[2] and new_sock[3]:
-                                        host_w, host_h = int(new_sock[2]), int(new_sock[3])
+                                        rw_re, rh_re = int(new_sock[2]), int(new_sock[3])
+                                        if (not is_android) and rh_re > 0 and (rw_re / float(rh_re)) >= 2.0 and client_host_monitor_count < 2:
+                                            _m1_r, _m2_r, _fw, _fh = _resolve_dual_monitor_subrects(rw_re, rh_re, monitors_meta=client_host_monitor_rects)
+                                            if _m1_r[2] > 100 and _m1_r[3] > 100:
+                                                rw_re, rh_re = int(_m1_r[2]), int(_m1_r[3])
+                                        host_w, host_h = rw_re, rh_re
+                                        client_true_remote_res = (host_w, host_h)
                                 ensure_session_socket_blocking(sock)
                                 if partner_pass:
                                     socket_passwords[sock] = partner_pass
