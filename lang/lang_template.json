@@ -491,5 +491,7 @@
   "Sai mật khẩu hoặc lỗi xác thực": "Sai mật khẩu hoặc lỗi xác thực",
   "Sai mật khẩu kết nối": "Sai mật khẩu kết nối",
   "Mật khẩu: đã lưu": "Mật khẩu: đã lưu",
-  "Mật khẩu: chưa lưu": "Mật khẩu: chưa lưu"
+  "Mật khẩu: chưa lưu": "Mật khẩu: chưa lưu",
+  "Đang bật máy {name} - {id}": "Đang bật máy {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Đã gửi tín hiệu Wake-on-LAN qua mạng..."
 }

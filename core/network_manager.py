@@ -241,7 +241,103 @@ class NetworkMixin:
         elif err:
             print(f"[Host] Failed to configure registry for UAC: {err}")
 
-    def wake_on_lan(self, mac_str, extra_ips=None):
+    def show_wol_notification(self, computer_name="", peer_id="", parent_win=None):
+        """Hiển thị dialog nhỏ thông báo 'Đang bật máy <Tên máy tính> - <ID>'."""
+        try:
+            import tkinter as tk
+            p = parent_win
+            if not p or not getattr(p, "winfo_exists", lambda: False)():
+                p = getattr(self, "lan_computers_dialog", None)
+            if not p or not getattr(p, "winfo_exists", lambda: False)():
+                p = getattr(self, "root", None) or self
+
+            clean_id = ''.join(ch for ch in str(peer_id) if ch.isdigit())
+            fmt_id = f"{clean_id[:3]} {clean_id[3:6]} {clean_id[6:9]} {clean_id[9:]}" if len(clean_id) == 12 else (peer_id or clean_id)
+            comp_name = computer_name or _("Máy tính")
+
+            template = _("Đang bật máy {name} - {id}")
+            if "{name}" in template:
+                msg_title = template.format(name=comp_name, id=fmt_id)
+            else:
+                msg_title = f"{_('Đang bật máy')} {comp_name} - {fmt_id}"
+
+            top = tk.Toplevel(p)
+            top.withdraw()
+            top.title(_("Bật nguồn (WOL)"))
+            bg_col = getattr(self, "bg_color", "#FFFFFF")
+            text_col = getattr(self, "text_white", "#000000")
+            gray_col = getattr(self, "text_gray", "#666666")
+            btn_col = getattr(self, "btn_color", "#0088CC")
+            btn_hover_col = getattr(self, "btn_hover", "#006699")
+
+            top.configure(bg=bg_col)
+            top.resizable(False, False)
+            top.attributes("-topmost", True)
+            try:
+                top.transient(p)
+            except Exception:
+                pass
+
+            w, h = 380, 130
+            try:
+                px = p.winfo_x() + (p.winfo_width() - w) // 2
+                py = p.winfo_y() + (p.winfo_height() - h) // 2
+                top.geometry(f"{w}x{h}+{px}+{py}")
+            except Exception:
+                top.geometry(f"{w}x{h}")
+
+            top.deiconify()
+
+            inner = tk.Frame(top, bg=bg_col, padx=16, pady=14)
+            inner.pack(fill=tk.BOTH, expand=True)
+
+            lbl_icon = tk.Label(inner, text="⚡", font=("Segoe UI", 20), fg="#D35400", bg=bg_col)
+            lbl_icon.pack(side=tk.LEFT, padx=(0, 12), anchor=tk.CENTER)
+
+            txt_frame = tk.Frame(inner, bg=bg_col)
+            txt_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            lbl_msg = tk.Label(
+                txt_frame, text=msg_title, font=("Segoe UI", 9, "bold"),
+                fg=text_col, bg=bg_col, wraplength=270, justify=tk.LEFT
+            )
+            lbl_msg.pack(anchor=tk.W, pady=(0, 4))
+
+            lbl_sub = tk.Label(
+                txt_frame, text=_("Đã gửi tín hiệu Wake-on-LAN qua mạng..."), font=("Segoe UI", 8),
+                fg=gray_col, bg=bg_col, justify=tk.LEFT
+            )
+            lbl_sub.pack(anchor=tk.W)
+
+            btn_close = tk.Button(
+                top, text=f"{_('Đóng')} (5s)", font=("Segoe UI", 8),
+                fg=text_col, bg=btn_col, activebackground=btn_hover_col,
+                relief=tk.FLAT, bd=0, padx=14, pady=2, cursor="hand2", command=top.destroy
+            )
+            btn_close.pack(side=tk.BOTTOM, pady=(0, 10))
+
+            def _update_wol_countdown(remaining):
+                try:
+                    if not top.winfo_exists():
+                        return
+                    if remaining > 0:
+                        btn_close.config(text=f"{_('Đóng')} ({remaining}s)")
+                        top.after(1000, _update_wol_countdown, remaining - 1)
+                    else:
+                        top.destroy()
+                except Exception:
+                    pass
+
+            top.after(1000, _update_wol_countdown, 4)
+        except Exception as e:
+            print(f"[WOL] Notification error: {e}")
+
+    def wake_on_lan(self, mac_str, extra_ips=None, computer_name="", peer_id="", parent_win=None):
+        if computer_name or peer_id:
+            try:
+                self.show_wol_notification(computer_name=computer_name, peer_id=peer_id, parent_win=parent_win)
+            except Exception:
+                pass
         # mac_str can be multiple MACs separated by comma
         dest_ips = ["255.255.255.255"]
         try:
@@ -1330,48 +1426,75 @@ class NetworkMixin:
                 tip_lines.append(_("💡 Bấm chuột trái: Kết nối trực tiếp ngay\n💡 Bấm chuột phải: Thay đổi mật khẩu hoặc Xóa máy"))
                 return "\n".join(tip_lines)
 
-            def _create_wol_icon():
+            def _get_wol_icon(icon_size, dpi_scale):
+                cache = getattr(self, "_wol_icons_cache", None)
+                if cache is None:
+                    cache = {}
+                    self._wol_icons_cache = cache
+                if icon_size in cache:
+                    return cache[icon_size]
                 try:
                     from PIL import Image, ImageDraw, ImageTk
                     scale = 2
-                    size = 14
-                    canvas_size = size * scale
+                    canvas_size = icon_size * scale
                     img = Image.new('RGBA', (canvas_size, canvas_size), (0, 0, 0, 0))
                     draw = ImageDraw.Draw(img)
                     cx, cy = canvas_size / 2, canvas_size / 2
                     r = int(canvas_size * 0.36)
-                    width = max(2, int(scale * 1.5))
-                    draw.arc([cx - r, cy - r, cx + r, cy + r], start=315, end=225, fill=(255, 255, 255, 255), width=width)
-                    draw.line([cx, cy - r - 2, cx, cy + 1], fill=(255, 255, 255, 255), width=width)
-                    resized = img.resize((size, size), Image.Resampling.LANCZOS)
-                    return ImageTk.PhotoImage(resized)
+                    stroke_w = max(2, int(scale * 1.5 * dpi_scale))
+                    draw.arc([cx - r, cy - r, cx + r, cy + r], start=315, end=225, fill=(255, 255, 255, 255), width=stroke_w)
+                    draw.line([cx, cy - r - 2, cx, cy + 1], fill=(255, 255, 255, 255), width=stroke_w)
+                    resized = img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(resized)
+                    cache[icon_size] = photo
+                    return photo
                 except Exception:
                     return None
 
-            def _build_wol_button(container, h_info):
-                wol_icon = getattr(self, "_wol_power_icon", None)
-                if wol_icon is None:
-                    wol_icon = _create_wol_icon()
-                    if wol_icon:
-                        self._wol_power_icon = wol_icon
+            def _build_wol_button(container, h_info, ref_widget=None):
+                try:
+                    dpi = container.winfo_fpixels('1i')
+                    dpi_scale = max(1.0, dpi / 96.0)
+                except Exception:
+                    dpi_scale = 1.0
+
+                target_w = 0
+                target_h = 0
+                if ref_widget and ref_widget.winfo_exists():
+                    target_w = ref_widget.winfo_reqwidth()
+                    target_h = ref_widget.winfo_reqheight()
+
+                if not target_w or not target_h:
+                    target_w = int(round(29 * dpi_scale))
+                    target_h = int(round(23 * dpi_scale))
+
+                icon_size = max(14, int(target_h * 0.65))
+                wol_icon = _get_wol_icon(icon_size, dpi_scale)
 
                 if wol_icon:
                     btn = tk.Button(
-                        container, image=wol_icon, width=28, height=20,
+                        container, image=wol_icon, width=target_w, height=target_h,
                         bg="#D35400", activebackground="#E67E22",
-                        relief=tk.FLAT, bd=0, cursor="hand2",
+                        relief=tk.FLAT, bd=0, highlightthickness=0, cursor="hand2",
                         command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
-                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")],
+                            computer_name=i.get("computer_name", ""),
+                            peer_id=i.get("hwid") or i.get("saved_id") or "",
+                            parent_win=dialog
                         )
                     )
                     btn.image = wol_icon
                 else:
+                    font_size = max(9, int(round(9 * dpi_scale)))
                     btn = tk.Button(
-                        container, text="⏻", font=("Segoe UI Symbol", 10, "bold"),
+                        container, text="⏻", font=("Segoe UI Symbol", font_size, "bold"),
                         fg="#FFFFFF", activeforeground="#FFFFFF", bg="#D35400", activebackground="#E67E22",
-                        relief=tk.FLAT, bd=0, padx=6, pady=2, cursor="hand2",
+                        relief=tk.FLAT, bd=0, highlightthickness=0, padx=6, pady=2, cursor="hand2",
                         command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
-                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")]
+                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")],
+                            computer_name=i.get("computer_name", ""),
+                            peer_id=i.get("hwid") or i.get("saved_id") or "",
+                            parent_win=dialog
                         )
                     )
                 RowTooltip(btn, _("Bật nguồn (WOL)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
@@ -1482,10 +1605,6 @@ class NetworkMixin:
                 wol_container = tk.Frame(right_box, bg=self.card_color)
                 wol_container.pack(side=tk.RIGHT, padx=(6, 0))
 
-                if peer_online is False and info.get("macs"):
-                    btn = _build_wol_button(wol_container, info)
-                    btn.pack()
-
                 # 2. Biểu tượng 🔑 (Đã lưu: nền xanh lá, Chưa lưu: nền xám)
                 has_saved_pw = bool(saved_pw or info.get("saved_password"))
                 k_bg = "#145A32" if has_saved_pw else "#4A5568"
@@ -1497,6 +1616,10 @@ class NetworkMixin:
                     bg=k_bg, fg=k_fg, padx=6, pady=2, cursor="hand2"
                 )
                 lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
+
+                if peer_online is False and info.get("macs"):
+                    btn = _build_wol_button(wol_container, info, ref_widget=lbl_key)
+                    btn.pack()
                 key_tooltip_obj = RowTooltip(lbl_key, k_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
                 lbl_key.bind("<Button-1>", lambda e, h=hwid, i=info: open_change_lan_password_dialog(h, i))
 
@@ -1530,7 +1653,10 @@ class NetworkMixin:
                             2,
                             label=_("⚡ Bật nguồn (WOL)"),
                             command=lambda mac=h_info.get("macs", ""), inf=h_info: self.wake_on_lan(
-                                mac, extra_ips=[inf.get("local_ip"), inf.get("source_ip")]
+                                mac, extra_ips=[inf.get("local_ip"), inf.get("source_ip")],
+                                computer_name=inf.get("computer_name", ""),
+                                peer_id=inf.get("hwid") or inf.get("saved_id") or "",
+                                parent_win=dialog
                             )
                         )
 
@@ -1651,7 +1777,7 @@ class NetworkMixin:
                     for ch in w_box.winfo_children():
                         ch.destroy()
                     if not is_on and inf.get("macs"):
-                        w_btn = _build_wol_button(w_box, inf)
+                        w_btn = _build_wol_button(w_box, inf, ref_widget=ui_item.get("lbl_key"))
                         w_btn.pack()
 
                 # 4. Menu chuột phải

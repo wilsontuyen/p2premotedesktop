@@ -448,5 +448,7 @@
   "Mở thư mục Logs": "로그 폴더 열기",
   "Đang thử kết nối lại (lần {x}/5)...": "다시 연결을 시도하는 중(회 {x}/5)...",
   "Mật khẩu: đã lưu": "비밀번호: 저장됨",
-  "Mật khẩu: chưa lưu": "비밀번호: 저장 안 됨"
+  "Mật khẩu: chưa lưu": "비밀번호: 저장 안 됨",
+  "Đang bật máy {name} - {id}": "컴퓨터 켜는 중: {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "네트워크를 통해 Wake-on-LAN 신호를 전송했습니다..."
 }

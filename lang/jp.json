@@ -448,5 +448,7 @@
   "Mở thư mục Logs": "ログフォルダーを開く",
   "Đang thử kết nối lại (lần {x}/5)...": "再接続を試行中 ({x}/5 回)...",
   "Mật khẩu: đã lưu": "パスワード: 保存済み",
-  "Mật khẩu: chưa lưu": "パスワード: 未保存"
+  "Mật khẩu: chưa lưu": "パスワード: 未保存",
+  "Đang bật máy {name} - {id}": "起動中: {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "ネットワーク経由でWake-on-LAN信号を送信しました..."
 }

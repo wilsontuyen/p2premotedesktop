@@ -469,5 +469,7 @@
   "Sai mật khẩu hoặc lỗi xác thực": "Wrong password or authentication error",
   "Sai mật khẩu kết nối": "Incorrect connection password",
   "Mật khẩu: đã lưu": "Password: saved",
-  "Mật khẩu: chưa lưu": "Password: not saved"
+  "Mật khẩu: chưa lưu": "Password: not saved",
+  "Đang bật máy {name} - {id}": "Waking up {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Wake-on-LAN signal sent over network..."
 }

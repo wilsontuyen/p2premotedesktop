@@ -448,5 +448,7 @@
   "Mở thư mục Logs": "開啟日誌資料夾",
   "Đang thử kết nối lại (lần {x}/5)...": "正在重新嘗試連線（次 {x}/5）...",
   "Mật khẩu: đã lưu": "密碼：已儲存",
-  "Mật khẩu: chưa lưu": "密碼：未儲存"
+  "Mật khẩu: chưa lưu": "密碼：未儲存",
+  "Đang bật máy {name} - {id}": "正在喚醒 {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "已透過網路發送遠端開機訊號..."
 }

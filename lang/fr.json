@@ -448,5 +448,7 @@
   "Mở thư mục Logs": "Ouvrir le dossier des logs",
   "Đang thử kết nối lại (lần {x}/5)...": "Nouvelle tentative de connexion (fois {x}/5)...",
   "Mật khẩu: đã lưu": "Mot de passe: enregistré",
-  "Mật khẩu: chưa lưu": "Mot de passe: non enregistré"
+  "Mật khẩu: chưa lưu": "Mot de passe: non enregistré",
+  "Đang bật máy {name} - {id}": "Démarrage de {name} - {id}",
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Signal Wake-on-LAN envoyé sur le réseau..."
 }
