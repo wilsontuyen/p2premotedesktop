@@ -2428,21 +2428,49 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
                     title = _("Mất kết nối.")
                     title_surf = title_font.render(title, True, (255, 80, 80))
-                    title_rect = title_surf.get_rect(center=(window_w//2, window_h//2 - 36))
-                    screen.blit(title_surf, title_rect)
 
-                    if status_msg_text:
-                        detail = str(status_msg_text)
-                    else:
-                        detail = ""
-                    if detail:
-                        detail_surf = msg_font.render(detail, True, (255, 255, 255))
-                        detail_rect = detail_surf.get_rect(center=(window_w//2, window_h//2 + 8))
-                        screen.blit(detail_surf, detail_rect)
-
+                    # Chi tiết có thể chứa "\n" và dài: tách dòng, tự ngắt theo bề rộng cửa sổ,
+                    # căn giữa TỪNG dòng (pygame-ce render("\n") căn trái cả khối, đè countdown).
+                    detail = str(status_msg_text) if status_msg_text else ""
+                    max_line_w = max(200, int(window_w * 0.86))
+                    detail_lines = []
+                    for _para in detail.replace("\r", "").split("\n"):
+                        _para = _para.strip()
+                        if not _para:
+                            continue
+                        _cur = ""
+                        for _word in _para.split(" "):
+                            _try = (_cur + " " + _word) if _cur else _word
+                            if _cur and msg_font.size(_try)[0] > max_line_w:
+                                detail_lines.append(_cur)
+                                _cur = _word
+                            else:
+                                _cur = _try
+                        if _cur:
+                            detail_lines.append(_cur)
+                    detail_surfs = [msg_font.render(_ln, True, (255, 255, 255)) for _ln in detail_lines]
                     cd_surf = msg_font.render(_("Thời gian chờ: ") + str(countdown) + _(" giây"), True, (180, 180, 180))
-                    cd_rect = cd_surf.get_rect(center=(window_w//2, window_h//2 + 44))
-                    screen.blit(cd_surf, cd_rect)
+
+                    gap_title = 14
+                    gap_line = 4
+                    gap_cd = 14
+                    total_h = title_surf.get_height()
+                    if detail_surfs:
+                        total_h += gap_title + sum(_s.get_height() for _s in detail_surfs) + gap_line * (len(detail_surfs) - 1)
+                    total_h += gap_cd + cd_surf.get_height()
+                    y = max(0, (window_h - total_h) // 2)
+
+                    screen.blit(title_surf, title_surf.get_rect(midtop=(window_w // 2, y)))
+                    y += title_surf.get_height()
+                    if detail_surfs:
+                        y += gap_title
+                        for _i, _s in enumerate(detail_surfs):
+                            if _i:
+                                y += gap_line
+                            screen.blit(_s, _s.get_rect(midtop=(window_w // 2, y)))
+                            y += _s.get_height()
+                    y += gap_cd
+                    screen.blit(cd_surf, cd_surf.get_rect(midtop=(window_w // 2, y)))
                         
                     pygame.display.flip()
                     
