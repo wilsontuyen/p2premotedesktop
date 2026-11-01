@@ -10,6 +10,15 @@ from gui.window_icon import set_dialog_app_icon, hide_tk_from_taskbar
 _DIALOG_FONT = "Segoe UI" if sys.platform == "win32" else "Helvetica"
 
 
+def ui_scale(widget):
+    """Hệ số DPI (1.0 = 96 DPI). Process DPI-aware: font tự scale, pixel cứng thì không."""
+    try:
+        s = float(widget.winfo_fpixels("1i")) / 96.0
+    except Exception:
+        s = 1.0
+    return max(1.0, min(s, 4.0))
+
+
 def file_download_dialog_title():
     """Title cho dialog paste/clipboard: Đang tải file về..."""
     return _("Đang tải file về...")
@@ -50,16 +59,18 @@ class ProgressDialog(tk.Toplevel):
                 pass
             self.resizable(False, False)
         self.configure(bg="#FFFFFF", highlightbackground="#CCCCCC", highlightthickness=1)
+        self._scale = ui_scale(self)
+        S = lambda v: int(round(v * self._scale))
 
         self._drag_offset_x = 0
         self._drag_offset_y = 0
         if self._embed:
             title_bg = "#F3F3F3"
-            self.title_bar = tk.Frame(self, bg=title_bg, height=28)
+            self.title_bar = tk.Frame(self, bg=title_bg, height=S(28))
             self.title_bar.pack(fill=tk.X, side=tk.TOP)
             self.title_bar.pack_propagate(False)
             self.title_lbl = tk.Label(self.title_bar, text=title_text, bg=title_bg, fg="#333333", font=(_DIALOG_FONT, 9, "bold"))
-            self.title_lbl.pack(side=tk.LEFT, padx=10, pady=4)
+            self.title_lbl.pack(side=tk.LEFT, padx=S(10), pady=S(4))
             for widget in (self.title_bar, self.title_lbl):
                 widget.bind("<ButtonPress-1>", self._start_drag)
                 widget.bind("<B1-Motion>", self._do_drag)
@@ -85,7 +96,7 @@ class ProgressDialog(tk.Toplevel):
         self.job_id = job_id
         
         top_frame = tk.Frame(self, bg="#FFFFFF")
-        top_frame.pack(fill=tk.X, padx=12, pady=(6, 2))
+        top_frame.pack(fill=tk.X, padx=S(12), pady=(S(8), S(4)))
         
         self.item_kind = "folder" if str(item_kind or "").lower() == "folder" else "file"
         display_name = self._short_copy_label(
@@ -105,12 +116,12 @@ class ProgressDialog(tk.Toplevel):
         self.lbl_action.pack(fill=tk.X)
 
         dest_row = tk.Frame(top_frame, bg="#FFFFFF")
-        dest_row.pack(fill=tk.X, pady=(2, 0))
+        dest_row.pack(fill=tk.X, pady=(S(2), 0))
         self.lbl_percent = tk.Label(
             dest_row, text="0%", font=(_DIALOG_FONT, 16, "bold"),
             fg="#0066CC", bg="#FFFFFF", anchor="e"
         )
-        self.lbl_percent.pack(side=tk.RIGHT, padx=(8, 0))
+        self.lbl_percent.pack(side=tk.RIGHT, padx=(S(8), 0))
 
         dest_text = self._format_dest_dir(dest_dir)
         if dest_text:
@@ -118,7 +129,7 @@ class ProgressDialog(tk.Toplevel):
                 dest_row,
                 text=_("Thư mục đích") + ": " + dest_text,
                 font=(_DIALOG_FONT, 9), fg="#555555", bg="#FFFFFF",
-                anchor="w", justify="left", wraplength=300
+                anchor="w", justify="left", wraplength=S(300)
             )
             self.lbl_dest.pack(side=tk.LEFT, fill=tk.X, expand=True)
         else:
@@ -131,12 +142,12 @@ class ProgressDialog(tk.Toplevel):
             ),
             font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w"
         )
-        self.lbl_stats1.pack(fill=tk.X, pady=(2, 2))
+        self.lbl_stats1.pack(fill=tk.X, pady=(S(2), S(4)))
         
-        self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=360, mode="determinate")
+        self.prog1 = ttk.Progressbar(top_frame, orient="horizontal", length=S(360), mode="determinate")
         self.prog1.pack(fill=tk.X)
         
-        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=34)
+        bottom_frame = tk.Frame(self, bg="#F0F0F0", height=S(40))
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
         bottom_frame.pack_propagate(False)
         
@@ -149,7 +160,7 @@ class ProgressDialog(tk.Toplevel):
                 fg="#000000", bg="#E1E1E1", activeforeground="#000000", activebackground="#E5F1FB",
                 relief=tk.FLAT, bd=1, width=10, command=self.trigger_cancel
             )
-            btn_cancel.pack(side=tk.RIGHT, padx=12, pady=4)
+            btn_cancel.pack(side=tk.RIGHT, padx=S(12), pady=S(6))
             def btn_enter(event): btn_cancel.configure(bg="#E5F1FB", bd=1)
             def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
             btn_cancel.bind("<Enter>", btn_enter)
@@ -157,7 +168,7 @@ class ProgressDialog(tk.Toplevel):
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
             
         self.update_idletasks()
-        dialog_w = 400
+        dialog_w = max(S(420), int(self.winfo_reqwidth() or 0))
         dialog_h = max(int(self.winfo_reqheight() or 0), 1)
         
         if self._embed:

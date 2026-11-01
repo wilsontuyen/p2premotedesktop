@@ -15,7 +15,7 @@ except ImportError:
 from gui.window_icon import install_toplevel_app_icon, set_dialog_app_icon, hide_tk_from_taskbar
 install_toplevel_app_icon()
 
-from gui.windows_ui import ProgressDialog  # re-export; class lives in windows_ui
+from gui.windows_ui import ProgressDialog, ui_scale  # re-export; class lives in windows_ui
 
 
 def _blend_hex(widget, color, target, ratio):
@@ -173,19 +173,21 @@ class ClassicCopyDialog(tk.Toplevel):
         
         self.attributes("-topmost", True)
         self.title(_("Sao chép tệp"))
+        _sc = ui_scale(self)
+        S = lambda v: int(round(v * _sc))
         
         lbl_title = tk.Label(
             self, text=_("Đã có tệp cùng tên trong thư mục này."),
             font=(_DIALOG_FONT, 12), fg="#003399", bg="#FFFFFF", anchor="w", justify=tk.LEFT,
-            wraplength=460
+            wraplength=S(460)
         )
-        lbl_title.pack(fill=tk.X, padx=24, pady=(20, 2))
+        lbl_title.pack(fill=tk.X, padx=S(24), pady=(S(20), S(2)))
         
         lbl_sub = tk.Label(
             self, text=_("Bấm vào tệp bạn muốn giữ lại"),
-            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=460
+            font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=S(460)
         )
-        lbl_sub.pack(fill=tk.X, padx=24, pady=(0, 15))
+        lbl_sub.pack(fill=tk.X, padx=S(24), pady=(0, S(15)))
         
         def format_size(bytes_size):
             if bytes_size < 1024:
@@ -262,28 +264,46 @@ class ClassicCopyDialog(tk.Toplevel):
                 w.bind("<ButtonRelease-1>", on_click)
                 w.configure(cursor="hand2")
                 
+        def make_arrow(parent):
+            # Vẽ mũi tên trên Canvas (glyph "→" font 16pt lệch baseline so với tiêu đề 10pt).
+            return tk.Canvas(parent, width=S(22), height=S(20), bg="#FFFFFF", highlightthickness=0, bd=0)
+
+        def draw_arrow(cv, ref_label):
+            # Cao bằng dòng tiêu đề, mũi tên nằm giữa dòng.
+            cv.update_idletasks()
+            h = max(int(ref_label.winfo_reqheight() or 0), S(12))
+            w = S(22)
+            cv.configure(height=h, width=w)
+            cv.delete("all")
+            y = h / 2.0 + S(1)  # bù nhẹ: tâm chữ thị giác thấp hơn tâm line-height
+            cv.create_line(
+                S(2), y, w - S(2), y, fill="#0066CC", width=max(2, S(2)),
+                arrow=tk.LAST, arrowshape=(S(8), S(9), S(4)), capstyle=tk.ROUND,
+            )
+
         # Link 1: Copy and Replace
         link1 = tk.Frame(self, bg="#FFFFFF")
-        link1.pack(fill=tk.X, padx=24, pady=5)
+        link1.pack(fill=tk.X, padx=S(24), pady=S(5))
         
-        lbl_arrow1 = tk.Label(link1, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
-        lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+        lbl_arrow1 = make_arrow(link1)
+        lbl_arrow1.pack(side=tk.LEFT, anchor="n", padx=(S(5), S(5)))
         
         right_content1 = tk.Frame(link1, bg="#FFFFFF")
         right_content1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
         lbl_title1 = tk.Label(right_content1, text=_("Sao chép và thay thế"), font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title1.pack(fill=tk.X)
+        draw_arrow(lbl_arrow1, lbl_title1)
         
-        lbl_desc1 = tk.Label(right_content1, text=_("Thay thế tệp trong thư mục đích bằng tệp bạn đang sao chép:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=430, justify=tk.LEFT)
-        lbl_desc1.pack(fill=tk.X, pady=(0, 5))
+        lbl_desc1 = tk.Label(right_content1, text=_("Thay thế tệp trong thư mục đích bằng tệp bạn đang sao chép:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=S(430), justify=tk.LEFT)
+        lbl_desc1.pack(fill=tk.X, pady=(0, S(5)))
         
         info_frame1 = tk.Frame(right_content1, bg="#FFFFFF")
-        info_frame1.pack(fill=tk.X, padx=(10, 0))
+        info_frame1.pack(fill=tk.X, padx=(S(10), 0))
         
         if self.src_icon:
             lbl_icon1 = tk.Label(info_frame1, image=self.src_icon, bg="#FFFFFF")
-            lbl_icon1.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+            lbl_icon1.pack(side=tk.LEFT, anchor="n", padx=(0, S(10)))
             
         info_text1 = tk.Frame(info_frame1, bg="#FFFFFF")
         info_text1.pack(side=tk.LEFT, fill=tk.X)
@@ -298,26 +318,27 @@ class ClassicCopyDialog(tk.Toplevel):
         
         # Link 2: Don't Copy
         link2 = tk.Frame(self, bg="#FFFFFF")
-        link2.pack(fill=tk.X, padx=24, pady=5)
+        link2.pack(fill=tk.X, padx=S(24), pady=S(5))
         
-        lbl_arrow2 = tk.Label(link2, text="→", font=(_DIALOG_FONT, 16, "bold"), fg="#0066CC", bg="#FFFFFF")
-        lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(5, 5))
+        lbl_arrow2 = make_arrow(link2)
+        lbl_arrow2.pack(side=tk.LEFT, anchor="n", padx=(S(5), S(5)))
         
         right_content2 = tk.Frame(link2, bg="#FFFFFF")
         right_content2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
         lbl_title2 = tk.Label(right_content2, text=_("Không sao chép"), font=(_DIALOG_FONT, 10, "bold"), fg="#0066CC", bg="#FFFFFF", anchor="w")
         lbl_title2.pack(fill=tk.X)
+        draw_arrow(lbl_arrow2, lbl_title2)
         
-        lbl_desc2 = tk.Label(right_content2, text=_("Không thay đổi tệp nào. Giữ nguyên tệp trong thư mục đích:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=430, justify=tk.LEFT)
-        lbl_desc2.pack(fill=tk.X, pady=(0, 5))
+        lbl_desc2 = tk.Label(right_content2, text=_("Không thay đổi tệp nào. Giữ nguyên tệp trong thư mục đích:"), font=(_DIALOG_FONT, 9), fg="#000000", bg="#FFFFFF", anchor="w", wraplength=S(430), justify=tk.LEFT)
+        lbl_desc2.pack(fill=tk.X, pady=(0, S(5)))
         
         info_frame2 = tk.Frame(right_content2, bg="#FFFFFF")
-        info_frame2.pack(fill=tk.X, padx=(10, 0))
+        info_frame2.pack(fill=tk.X, padx=(S(10), 0))
         
         if self.dest_icon:
             lbl_icon2 = tk.Label(info_frame2, image=self.dest_icon, bg="#FFFFFF")
-            lbl_icon2.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+            lbl_icon2.pack(side=tk.LEFT, anchor="n", padx=(0, S(10)))
             
         info_text2 = tk.Frame(info_frame2, bg="#FFFFFF")
         info_text2.pack(side=tk.LEFT, fill=tk.X)
@@ -332,7 +353,7 @@ class ClassicCopyDialog(tk.Toplevel):
         sep = tk.Frame(self, height=1, bg="#D0D0D0", bd=0)
         sep.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 0))
         
-        bottom_bar = tk.Frame(self, bg="#F0F0F0", height=48)
+        bottom_bar = tk.Frame(self, bg="#F0F0F0", height=S(48))
         bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
         bottom_bar.pack_propagate(False)
         
@@ -342,14 +363,14 @@ class ClassicCopyDialog(tk.Toplevel):
                 bottom_bar, text=_("Áp dụng cho mọi xung đột"), font=(_DIALOG_FONT, 9),
                 variable=self.var_all, bg="#F0F0F0", activebackground="#F0F0F0", bd=0
             )
-            chk.pack(side=tk.LEFT, padx=24, pady=10)
+            chk.pack(side=tk.LEFT, padx=S(24), pady=S(10))
             
         btn_cancel = tk.Button(
             bottom_bar, text=_("Hủy"), font=(_DIALOG_FONT, 9), width=10,
             bg="#E1E1E1", fg="#000000", relief=tk.FLAT, bd=1, highlightthickness=0,
             command=self.on_cancel
         )
-        btn_cancel.pack(side=tk.RIGHT, padx=24, pady=10)
+        btn_cancel.pack(side=tk.RIGHT, padx=S(24), pady=S(10))
         
         def btn_enter(event):
             btn_cancel.configure(bg="#E5F1FB", bd=1)
@@ -369,8 +390,8 @@ class ClassicCopyDialog(tk.Toplevel):
 
         # Chiều cao theo nội dung (DPI 125%/150% làm 520x420 cắt mất nút Hủy).
         self.update_idletasks()
-        w = max(int(self.winfo_reqwidth() or 0), 520)
-        h = max(int(self.winfo_reqheight() or 0) + 8, 360)
+        w = max(int(self.winfo_reqwidth() or 0), S(520))
+        h = max(int(self.winfo_reqheight() or 0) + S(8), S(360))
         ws = int(self.winfo_screenwidth() or w)
         hs = int(self.winfo_screenheight() or h)
         w = min(w, max(400, ws - 40))
