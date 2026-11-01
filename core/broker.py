@@ -869,6 +869,31 @@ class Broker:
                     if not hw:
                         from utils.hwid import load_saved_hwid
                         hw = load_saved_hwid() or ""
+                    ident = self.identity or {}
+                    pong_macs = ident.get("macs", "")
+                    pong_ip = ident.get("local_ip", "") or ident.get("ip", "")
+                    # Fallback MAC/IP từ beacon của worker khi broker chưa nạp xong identity
+                    try:
+                        with self.worker_lock:
+                            aw = self.active_worker
+                        wb = (aw.beacon or {}) if aw else {}
+                        if not pong_macs:
+                            pong_macs = wb.get("macs", "") or ""
+                        if not pong_ip or str(pong_ip).startswith("127."):
+                            pong_ip = wb.get("local_ip", "") or pong_ip
+                    except Exception:
+                        pass
+                    # Vẫn thiếu MAC -> lấy lại trực tiếp (cần MAC để máy Client hiển thị nút Bật nguồn WOL)
+                    if not pong_macs:
+                        try:
+                            from utils.hwid import get_hwid
+                            pong_macs = get_hwid()[2] or ""
+                            if pong_macs:
+                                new_ident = dict(self.identity or {})
+                                new_ident["macs"] = pong_macs
+                                self.identity = new_ident
+                        except Exception:
+                            pass
                     pong_data = json.dumps({
                         "status": "ok",
                         "type": "probe_pong",
@@ -877,8 +902,8 @@ class Broker:
                         "computer_name": platform.node(),
                         "os": platform.system(),
                         "port": VIEWER_PORT,
-                        "local_ip": (self.identity or {}).get("ip", ""),
-                        "macs": (self.identity or {}).get("macs", "")
+                        "local_ip": pong_ip,
+                        "macs": pong_macs
                     }).encode("utf-8")
                     send_msg(conn, pong_data, APP_KEY)
                 except Exception as probe_err:

@@ -833,6 +833,9 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                             nb_mac = r_mac
                         if not os_name:
                             os_name = r_os
+                # Host cũ / broker chưa nạp xong MAC trả về macs rỗng -> thử bảng ARP (cùng LAN) để nút WOL hoạt động
+                if not nb_mac:
+                    nb_mac = get_mac_from_arp(ip)
 
                 pong_hwid_raw = str(data.get("hwid") or "").strip()
                 clean_pong_hwid = ''.join(ch for ch in pong_hwid_raw if ch.isdigit())
@@ -900,6 +903,8 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                         nb_mac = known_mac
                     if not os_name:
                         os_name = known_os
+                if not nb_mac:
+                    nb_mac = get_mac_from_arp(ip)
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
                 matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)

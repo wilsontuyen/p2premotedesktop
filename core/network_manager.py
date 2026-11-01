@@ -1451,7 +1451,8 @@ class NetworkMixin:
                 except Exception:
                     return None
 
-            def _build_wol_button(container, h_info, ref_widget=None):
+            def _build_wol_button(container, h_info, is_online=False, ref_widget=None):
+                has_mac = bool(str(h_info.get("macs") or "").strip())
                 try:
                     dpi = container.winfo_fpixels('1i')
                     dpi_scale = max(1.0, dpi / 96.0)
@@ -1471,33 +1472,56 @@ class NetworkMixin:
                 icon_size = max(14, int(target_h * 0.65))
                 wol_icon = _get_wol_icon(icon_size, dpi_scale)
 
+                if is_online is True:
+                    wol_bg = "#2980B9"
+                    wol_active_bg = "#3498DB"
+                    cursor_style = "hand2"
+                elif is_online is False:
+                    wol_bg = "#D35400" if has_mac else "#6B7280"
+                    wol_active_bg = "#E67E22" if has_mac else "#6B7280"
+                    cursor_style = "hand2" if has_mac else "arrow"
+                else:
+                    wol_bg = "#6B7280"
+                    wol_active_bg = "#6B7280"
+                    cursor_style = "arrow"
+
+                def _do_wol(i=h_info):
+                    if is_online is True:
+                        connect_to_peer(i.get("hwid") or i.get("saved_id") or "", i)
+                        return
+                    if not str(i.get("macs") or "").strip():
+                        return
+                    self.wake_on_lan(
+                        i.get("macs", ""), extra_ips=[i.get("local_ip"), i.get("source_ip")],
+                        computer_name=i.get("computer_name", ""),
+                        peer_id=i.get("hwid") or i.get("saved_id") or "",
+                        parent_win=dialog
+                    )
+
                 if wol_icon:
                     btn = tk.Button(
                         container, image=wol_icon, width=target_w, height=target_h,
-                        bg="#D35400", activebackground="#E67E22",
-                        relief=tk.FLAT, bd=0, highlightthickness=0, cursor="hand2",
-                        command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
-                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")],
-                            computer_name=i.get("computer_name", ""),
-                            peer_id=i.get("hwid") or i.get("saved_id") or "",
-                            parent_win=dialog
-                        )
+                        bg=wol_bg, activebackground=wol_active_bg,
+                        relief=tk.FLAT, bd=0, highlightthickness=0, cursor=cursor_style,
+                        command=_do_wol
                     )
                     btn.image = wol_icon
                 else:
                     font_size = max(9, int(round(9 * dpi_scale)))
                     btn = tk.Button(
                         container, text="⏻", font=("Segoe UI Symbol", font_size, "bold"),
-                        fg="#FFFFFF", activeforeground="#FFFFFF", bg="#D35400", activebackground="#E67E22",
-                        relief=tk.FLAT, bd=0, highlightthickness=0, padx=6, pady=2, cursor="hand2",
-                        command=lambda m=h_info.get("macs", ""), i=h_info: self.wake_on_lan(
-                            m, extra_ips=[i.get("local_ip"), i.get("source_ip")],
-                            computer_name=i.get("computer_name", ""),
-                            peer_id=i.get("hwid") or i.get("saved_id") or "",
-                            parent_win=dialog
-                        )
+                        fg="#FFFFFF", activeforeground="#FFFFFF", bg=wol_bg, activebackground=wol_active_bg,
+                        relief=tk.FLAT, bd=0, highlightthickness=0, padx=6, pady=2, cursor=cursor_style,
+                        command=_do_wol
                     )
-                RowTooltip(btn, _("Bật nguồn (WOL)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+
+                if is_online is True:
+                    wol_tip = _("Máy đang bật (Online) - Bấm để kết nối ngay")
+                elif has_mac:
+                    wol_tip = _("Bật nguồn (WOL)")
+                else:
+                    wol_tip = _("Bật nguồn (WOL): chưa có địa chỉ MAC của máy này.\nHãy mở danh sách khi máy đang bật (Online) để tự lấy MAC.")
+                RowTooltip(btn, wol_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
                 return btn
 
             any_peer_synced = False
@@ -1617,9 +1641,8 @@ class NetworkMixin:
                 )
                 lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
 
-                if peer_online is False and info.get("macs"):
-                    btn = _build_wol_button(wol_container, info, ref_widget=lbl_key)
-                    btn.pack()
+                btn = _build_wol_button(wol_container, info, is_online=peer_online, ref_widget=lbl_key)
+                btn.pack()
                 key_tooltip_obj = RowTooltip(lbl_key, k_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
                 lbl_key.bind("<Button-1>", lambda e, h=hwid, i=info: open_change_lan_password_dialog(h, i))
 
@@ -1771,14 +1794,13 @@ class NetworkMixin:
                     if k_tip:
                         k_tip.update_text(_("Mật khẩu: đã lưu") if h_pw else _("Mật khẩu: chưa lưu"))
 
-                # 3. Nút Bật nguồn WOL: Chỉ hiển thị khi máy XÁC NHẬN NGOẠI TUYẾN và có địa chỉ MAC
+                # 3. Nút Nguồn: Màu xanh dương nếu Online, màu Cam (WOL) nếu Offline
                 w_box = ui_item.get("wol_container")
                 if w_box and w_box.winfo_exists():
                     for ch in w_box.winfo_children():
                         ch.destroy()
-                    if not is_on and inf.get("macs"):
-                        w_btn = _build_wol_button(w_box, inf, ref_widget=ui_item.get("lbl_key"))
-                        w_btn.pack()
+                    w_btn = _build_wol_button(w_box, inf, is_online=is_on, ref_widget=ui_item.get("lbl_key"))
+                    w_btn.pack()
 
                 # 4. Menu chuột phải
                 m_ctx = ui_item.get("menu")

@@ -2898,6 +2898,13 @@ class HostMixin:
                             hw = load_saved_hwid() or get_hwid()[0] or ""
                         except Exception:
                             hw = ""
+                    if not getattr(self, 'my_macs', ""):
+                        # MAC cần cho nút Bật nguồn (WOL) phía Client
+                        try:
+                            from utils.hwid import get_hwid
+                            self.my_macs = get_hwid()[2] or ""
+                        except Exception:
+                            pass
                     pong_data = json.dumps({
                         "status": "ok",
                         "type": "probe_pong",
