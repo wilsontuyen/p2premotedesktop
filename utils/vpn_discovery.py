@@ -434,7 +434,7 @@ def resolve_host_info_safe(ip, timeout=0.8):
     try:
         f = _RESOLVER_POOL.submit(_do_dns)
         dns_name = f.result(timeout=0.4)
-        if dns_name and not dns_name.lower().startswith('pc-') and dns_name.lower() not in ('unknown', 'không rõ'):
+        if dns_name and not dns_name.lower().startswith('pc-') and not dns_name.lower().startswith('unknown-') and dns_name.lower() not in ('unknown', 'không rõ'):
             res = (dns_name, nb_mac or "", "", True)
             with _DNS_LOCK:
                 _DNS_CACHE[ip] = res
@@ -443,7 +443,7 @@ def resolve_host_info_safe(ip, timeout=0.8):
         pass
 
     # 4. Fallback (không xác thực được tên)
-    fallback = f"PC-{ip.split('.')[-1]}"
+    fallback = f"Unknown-{ip.split('.')[-1]}"
     res = (fallback, nb_mac or "", "", False)
     with _DNS_LOCK:
         _DNS_CACHE[ip] = res
@@ -596,7 +596,7 @@ def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
     if not comp_name:
         return None
     cn = str(comp_name).strip().lower()
-    if not cn or re.match(r"^pc-\d+$", cn) or cn in ("unknown", "không rõ"):
+    if not cn or re.match(r"^(unknown|pc)-\d+$", cn) or cn in ("unknown", "không rõ"):
         return None
 
     # 2. Khớp tên chính xác hoàn toàn (case-insensitive, ưu tiên bản ghi mới nhất có mật khẩu)
@@ -673,7 +673,7 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     Kiểm tra xem 2 bản ghi có thuộc về cùng 1 máy tính vật lý hay không:
     1. Trùng HWID/ID chính xác (hoặc trùng saved_id).
     2. Trùng địa chỉ MAC vật lý (không phân biệt chữ hoa/thường, dấu gạch nối hay hai chấm).
-    3. Trùng tên máy tính đã xác định (không phải tên rỗng, unknown, localhost hay fallback PC-xxx chưa xác thực).
+    3. Trùng tên máy tính đã xác định (không phải tên rỗng, unknown, localhost hay fallback Unknown-xxx/PC-xxx chưa xác thực).
     4. Trùng IP (local_ip hoặc source_ip) kèm tên máy không mâu thuẫn.
     """
     if not p1 or not p2:
@@ -703,8 +703,8 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     n2_clean = n2.split('.')[0].strip()
     if n1_clean and n2_clean and n1_clean == n2_clean:
         if n1_clean not in ("unknown", "không rõ", "localhost") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", n1_clean):
-            # Nếu tên dạng PC-xxx (ví dụ PC-48, PC-201) thì cả 2 phải được verified
-            if not re.match(r"^pc-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
+            # Nếu tên dạng Unknown-xxx hoặc PC-xxx (ví dụ Unknown-48, PC-201) thì cả 2 phải được verified
+            if not re.match(r"^(unknown|pc)-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
                 return True
 
     # 4. Trùng IP và tên máy không mâu thuẫn (hỗ trợ trường hợp máy đổi IP hoặc 2 card mạng, hoặc tên fallback chưa xác thực)
@@ -712,8 +712,8 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + str(p2.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
     common_ips = set(ips1).intersection(set(ips2))
     if common_ips:
-        is_fallback_1 = (not p1.get("name_verified")) or re.match(r"^pc-\d+$", n1_clean) or n1_clean in ("unknown", "không rõ")
-        is_fallback_2 = (not p2.get("name_verified")) or re.match(r"^pc-\d+$", n2_clean) or n2_clean in ("unknown", "không rõ")
+        is_fallback_1 = (not p1.get("name_verified")) or re.match(r"^(unknown|pc)-\d+$", n1_clean) or n1_clean in ("unknown", "không rõ")
+        is_fallback_2 = (not p2.get("name_verified")) or re.match(r"^(unknown|pc)-\d+$", n2_clean) or n2_clean in ("unknown", "không rõ")
         if is_fallback_1 or is_fallback_2 or n1_clean == n2_clean:
             return True
 
@@ -758,7 +758,7 @@ def merge_peers(p_winner, p_loser):
             res["hwid"] = p_loser["hwid"]
         if p_loser.get("saved_id"):
             res["saved_id"] = p_loser["saved_id"]
-    elif (not w_name or w_name.lower() in ("unknown", "không rõ") or re.match(r"^pc-\d+$", w_name.lower())) and l_name and not re.match(r"^pc-\d+$", l_name.lower()):
+    elif (not w_name or w_name.lower() in ("unknown", "không rõ") or re.match(r"^(unknown|pc)-\d+$", w_name.lower())) and l_name and not re.match(r"^(unknown|pc)-\d+$", l_name.lower()):
         res["computer_name"] = l_name
         res["name_verified"] = p_loser.get("name_verified", False)
         if p_loser.get("saved_id") and not res.get("saved_id"):
@@ -844,7 +844,7 @@ def make_stable_hwid(ip, comp_name="", mac=""):
     else:
         cn = (comp_name or "").strip().upper()
         # Loại trừ tên generic hoặc IP
-        if cn and cn not in ("UNKNOWN", "KHÔNG RÕ", "LOCALHOST") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", cn) and not re.match(r"^PC-\d+$", cn):
+        if cn and cn not in ("UNKNOWN", "KHÔNG RÕ", "LOCALHOST") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", cn) and not re.match(r"^(PC|UNKNOWN)-\d+$", cn):
             seed = f"PEER_NAME_{cn}".encode('utf-8')
         else:
             seed = f"VPN_STABLE_{ip}_{comp_name}".encode('utf-8')
@@ -887,7 +887,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
 
             known_name = str(known_peer.get("computer_name") or "").strip() if known_peer else ""
             known_verified = bool(known_peer.get("name_verified")) if known_peer else False
-            known_has_real_name = bool(known_name and known_name.lower() not in ("unknown", "không rõ") and not re.match(r"^pc-\d+$", known_name.lower()))
+            known_has_real_name = bool(known_name and known_name.lower() not in ("unknown", "không rõ") and not re.match(r"^(unknown|pc)-\d+$", known_name.lower()))
             known_mac = str(known_peer.get("macs") or "").strip() if known_peer else ""
             known_os = str(known_peer.get("os") or "").strip() if known_peer else ""
             known_hwid = str(known_peer.get("hwid") or "").strip() if known_peer else ""

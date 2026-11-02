@@ -31,7 +31,7 @@ from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_
 from utils.vpn_discovery import (
     detect_vpn_interfaces, scan_vpn_network, scan_custom_range, probe_single_host, match_saved_computer,
     hash_password_md5, get_last_seen_epoch, format_last_seen_str,
-    deduplicate_lan_peers, are_same_machine, merge_peers
+    deduplicate_lan_peers, are_same_machine, merge_peers, get_all_local_ipv4
 )
 from utils.logger import log_debug
 
@@ -646,14 +646,14 @@ class NetworkMixin:
 
         if detected_vpns:
             vpn_names = ", ".join(f"{v['vpn_type']} ({v['ip']})" for v in detected_vpns)
-            vpn_info_text = f"🛡️ " + _("Phát hiện VPN: ") + vpn_names
+            vpn_info_text = f"🛡 " + _("Phát hiện VPN: ") + vpn_names
             lbl_vpn_info = tk.Label(vpn_toolbar, text=vpn_info_text, font=("Segoe UI", 8), fg="#56CCF2", bg=getattr(self, 'card_color', '#252836'), anchor=tk.W)
             lbl_vpn_info.pack(side=tk.LEFT, fill=tk.X, expand=True)
         else:
-            lbl_vpn_info = tk.Label(vpn_toolbar, text="🛡️ " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"), font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=getattr(self, 'card_color', '#252836'), anchor=tk.W)
+            lbl_vpn_info = tk.Label(vpn_toolbar, text="🛡 " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"), font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=getattr(self, 'card_color', '#252836'), anchor=tk.W)
             lbl_vpn_info.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        btn_vpn_scan = tk.Button(vpn_toolbar, text=_("🛡️ Quét VPN"), font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg="#8E44AD", activebackground="#9B59B6", relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2")
+        btn_vpn_scan = tk.Button(vpn_toolbar, text=_("🛡 Quét VPN"), font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg="#8E44AD", activebackground="#9B59B6", relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2")
         btn_vpn_scan.pack(side=tk.RIGHT, padx=(4, 0))
 
         btn_custom_scan = tk.Button(vpn_toolbar, text=_("🌐 Dải IP..."), font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg="#2980B9", activebackground="#3498DB", relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2")
@@ -1187,13 +1187,13 @@ class NetworkMixin:
                     if vpns and dialog.winfo_exists():
                         vpn_names = ", ".join(f"{v['vpn_type']} ({v['ip']})" for v in vpns)
                         dialog.after(0, lambda n=vpn_names: lbl_vpn_info.config(
-                            text=f"🛡️ " + _("Phát hiện VPN: ") + n,
+                            text=f"🛡 " + _("Phát hiện VPN: ") + n,
                             fg="#56CCF2",
                             font=("Segoe UI", 8, "bold")
                         ))
                     elif dialog.winfo_exists():
                         dialog.after(0, lambda: lbl_vpn_info.config(
-                            text="🛡️ " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"),
+                            text="🛡 " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"),
                             fg=self.text_gray,
                             font=("Segoe UI", 8, "italic")
                         ))
@@ -1240,7 +1240,7 @@ class NetworkMixin:
                     scan_state["is_scanning"] = False
                     self.save_lan_peers()
                     if dialog.winfo_exists():
-                        dialog.after(0, lambda: btn_vpn_scan.config(state=tk.NORMAL, text=_("🛡️ Quét VPN")))
+                        dialog.after(0, lambda: btn_vpn_scan.config(state=tk.NORMAL, text=_("🛡 Quét VPN")))
                         schedule_refresh(50)
 
             threading.Thread(target=_thread, daemon=True).start()
@@ -1363,10 +1363,10 @@ class NetworkMixin:
             name = (info.get("computer_name") or "").strip()
             if not name or name.lower() in ("unknown", "không rõ"):
                 return False
-            # Nếu là fallback dạng PC-xxx (ví dụ: PC-48, PC-201) và chưa được xác thực
+            # Nếu là fallback dạng Unknown-xxx hoặc PC-xxx (ví dụ: Unknown-48, PC-201) và chưa được xác thực
             if not info.get("name_verified", True):
                 return False
-            if re.match(r"^Unknow-\d{1,3}$", name):
+            if re.match(r"^(unknown|pc)-\d{1,3}$", name, re.IGNORECASE):
                 return False
             return True
 
@@ -1379,7 +1379,7 @@ class NetworkMixin:
             try:
                 if filter_named_var.get():
                     btn_filter_named.config(
-                        text=_("🏷️ Hiện tên máy: BẬT"),
+                        text=_("🏷 Hiện tên máy: BẬT"),
                         bg="#27AE60",
                         activebackground="#2ECC71"
                     )
@@ -1387,7 +1387,7 @@ class NetworkMixin:
                         filter_named_tip_box[0].update_text(_("Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị."))
                 else:
                     btn_filter_named.config(
-                        text=_("🏷️ Hiện tên máy: TẮT"),
+                        text=_("🏷 Hiện tên máy: TẮT"),
                         bg="#5D6D7E",
                         activebackground="#7F8C8D"
                     )
@@ -1480,7 +1480,7 @@ class NetworkMixin:
 
                 matched_c = match_saved_computer(h_info.get("computer_name"), h_info.get("hwid"), h_info.get("saved_id"))
                 sp = (matched_c.get("password", "") if matched_c else "") or h_info.get("saved_password", "")
-                pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠️ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
+                pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
 
                 tip_lines = [
                     f"💻 {h_info.get('computer_name', 'Unknown')}",
@@ -1778,7 +1778,7 @@ class NetworkMixin:
 
                 _sync_menu_wol(row_menu, info, peer_online)
                 row_menu.add_separator()
-                row_menu.add_command(label=_("🗑️ Xóa"), command=lambda h=hwid, i=info: delete_lan_peer(h, i))
+                row_menu.add_command(label=_("🗑 Xóa"), command=lambda h=hwid, i=info: delete_lan_peer(h, i))
 
                 def show_context(event, m=row_menu):
                     try:
@@ -2022,7 +2022,7 @@ class NetworkMixin:
         # Nút "Xóa sạch" để xóa toàn bộ danh sách đã quét
         btn_clear = tk.Button(
             btn_frame, 
-            text=_("🗑️ Xóa sạch"), 
+            text=_("🗑 Xóa sạch"), 
             font=("Segoe UI", 9, "bold"), 
             fg="#FFFFFF", 
             activeforeground="#FFFFFF", 
@@ -2041,7 +2041,7 @@ class NetworkMixin:
         # Nút lọc "Hiện tên máy"
         btn_filter_named = tk.Button(
             btn_frame, 
-            text=_("🏷️ Hiện tên máy: BẬT"), 
+            text=_("🏷 Hiện tên máy: BẬT"), 
             font=("Segoe UI", 9, "bold"), 
             fg="#FFFFFF", 
             activeforeground="#FFFFFF", 
