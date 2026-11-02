@@ -484,5 +484,12 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN computer list imported successfully!",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN computer list exported successfully!",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "No LAN & VPN computer data found to export.",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Invalid file format. The file must contain JSON data."
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Invalid file format. The file must contain JSON data.",
+  "Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)": "Discover peers on active VPN networks (ZeroTier, Tailscale, Radmin...)",
+  "Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)": "Scan custom IP range (e.g., 192.168.1.1 to 192.168.1.254)",
+  "Dò tìm lại các máy trong mạng LAN & VPN và kiểm tra trạng thái Online/Offline": "Rescan peers in LAN & VPN and verify Online/Offline status",
+  "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN": "Clear all scanned peers in LAN & VPN list",
+  "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.": "Filter ON: Showing only named computers (hiding unknown IP addresses).\nClick to turn OFF and show all devices.",
+  "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.": "Filter OFF: Showing all devices (including unknown IPs).\nClick to turn ON and show named computers only.",
+  "Đóng cửa sổ máy tính mạng LAN & VPN": "Close LAN & VPN computers window"
 }

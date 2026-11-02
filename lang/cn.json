@@ -462,5 +462,12 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "局域网和VPN计算机列表导入成功！",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "局域网和VPN计算机列表导出成功！",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "未找到可导出的局域网和VPN计算机数据。",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "文件格式无效。文件必须包含JSON数据。"
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "文件格式无效。文件必须包含JSON数据。",
+  "Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)": "发现已连接VPN网络中的计算机（ZeroTier、Tailscale、Radmin等）",
+  "Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)": "扫描自定义IP范围（例如 192.168.1.1 至 192.168.1.254）",
+  "Dò tìm lại các máy trong mạng LAN & VPN và kiểm tra trạng thái Online/Offline": "重新搜索局域网和VPN计算机并检测在线/离线状态",
+  "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN": "清除局域网和VPN列表中所有已扫描的计算机",
+  "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.": "过滤已开启：仅显示已命名计算机（隐藏未知IP）。\n点击关闭以显示所有设备。",
+  "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.": "过滤已关闭：显示所有设备（包括未知IP）。\n点击开启以仅显示已命名计算机。",
+  "Đóng cửa sổ máy tính mạng LAN & VPN": "关闭局域网和VPN计算机窗口"
 }

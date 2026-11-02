@@ -713,5 +713,12 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON."
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.",
+  "Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)": "Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)",
+  "Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)": "Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)",
+  "Dò tìm lại các máy trong mạng LAN & VPN và kiểm tra trạng thái Online/Offline": "Dò tìm lại các máy trong mạng LAN & VPN và kiểm tra trạng thái Online/Offline",
+  "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN": "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN",
+  "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.": "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.",
+  "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.": "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.",
+  "Đóng cửa sổ máy tính mạng LAN & VPN": "Đóng cửa sổ máy tính mạng LAN & VPN"
 }

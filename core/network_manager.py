@@ -1043,6 +1043,10 @@ class NetworkMixin:
                     self.tw = None
                 self.lbl_widget = None
 
+        # Gắn tooltip cho các nút trên thanh công cụ VPN
+        RowTooltip(btn_vpn_scan, _("Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+        RowTooltip(btn_custom_scan, _("Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+
         # Bộ đệm cập nhật danh sách chống nháy giật màn hình
         refresh_timer = [None]
         def schedule_refresh(delay_ms=160):
@@ -1353,6 +1357,7 @@ class NetworkMixin:
 
         # Biến lọc: Chỉ hiện máy có tên xác định (mặc định BẬT)
         filter_named_var = tk.BooleanVar(value=True)
+        filter_named_tip_box = [None]
 
         def is_named_peer(info):
             name = (info.get("computer_name") or "").strip()
@@ -1361,7 +1366,7 @@ class NetworkMixin:
             # Nếu là fallback dạng PC-xxx (ví dụ: PC-48, PC-201) và chưa được xác thực
             if not info.get("name_verified", True):
                 return False
-            if re.match(r"^PC-\d{1,3}$", name):
+            if re.match(r"^Unknow-\d{1,3}$", name):
                 return False
             return True
 
@@ -1378,12 +1383,16 @@ class NetworkMixin:
                         bg="#27AE60",
                         activebackground="#2ECC71"
                     )
+                    if filter_named_tip_box[0]:
+                        filter_named_tip_box[0].update_text(_("Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị."))
                 else:
                     btn_filter_named.config(
                         text=_("🏷️ Hiện tên máy: TẮT"),
                         bg="#5D6D7E",
                         activebackground="#7F8C8D"
                     )
+                    if filter_named_tip_box[0]:
+                        filter_named_tip_box[0].update_text(_("Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định."))
             except Exception:
                 pass
 
@@ -1992,7 +2001,7 @@ class NetworkMixin:
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
 
         # Nút "Làm mới" với màu chữ trắng sáng (#FFFFFF) nổi bật trên nền xanh (#007ACC)
-        tk.Button(
+        btn_refresh = tk.Button(
             btn_frame, 
             text=_("🔄 Làm mới"), 
             font=("Segoe UI", 9, "bold"), 
@@ -2006,10 +2015,12 @@ class NetworkMixin:
             padx=14, 
             cursor="hand2", 
             command=do_scan_once
-        ).pack(side=tk.LEFT)
+        )
+        btn_refresh.pack(side=tk.LEFT)
+        RowTooltip(btn_refresh, _("Dò tìm lại các máy trong mạng LAN & VPN và kiểm tra trạng thái Online/Offline"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
 
         # Nút "Xóa sạch" để xóa toàn bộ danh sách đã quét
-        tk.Button(
+        btn_clear = tk.Button(
             btn_frame, 
             text=_("🗑️ Xóa sạch"), 
             font=("Segoe UI", 9, "bold"), 
@@ -2023,8 +2034,9 @@ class NetworkMixin:
             padx=14, 
             cursor="hand2", 
             command=clear_all_peers
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
+        )
+        btn_clear.pack(side=tk.LEFT, padx=(8, 0))
+        RowTooltip(btn_clear, _("Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
 
         # Nút lọc "Hiện tên máy"
         btn_filter_named = tk.Button(
@@ -2043,8 +2055,13 @@ class NetworkMixin:
             command=toggle_filter_named
         )
         btn_filter_named.pack(side=tk.LEFT, padx=(8, 0))
+        filter_named_tip_box[0] = RowTooltip(
+            btn_filter_named, 
+            _("Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị."), 
+            bg="#FFFFFF", fg="#000000", border_color="#B0B7C3"
+        )
 
-        tk.Button(
+        btn_close = tk.Button(
             btn_frame, 
             text=_("Đóng"), 
             font=("Segoe UI", 9, "bold"), 
@@ -2056,7 +2073,9 @@ class NetworkMixin:
             padx=15, 
             cursor="hand2", 
             command=on_dialog_close
-        ).pack(side=tk.RIGHT)
+        )
+        btn_close.pack(side=tk.RIGHT)
+        RowTooltip(btn_close, _("Đóng cửa sổ máy tính mạng LAN & VPN"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
 
     def _connect_lan_direct(self, hwid, peer_info, password):
         """Kết nối TCP trực tiếp tới máy trong LAN (không qua Signaling Server)."""
