@@ -207,6 +207,68 @@ def detect_vpn_interfaces():
     return vpn_list
 
 
+import ipaddress
+_PHYSICAL_LAN_SUBNETS_CACHE = None
+_PHYSICAL_LAN_SUBNETS_TIME = 0
+
+
+def get_physical_lan_subnets():
+    """Lấy danh sách subnet IP cảng card mạng LAN vật lý cục bộ (loại trừ VPN và loopback)."""
+    global _PHYSICAL_LAN_SUBNETS_CACHE, _PHYSICAL_LAN_SUBNETS_TIME
+    now = time.time()
+    if _PHYSICAL_LAN_SUBNETS_CACHE is not None and (now - _PHYSICAL_LAN_SUBNETS_TIME) < 5.0:
+        return _PHYSICAL_LAN_SUBNETS_CACHE
+    subnets = []
+    vpn_keywords = ('wan miniport', 'ikev2', 'l2tp', 'sstp', 'pptp', 'vpn', 'aua', 'tailscale', 'hamachi', 'radmin', 'zerotier', 'wireguard', 'openvpn', 'tap', 'tun', 'wintun')
+    try:
+        import psutil
+        for iface_name, addrs in psutil.net_if_addrs().items():
+            name_lower = iface_name.lower()
+            is_vpn = any(k in name_lower for k in vpn_keywords)
+            for a in addrs:
+                if getattr(a.family, "name", "") == 'AF_INET' or a.family == 2:
+                    ip = a.address
+                    if ip.startswith('127.') or ip.startswith('169.254.'):
+                        continue
+                    netmask = a.netmask or '255.255.255.0'
+                    if netmask == '255.255.255.255':
+                        is_vpn = True
+                    if not is_vpn:
+                        try:
+                            net = ipaddress.IPv4Network(f'{ip}/{netmask}', strict=False)
+                            subnets.append(net)
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    _PHYSICAL_LAN_SUBNETS_CACHE = subnets
+    _PHYSICAL_LAN_SUBNETS_TIME = now
+    return subnets
+
+
+def is_in_physical_lan_subnet(target_ip):
+    """Kiểm tra xem một hoặc nhiều IP có nằm trong subnet LAN vật lý không."""
+    if not target_ip:
+        return False
+    try:
+        subnets = get_physical_lan_subnets()
+        if not subnets:
+            return False
+        for raw in str(target_ip).split(","):
+            clean_ip = raw.strip()
+            if not clean_ip or clean_ip.startswith("127.") or clean_ip.startswith("169.254."):
+                continue
+            try:
+                ip_obj = ipaddress.IPv4Address(clean_ip)
+                if any(ip_obj in net for net in subnets):
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 import threading
 _DNS_CACHE = {}
 _DNS_LOCK = threading.Lock()
@@ -310,6 +372,23 @@ def get_mac_from_arp(ip):
     except Exception:
         pass
     return ""
+
+
+def format_mac_address(raw):
+    """Chuân hoa dia chi MAC nguoi dung nhap (ho tro dau :, -, khoang trang, hoac dinh lien)."""
+    if not raw:
+        return ""
+    parts = []
+    for piece in str(raw).split(","):
+        p = piece.strip()
+        if not p:
+            continue
+        cleaned = re.sub(r"[^0-9A-Fa-f]", "", p)
+        if len(cleaned) == 12:
+            parts.append("-".join(cleaned[i:i+2].upper() for i in range(0, 12, 2)))
+        elif p:
+            parts.append(p.upper().replace(":", "-"))
+    return ",".join(dict.fromkeys(parts))
 
 
 def resolve_host_info_safe(ip, timeout=0.8):
@@ -1143,7 +1222,8 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_cal
         for port in ports:
             if cancel_event and cancel_event.is_set():
                 break
-            res = probe_single_host(target_ip, port=port, vpn_type_label="Custom IP", timeout=0.45, known_peer=kp)
+            vpn_lbl = "LAN" if is_in_physical_lan_subnet(target_ip) else "Custom IP"
+            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_lbl, timeout=0.45, known_peer=kp)
             if res:
                 break
 

@@ -1558,6 +1558,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     matched = match_saved_computer(v_copy.get("computer_name"), canonical_k, v_copy.get("saved_id"))
                     if not spw and matched and matched.get("password"):
                         spw = str(matched["password"]).strip()
+                    if not v_copy.get("macs") and matched and matched.get("mac"):
+                        v_copy["macs"] = str(matched["mac"]).strip()
+                        v["macs"] = v_copy["macs"]
 
                     # 3. Đảm bảo saved_id đồng bộ chuẩn với HWID 12 số
                     if len(canonical_k) == 12:

@@ -3031,6 +3031,14 @@ class HostMixin:
                     
                 init_mon_rects = [] if is_android else (active_mon_rects if active_mon_rects else _get_physical_monitor_rects())
                 init_mon_cnt = 1 if is_android else max(1, len(init_mon_rects))
+                my_mac_val = getattr(self, "my_macs", "") or ""
+                if not my_mac_val:
+                    try:
+                        from utils.hwid import get_hwid
+                        my_mac_val = get_hwid()[2] or ""
+                        self.my_macs = my_mac_val
+                    except Exception:
+                        pass
                 res_info = json.dumps({
                     "status": "ok",
                     "width": host_w,
@@ -3043,6 +3051,8 @@ class HostMixin:
                     "chk_reason": chk_reason,
                     "os_release": "android" if is_android else platform.release(),
                     "is_android": is_android,
+                    "macs": my_mac_val,
+                    "hwid": getattr(self, "my_id_clean", "") or "",
                 }).encode('utf-8')
                 send_msg(conn, res_info, client_pass)
                 

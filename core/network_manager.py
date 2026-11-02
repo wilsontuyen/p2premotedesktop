@@ -388,6 +388,41 @@ class NetworkMixin:
         if not sent_any:
             print("[WOL] Không gửi được: MAC trống hoặc không hợp lệ.")
 
+    def sync_received_host_mac(self, target_id, target_name, host_macs, peer_info=None):
+        """Đồng bộ địa chỉ MAC nhận được từ Host vào lan_peers.json và saved_computers.xml rồi làm mới giao diện."""
+        if not host_macs:
+            return
+        host_macs = str(host_macs).strip()
+        if not host_macs:
+            return
+        clean_id = ''.join(ch for ch in str(target_id or '') if ch.isdigit())
+        comp_name = str(target_name or '').strip()
+        with self.lan_peers_lock:
+            if peer_info is not None:
+                peer_info["macs"] = host_macs
+            for pk, pv in self.lan_peers.items():
+                if pk == clean_id or are_same_machine(pk, pv, clean_id, {"hwid": clean_id, "computer_name": comp_name}):
+                    pv["macs"] = host_macs
+        self.save_lan_peers()
+        try:
+            if hasattr(self, 'load_saved_computers') and hasattr(self, 'save_saved_computers'):
+                comps = self.load_saved_computers()
+                updated = False
+                for c in comps:
+                    c_id_clean = ''.join(ch for ch in str(c.get('id', '')) if ch.isdigit())
+                    c_name_lower = str(c.get('name', '')).strip().lower()
+                    if (clean_id and c_id_clean == clean_id) or (comp_name and comp_name.lower() == c_name_lower):
+                        c["mac"] = host_macs
+                        updated = True
+                if updated:
+                    self.save_saved_computers(comps)
+        except Exception as e:
+            print(f"[Network] Error updating saved_computers with host MAC: {e}")
+        try:
+            self.after(50, self.refresh_list)
+        except Exception:
+            pass
+
     # ==================== LAN DISCOVERY (UDP Broadcast) ====================
     def start_lan_discovery(self):
         """Khởi chạy 2 luồng: beacon broadcaster và beacon listener cho LAN Discovery."""
@@ -635,8 +670,8 @@ class NetworkMixin:
         canvas = tk.Canvas(list_outer, bg=self.entry_bg, highlightthickness=0)
         scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL, command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
-
         scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        active_frame_box = [scroll_frame]
         
         canvas_win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_win_id, width=e.width))
@@ -661,8 +696,8 @@ class NetworkMixin:
             "probe_gen": 0,
         }
 
-        def _persist_peer_password(target_hwid, peer_info, new_pw):
-            """Lưu mật khẩu đồng bộ vào cả saved_computers.xml và lan_peers.json."""
+        def _persist_peer_password(target_hwid, peer_info, new_pw, new_mac=None):
+            """Lưu mật khẩu và MAC đồng bộ vào cả saved_computers.xml và lan_peers.json."""
             comp_name = str(peer_info.get("computer_name") or "").strip()
             # Ưu tiên HWID thực tế 12 số của peer
             p_hw = ''.join(ch for ch in str(peer_info.get("hwid") or target_hwid or "") if ch.isdigit())
@@ -685,6 +720,8 @@ class NetworkMixin:
                 c_name_lower = str(c.get('name', '')).strip().lower()
                 if (c_id_clean and c_id_clean in id_targets) or (c_name_lower and c_name_lower in name_targets):
                     comps[idx]["password"] = new_pw
+                    if new_mac is not None:
+                        comps[idx]["mac"] = new_mac
                     # Cập nhật ID chuẩn nếu bản ghi cũ bị sai hoặc thiếu
                     if len(canonical_id) == 12:
                         comps[idx]["id"] = fmt_saved_id
@@ -692,12 +729,15 @@ class NetworkMixin:
 
             group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
             if not updated_any:
-                comps.append({
+                new_entry = {
                     "name": comp_name or target_hwid,
                     "id": fmt_saved_id,
                     "password": new_pw,
                     "group": group_label
-                })
+                }
+                if new_mac is not None:
+                    new_entry["mac"] = new_mac
+                comps.append(new_entry)
             self.save_saved_computers(comps)
             if hasattr(self, '_reorder_saved_computers_func'):
                 self.after(50, self._reorder_saved_computers_func)
@@ -707,6 +747,8 @@ class NetworkMixin:
             peer_info["saved_password"] = pw_md5
             peer_info["saved_id"] = canonical_id
             peer_info["hwid"] = canonical_id
+            if new_mac is not None:
+                peer_info["macs"] = new_mac
 
             with self.lan_peers_lock:
                 found_in_peers = False
@@ -715,6 +757,8 @@ class NetworkMixin:
                         v["saved_password"] = pw_md5
                         v["saved_id"] = canonical_id
                         v["hwid"] = canonical_id
+                        if new_mac is not None:
+                            v["macs"] = new_mac
                         found_in_peers = True
                 if not found_in_peers and canonical_id:
                     self.lan_peers[canonical_id] = dict(peer_info)
@@ -821,20 +865,21 @@ class NetworkMixin:
             tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
         def open_change_lan_password_dialog(hwid, peer_info):
-            """Hộp thoại thay đổi mật khẩu cho máy trong danh sách LAN & VPN."""
+            """Hộp thoại thay đổi mật khẩu và địa chỉ MAC cho máy trong danh sách LAN & VPN."""
             existing = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
             current_pw = existing.get("password", "") if existing else ""
+            current_mac = str(peer_info.get("macs") or (existing.get("mac") if existing else "") or "").strip()
             
             pwd_win = tk.Toplevel(dialog)
             pwd_win.withdraw()
-            pwd_win.title(_("Thay đổi mật khẩu"))
+            pwd_win.title(_("Cài đặt Mật khẩu & MAC"))
             pwd_win.resizable(False, False)
             pwd_win.configure(bg=self.bg_color)
             pwd_win.transient(dialog)
             pwd_win.grab_set()
             pwd_win.bind("<Escape>", lambda e: pwd_win.destroy())
 
-            pw, ph = 360, 220
+            pw, ph = 380, 290
             px = dialog.winfo_x() + (dialog.winfo_width() - pw) // 2
             py = dialog.winfo_y() + (dialog.winfo_height() - ph) // 2
             pwd_win.geometry(f"{pw}x{ph}+{px}+{py}")
@@ -845,17 +890,27 @@ class NetworkMixin:
             clean_h = ''.join(ch for ch in str(disp_id) if ch.isdigit())
             fmt_id = f"{clean_h[:3]} {clean_h[3:6]} {clean_h[6:9]} {clean_h[9:]}" if len(clean_h) == 12 else disp_id
 
-            lbl_title = tk.Label(pwd_win, text=_("🔑 THAY ĐỔI MẬT KHẨU"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
-            lbl_title.pack(pady=(15, 4))
+            lbl_title = tk.Label(pwd_win, text=_("🔑 MẬT KHẨU & ĐỊA CHỈ MAC"), font=("Segoe UI", 10, "bold"), fg=self.btn_color, bg=self.bg_color)
+            lbl_title.pack(pady=(12, 3))
 
             lbl_sub = tk.Label(pwd_win, text=f"💻 {comp_name}  •  ID: {fmt_id}", font=("Segoe UI", 8), fg=self.text_gray, bg=self.bg_color)
-            lbl_sub.pack(pady=(0, 10))
+            lbl_sub.pack(pady=(0, 8))
 
-            tk.Label(pwd_win, text=_("Nhập mật khẩu mới:"), font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color).pack(anchor=tk.W, padx=30)
+            tk.Label(pwd_win, text=_("Nhập mật khẩu kết nối:"), font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color).pack(anchor=tk.W, padx=30)
 
             pw_var = tk.StringVar(value=current_pw)
-            entry_pw = tk.Entry(pwd_win, textvariable=pw_var, font=("Segoe UI", 12), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
-            entry_pw.pack(fill=tk.X, padx=30, pady=(4, 15))
+            entry_pw = tk.Entry(pwd_win, textvariable=pw_var, font=("Segoe UI", 11), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=3)
+            entry_pw.pack(fill=tk.X, padx=30, pady=(3, 8))
+
+            tk.Label(pwd_win, text=_("Địa chỉ MAC (Bật nguồn WOL):"), font=("Segoe UI", 9), fg=self.text_white, bg=self.bg_color).pack(anchor=tk.W, padx=30)
+
+            mac_var = tk.StringVar(value=current_mac)
+            entry_mac = tk.Entry(pwd_win, textvariable=mac_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3)
+            entry_mac.pack(fill=tk.X, padx=30, pady=(3, 2))
+
+            lbl_mac_hint = tk.Label(pwd_win, text=_("Ví dụ: 00-11-22-33-44-55 (hoặc dấu hai chấm)"), font=("Segoe UI", 7), fg=self.text_gray, bg=self.bg_color)
+            lbl_mac_hint.pack(anchor=tk.W, padx=30, pady=(0, 10))
+
             entry_pw.focus()
             if current_pw:
                 entry_pw.select_range(0, tk.END)
@@ -866,7 +921,14 @@ class NetworkMixin:
                     self.show_custom_error(_("Lỗi"), _("Mật khẩu không được để trống!"), parent=pwd_win)
                     return
 
-                _persist_peer_password(hwid, peer_info, new_pw)
+                raw_mac = mac_var.get().strip().upper()
+                try:
+                    from utils.vpn_discovery import format_mac_address
+                    new_mac = format_mac_address(raw_mac)
+                except Exception:
+                    new_mac = raw_mac
+
+                _persist_peer_password(hwid, peer_info, new_pw, new_mac)
 
                 # Cập nhật partner_pass_var nếu ID khớp
                 if hasattr(self, 'partner_pass_var'):
@@ -874,7 +936,7 @@ class NetworkMixin:
 
                 pwd_win.destroy()
                 refresh_list()
-                progress_label.config(text=_("Đã cập nhật mật khẩu cho {name}!").format(name=comp_name))
+                progress_label.config(text=_("Đã cập nhật mật khẩu & MAC cho {name}!").format(name=comp_name))
                 dialog.after(3000, lambda: progress_label.config(text=""))
 
             entry_pw.bind("<Return>", lambda e: do_save_password())
@@ -1062,8 +1124,10 @@ class NetworkMixin:
                     self.lan_peers[p["hwid"]] = p
                     scan_state.setdefault("online_status", {})[p["hwid"]] = True
 
-            if dialog.winfo_exists():
-                schedule_refresh(150)
+            # Chỉ lên lịch làm mới khi không ở trong tiến trình quét hàng loạt
+            if not scan_state.get("is_scanning", False):
+                if dialog.winfo_exists():
+                    schedule_refresh(250)
 
         def get_custom_ip_file():
             try:
@@ -1159,13 +1223,6 @@ class NetworkMixin:
                             peer_found_callback=_on_peer_found,
                             known_peers=current_known
                         )
-                        
-                        if found:
-                            for p in found:
-                                _on_peer_found(p)
-                            self.save_lan_peers()
-                            if dialog.winfo_exists():
-                                dialog.after(0, refresh_list)
 
                     self.save_lan_peers()
                     if dialog.winfo_exists():
@@ -1180,7 +1237,7 @@ class NetworkMixin:
                     self.save_lan_peers()
                     if dialog.winfo_exists():
                         dialog.after(0, lambda: btn_vpn_scan.config(state=tk.NORMAL, text=_("🛡️ Quét VPN")))
-                        dialog.after(0, refresh_list)
+                        schedule_refresh(50)
 
             threading.Thread(target=_thread, daemon=True).start()
 
@@ -1266,12 +1323,6 @@ class NetworkMixin:
                             peer_found_callback=_on_peer_found,
                             known_peers=current_known
                         )
-                        if found:
-                            for p in found:
-                                _on_peer_found(p)
-                            self.save_lan_peers()
-                            if dialog.winfo_exists():
-                                schedule_refresh(100)
                         self.save_lan_peers()
                         if dialog.winfo_exists():
                             with self.lan_peers_lock:
@@ -1344,9 +1395,20 @@ class NetworkMixin:
             except Exception:
                 cur_scroll = (0.0, 1.0)
 
-            # Xóa danh sách cũ
-            for w in scroll_frame.winfo_children():
-                w.destroy()
+            # Container mới (kỹ thuật double-buffering chuyển mượt mà không chớp nháy)
+            new_scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
+            old_scroll_frame = active_frame_box[0]
+
+            def _finish_swap():
+                new_scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+                canvas.itemconfig(canvas_win_id, window=new_scroll_frame)
+                active_frame_box[0] = new_scroll_frame
+                if old_scroll_frame and old_scroll_frame.winfo_exists():
+                    old_scroll_frame.destroy()
+                try:
+                    canvas.yview_moveto(cur_scroll[0])
+                except Exception:
+                    pass
 
             with self.lan_peers_lock:
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
@@ -1360,8 +1422,9 @@ class NetworkMixin:
                 peers = {h: i for h, i in self.lan_peers.items() if not _is_self_peer(h, i)}
 
             if not peers:
-                tk.Label(scroll_frame, text=_("Chưa có máy tính nào trong danh sách.\nBấm nút 'Làm mới' hoặc 'Quét VPN' bên dưới để dò tìm các máy trong mạng."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                tk.Label(new_scroll_frame, text=_("Chưa có máy tính nào trong danh sách.\nBấm nút 'Làm mới' hoặc 'Quét VPN' bên dưới để dò tìm các máy trong mạng."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
                 status_label.config(text=_("Danh sách máy tính (0 máy)"))
+                _finish_swap()
                 return
 
             total_all = len(peers)
@@ -1378,7 +1441,8 @@ class NetworkMixin:
                 status_label.config(text=_("Tìm thấy ") + str(len(filtered_peers)) + _(" máy trong mạng LAN & VPN"))
 
             if not filtered_peers:
-                tk.Label(scroll_frame, text=_("Không có máy tính nào có tên xác định.\nBấm nút 'Hiện tên máy' bên dưới để xem tất cả {n} thiết bị đã phát hiện.").format(n=total_all), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                tk.Label(new_scroll_frame, text=_("Không có máy tính nào có tên xác định.\nBấm nút 'Hiện tên máy' bên dưới để xem tất cả {n} thiết bị đã phát hiện.").format(n=total_all), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                _finish_swap()
                 return
 
             # Sắp xếp: máy nhóm "LAN" lên trên cùng, sau đó là các nhóm "VPN khác" ở dưới; theo thứ tự bảng chữ cái
@@ -1479,17 +1543,18 @@ class NetworkMixin:
                 elif is_online is False:
                     wol_bg = "#D35400" if has_mac else "#6B7280"
                     wol_active_bg = "#E67E22" if has_mac else "#6B7280"
-                    cursor_style = "hand2" if has_mac else "arrow"
+                    cursor_style = "hand2"
                 else:
                     wol_bg = "#6B7280"
                     wol_active_bg = "#6B7280"
-                    cursor_style = "arrow"
+                    cursor_style = "hand2"
 
                 def _do_wol(i=h_info):
                     if is_online is True:
                         connect_to_peer(i.get("hwid") or i.get("saved_id") or "", i)
                         return
                     if not str(i.get("macs") or "").strip():
+                        open_change_lan_password_dialog(i.get("hwid") or i.get("saved_id") or "", i)
                         return
                     self.wake_on_lan(
                         i.get("macs", ""), extra_ips=[i.get("local_ip"), i.get("source_ip")],
@@ -1518,9 +1583,9 @@ class NetworkMixin:
                 if is_online is True:
                     wol_tip = _("Máy đang bật (Online) - Bấm để kết nối ngay")
                 elif has_mac:
-                    wol_tip = _("Bật nguồn (WOL)")
+                    wol_tip = _("Bật nguồn (WOL): Gửi lệnh bật nguồn từ xa")
                 else:
-                    wol_tip = _("Bật nguồn (WOL): chưa có địa chỉ MAC của máy này.\nHãy mở danh sách khi máy đang bật (Online) để tự lấy MAC.")
+                    wol_tip = _("Bật nguồn (WOL): Chưa có địa chỉ MAC.\nNhấp chuột vào đây để cài đặt địa chỉ MAC cho máy này.")
                 RowTooltip(btn, wol_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
                 return btn
 
@@ -1541,7 +1606,7 @@ class NetworkMixin:
             for hwid, info in sorted_items:
                 if _is_self_peer(hwid, info):
                     continue
-                row = tk.Frame(scroll_frame, bg=self.card_color, bd=0)
+                row = tk.Frame(new_scroll_frame, bg=self.card_color, bd=0)
                 row.pack(fill=tk.X, padx=5, pady=2)
 
                 clean_hwid_key = ''.join(ch for ch in str(hwid) if ch.isdigit())
@@ -1553,6 +1618,9 @@ class NetworkMixin:
                 # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
                 matched = match_saved_computer(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
                 saved_pw = matched.get("password", "") if matched else ""
+                saved_mac = matched.get("mac", "") if matched else ""
+                if saved_mac and not info.get("macs"):
+                    info["macs"] = saved_mac
                 m_id_clean = ''.join(ch for ch in str(matched.get("id", "")) if ch.isdigit()) if matched else ""
 
                 is_hwid_verified = bool(info.get("hwid_verified", False))
@@ -1579,6 +1647,8 @@ class NetworkMixin:
                     if hwid in self.lan_peers:
                         if info.get("saved_password"):
                             self.lan_peers[hwid]["saved_password"] = info["saved_password"]
+                        if info.get("macs") and not self.lan_peers[hwid].get("macs"):
+                            self.lan_peers[hwid]["macs"] = info["macs"]
                         if clean_hwid:
                             self.lan_peers[hwid]["saved_id"] = clean_hwid
                             self.lan_peers[hwid]["hwid"] = clean_hwid
@@ -1599,6 +1669,10 @@ class NetworkMixin:
                 lbl_dot.pack(side=tk.LEFT, padx=(8, 4))
 
                 # Network Badge
+                from utils.vpn_discovery import is_in_physical_lan_subnet
+                all_candidate_ips = f"{info.get('source_ip', '')},{info.get('local_ip', '')}"
+                is_physical_lan = is_in_physical_lan_subnet(all_candidate_ips)
+
                 net_type = str(info.get("network_type") or "LAN")
                 nt_lower = net_type.lower()
                 if "windows" in nt_lower:
@@ -1609,6 +1683,16 @@ class NetworkMixin:
                     badge_text = "VPN"
                     badge_bg = "#1B334D"
                     badge_fg = "#56CCF2"
+                elif is_physical_lan:
+                    # Thuộc subnet LAN vật lý cục bộ (luôn gán nhãn LAN)
+                    badge_text = "LAN"
+                    badge_bg = "#145A32"
+                    badge_fg = "#D4EFDF"
+                    if "custom" in nt_lower:
+                        info["network_type"] = "LAN"
+                        with self.lan_peers_lock:
+                            if hwid in self.lan_peers:
+                                self.lan_peers[hwid]["network_type"] = "LAN"
                 elif "custom" in nt_lower:
                     badge_text = "IP SCAN"
                     badge_bg = "#4D3319"
@@ -1659,7 +1743,7 @@ class NetworkMixin:
                 # Menu chuột phải cho từng máy tính (giống như bên Danh sách máy tính đã lưu)
                 row_menu = tk.Menu(row, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
                 row_menu.add_command(label=_("🚀 Kết nối"), command=lambda h=hwid, i=info: connect_to_peer(h, i))
-                row_menu.add_command(label=_("🔑 Thay đổi mật khẩu"), command=lambda h=hwid, i=info: open_change_lan_password_dialog(h, i))
+                row_menu.add_command(label=_("🔑 Thay đổi mật khẩu & MAC"), command=lambda h=hwid, i=info: open_change_lan_password_dialog(h, i))
 
                 def _sync_menu_wol(m, h_info, is_on):
                     try:
@@ -1741,11 +1825,8 @@ class NetworkMixin:
             if any_peer_synced:
                 self.save_lan_peers()
 
-            # Khôi phục vị trí cuộn mượt mà
-            try:
-                canvas.yview_moveto(cur_scroll[0])
-            except Exception:
-                pass
+            # Hoàn tất hiển thị giao diện mới mượt mà (double-buffering)
+            _finish_swap()
 
             # Khởi chạy luồng thăm dò trạng thái trực tuyến của toàn bộ máy trong mạng LAN & VPN
             # Dùng trực tiếp TCP socket kết nối thẳng tới từng máy (cực nhanh, không qua Signaling Server)
@@ -1851,7 +1932,7 @@ class NetworkMixin:
             dialog.after(2500, lambda: progress_label.config(text=""))
 
         def do_scan_once():
-            """Thực hiện quét 1 lần duy nhất (phát beacon LAN + quét dải VPN)."""
+            """Thực hiện làm mới danh sách máy và kiểm tra lại trạng thái trực tuyến đúng 1 lần duy nhất."""
             scan_state.setdefault("online_status", {}).clear()
             # 1. Phát 1 beacon LAN
             try:
@@ -1882,8 +1963,8 @@ class NetworkMixin:
             except Exception:
                 pass
 
-            # 2. Quét VPN với phát hiện động
-            run_vpn_scan_background()
+            # 2. Làm mới danh sách đúng 1 lần duy nhất (kiểm tra trạng thái online/offline của tất cả máy)
+            schedule_refresh(30)
 
         self._lan_refresh_list_func = refresh_list
         refresh_list()
@@ -2082,6 +2163,10 @@ class NetworkMixin:
                 if is_android and not os_release:
                     os_release = "android"
                 partner_id = hwid
+
+                host_macs = str(res.get("macs") or "").strip()
+                if host_macs:
+                    self.sync_received_host_mac(hwid, computer_name, host_macs, peer_info)
 
                 if is_android:
                     client_android_speed_test(sock, password, self.update_status)
@@ -3079,6 +3164,10 @@ class NetworkMixin:
                 if is_android and not os_release:
                     os_release = "android"
                 
+                host_macs = str(res.get("macs") or "").strip()
+                if host_macs:
+                    self.sync_received_host_mac(partner_id, computer_name, host_macs)
+
                 probe_status_cb = None if (is_reconnect or retry_count > 0) else notify_status
                 if is_android:
                     net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, probe_status_cb)

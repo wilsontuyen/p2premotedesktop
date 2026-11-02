@@ -765,6 +765,16 @@ class SavedListMixin:
 
                     context_menu = tk.Menu(card, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
                     context_menu.add_command(label=_("Kết nối"), command=lambda c=comp: connect_computer(c))
+                    if comp.get("mac") and hasattr(self, "wake_on_lan"):
+                        context_menu.add_command(
+                            label=_("⚡ Bật nguồn (WOL)"),
+                            command=lambda c=comp: self.wake_on_lan(
+                                c["mac"],
+                                computer_name=c.get("name", ""),
+                                peer_id=c.get("id", ""),
+                                parent_win=dialog
+                            )
+                        )
                     context_menu.add_separator()
                     context_menu.add_command(label=_("Thay đổi thông tin"), command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
                     context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
@@ -896,7 +906,7 @@ class SavedListMixin:
         # Center add window
         add_win.update_idletasks()
         aw = 320
-        ah = 360
+        ah = 420
         ax = parent.winfo_x() + (parent.winfo_width() - aw) // 2
         ay = parent.winfo_y() + (parent.winfo_height() - ah) // 2
         add_win.geometry(f"{aw}x{ah}+{ax}+{ay}")
@@ -928,7 +938,12 @@ class SavedListMixin:
         lbl_group = tk.Label(add_win, text=_("Nhóm (Tùy chọn):"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.bg_color)
         lbl_group.pack(anchor=tk.W, padx=20)
         entry_group = tk.Entry(add_win, font=(APP_FONT_NAME, 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
-        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 8))
+
+        lbl_mac = tk.Label(add_win, text=_("Địa chỉ MAC (Bật nguồn WOL):"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_mac.pack(anchor=tk.W, padx=20)
+        entry_mac = tk.Entry(add_win, font=(APP_FONT_NAME, 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_mac.pack(fill=tk.X, padx=20, pady=(3, 12))
 
         def load_computers():
             return self.load_saved_computers()
@@ -952,11 +967,18 @@ class SavedListMixin:
                     self.show_custom_error(_("Trùng lặp"), _("Máy tính này đã tồn tại trong danh sách!"), parent=add_win)
                     return
 
+            raw_mac = entry_mac.get().strip().upper()
+            try:
+                from utils.vpn_discovery import format_mac_address
+                cmac = format_mac_address(raw_mac)
+            except Exception:
+                cmac = raw_mac
             computers.append({
                 "name": name,
                 "id": cid,
                 "password": cpass,
-                "group": cgroup
+                "group": cgroup,
+                "mac": cmac
             })
             save_computers(computers)
             if on_save:
@@ -997,7 +1019,7 @@ class SavedListMixin:
         # Center edit window
         edit_win.update_idletasks()
         ew = 320
-        eh = 360
+        eh = 420
         ex = parent.winfo_x() + (parent.winfo_width() - ew) // 2
         ey = parent.winfo_y() + (parent.winfo_height() - eh) // 2
         edit_win.geometry(f"{ew}x{eh}+{ex}+{ey}")
@@ -1028,8 +1050,14 @@ class SavedListMixin:
         lbl_group = tk.Label(edit_win, text=_("Nhóm (Tùy chọn):"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.bg_color)
         lbl_group.pack(anchor=tk.W, padx=20)
         entry_group = tk.Entry(edit_win, font=(APP_FONT_NAME, 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
-        entry_group.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_group.pack(fill=tk.X, padx=20, pady=(3, 8))
         entry_group.insert(0, item.get("group", ""))
+
+        lbl_mac = tk.Label(edit_win, text=_("Địa chỉ MAC (Bật nguồn WOL):"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.bg_color)
+        lbl_mac.pack(anchor=tk.W, padx=20)
+        entry_mac = tk.Entry(edit_win, font=(APP_FONT_NAME, 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
+        entry_mac.pack(fill=tk.X, padx=20, pady=(3, 12))
+        entry_mac.insert(0, item.get("mac", ""))
 
         def load_computers():
             return self.load_saved_computers()
@@ -1051,10 +1079,17 @@ class SavedListMixin:
             updated = False
             for c in computers:
                 if c["id"] == item["id"] and c["name"] == item["name"]:
+                    raw_mac = entry_mac.get().strip().upper()
+                    try:
+                        from utils.vpn_discovery import format_mac_address
+                        cmac = format_mac_address(raw_mac)
+                    except Exception:
+                        cmac = raw_mac
                     c["name"] = name
                     c["id"] = new_id
                     c["password"] = cpass
                     c["group"] = cgroup
+                    c["mac"] = cmac
                     updated = True
                     break
             
@@ -1113,13 +1148,16 @@ class SavedListMixin:
                     cid = decrypt_text(id_node.text) if id_node is not None else ""
                     cpass = decrypt_text(pass_node.text) if pass_node is not None else ""
                     cgroup = decrypt_text(group_node.text) if group_node is not None else ""
+                    mac_node = comp_node.find("mac")
+                    cmac = decrypt_text(mac_node.text) if mac_node is not None else ""
                     
                     if cid:
                         lst.append({
                             "name": name,
                             "id": cid,
                             "password": cpass,
-                            "group": cgroup
+                            "group": cgroup,
+                            "mac": cmac
                         })
                         
                 if not hasattr(self, 'collapsed_groups_loaded'):
@@ -1183,6 +1221,9 @@ class SavedListMixin:
                 
                 group_node = ET.SubElement(comp_node, "group")
                 group_node.text = encrypt_text(comp.get("group", ""))
+                
+                mac_node = ET.SubElement(comp_node, "mac")
+                mac_node.text = encrypt_text(comp.get("mac", ""))
                 
             if hasattr(ET, "indent"):
                 ET.indent(root, space="  ")
