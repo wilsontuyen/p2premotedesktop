@@ -450,5 +450,17 @@
   "Mật khẩu: đã lưu": "Пароль: сохранен",
   "Mật khẩu: chưa lưu": "Пароль: не сохранен",
   "Đang bật máy {name} - {id}": "Включение {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Сигнал Wake-on-LAN отправлен по сети..."
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Сигнал Wake-on-LAN отправлен по сети...",
+  "Nhập khẩu (Import)": "Импорт",
+  "Xuất khẩu (Export)": "Экспорт",
+  "Danh sách máy tính chính": "Основной список компьютеров",
+  "Máy tính mạng LAN & VPN": "Компьютеры LAN и VPN",
+  "Nhập khẩu danh sách máy tính chính": "Импортировать основной список компьютеров",
+  "Xuất khẩu danh sách máy tính chính": "Экспортировать основной список компьютеров",
+  "Nhập khẩu máy tính mạng LAN & VPN": "Импортировать компьютеры LAN и VPN",
+  "Xuất khẩu máy tính mạng LAN & VPN": "Экспортировать компьютеры LAN và VPN",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "Список компьютеров LAN и VPN успешно импортирован!",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "Список компьютеров LAN và VPN успешно экспортирован!",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "Данные компьютеров LAN и VPN для экспорта не найдены.",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Неверный формат файла. Файл должен содержать данные JSON."
 }

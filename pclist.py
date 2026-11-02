@@ -139,7 +139,7 @@ class SavedListMixin:
         from tkinter import filedialog
         filepath = filedialog.askopenfilename(
             parent=self,
-            title=_("Nhập khẩu danh sách máy tính"),
+            title=_("Nhập khẩu danh sách máy tính chính"),
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
         )
         if filepath:
@@ -147,6 +147,13 @@ class SavedListMixin:
                 import shutil
                 dest = get_computers_xml_path()
                 shutil.copy2(filepath, dest)
+                self._saved_computers_cache = None
+                if hasattr(self, 'saved_computers_dialog') and self.saved_computers_dialog and self.saved_computers_dialog.winfo_exists():
+                    if hasattr(self.saved_computers_dialog, 'refresh_list_func'):
+                        try:
+                            self.saved_computers_dialog.refresh_list_func()
+                        except Exception:
+                            pass
                 msg = f"{_('Đã nhập khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
                 InfoDialog(self, _("Thành công"), msg)
             except Exception as e:
@@ -156,7 +163,7 @@ class SavedListMixin:
         from tkinter import filedialog
         filepath = filedialog.asksaveasfilename(
             parent=self,
-            title=_("Xuất khẩu danh sách máy tính"),
+            title=_("Xuất khẩu danh sách máy tính chính"),
             defaultextension=".xml",
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
             initialfile="saved_computers.xml"
@@ -171,6 +178,84 @@ class SavedListMixin:
                     InfoDialog(self, _("Thành công"), msg)
                 else:
                     messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."))
+            except Exception as e:
+                messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
+
+    def import_lan_computers(self):
+        from tkinter import filedialog
+        filepath = filedialog.askopenfilename(
+            parent=self,
+            title=_("Nhập khẩu máy tính mạng LAN & VPN"),
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filepath:
+            try:
+                import json
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    raise ValueError(_("Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON."))
+                
+                from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers
+                dest = get_lan_peers_json_path()
+                import shutil
+                shutil.copy2(filepath, dest)
+                
+                if hasattr(self, 'lan_peers_lock') and hasattr(self, 'lan_peers'):
+                    with self.lan_peers_lock:
+                        self.lan_peers = deduplicate_lan_peers(dict(data))
+                elif hasattr(self, 'lan_peers'):
+                    self.lan_peers = deduplicate_lan_peers(dict(data))
+
+                if hasattr(self, 'save_lan_peers'):
+                    try:
+                        self.save_lan_peers()
+                    except Exception:
+                        pass
+
+                if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog and self.lan_computers_dialog.winfo_exists():
+                    if hasattr(self, '_lan_refresh_list_func') and self._lan_refresh_list_func:
+                        try:
+                            self._lan_refresh_list_func()
+                        except Exception:
+                            pass
+
+                msg = f"{_('Đã nhập khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                InfoDialog(self, _("Thành công"), msg)
+            except Exception as e:
+                messagebox.showerror(_("Lỗi"), f"Không thể nhập khẩu: {e}")
+
+    def export_lan_computers(self):
+        from tkinter import filedialog
+        filepath = filedialog.asksaveasfilename(
+            parent=self,
+            title=_("Xuất khẩu máy tính mạng LAN & VPN"),
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="lan_peers.json"
+        )
+        if filepath:
+            try:
+                if hasattr(self, 'save_lan_peers'):
+                    try:
+                        self.save_lan_peers()
+                    except Exception:
+                        pass
+                from utils.vpn_discovery import get_lan_peers_json_path
+                src = get_lan_peers_json_path()
+                if os.path.exists(src):
+                    import shutil
+                    shutil.copy2(src, filepath)
+                    msg = f"{_('Đã xuất khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                    InfoDialog(self, _("Thành công"), msg)
+                elif hasattr(self, 'lan_peers') and self.lan_peers:
+                    import json
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(self.lan_peers, f, indent=2, ensure_ascii=False)
+                    msg = f"{_('Đã xuất khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                    InfoDialog(self, _("Thành công"), msg)
+                else:
+                    messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu."))
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
 

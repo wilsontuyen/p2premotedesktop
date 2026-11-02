@@ -450,5 +450,17 @@
   "Mật khẩu: đã lưu": "Mot de passe: enregistré",
   "Mật khẩu: chưa lưu": "Mot de passe: non enregistré",
   "Đang bật máy {name} - {id}": "Démarrage de {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Signal Wake-on-LAN envoyé sur le réseau..."
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Signal Wake-on-LAN envoyé sur le réseau...",
+  "Nhập khẩu (Import)": "Importer",
+  "Xuất khẩu (Export)": "Exporter",
+  "Danh sách máy tính chính": "Liste principale des ordinateurs",
+  "Máy tính mạng LAN & VPN": "Ordinateurs LAN & VPN",
+  "Nhập khẩu danh sách máy tính chính": "Importer la liste principale des ordinateurs",
+  "Xuất khẩu danh sách máy tính chính": "Exporter la liste principale des ordinateurs",
+  "Nhập khẩu máy tính mạng LAN & VPN": "Importer les ordinateurs LAN & VPN",
+  "Xuất khẩu máy tính mạng LAN & VPN": "Exporter les ordinateurs LAN & VPN",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "Liste des ordinateurs LAN & VPN importée avec succès !",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "Liste des ordinateurs LAN & VPN exportée avec succès !",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "Aucune donnée d'ordinateur LAN & VPN trouvée à exporter.",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Format de fichier invalide. Le fichier doit contenir des données JSON."
 }

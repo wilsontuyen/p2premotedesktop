@@ -701,5 +701,17 @@
   "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",name} - {
   "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",id}",
   "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Đã gửi tín hiệu Wake-on-LAN qua mạng...",
-  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối"
+  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",
+  "Nhập khẩu (Import)": "Nhập khẩu (Import)",
+  "Xuất khẩu (Export)": "Xuất khẩu (Export)",
+  "Danh sách máy tính chính": "Danh sách máy tính chính",
+  "Máy tính mạng LAN & VPN": "Máy tính mạng LAN & VPN",
+  "Nhập khẩu danh sách máy tính chính": "Nhập khẩu danh sách máy tính chính",
+  "Xuất khẩu danh sách máy tính chính": "Xuất khẩu danh sách máy tính chính",
+  "Nhập khẩu máy tính mạng LAN & VPN": "Nhập khẩu máy tính mạng LAN & VPN",
+  "Xuất khẩu máy tính mạng LAN & VPN": "Xuất khẩu máy tính mạng LAN & VPN",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON."
 }

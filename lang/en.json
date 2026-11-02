@@ -472,5 +472,17 @@
   "Mật khẩu: chưa lưu": "Password: not saved",
   "Đang bật máy {name} - {id}": "Waking up {name} - {id}",
   "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Wake-on-LAN signal sent over network...",
-  "Có phiên điều khiển từ xa đang kết nối": "A remote desktop session is currently connected."
+  "Có phiên điều khiển từ xa đang kết nối": "A remote desktop session is currently connected.",
+  "Nhập khẩu (Import)": "Import",
+  "Xuất khẩu (Export)": "Export",
+  "Danh sách máy tính chính": "Main Computer List",
+  "Máy tính mạng LAN & VPN": "LAN & VPN Computers",
+  "Nhập khẩu danh sách máy tính chính": "Import Main Computer List",
+  "Xuất khẩu danh sách máy tính chính": "Export Main Computer List",
+  "Nhập khẩu máy tính mạng LAN & VPN": "Import LAN & VPN Computers",
+  "Xuất khẩu máy tính mạng LAN & VPN": "Export LAN & VPN Computers",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN computer list imported successfully!",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN computer list exported successfully!",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "No LAN & VPN computer data found to export.",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Invalid file format. The file must contain JSON data."
 }

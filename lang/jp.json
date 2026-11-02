@@ -450,5 +450,17 @@
   "Mật khẩu: đã lưu": "パスワード: 保存済み",
   "Mật khẩu: chưa lưu": "パスワード: 未保存",
   "Đang bật máy {name} - {id}": "起動中: {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "ネットワーク経由でWake-on-LAN信号を送信しました..."
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "ネットワーク経由でWake-on-LAN信号を送信しました...",
+  "Nhập khẩu (Import)": "インポート",
+  "Xuất khẩu (Export)": "エクスポート",
+  "Danh sách máy tính chính": "メインコンピュータリスト",
+  "Máy tính mạng LAN & VPN": "LAN & VPN コンピュータ",
+  "Nhập khẩu danh sách máy tính chính": "メインコンピュータリストをインポートする",
+  "Xuất khẩu danh sách máy tính chính": "メインコンピュータリストをエクスポートする",
+  "Nhập khẩu máy tính mạng LAN & VPN": "LAN & VPN コンピュータをインポートする",
+  "Xuất khẩu máy tính mạng LAN & VPN": "LAN & VPN コンピュータをエクスポートする",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN コンピュータリストが正常にインポートされました。",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN コンピュータリストが正常にエクスポートされました。",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "エクスポートする LAN & VPN コンピュータデータが見つかりません。",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "無効なファイル形式です。ファイルにはJSONデータが含まれている必要があります。"
 }

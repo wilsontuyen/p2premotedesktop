@@ -450,5 +450,17 @@
   "Mật khẩu: đã lưu": "비밀번호: 저장됨",
   "Mật khẩu: chưa lưu": "비밀번호: 저장 안 됨",
   "Đang bật máy {name} - {id}": "컴퓨터 켜는 중: {name} - {id}",
-  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "네트워크를 통해 Wake-on-LAN 신호를 전송했습니다..."
+  "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "네트워크를 통해 Wake-on-LAN 신호를 전송했습니다...",
+  "Nhập khẩu (Import)": "가져오기",
+  "Xuất khẩu (Export)": "내보내기",
+  "Danh sách máy tính chính": "기본 컴퓨터 목록",
+  "Máy tính mạng LAN & VPN": "LAN 및 VPN 컴퓨터",
+  "Nhập khẩu danh sách máy tính chính": "기본 컴퓨터 목록 가져오기",
+  "Xuất khẩu danh sách máy tính chính": "기본 컴퓨터 목록 내보내기",
+  "Nhập khẩu máy tính mạng LAN & VPN": "LAN 및 VPN 컴퓨터 가져오기",
+  "Xuất khẩu máy tính mạng LAN & VPN": "LAN 및 VPN 컴퓨터 내보내기",
+  "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN 및 VPN 컴퓨터 목록을 성공적으로 가져왔습니다!",
+  "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN 및 VPN 컴퓨터 목록을 성공적으로 내보냈습니다!",
+  "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "내보낼 LAN 및 VPN 컴퓨터 데이터를 찾을 수 없습니다.",
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "잘못된 파일 형식입니다. 파일에 JSON 데이터가 포함되어 있어야 합니다."
 }

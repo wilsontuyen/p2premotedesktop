@@ -780,8 +780,17 @@ def setup_windows_ui(self):
         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
         file_menu.add_command(label=E(_("Quét mạng LAN & VPN (Discovery)")), command=self.show_lan_computers_dialog)
         file_menu.add_separator()
-        file_menu.add_command(label=_("Nhập khẩu (Import Saved Computers)"), command=self.import_saved_computers)
-        file_menu.add_command(label=_("Xuất khẩu (Export Saved Computers)"), command=self.export_saved_computers)
+        # Submenu: Nhập khẩu
+        import_menu = tk.Menu(file_menu, tearoff=0)
+        import_menu.add_command(label=_("Danh sách máy tính chính"), command=self.import_saved_computers)
+        import_menu.add_command(label=_("Máy tính mạng LAN & VPN"), command=self.import_lan_computers)
+        file_menu.add_cascade(label=_("Nhập khẩu (Import)"), menu=import_menu)
+
+        # Submenu: Xuất khẩu
+        export_menu = tk.Menu(file_menu, tearoff=0)
+        export_menu.add_command(label=_("Danh sách máy tính chính"), command=self.export_saved_computers)
+        export_menu.add_command(label=_("Máy tính mạng LAN & VPN"), command=self.export_lan_computers)
+        file_menu.add_cascade(label=_("Xuất khẩu (Export)"), menu=export_menu)
         file_menu.add_separator()
         file_menu.add_command(label=_("Thoát (Exit)"), command=self.destroy)
         menubar.add_cascade(label=_("File"), menu=file_menu)
