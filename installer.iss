@@ -48,7 +48,6 @@ Name: "{group}\Uninstall Easy Remote Desktop"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop"; Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 ; Remove old firewall rules if they exist
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopAgent"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopService"""; Flags: runhidden
@@ -73,7 +72,6 @@ Filename: "{app}\RemoteDesktopP2P.exe"; WorkingDir: "{app}"; Description: "{cm:R
 
 
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 ; Stop existing scheduled task
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopAgent"""; Flags: runhidden waituntilterminated
 ; Delete scheduled task

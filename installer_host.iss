@@ -49,7 +49,6 @@ Name: "{group}\Uninstall Easy Remote Desktop Host"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop Host"; Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostAgent"" dir=in action=allow program=""{app}\RemoteDesktopHost.exe"" enable=yes profile=any"; Flags: runhidden
@@ -61,7 +60,6 @@ Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; F
 Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden
 Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/delete /tn ""EasyRemoteDesktopHostAgent"" /f"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/F /IM RemoteDesktopHostService.exe"; Flags: runhidden waituntilterminated
