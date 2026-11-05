@@ -725,15 +725,20 @@ class NetworkMixin:
                     # Cập nhật ID chuẩn nếu bản ghi cũ bị sai hoặc thiếu
                     if len(canonical_id) == 12:
                         comps[idx]["id"] = fmt_saved_id
+                    # Xóa nhóm tự động từ LAN/VPN nếu bản ghi cũ đã vô tình lưu
+                    c_grp = comps[idx].get("group", "").strip()
+                    if c_grp:
+                        cg_up = c_grp.upper()
+                        if cg_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or cg_up.startswith("WINDOWS VPN"):
+                            comps[idx]["group"] = ""
                     updated_any = True
 
-            group_label = peer_info.get("network_type") or _("Mạng LAN & VPN")
             if not updated_any:
                 new_entry = {
                     "name": comp_name or target_hwid,
                     "id": fmt_saved_id,
                     "password": new_pw,
-                    "group": group_label
+                    "group": ""
                 }
                 if new_mac is not None:
                     new_entry["mac"] = new_mac

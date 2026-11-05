@@ -1233,6 +1233,10 @@ class SavedListMixin:
                     cid = decrypt_text(id_node.text) if id_node is not None else ""
                     cpass = decrypt_text(pass_node.text) if pass_node is not None else ""
                     cgroup = decrypt_text(group_node.text) if group_node is not None else ""
+                    if cgroup:
+                        cg_up = cgroup.strip().upper()
+                        if cg_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or cg_up.startswith("WINDOWS VPN"):
+                            cgroup = ""
                     mac_node = comp_node.find("mac")
                     cmac = decrypt_text(mac_node.text) if mac_node is not None else ""
                     
@@ -1251,7 +1255,11 @@ class SavedListMixin:
                     gs_node = root.find("group_states")
                     if gs_node is not None:
                         for g_node in gs_node.findall("collapsed_group"):
-                            self.collapsed_groups.add(decrypt_text(g_node.text) if g_node.text else "")
+                            grp_txt = decrypt_text(g_node.text) if g_node.text else ""
+                            gt_up = grp_txt.strip().upper()
+                            if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
+                                continue
+                            self.collapsed_groups.add(grp_txt)
                     self._saved_collapsed_snapshot = set(self.collapsed_groups)
             except Exception as e:
                 print(f"[Config] Lỗi tải XML: {e}")
@@ -1287,6 +1295,9 @@ class SavedListMixin:
             if hasattr(self, 'collapsed_groups'):
                 gs_node = ET.SubElement(root, "group_states")
                 for grp in self.collapsed_groups:
+                    gt_up = grp.strip().upper()
+                    if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
+                        continue
                     g_node = ET.SubElement(gs_node, "collapsed_group")
                     g_node.text = encrypt_text(grp)
             elif old_gs_node is not None:
@@ -1353,6 +1364,9 @@ class SavedListMixin:
             if hasattr(self, 'collapsed_groups'):
                 gs_node = ET.SubElement(root, "group_states")
                 for grp in self.collapsed_groups:
+                    gt_up = grp.strip().upper()
+                    if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
+                        continue
                     g_node = ET.SubElement(gs_node, "collapsed_group")
                     g_node.text = encrypt_text(grp)
             if hasattr(ET, "indent"):
