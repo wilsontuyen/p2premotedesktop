@@ -93,7 +93,7 @@ def detect_vpn_interfaces():
     route_table = []
     if os.name == 'nt' and startupinfo:
         try:
-            res_rt = subprocess.run(['route', 'print', 'IPv4'], capture_output=True, text=True, startupinfo=startupinfo, timeout=3)
+            res_rt = subprocess.run(['route', 'print', '-4'], capture_output=True, text=True, startupinfo=startupinfo, timeout=3)
             if res_rt and res_rt.stdout:
                 for line in res_rt.stdout.splitlines():
                     parts = line.split()
@@ -133,7 +133,7 @@ def detect_vpn_interfaces():
             if ip.startswith('127.') or ip.startswith('169.254.'):
                 continue
                 
-            vpn_type = None
+            is_vpn = False
             is_private = (
                 ip.startswith('10.') or 
                 ip.startswith('192.168.') or 
@@ -143,63 +143,54 @@ def detect_vpn_interfaces():
                 ip.startswith('26.')
             )
             
-            # Check 1: Windows Built-in VPN (rasdial, WAN miniport, or interface name keywords)
-            if iface_name in connected_ras or any(k in name_lower for k in ("wan miniport", "ikev2", "l2tp", "sstp", "pptp", "vpn", "aua")):
-                vpn_type = f"Windows VPN ({iface_name})"
-            # Check 2: Tailscale (100.64.0.0/10)
-            elif "tailscale" in name_lower:
-                vpn_type = "Tailscale"
+            # Nhận diện giao diện mạng VPN chung (không phân biệt IKEv2, PPTP, L2TP, OpenVPN, Tailscale...)
+            if iface_name in connected_ras or any(k in name_lower for k in (
+                "wan miniport", "ikev2", "l2tp", "sstp", "pptp", "vpn", "aua",
+                "tailscale", "hamachi", "radmin", "zerotier", "zt", "wireguard", "wg",
+                "tap", "tun", "openvpn", "wintun"
+            )):
+                is_vpn = True
             elif ip.startswith('100.'):
                 octets = [int(x) for x in ip.split('.')]
                 if len(octets) == 4 and octets[0] == 100 and (64 <= octets[1] <= 127):
-                    vpn_type = "Tailscale"
-            # Check 3: Hamachi (25.0.0.0/8)
-            elif "hamachi" in name_lower or ip.startswith('25.'):
-                vpn_type = "Hamachi"
-            # Check 4: Radmin VPN (26.0.0.0/8)
-            elif "radmin" in name_lower or ip.startswith('26.'):
-                vpn_type = "Radmin VPN"
-            # Check 5: ZeroTier
-            elif "zerotier" in name_lower or "zt" in name_lower:
-                vpn_type = "ZeroTier"
-            # Check 6: WireGuard
-            elif "wireguard" in name_lower or "wg" in name_lower:
-                vpn_type = "WireGuard"
-            # Check 7: OpenVPN / TAP / Wintun
-            elif any(k in name_lower for k in ("tap", "tun", "openvpn", "wintun")):
-                vpn_type = "OpenVPN"
-            # Check 8: PPP / Point-to-Point (Không có MAC trên Windows hoặc netmask 255.255.255.255)
+                    is_vpn = True
+            elif ip.startswith('25.') or ip.startswith('26.'):
+                is_vpn = True
             elif is_private and (a.netmask == '255.255.255.255' or (os.name == 'nt' and not has_mac)):
-                vpn_type = f"Windows VPN ({iface_name})"
+                is_vpn = True
 
-            if vpn_type:
+            if is_vpn:
                 octs = ip.split('.')
                 base_c = f"{octs[0]}.{octs[1]}.{octs[2]}."
-                
-                # Tránh trùng lặp cùng dải mạng subnet
-                if base_c in seen_prefixes:
-                    continue
-                seen_prefixes.add(base_c)
 
-                # Tìm gateway hoặc subnet tương ứng trong route table
+                # Tìm gateway hoặc subnet đích tương ứng trong route table (nếu VPN định tuyến sang dải IP khác)
                 target_gateway = None
                 target_subnet = None
+                routed_prefix = None
                 for r in route_table:
                     if r['iface'] == ip:
                         if r['dest'] != ip and r['dest'] != '255.255.255.255' and r['dest'] != '0.0.0.0' and not r['dest'].startswith('224.'):
                             target_subnet = f"{r['dest']}/{r['netmask']}"
+                            r_octs = r['dest'].split('.')
+                            if len(r_octs) == 4 and r['netmask'] == '255.255.255.0':
+                                routed_prefix = f"{r_octs[0]}.{r_octs[1]}.{r_octs[2]}."
                             if r['gateway'] != 'On-link' and r['gateway'] != '0.0.0.0':
                                 target_gateway = r['gateway']
                             break
 
+                effective_prefix = routed_prefix or base_c
+                if effective_prefix in seen_prefixes:
+                    continue
+                seen_prefixes.add(effective_prefix)
+
                 vpn_list.append({
                     "name": iface_name,
-                    "vpn_type": vpn_type,
+                    "vpn_type": "VPN",
                     "ip": ip,
                     "netmask": a.netmask,
                     "gateway": target_gateway,
-                    "target_subnet": target_subnet or f"{base_c}0/24",
-                    "base_prefix": base_c,
+                    "target_subnet": target_subnet or f"{effective_prefix}0/24",
+                    "base_prefix": effective_prefix,
                     "start": 1,
                     "end": 254
                 })
@@ -687,29 +678,43 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     if id_candidates_1 and id_candidates_2 and id_candidates_1.intersection(id_candidates_2):
         return True
 
-    # 2. Trùng MAC vật lý
+    n1 = str(p1.get("computer_name") or "").strip().lower()
+    n2 = str(p2.get("computer_name") or "").strip().lower()
+    n1_clean = n1.split('.')[0].strip()
+    n2_clean = n2.split('.')[0].strip()
+
+    # Nếu cả 2 máy đã xác thực HWID 12 số khác nhau VÀ tên máy khác nhau -> chắc chắn là 2 máy khác nhau
+    # (tránh gộp nhầm qua VPN khi cả 2 máy cùng cài VirtualBox 0A-00-27-... hoặc trùng IP Wi-Fi nhà 192.168.1.x)
+    h1_ver = ''.join(ch for ch in str(p1.get("hwid") or "") if ch.isdigit())
+    h2_ver = ''.join(ch for ch in str(p2.get("hwid") or "") if ch.isdigit())
+    if (
+        p1.get("hwid_verified") and p2.get("hwid_verified")
+        and len(h1_ver) == 12 and len(h2_ver) == 12 and h1_ver != h2_ver
+        and n1_clean and n2_clean and n1_clean != n2_clean
+        and not re.match(r"^(unknown|pc)-\d+$", n1_clean)
+        and not re.match(r"^(unknown|pc)-\d+$", n2_clean)
+    ):
+        return False
+
+    # 2. Trùng MAC vật lý (bỏ qua MAC ảo mặc định của VirtualBox 0A-00-27-00-00-xx)
     macs1 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p1.get("macs", "")).split(",") if m.strip()]
     macs2 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p2.get("macs", "")).split(",") if m.strip()]
-    valid_macs1 = [m for m in macs1 if len(m) >= 12 and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
-    valid_macs2 = [m for m in macs2 if len(m) >= 12 and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
+    valid_macs1 = [m for m in macs1 if len(m) >= 12 and not m.startswith("0A00270000") and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
+    valid_macs2 = [m for m in macs2 if len(m) >= 12 and not m.startswith("0A00270000") and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
     if valid_macs1 and valid_macs2:
         if any(m in valid_macs2 for m in valid_macs1):
             return True
 
     # 3. Trùng tên máy tính (không phân biệt hoa/thường, bỏ domain suffix .local/.lan/...)
-    n1 = str(p1.get("computer_name") or "").strip().lower()
-    n2 = str(p2.get("computer_name") or "").strip().lower()
-    n1_clean = n1.split('.')[0].strip()
-    n2_clean = n2.split('.')[0].strip()
     if n1_clean and n2_clean and n1_clean == n2_clean:
         if n1_clean not in ("unknown", "không rõ", "localhost") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", n1_clean):
             # Nếu tên dạng Unknown-xxx hoặc PC-xxx (ví dụ Unknown-48, PC-201) thì cả 2 phải được verified
             if not re.match(r"^(unknown|pc)-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
                 return True
 
-    # 4. Trùng IP và tên máy không mâu thuẫn (hỗ trợ trường hợp máy đổi IP hoặc 2 card mạng, hoặc tên fallback chưa xác thực)
-    ips1 = [x.strip() for x in (str(p1.get("local_ip", "")) + "," + str(p1.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
-    ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + str(p2.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
+    # 4. Trùng IP thực tế (ưu tiên source_ip khi qua VPN) kèm tên máy không mâu thuẫn
+    ips1 = [x.strip() for x in (str(p1.get("local_ip", "")) + "," + str(p1.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
+    ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + str(p2.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
     common_ips = set(ips1).intersection(set(ips2))
     if common_ips:
         is_fallback_1 = (not p1.get("name_verified")) or re.match(r"^(unknown|pc)-\d+$", n1_clean) or n1_clean in ("unknown", "không rõ")
@@ -791,11 +796,13 @@ def merge_peers(p_winner, p_loser):
         if not res.get("saved_id") and p_loser.get("saved_id"):
             res["saved_id"] = p_loser["saved_id"]
 
-    # 6. Network type (ưu tiên nhãn chi tiết hơn LAN mặc định)
+    # 6. Network type (chuẩn hóa chung thành LAN hoặc VPN, không phân biệt giao thức VPN cụ thể)
     w_net = str(res.get("network_type") or "").strip()
     l_net = str(p_loser.get("network_type") or "").strip()
     if (not w_net or w_net.upper() == "LAN") and l_net and l_net.upper() != "LAN":
-        res["network_type"] = l_net
+        res["network_type"] = "VPN"
+    elif w_net and w_net.upper() != "LAN":
+        res["network_type"] = "VPN"
 
     return res
 
@@ -853,10 +860,193 @@ def make_stable_hwid(ip, comp_name="", mac=""):
     return str(twelve)
 
 
-def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, recv_timeout=0.6, known_peer=None):
+_TUNNEL_IF_CACHE = None
+_TUNNEL_IF_TIME = 0
+
+
+def get_vpn_tunnel_if_indices():
+    """
+    Lấy danh sách (if_index, ip) của các giao diện đường hầm VPN/PPP đang hoạt động trên Windows
+    (không phân biệt IKEv2, PPTP, L2TP, SSTP, WireGuard, OpenVPN...).
+    Dùng cho IP_UNICAST_IF khi dải IP VPN cần quét bị trùng lặp với dải mạng LAN vật lý cục bộ.
+    """
+    global _TUNNEL_IF_CACHE, _TUNNEL_IF_TIME
+    if os.name != 'nt':
+        return []
+    now = time.time()
+    if _TUNNEL_IF_CACHE is not None and (now - _TUNNEL_IF_TIME) < 5.0:
+        return _TUNNEL_IF_CACHE
+
+    tunnels = []
+    try:
+        import ctypes
+        iphlp = ctypes.windll.iphlpapi
+        sz = ctypes.c_ulong(0)
+        iphlp.GetIpAddrTable(None, ctypes.byref(sz), 0)
+        if sz.value > 0:
+            buf = ctypes.create_string_buffer(sz.value)
+            if iphlp.GetIpAddrTable(buf, ctypes.byref(sz), 0) == 0:
+                n = struct.unpack_from('<I', buf, 0)[0]
+                for i in range(n):
+                    off = 4 + i * 24
+                    if off + 12 <= len(buf.raw):
+                        addr_str = socket.inet_ntoa(buf.raw[off:off + 4])
+                        if_idx = struct.unpack_from('<I', buf, off + 4)[0]
+                        mask_str = socket.inet_ntoa(buf.raw[off + 8:off + 12])
+                        if addr_str.startswith('127.') or addr_str.startswith('169.254.') or addr_str == '0.0.0.0':
+                            continue
+                        if mask_str == '255.255.255.255':
+                            tunnels.append((if_idx, addr_str))
+    except Exception:
+        pass
+
+    _TUNNEL_IF_CACHE = tunnels
+    _TUNNEL_IF_TIME = now
+    return tunnels
+
+
+def connect_tcp_any_route(ip, port, timeout=1.05):
+    """
+    Kết nối TCP tới (ip, port) không phân biệt loại kết nối VPN (IKEv2, PPTP, L2TP, OpenVPN...):
+    1. Thử định tuyến mặc định của hệ điều hành trước.
+    2. Nếu thất bại VÀ dải IP đích bị trùng với dải mạng LAN vật lý cục bộ trong khi máy đang có
+       đường hầm VPN hoạt động (ví dụ: LAN nhà/văn phòng cùng là 192.168.10.x với VPN từ xa),
+       tự động thử ép gói tin đi qua từng giao diện đường hầm VPN bằng IP_UNICAST_IF (Windows).
+    Trả về: (connected_socket, used_vpn_tunnel_bool) hoặc (None, False)
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((ip, port))
+        return s, False
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+    if os.name == 'nt' and is_in_physical_lan_subnet(ip):
+        tunnels = get_vpn_tunnel_if_indices()
+        for if_idx, tun_ip in tunnels:
+            if ip == tun_ip:
+                continue
+            s_tun = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s_tun.settimeout(min(timeout, 0.85))
+            try:
+                # IPPROTO_IP = 0, IP_UNICAST_IF = 31 (network byte order)
+                s_tun.setsockopt(socket.IPPROTO_IP, 31, struct.pack('!I', if_idx))
+                s_tun.connect((ip, port))
+                return s_tun, True
+            except Exception:
+                try:
+                    s_tun.close()
+                except Exception:
+                    pass
+
+    return None, False
+
+
+def parse_ip_range_input(start_raw, end_raw=""):
+    """
+    Chuẩn hóa dải IP người dùng nhập vào (hỗ trợ cả dạng đầy đủ lẫn viết tắt):
+    - '192.168.10.1' .. '192.168.10.254'
+    - '192.168.10.xxx', '192.168.10.*', '192.168.10.', '192.168.10' -> ('192.168.10.1', '192.168.10.254')
+    - '192.168.10.0/24' -> ('192.168.10.1', '192.168.10.254')
+    """
+    s = str(start_raw or "").strip()
+    e = str(end_raw or "").strip()
+    if not s:
+        return None, None
+
+    # Cho phép nhập "192.168.10.1 - 192.168.10.254" ngay trong ô đầu
+    if "-" in s and not e:
+        parts_dash = [p.strip() for p in s.split("-", 1)]
+        if len(parts_dash) == 2:
+            s, e = parts_dash[0], parts_dash[1]
+
+    # Hỗ trợ CIDR (ví dụ: 192.168.10.0/24)
+    if "/" in s:
+        try:
+            net = ipaddress.IPv4Network(s, strict=False)
+            hosts = list(net.hosts())
+            if hosts:
+                return str(hosts[0]), str(hosts[-1])
+            return str(net.network_address), str(net.broadcast_address)
+        except Exception:
+            return None, None
+
+    # Hỗ trợ dạng viết tắt: 192.168.10.xxx, 192.168.10.*, 192.168.10., 192.168.10
+    m_wild = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(?:[xX*]+|\d{0}))?$', s)
+    if m_wild:
+        o1, o2, o3 = int(m_wild.group(1)), int(m_wild.group(2)), int(m_wild.group(3))
+        if all(0 <= x <= 255 for x in (o1, o2, o3)):
+            prefix = f"{o1}.{o2}.{o3}"
+            e_match = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$', e)
+            if e_match and (int(e_match.group(1)), int(e_match.group(2)), int(e_match.group(3))) == (o1, o2, o3):
+                e_last = int(e_match.group(4))
+                if 0 <= e_last <= 255:
+                    return f"{prefix}.1", f"{prefix}.{e_last}"
+            return f"{prefix}.1", f"{prefix}.254"
+
+    # Kiểm tra start_ip dạng A.B.C.D
+    try:
+        s_octs = [int(x) for x in s.split('.')]
+        if len(s_octs) != 4 or not all(0 <= x <= 255 for x in s_octs):
+            return None, None
+    except Exception:
+        return None, None
+
+    prefix_s = f"{s_octs[0]}.{s_octs[1]}.{s_octs[2]}"
+
+    # Nếu end_ip trống -> nếu start_ip kết thúc bằng .0 hoặc .1 thì quét cả dải .1->.254, ngược lại quét đúng IP đó
+    if not e:
+        if s_octs[3] in (0, 1):
+            return f"{prefix_s}.1", f"{prefix_s}.254"
+        return s, s
+
+    # Nếu end_ip là dạng wildcard (192.168.10.xxx / *) hoặc chỉ số cuối (ví dụ "254")
+    if e.isdigit() and 0 <= int(e) <= 255:
+        e = f"{prefix_s}.{int(e)}"
+    else:
+        m_ewild = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(?:[xX*]+)?$', e)
+        if m_ewild:
+            e = f"{int(m_ewild.group(1))}.{int(m_ewild.group(2))}.{int(m_ewild.group(3))}.254"
+
+    try:
+        e_octs = [int(x) for x in e.split('.')]
+        if len(e_octs) != 4 or not all(0 <= x <= 255 for x in e_octs):
+            return s, f"{prefix_s}.254"
+    except Exception:
+        return s, f"{prefix_s}.254"
+
+    # Nếu người dùng đổi Từ IP sang dải mạng mới (VD: 192.168.10.1) nhưng quên sửa Đến IP cũ (VD: 192.168.0.254)
+    s_int = (s_octs[0] << 24) + (s_octs[1] << 16) + (s_octs[2] << 8) + s_octs[3]
+    e_int = (e_octs[0] << 24) + (e_octs[1] << 16) + (e_octs[2] << 8) + e_octs[3]
+    if (e_int < s_int or (e_int - s_int) > 1024) and s_octs[:3] != e_octs[:3]:
+        e = f"{prefix_s}.{e_octs[3] if e_octs[3] >= s_octs[3] else 254}"
+
+    if s_octs[3] == 0:
+        s = f"{prefix_s}.1"
+    return s, e
+
+
+def normalize_network_label(label, ip="", forced_tunnel=False):
+    """Chuẩn hóa nhãn mạng thành 'LAN' hoặc 'VPN' (không phân biệt loại giao thức VPN cụ thể)."""
+    if forced_tunnel:
+        return "VPN"
+    lbl = str(label or "").strip()
+    if not lbl:
+        return "LAN" if (ip and is_in_physical_lan_subnet(ip)) else "VPN"
+    low = lbl.lower()
+    if low == "lan":
+        return "LAN"
+    return "VPN"
+
+
+def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, recv_timeout=2.5, known_peer=None):
     """
     Thăm dò một địa chỉ IP xem có đang chạy EasyRemoteDesktop không:
-    - Gửi gói tin probe với APP_KEY.
+    - Gửi gói tin probe với APP_KEY (không phân biệt loại kết nối VPN IKEv2 / PPTP / L2TP...).
     - Hỗ trợ cả bản mới (trả về probe_pong kèm computer_name, hwid)
       lẫn bản cũ (trả về error 'Sai mật khẩu kết nối!' hoặc 'Sai mat khau').
     - Nếu truyền known_peer (khi kiểm tra trạng thái Online của máy đã biết), giữ lại
@@ -871,10 +1061,12 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
     except Exception:
         pass
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
+    s, used_tunnel = connect_tcp_any_route(ip, port, timeout=timeout)
+    if not s:
+        return None
+
+    net_label = normalize_network_label(vpn_type_label, ip=ip, forced_tunnel=used_tunnel)
     try:
-        s.connect((ip, port))
         s.settimeout(recv_timeout)
         probe_packet = json.dumps({"action": "probe", "sig": LAN_APP_SIGNATURE}).encode('utf-8')
         send_msg(s, probe_packet, APP_KEY)
@@ -958,7 +1150,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     "port": int(data.get("port", port)),
                     "hwid": hwid,
                     "macs": nb_mac,
-                    "network_type": vpn_type_label,
+                    "network_type": net_label,
                     "last_seen": format_last_seen_str(),
                     "source_ip": ip,
                     "saved_password": final_pw_hash,
@@ -1015,7 +1207,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
                     "port": port,
                     "hwid": hwid,
                     "macs": nb_mac,
-                    "network_type": vpn_type_label,
+                    "network_type": net_label,
                     "last_seen": format_last_seen_str(),
                     "source_ip": ip,
                     "saved_password": final_pw_hash,
@@ -1034,7 +1226,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=0.45, r
     return None
 
 
-def probe_peer_direct(peer_info, timeout=0.35):
+def probe_peer_direct(peer_info, timeout=0.85):
     """
     Thăm dò trực tiếp trạng thái Online của một máy tính trong mạng LAN / VPN qua TCP:
     - Thử kết nối tới source_ip và các IP trong local_ip trên cổng port (mặc định BOUND_PORT).
@@ -1060,125 +1252,61 @@ def probe_peer_direct(peer_info, timeout=0.35):
         return False, None
 
     port = int(peer_info.get("port") or BOUND_PORT)
-    vpn_label = peer_info.get("network_type") or "LAN"
+    raw_net = str(peer_info.get("network_type") or "").strip()
+    vpn_label = "LAN" if (not raw_net or raw_net.upper() == "LAN") else "VPN"
 
     for ip in candidate_ips:
-        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45, known_peer=peer_info)
+        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
         if res:
             return True, res
 
     if port != 12345:
         for ip in candidate_ips:
-            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=0.45, known_peer=peer_info)
+            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
             if res:
                 return True, res
 
     return False, None
 
 
-def scan_vpn_network(vpn_info, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
+def scan_vpn_network(vpn_info, ports=None, max_workers=75, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
     """
-    Quét toàn bộ dải IP của một mạng VPN.
-    vpn_info: dict trả về từ detect_vpn_interfaces().
-    ports: danh sách cổng cần quét (mặc định [12345, 12346]).
-    peer_found_callback: hàm gọi ngay khi phát hiện 1 máy (để UI cập nhật tức thì).
-    known_peers: dict máy đã biết để truyền known_peer vào probe_single_host bảo vệ HWID.
+    Quét toàn bộ dải IP của một mạng VPN (ủy quyền sang scan_custom_range theo dải IP, không phân biệt loại VPN).
     """
-    if ports is None:
-        ports = DEFAULT_SCAN_PORTS
-    elif isinstance(ports, int):
-        ports = [ports]
-
     base_prefix = vpn_info.get("base_prefix", "")
     start = vpn_info.get("start", 1)
     end = vpn_info.get("end", 254)
-    vpn_type = vpn_info.get("vpn_type", "VPN")
-
-    my_ips = get_all_local_ipv4()
-    ips_to_scan = []
-    for i in range(start, end + 1):
-        target_ip = f"{base_prefix}{i}"
-        if target_ip not in my_ips:
-            ips_to_scan.append(target_ip)
-
-    total = len(ips_to_scan)
-    current = 0
-    found_peers = []
-    _lock = threading.Lock()
-
-    def _worker(target_ip):
-        nonlocal current
-        if cancel_event and cancel_event.is_set():
-            return None
-        res = None
-        kp = None
-        if known_peers and isinstance(known_peers, dict):
-            for p_info in known_peers.values():
-                p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
-                if target_ip in p_ips:
-                    kp = p_info
-                    break
-
-        for port in ports:
-            if cancel_event and cancel_event.is_set():
-                break
-            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_type, timeout=0.45, known_peer=kp)
-            if res:
-                break
-
-        if res:
-            my_clean = ""
-            try:
-                from utils.hwid import load_saved_hwid, get_hwid
-                my_clean = ''.join(ch for ch in str(load_saved_hwid() or get_hwid()[0] or "") if ch.isdigit())
-            except Exception:
-                pass
-            res_hwid = ''.join(ch for ch in str(res.get("hwid") or "") if ch.isdigit())
-            res_saved_id = ''.join(ch for ch in str(res.get("saved_id") or "") if ch.isdigit())
-            res_name = str(res.get("computer_name") or "").strip().lower()
-            my_hostname = socket.gethostname().strip().lower()
-            if my_clean and (my_clean == res_hwid or my_clean == res_saved_id):
-                res = None
-            elif res_name and res_name == my_hostname and res_name not in ("unknown", "không rõ", "localhost"):
-                res = None
-
-        should_notify = False
-        with _lock:
-            current += 1
-            if res:
-                if not any(p["local_ip"] == res["local_ip"] for p in found_peers):
-                    found_peers.append(res)
-                    should_notify = True
-
-        if should_notify and peer_found_callback:
-            try:
-                peer_found_callback(res)
-            except Exception:
-                pass
-
-        if progress_callback:
-            try:
-                progress_callback(current, total, target_ip)
-            except Exception:
-                pass
-        return res
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        list(executor.map(_worker, ips_to_scan))
-
-    return found_peers
+    if not base_prefix:
+        return []
+    return scan_custom_range(
+        f"{base_prefix}{start}",
+        f"{base_prefix}{end}",
+        ports=ports,
+        max_workers=max_workers,
+        progress_callback=progress_callback,
+        cancel_event=cancel_event,
+        peer_found_callback=peer_found_callback,
+        known_peers=known_peers,
+    )
 
 
-def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
-    """Quét dải IP tùy chỉnh do người dùng nhập (ví dụ 192.168.1.1 -> 192.168.1.50)."""
+def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
+    """
+    Quét trực tiếp theo dải IP người dùng nhập vào (ví dụ 192.168.10.1 -> 192.168.10.254),
+    hoàn toàn độc lập và không phân biệt loại kết nối VPN hiện tại (IKEv2, PPTP, L2TP, SSTP, OpenVPN...).
+    """
     if ports is None:
         ports = DEFAULT_SCAN_PORTS
     elif isinstance(ports, int):
         ports = [ports]
 
+    norm_start, norm_end = parse_ip_range_input(start_ip, end_ip)
+    if not norm_start or not norm_end:
+        return []
+
     try:
-        s_octets = [int(x) for x in start_ip.strip().split('.')]
-        e_octets = [int(x) for x in end_ip.strip().split('.')]
+        s_octets = [int(x) for x in norm_start.split('.')]
+        e_octets = [int(x) for x in norm_end.split('.')]
         if len(s_octets) != 4 or len(e_octets) != 4:
             return []
     except Exception:
@@ -1190,9 +1318,9 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_cal
     if s_int > e_int:
         s_int, e_int = e_int, s_int
 
-    # Giới hạn tối đa 512 IPs để quét nhanh
-    if (e_int - s_int) > 512:
-        e_int = s_int + 512
+    # Giới hạn tối đa 1024 IPs để quét nhanh và tránh treo
+    if (e_int - s_int) > 1024:
+        e_int = s_int + 1024
 
     my_ips = get_all_local_ipv4()
     ips_to_scan = []
@@ -1219,11 +1347,11 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_cal
                     kp = p_info
                     break
 
+        vpn_lbl = "LAN" if is_in_physical_lan_subnet(target_ip) else "VPN"
         for port in ports:
             if cancel_event and cancel_event.is_set():
                 break
-            vpn_lbl = "LAN" if is_in_physical_lan_subnet(target_ip) else "Custom IP"
-            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_lbl, timeout=0.45, known_peer=kp)
+            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_lbl, timeout=1.05, recv_timeout=2.5, known_peer=kp)
             if res:
                 break
 
@@ -1247,7 +1375,8 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=45, progress_cal
         with _lock:
             current += 1
             if res:
-                if not any(p["local_ip"] == res["local_ip"] for p in found_peers):
+                res_key = (res.get("hwid"), res.get("source_ip"))
+                if not any((p.get("hwid"), p.get("source_ip")) == res_key for p in found_peers):
                     found_peers.append(res)
                     should_notify = True
 

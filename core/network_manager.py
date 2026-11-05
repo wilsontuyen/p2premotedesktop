@@ -31,7 +31,8 @@ from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_
 from utils.vpn_discovery import (
     detect_vpn_interfaces, scan_vpn_network, scan_custom_range, probe_single_host, match_saved_computer,
     hash_password_md5, get_last_seen_epoch, format_last_seen_str,
-    deduplicate_lan_peers, are_same_machine, merge_peers, get_all_local_ipv4
+    deduplicate_lan_peers, are_same_machine, merge_peers, get_all_local_ipv4,
+    parse_ip_range_input, connect_tcp_any_route
 )
 from utils.logger import log_debug
 
@@ -637,27 +638,98 @@ class NetworkMixin:
         lbl_desc = tk.Label(dialog, text=_("Kết nối trực tiếp tốc độ cao qua mạng nội bộ hoặc VPN (không qua Signaling Server)"), font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
         lbl_desc.pack(pady=(0, 8))
 
-        # Nhận diện các mạng VPN đang hoạt động trên máy
-        detected_vpns = detect_vpn_interfaces()
+        def get_custom_ip_file():
+            try:
+                from pclist import get_app_data_dir
+                b = get_app_data_dir()
+            except Exception:
+                b = os.path.dirname(os.path.abspath(__file__))
+            if sys.platform == "win32" and not os.access(b, os.W_OK):
+                appdata = os.environ.get("APPDATA")
+                if appdata:
+                    folder = os.path.join(appdata, "EasyRemoteDesktop")
+                    try:
+                        os.makedirs(folder, exist_ok=True)
+                        return os.path.join(folder, "custom_ip_range.json")
+                    except Exception:
+                        pass
+            return os.path.join(b, "custom_ip_range.json")
 
-        # VPN Toolbar
-        vpn_toolbar = tk.Frame(dialog, bg=getattr(self, 'card_color', '#252836'), bd=0, padx=10, pady=6)
+        def load_saved_custom_ip(default_s, default_e):
+            fpath = get_custom_ip_file()
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        s = data.get("start_ip", "").strip()
+                        e = data.get("end_ip", "").strip()
+                        if s and e:
+                            return s, e
+                except Exception:
+                    pass
+            return default_s, default_e
+
+        def save_saved_custom_ip(s_ip, e_ip):
+            fpath = get_custom_ip_file()
+            try:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    json.dump({"start_ip": s_ip.strip(), "end_ip": e_ip.strip()}, f, indent=2)
+            except Exception as e:
+                print(f"[Custom IP] Save error: {e}")
+
+        # Giá trị dải IP mặc định (ưu tiên dải đã lưu lần trước -> subnet VPN gợi ý -> subnet LAN hiện tại)
+        default_start = "192.168.1.1"
+        default_end = "192.168.1.254"
+        try:
+            detected_vpns = detect_vpn_interfaces()
+            if detected_vpns:
+                bp = detected_vpns[0].get("base_prefix", "")
+                if bp:
+                    default_start = f"{bp}1"
+                    default_end = f"{bp}254"
+            else:
+                local_ip_first = getattr(self, 'local_ip', '').split(',')[0].strip()
+                if local_ip_first and '.' in local_ip_first:
+                    parts = local_ip_first.split('.')
+                    if len(parts) == 4:
+                        default_start = f"{parts[0]}.{parts[1]}.{parts[2]}.1"
+                        default_end = f"{parts[0]}.{parts[1]}.{parts[2]}.254"
+        except Exception:
+            pass
+
+        init_start, init_end = load_saved_custom_ip(default_start, default_end)
+
+        # VPN / IP Range Toolbar (quét trực tiếp theo dải IP nhập vào, không phân biệt loại kết nối VPN)
+        toolbar_bg = getattr(self, 'card_color', '#252836')
+        vpn_toolbar = tk.Frame(dialog, bg=toolbar_bg, bd=0, padx=10, pady=6)
         vpn_toolbar.pack(fill=tk.X, padx=20, pady=(0, 6))
 
-        if detected_vpns:
-            vpn_names = ", ".join(f"{v['vpn_type']} ({v['ip']})" for v in detected_vpns)
-            vpn_info_text = f"🛡 " + _("Phát hiện VPN: ") + vpn_names
-            lbl_vpn_info = tk.Label(vpn_toolbar, text=vpn_info_text, font=("Segoe UI", 8), fg="#56CCF2", bg=getattr(self, 'card_color', '#252836'), anchor=tk.W)
-            lbl_vpn_info.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        else:
-            lbl_vpn_info = tk.Label(vpn_toolbar, text="🛡 " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"), font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=getattr(self, 'card_color', '#252836'), anchor=tk.W)
-            lbl_vpn_info.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        btn_vpn_scan = tk.Button(
+            vpn_toolbar, text=_("🛡 Quét VPN"), font=("Segoe UI", 8, "bold"),
+            fg="#FFFFFF", activeforeground="#FFFFFF", bg="#8E44AD", activebackground="#9B59B6",
+            relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2"
+        )
+        btn_vpn_scan.pack(side=tk.RIGHT, padx=(8, 0))
 
-        btn_vpn_scan = tk.Button(vpn_toolbar, text=_("🛡 Quét VPN"), font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg="#8E44AD", activebackground="#9B59B6", relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2")
-        btn_vpn_scan.pack(side=tk.RIGHT, padx=(4, 0))
+        lbl_ip_from = tk.Label(vpn_toolbar, text="🌐 " + _("Từ IP:"), font=("Segoe UI", 8, "bold"), fg=self.text_white, bg=toolbar_bg)
+        lbl_ip_from.pack(side=tk.LEFT, padx=(0, 5))
 
-        btn_custom_scan = tk.Button(vpn_toolbar, text=_("🌐 Dải IP..."), font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg="#2980B9", activebackground="#3498DB", relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2")
-        btn_custom_scan.pack(side=tk.RIGHT, padx=(0, 4))
+        start_var = tk.StringVar(value=init_start)
+        entry_start = tk.Entry(
+            vpn_toolbar, textvariable=start_var, width=15, font=("Segoe UI", 9),
+            fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3
+        )
+        entry_start.pack(side=tk.LEFT, padx=(0, 10))
+
+        lbl_ip_to = tk.Label(vpn_toolbar, text=_("Đến IP:"), font=("Segoe UI", 8, "bold"), fg=self.text_white, bg=toolbar_bg)
+        lbl_ip_to.pack(side=tk.LEFT, padx=(0, 5))
+
+        end_var = tk.StringVar(value=init_end)
+        entry_end = tk.Entry(
+            vpn_toolbar, textvariable=end_var, width=15, font=("Segoe UI", 9),
+            fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3
+        )
+        entry_end.pack(side=tk.LEFT, padx=(0, 4))
 
         # Progress / Status label
         progress_label = tk.Label(dialog, text="", font=("Segoe UI", 8, "italic"), fg="#56CCF2", bg=self.bg_color)
@@ -1048,9 +1120,17 @@ class NetworkMixin:
                     self.tw = None
                 self.lbl_widget = None
 
-        # Gắn tooltip cho các nút trên thanh công cụ VPN
-        RowTooltip(btn_vpn_scan, _("Dò tìm các máy trong mạng VPN đang kết nối (ZeroTier, Tailscale, Radmin...)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
-        RowTooltip(btn_custom_scan, _("Quét theo dải địa chỉ IP tùy chọn (VD: 192.168.1.1 đến 192.168.1.254)"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+        # Gắn tooltip cho thanh nhập dải IP và nút Quét VPN
+        RowTooltip(
+            btn_vpn_scan,
+            _("Quét các máy tính theo dải địa chỉ IP đã nhập (không phân biệt loại kết nối VPN)"),
+            bg="#FFFFFF", fg="#000000", border_color="#B0B7C3"
+        )
+        RowTooltip(
+            [entry_start, entry_end],
+            _("Nhập dải IP cần quét (VD: 192.168.10.1 đến 192.168.10.254 hoặc gõ tắt 192.168.10.xxx)"),
+            bg="#FFFFFF", fg="#000000", border_color="#B0B7C3"
+        )
 
         # Bộ đệm cập nhật danh sách chống nháy giật màn hình
         refresh_timer = [None]
@@ -1078,17 +1158,30 @@ class NetworkMixin:
             s_clean = ''.join(ch for ch in str((p_info or {}).get("saved_id") or "") if ch.isdigit())
             if my_clean and (my_clean == k_clean or my_clean == h_clean or my_clean == s_clean):
                 return True
+
             p_name = str((p_info or {}).get("computer_name") or "").strip().lower()
             my_hostname = socket.gethostname().strip().lower()
             if p_name and p_name == my_hostname and p_name not in ("unknown", "không rõ", "localhost"):
                 return True
-            p_ips = [x.strip() for x in (str((p_info or {}).get("local_ip", "")) + "," + str((p_info or {}).get("source_ip", ""))).split(",") if x.strip()]
+
             try:
                 my_ips = get_all_local_ipv4()
             except Exception:
                 my_ips = set()
-            if any(ip in my_ips for ip in p_ips if not ip.startswith("127.")):
+
+            src_ip = str((p_info or {}).get("source_ip") or "").strip()
+            if src_ip and not src_ip.startswith("127.") and src_ip in my_ips:
                 return True
+
+            # Nếu cả máy mình và máy đích đều có HWID thực 12 chữ số (đã xác thực từ probe_pong) và KHÁC nhau,
+            # tuyệt đối không loại nhầm chỉ vì trùng IP phụ (VirtualBox 192.168.56.1 / mạng nhà 192.168.1.x)
+            if len(my_clean) == 12 and len(h_clean) == 12 and (p_info or {}).get("hwid_verified") and h_clean != my_clean:
+                return False
+
+            p_ips = [x.strip() for x in str((p_info or {}).get("local_ip") or "").split(",") if x.strip()]
+            if any(ip in my_ips for ip in p_ips if not ip.startswith("127.") and ip != "192.168.56.1"):
+                return True
+
             my_macs_raw = str(getattr(self, "my_macs", "") or "")
             if not my_macs_raw:
                 try:
@@ -1096,8 +1189,16 @@ class NetworkMixin:
                     my_macs_raw = str(get_hwid()[2] or "")
                 except Exception:
                     pass
-            my_mac_list = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in my_macs_raw.split(',') if len(m) >= 12]
-            p_macs = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str((p_info or {}).get("macs") or "").split(',') if len(m) >= 12]
+            my_mac_list = [
+                re.sub(r'[^A-Fa-f0-9]', '', m).upper()
+                for m in my_macs_raw.split(',')
+                if len(m) >= 12 and not re.sub(r'[^A-Fa-f0-9]', '', m).upper().startswith("0A00270000")
+            ]
+            p_macs = [
+                re.sub(r'[^A-Fa-f0-9]', '', m).upper()
+                for m in str((p_info or {}).get("macs") or "").split(',')
+                if len(m) >= 12 and not re.sub(r'[^A-Fa-f0-9]', '', m).upper().startswith("0A00270000")
+            ]
             if any(m in my_mac_list for m in p_macs if not all(c == '0' for c in m)):
                 return True
             return False
@@ -1133,232 +1234,130 @@ class NetworkMixin:
                     self.lan_peers[p["hwid"]] = p
                     scan_state.setdefault("online_status", {})[p["hwid"]] = True
 
-            # Chỉ lên lịch làm mới khi không ở trong tiến trình quét hàng loạt
-            if not scan_state.get("is_scanning", False):
-                if dialog.winfo_exists():
-                    schedule_refresh(250)
+            # Cập nhật trực tiếp lên danh sách ngay khi phát hiện máy mới (bộ đệm 250ms chống giật)
+            if dialog.winfo_exists():
+                schedule_refresh(250)
 
-        def get_custom_ip_file():
-            try:
-                from pclist import get_app_data_dir
-                b = get_app_data_dir()
-            except Exception:
-                b = os.path.dirname(os.path.abspath(__file__))
-            if sys.platform == "win32" and not os.access(b, os.W_OK):
-                appdata = os.environ.get("APPDATA")
-                if appdata:
-                    folder = os.path.join(appdata, "EasyRemoteDesktop")
-                    try:
-                        os.makedirs(folder, exist_ok=True)
-                        return os.path.join(folder, "custom_ip_range.json")
-                    except Exception:
-                        pass
-            return os.path.join(b, "custom_ip_range.json")
+        def _extract_ip_prefix(ip_text):
+            m = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.', str(ip_text or "").strip())
+            if m:
+                o1, o2, o3 = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                if all(0 <= x <= 255 for x in (o1, o2, o3)):
+                    return f"{o1}.{o2}.{o3}."
+            return ""
 
-        def load_saved_custom_ip(default_s, default_e):
-            fpath = get_custom_ip_file()
-            if os.path.exists(fpath):
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        s = data.get("start_ip", "").strip()
-                        e = data.get("end_ip", "").strip()
-                        if s and e:
-                            return s, e
-                except Exception:
-                    pass
-            return default_s, default_e
+        last_start_prefix = [_extract_ip_prefix(init_start)]
 
-        def save_saved_custom_ip(s_ip, e_ip):
-            fpath = get_custom_ip_file()
-            try:
-                with open(fpath, "w", encoding="utf-8") as f:
-                    json.dump({"start_ip": s_ip.strip(), "end_ip": e_ip.strip()}, f, indent=2)
-            except Exception as e:
-                print(f"[Custom IP] Save error: {e}")
+        def _on_start_ip_change(*_args):
+            new_pfx = _extract_ip_prefix(start_var.get())
+            if not new_pfx:
+                return
+            old_pfx = last_start_prefix[0]
+            if new_pfx != old_pfx:
+                cur_end = end_var.get().strip()
+                if not cur_end or (old_pfx and cur_end.startswith(old_pfx)):
+                    end_suffix = "254"
+                    m_end = re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.(\d{1,3})$', cur_end)
+                    if m_end and 1 <= int(m_end.group(1)) <= 255:
+                        end_suffix = m_end.group(1)
+                    end_var.set(f"{new_pfx}{end_suffix}")
+                last_start_prefix[0] = new_pfx
+
+        def _on_start_focus_out(_event=None):
+            s_norm, e_norm = parse_ip_range_input(start_var.get(), end_var.get())
+            if s_norm and e_norm:
+                if start_var.get().strip() != s_norm:
+                    start_var.set(s_norm)
+                if end_var.get().strip() != e_norm:
+                    end_var.set(e_norm)
+                last_start_prefix[0] = _extract_ip_prefix(s_norm)
+
+        start_var.trace_add("write", _on_start_ip_change)
+        entry_start.bind("<FocusOut>", _on_start_focus_out)
 
         def run_vpn_scan_background():
-            """Quét tất cả các dải IP của các VPN đang kết nối trong luồng nền."""
+            """Quét trực tiếp theo dải IP người dùng nhập vào (không phân biệt loại kết nối VPN hiện tại)."""
             if scan_state["is_scanning"]:
+                scan_state["cancel_event"].set()
+                btn_vpn_scan.config(state=tk.DISABLED, text=_("Đang dừng..."))
                 return
+
+            s_ip, e_ip = parse_ip_range_input(start_var.get(), end_var.get())
+            if not s_ip or not e_ip:
+                progress_label.config(
+                    text=_("Dải IP không hợp lệ! Ví dụ: 192.168.10.1 đến 192.168.10.254"),
+                    fg="#F39C12"
+                )
+                dialog.after(3500, lambda: progress_label.config(text="", fg="#56CCF2") if dialog.winfo_exists() else None)
+                return
+
+            start_var.set(s_ip)
+            end_var.set(e_ip)
+            last_start_prefix[0] = _extract_ip_prefix(s_ip)
+            save_saved_custom_ip(s_ip, e_ip)
+
             scan_state["is_scanning"] = True
             scan_state["cancel_event"].clear()
-            btn_vpn_scan.config(state=tk.DISABLED, text=_("Đang quét..."))
+            progress_label.config(fg="#56CCF2")
+            btn_vpn_scan.config(
+                state=tk.NORMAL,
+                text=_("⏹ Dừng quét"),
+                bg="#D9534F",
+                activebackground="#C9302C"
+            )
 
             def _thread():
                 try:
-                    vpns = detect_vpn_interfaces()
-                    # Cập nhật thông tin VPN trên thanh công cụ
-                    if vpns and dialog.winfo_exists():
-                        vpn_names = ", ".join(f"{v['vpn_type']} ({v['ip']})" for v in vpns)
-                        dialog.after(0, lambda n=vpn_names: lbl_vpn_info.config(
-                            text=f"🛡 " + _("Phát hiện VPN: ") + n,
-                            fg="#56CCF2",
-                            font=("Segoe UI", 8, "bold")
-                        ))
-                    elif dialog.winfo_exists():
-                        dialog.after(0, lambda: lbl_vpn_info.config(
-                            text="🛡 " + _("VPN: Chưa phát hiện card mạng VPN (Có thể quét theo dải IP tùy chọn)"),
-                            fg=self.text_gray,
-                            font=("Segoe UI", 8, "italic")
-                        ))
-
-                    if not vpns:
+                    def _prog(cur, tot, target_ip):
                         if dialog.winfo_exists():
-                            dialog.after(0, lambda: progress_label.config(text=_("Không tìm thấy kết nối VPN nào đang hoạt động.")))
-                            dialog.after(2500, lambda: progress_label.config(text=""))
-                        return
-                        
-                    for vpn in vpns:
-                        if scan_state["cancel_event"].is_set():
-                            break
-                        v_name = vpn.get("vpn_type", "VPN")
-                        subnet = vpn.get("target_subnet", "")
-                        
-                        def _prog(cur, tot, target_ip):
-                            if dialog.winfo_exists():
-                                dialog.after(0, lambda c=cur, t=tot, tip=target_ip, v=v_name: progress_label.config(
-                                    text=_("Đang quét {vpn} ({tip} - {c}/{t})...").format(vpn=v, tip=tip, c=c, t=t)
-                                ))
+                            dialog.after(0, lambda c=cur, t=tot, tip=target_ip: progress_label.config(
+                                text=_("Đang quét {ip} ({c}/{t})...").format(ip=tip, c=c, t=t)
+                            ) if dialog.winfo_exists() else None)
 
-                        with self.lan_peers_lock:
-                            current_known = dict(self.lan_peers)
-                        found = scan_vpn_network(
-                            vpn, 
-                            ports=[12345, 12346], 
-                            max_workers=60, 
-                            progress_callback=_prog, 
-                            cancel_event=scan_state["cancel_event"],
-                            peer_found_callback=_on_peer_found,
-                            known_peers=current_known
-                        )
+                    with self.lan_peers_lock:
+                        current_known = dict(self.lan_peers)
 
+                    found = scan_custom_range(
+                        s_ip, e_ip,
+                        ports=[12345, 12346],
+                        max_workers=75,
+                        progress_callback=_prog,
+                        cancel_event=scan_state["cancel_event"],
+                        peer_found_callback=_on_peer_found,
+                        known_peers=current_known
+                    )
+
+                    was_cancelled = scan_state["cancel_event"].is_set()
                     self.save_lan_peers()
                     if dialog.winfo_exists():
-                        with self.lan_peers_lock:
-                            count_now = len(self.lan_peers)
-                        dialog.after(0, lambda cnt=count_now: progress_label.config(text=_("Quét VPN hoàn tất! Tìm thấy {count} máy.").format(count=cnt)))
-                        dialog.after(4000, lambda: progress_label.config(text=""))
+                        found_cnt = len(found)
+                        if was_cancelled:
+                            msg_done = _("Đã dừng quét ({s} - {e}). Đã tìm thấy {count} máy.").format(s=s_ip, e=e_ip, count=found_cnt)
+                        else:
+                            msg_done = _("Quét hoàn tất ({s} - {e})! Tìm thấy {count} máy trực tuyến.").format(s=s_ip, e=e_ip, count=found_cnt)
+                        dialog.after(0, lambda m=msg_done: progress_label.config(text=m) if dialog.winfo_exists() else None)
+                        dialog.after(4500, lambda: progress_label.config(text="") if dialog.winfo_exists() and not scan_state["is_scanning"] else None)
                 except Exception as ex:
                     print(f"[VPN Scan] Error: {ex}")
                 finally:
                     scan_state["is_scanning"] = False
                     self.save_lan_peers()
                     if dialog.winfo_exists():
-                        dialog.after(0, lambda: btn_vpn_scan.config(state=tk.NORMAL, text=_("🛡 Quét VPN")))
+                        dialog.after(0, lambda: btn_vpn_scan.config(
+                            state=tk.NORMAL,
+                            text=_("🛡 Quét VPN"),
+                            bg="#8E44AD",
+                            activebackground="#9B59B6"
+                        ) if dialog.winfo_exists() else None)
                         schedule_refresh(50)
 
             threading.Thread(target=_thread, daemon=True).start()
 
         btn_vpn_scan.config(command=run_vpn_scan_background)
-
-        def open_custom_ip_dialog():
-            """Hộp thoại nhập dải IP tùy chọn để quét."""
-            ip_dialog = tk.Toplevel(dialog)
-            ip_dialog.title(_("Quét dải IP tùy chọn"))
-            ip_dialog.resizable(False, False)
-            ip_dialog.configure(bg=self.bg_color)
-            ip_dialog.transient(dialog)
-            ip_dialog.grab_set()
-            ip_dialog.bind("<Escape>", lambda e: ip_dialog.destroy())
-
-            pw, ph = 380, 220
-            px = dialog.winfo_x() + (dialog.winfo_width() - pw) // 2
-            py = dialog.winfo_y() + (dialog.winfo_height() - ph) // 2
-            ip_dialog.geometry(f"{pw}x{ph}+{px}+{py}")
-
-            default_start = "192.168.1.1"
-            default_end = "192.168.1.254"
-            try:
-                vpns_now = detect_vpn_interfaces()
-                if vpns_now:
-                    bp = vpns_now[0].get("base_prefix", "")
-                    if bp:
-                        default_start = f"{bp}1"
-                        default_end = f"{bp}254"
-                else:
-                    local_ip = getattr(self, 'local_ip', '').split(',')[0].strip()
-                    if local_ip and '.' in local_ip:
-                        parts = local_ip.split('.')
-                        if len(parts) == 4:
-                            default_start = f"{parts[0]}.{parts[1]}.{parts[2]}.1"
-                            default_end = f"{parts[0]}.{parts[1]}.{parts[2]}.254"
-            except Exception:
-                pass
-
-            cur_start, cur_end = load_saved_custom_ip(default_start, default_end)
-
-            tk.Label(ip_dialog, text=_("Nhập dải IP mạng cần quét"), font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.bg_color).pack(pady=(15, 10))
-
-            frame_inputs = tk.Frame(ip_dialog, bg=self.bg_color)
-            frame_inputs.pack(padx=20, fill=tk.X, pady=(0, 15))
-
-            tk.Label(frame_inputs, text=_("Từ IP:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).grid(row=0, column=0, sticky="w", pady=4)
-            start_var = tk.StringVar(value=cur_start)
-            entry_start = tk.Entry(frame_inputs, textvariable=start_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3)
-            entry_start.grid(row=0, column=1, padx=(10, 0), sticky="ew", pady=4)
-
-            tk.Label(frame_inputs, text=_("Đến IP:"), font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color).grid(row=1, column=0, sticky="w", pady=4)
-            end_var = tk.StringVar(value=cur_end)
-            entry_end = tk.Entry(frame_inputs, textvariable=end_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3)
-            entry_end.grid(row=1, column=1, padx=(10, 0), sticky="ew", pady=4)
-            frame_inputs.columnconfigure(1, weight=1)
-
-            def do_start_custom_scan():
-                s_ip = start_var.get().strip()
-                e_ip = end_var.get().strip()
-                save_saved_custom_ip(s_ip, e_ip)
-                ip_dialog.destroy()
-                if scan_state["is_scanning"]:
-                    return
-                scan_state["is_scanning"] = True
-                scan_state["cancel_event"].clear()
-                
-                def _c_thread():
-                    try:
-                        def _prog(cur, tot, tip):
-                            if dialog.winfo_exists():
-                                dialog.after(0, lambda c=cur, t=tot, ip=tip: progress_label.config(
-                                    text=_("Đang quét {ip} ({c}/{t})...").format(ip=ip, c=c, t=t)
-                                ))
-                        with self.lan_peers_lock:
-                            current_known = dict(self.lan_peers)
-                        found = scan_custom_range(
-                            s_ip, e_ip, 
-                            ports=[12345, 12346], 
-                            max_workers=60, 
-                            progress_callback=_prog, 
-                            cancel_event=scan_state["cancel_event"],
-                            peer_found_callback=_on_peer_found,
-                            known_peers=current_known
-                        )
-                        self.save_lan_peers()
-                        if dialog.winfo_exists():
-                            with self.lan_peers_lock:
-                                count_now = len(self.lan_peers)
-                            dialog.after(0, lambda cnt=count_now: progress_label.config(text=_("Quét dải IP hoàn tất! Tìm thấy {count} máy.").format(count=cnt)))
-                            dialog.after(4000, lambda: progress_label.config(text=""))
-                    except Exception as err:
-                        print(f"[Custom Scan] Error: {err}")
-                    finally:
-                        scan_state["is_scanning"] = False
-                        self.save_lan_peers()
-                        if dialog.winfo_exists():
-                            schedule_refresh(50)
-                            
-                threading.Thread(target=_c_thread, daemon=True).start()
-
-            entry_start.bind("<Return>", lambda e: do_start_custom_scan())
-            entry_end.bind("<Return>", lambda e: do_start_custom_scan())
-            entry_start.bind("<KP_Enter>", lambda e: do_start_custom_scan())
-            entry_end.bind("<KP_Enter>", lambda e: do_start_custom_scan())
-
-            btn_f = tk.Frame(ip_dialog, bg=self.bg_color)
-            btn_f.pack(fill=tk.X, padx=20, pady=(0, 10))
-            tk.Button(btn_f, text=_("Quét ngay"), font=("Segoe UI", 9, "bold"), fg="#FFFFFF", activeforeground="#FFFFFF", bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_start_custom_scan).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-            tk.Button(btn_f, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=ip_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
-
-        btn_custom_scan.config(command=open_custom_ip_dialog)
+        entry_start.bind("<Return>", lambda e: run_vpn_scan_background())
+        entry_end.bind("<Return>", lambda e: run_vpn_scan_background())
+        entry_start.bind("<KP_Enter>", lambda e: run_vpn_scan_background())
+        entry_end.bind("<KP_Enter>", lambda e: run_vpn_scan_background())
 
         # Biến lọc: Chỉ hiện máy có tên xác định (mặc định BẬT)
         filter_named_var = tk.BooleanVar(value=True)
@@ -1473,7 +1472,14 @@ class NetworkMixin:
 
             def _make_tooltip_text(h_info, is_on, f_id):
                 ip_str = h_info.get('local_ip', '')
-                ip_list = [ip.strip() for ip in ip_str.split(',') if ip.strip()]
+                src_ip_tip = str(h_info.get('source_ip') or '').strip()
+                ip_list = []
+                if src_ip_tip and not src_ip_tip.startswith('127.'):
+                    ip_list.append(src_ip_tip)
+                for ip_item in ip_str.split(','):
+                    ip_clean = ip_item.strip()
+                    if ip_clean and ip_clean not in ip_list:
+                        ip_list.append(ip_clean)
                 display_ip = f"{ip_list[0]} (+{len(ip_list)-1})" if len(ip_list) > 1 else (ip_list[0] if ip_list else ip_str)
 
                 if is_on is True:
@@ -1487,12 +1493,15 @@ class NetworkMixin:
                 sp = (matched_c.get("password", "") if matched_c else "") or h_info.get("saved_password", "")
                 pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
 
+                raw_net_tip = str(h_info.get('network_type') or 'LAN').strip()
+                net_disp = 'LAN' if raw_net_tip.upper() == 'LAN' else 'VPN'
+
                 tip_lines = [
                     f"💻 {h_info.get('computer_name', 'Unknown')}",
                     "──────────────────────────────",
                     f"• ID: {f_id}",
                     f"• IP: {display_ip}:{h_info.get('port', BOUND_PORT)}",
-                    f"• Mạng: {h_info.get('network_type') or 'LAN'}",
+                    f"• Mạng: {net_disp}",
                 ]
                 if h_info.get("os"):
                     tip_lines.append(f"• Hệ điều hành: {h_info['os']}")
@@ -1682,35 +1691,29 @@ class NetworkMixin:
                 lbl_dot = tk.Label(row, text="●", font=("Segoe UI", 9), fg=dot_color, bg=self.card_color)
                 lbl_dot.pack(side=tk.LEFT, padx=(8, 4))
 
-                # Network Badge
+                # Network Badge (chỉ phân biệt LAN hoặc VPN chung, không phân biệt loại giao thức VPN cụ thể)
                 from utils.vpn_discovery import is_in_physical_lan_subnet
-                all_candidate_ips = f"{info.get('source_ip', '')},{info.get('local_ip', '')}"
-                is_physical_lan = is_in_physical_lan_subnet(all_candidate_ips)
+                primary_ip_check = str(info.get('source_ip') or '').strip() or str(info.get('local_ip') or '').split(',')[0].strip()
+                is_physical_lan = is_in_physical_lan_subnet(primary_ip_check)
 
-                net_type = str(info.get("network_type") or "LAN")
+                net_type = str(info.get("network_type") or "LAN").strip()
                 nt_lower = net_type.lower()
-                if "windows" in nt_lower:
-                    badge_text = "WIN VPN"
-                    badge_bg = "#4A235A"
-                    badge_fg = "#E8DAEF"
-                elif any(k in nt_lower for k in ("vpn", "tailscale", "zerotier", "hamachi", "radmin", "wireguard", "openvpn")):
-                    badge_text = "VPN"
-                    badge_bg = "#1B334D"
-                    badge_fg = "#56CCF2"
-                elif is_physical_lan:
-                    # Thuộc subnet LAN vật lý cục bộ (luôn gán nhãn LAN)
-                    badge_text = "LAN"
-                    badge_bg = "#145A32"
-                    badge_fg = "#D4EFDF"
-                    if "custom" in nt_lower:
-                        info["network_type"] = "LAN"
+                if nt_lower != "lan":
+                    if "custom" in nt_lower and is_physical_lan:
+                        badge_text = "LAN"
+                        badge_bg = "#145A32"
+                        badge_fg = "#D4EFDF"
+                        normalized_net = "LAN"
+                    else:
+                        badge_text = "VPN"
+                        badge_bg = "#1B334D"
+                        badge_fg = "#56CCF2"
+                        normalized_net = "VPN"
+                    if info.get("network_type") != normalized_net:
+                        info["network_type"] = normalized_net
                         with self.lan_peers_lock:
                             if hwid in self.lan_peers:
-                                self.lan_peers[hwid]["network_type"] = "LAN"
-                elif "custom" in nt_lower:
-                    badge_text = "IP SCAN"
-                    badge_bg = "#4D3319"
-                    badge_fg = "#F39C12"
+                                self.lan_peers[hwid]["network_type"] = normalized_net
                 else:
                     badge_text = "LAN"
                     badge_bg = "#145A32"
@@ -1911,7 +1914,7 @@ class NetworkMixin:
                     h, inf = item_entry
                     if not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
                         return
-                    is_on, u_data = probe_peer_direct(inf, timeout=0.35)
+                    is_on, u_data = probe_peer_direct(inf, timeout=0.85)
                     scan_state.setdefault("online_status", {})[h] = is_on
                     if is_on and u_data:
                         with self.lan_peers_lock:
@@ -2090,12 +2093,15 @@ class NetworkMixin:
         ip = peer_info.get("local_ip", "")
         port = peer_info.get("port", BOUND_PORT)
         
-        # Thử kết nối tới tất cả IP nếu có nhiều
-        ips_to_try = [i.strip() for i in ip.split(',') if i.strip()]
-        # Thêm source_ip nếu khác
-        source_ip = peer_info.get("source_ip", "")
-        if source_ip and source_ip not in ips_to_try:
+        # Ưu tiên kết nối tới source_ip (IP thực tế đã dò thấy qua VPN/LAN) trước các local_ip phụ
+        ips_to_try = []
+        source_ip = str(peer_info.get("source_ip") or "").strip()
+        if source_ip and not source_ip.startswith("127."):
             ips_to_try.append(source_ip)
+        for i in ip.split(','):
+            i_clean = i.strip()
+            if i_clean and not i_clean.startswith("127.") and i_clean not in ips_to_try:
+                ips_to_try.append(i_clean)
             
         ports_to_try = [port]
         for p_alt in (12345, 12346):
@@ -2108,10 +2114,11 @@ class NetworkMixin:
         
         for try_ip in ips_to_try:
             for try_port in ports_to_try:
+                s = None
                 try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(2.5)
-                    s.connect((try_ip, try_port))
+                    s, _used_tun = connect_tcp_any_route(try_ip, try_port, timeout=2.5)
+                    if not s:
+                        raise ConnectionError(f"Timed out / unreachable {try_ip}:{try_port}")
                     s.settimeout(15.0)
                     sock = s
                     connected = True
@@ -2120,8 +2127,9 @@ class NetworkMixin:
                     break
                 except Exception as e:
                     print(f"[LAN Direct] Failed to connect to {try_ip}:{try_port}: {e}")
-                    try: s.close()
-                    except: pass
+                    if s:
+                        try: s.close()
+                        except: pass
                     continue
             if connected:
                 break
