@@ -195,7 +195,8 @@ def set_keepalive(sock):
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         if os.name == 'nt':
-            sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 30000, 10000))
+            sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+            sock.ioctl(sio_keepalive, (1, 30000, 10000))
         else:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)

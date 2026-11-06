@@ -2161,7 +2161,8 @@ class NetworkMixin:
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             if sys.platform == "win32":
-                sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 10000, 2000))
+                sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                sock.ioctl(sio_keepalive, (1, 10000, 2000))
         except: pass
 
         try:
@@ -2340,7 +2341,8 @@ class NetworkMixin:
                 try:
                     if os.name == 'nt':
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                        sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 30000, 10000))
+                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                        sock.ioctl(sio_keepalive, (1, 30000, 10000))
                     else:
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 except Exception: pass
@@ -3146,7 +3148,8 @@ class NetworkMixin:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             if sys.platform == "win32":
                 ka = (1, 10000, 2000) if is_lan_socket(sock) else (1, 1000, 1000)
-                sock.ioctl(socket.SIOC_KEEPALIVE_VALS, ka)
+                sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                sock.ioctl(sio_keepalive, ka)
         except Exception as e:
             print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
             

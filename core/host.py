@@ -2964,7 +2964,8 @@ class HostMixin:
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     if not _is_legacy_windows_host():
                         ka = (1, 10000, 2000) if is_lan_socket(conn) else (1, 1000, 1000)
-                        conn.ioctl(socket.SIOC_KEEPALIVE_VALS, ka)
+                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                        conn.ioctl(sio_keepalive, ka)
                 except Exception as e:
                     print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Host: {e}")
                 

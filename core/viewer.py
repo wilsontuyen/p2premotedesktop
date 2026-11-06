@@ -168,11 +168,15 @@ client_net_bytes_count = 0
 client_net_speed_timer = 0.0
 
 
-def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_theme, is_android, net_info, font_names="Segoe UI, Arial"):
+def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_theme, is_android, net_info, font_names="Segoe UI, Arial", alpha=255, draw_title=True):
     """
     Vẽ thông tin mạng (Ping / Latency, Tốc độ trung bình / Băng thông, Chất lượng, Phương thức kết nối)
-    lên màn hình chờ của Viewer khi đang đợi khung hình từ máy chủ.
+    lên màn hình Viewer. Hỗ trợ hiệu ứng mờ dần (Fade Out) mượt mà qua tham số alpha (0 - 255).
     """
+    if alpha <= 0:
+        return
+
+    # 1. Xác định bảng màu theo theme
     if is_android:
         card_bg = (40, 42, 48)
         card_border = (65, 72, 85)
@@ -244,24 +248,29 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         val_font = pygame.font.Font(None, 20)
         sub_font = pygame.font.Font(None, 15)
 
-    # 1. Tiêu đề trạng thái
-    wait_surf = title_font.render(title_text, True, text_title)
-    wait_rect = wait_surf.get_rect(center=(cx, cy - 60))
-    screen.blit(wait_surf, wait_rect)
-
-    # 2. Khung Card thông số mạng
     card_w = min(480, max(360, window_w - 40))
     card_h = 96
     card_x = cx - card_w // 2
-    card_y = cy - 20
-    card_rect = pygame.Rect(card_x, card_y, card_w, card_h)
+    card_y = (cy - 20) if draw_title else (cy - card_h // 2)
+
+    # 2. Tiêu đề trạng thái (chỉ vẽ khi draw_title=True)
+    if draw_title:
+        wait_surf = title_font.render(title_text, True, text_title)
+        wait_rect = wait_surf.get_rect(center=(cx, cy - 60))
+        if alpha < 255:
+            wait_surf.set_alpha(int(alpha))
+        screen.blit(wait_surf, wait_rect)
+
+    # 3. Tạo Surface độc lập cho Card để hỗ trợ set_alpha mờ dần mượt mà
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_rect = pygame.Rect(0, 0, card_w, card_h)
 
     try:
-        pygame.draw.rect(screen, card_bg, card_rect, border_radius=10)
-        pygame.draw.rect(screen, card_border, card_rect, width=1, border_radius=10)
+        pygame.draw.rect(card_surf, card_bg, card_rect, border_radius=10)
+        pygame.draw.rect(card_surf, card_border, card_rect, width=1, border_radius=10)
     except TypeError:
-        pygame.draw.rect(screen, card_bg, card_rect)
-        pygame.draw.rect(screen, card_border, card_rect, width=1)
+        pygame.draw.rect(card_surf, card_bg, card_rect)
+        pygame.draw.rect(card_surf, card_border, card_rect, width=1)
 
     ping = net_info.get("ping") if net_info.get("ping") is not None else net_info.get("latency")
     bw = net_info.get("bandwidth") if net_info.get("bandwidth") is not None else net_info.get("avg_speed")
@@ -271,9 +280,9 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
     col_w = card_w // 3
 
     # === CỘT 1: PING / LATENCY ===
-    c1_cx = card_x + col_w // 2
+    c1_cx = col_w // 2
     lbl_ping_surf = lbl_font.render(_("Độ trễ (Latency)"), True, lbl_col)
-    screen.blit(lbl_ping_surf, lbl_ping_surf.get_rect(center=(c1_cx, card_y + 18)))
+    card_surf.blit(lbl_ping_surf, lbl_ping_surf.get_rect(center=(c1_cx, 18)))
 
     if ping is not None and float(ping) >= 0:
         p_val = float(ping)
@@ -289,25 +298,25 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
             else:
                 p_col = (225, 60, 60)
         v_ping_surf = val_font.render(ping_str, True, p_col)
-        v_ping_rect = v_ping_surf.get_rect(center=(c1_cx + 6, card_y + 40))
+        v_ping_rect = v_ping_surf.get_rect(center=(c1_cx + 6, 40))
         dot_x = v_ping_rect.left - 8
         dot_y = v_ping_rect.centery
-        pygame.draw.circle(screen, p_col, (dot_x, dot_y), 4)
-        screen.blit(v_ping_surf, v_ping_rect)
+        pygame.draw.circle(card_surf, p_col, (dot_x, dot_y), 4)
+        card_surf.blit(v_ping_surf, v_ping_rect)
     else:
         v_ping_surf = val_font.render(_("Đang đo..."), True, lbl_col)
-        screen.blit(v_ping_surf, v_ping_surf.get_rect(center=(c1_cx, card_y + 40)))
+        card_surf.blit(v_ping_surf, v_ping_surf.get_rect(center=(c1_cx, 40)))
 
     # === CỘT 2: TỐC ĐỘ MẠNG / BĂNG THÔNG ===
-    c2_cx = card_x + col_w + col_w // 2
+    c2_cx = col_w + col_w // 2
     lbl_bw_surf = lbl_font.render(_("Tốc độ trung bình"), True, lbl_col)
-    screen.blit(lbl_bw_surf, lbl_bw_surf.get_rect(center=(c2_cx, card_y + 18)))
+    card_surf.blit(lbl_bw_surf, lbl_bw_surf.get_rect(center=(c2_cx, 18)))
 
     if mode == "lan":
         v_bw_surf = val_font.render("> 100 Mbps", True, (34, 160, 80))
-        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 36)))
+        card_surf.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, 36)))
         s_bw_surf = sub_font.render(_("Mạng LAN (Siêu tốc)"), True, lbl_col)
-        screen.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, card_y + 53)))
+        card_surf.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, 53)))
     elif bw is not None and float(bw) > 0:
         b_val = float(bw)
         if b_val >= 20.0:
@@ -317,18 +326,18 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         else:
             b_col = (225, 60, 60)
         v_bw_surf = val_font.render(f"{b_val:.2f} Mbps", True, b_col)
-        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 36)))
+        card_surf.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, 36)))
         mb_str = f"~ {b_val / 8.0:.2f} MB/s"
         s_bw_surf = sub_font.render(mb_str, True, lbl_col)
-        screen.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, card_y + 53)))
+        card_surf.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, 53)))
     else:
         v_bw_surf = val_font.render(_("Đang đo..."), True, lbl_col)
-        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 40)))
+        card_surf.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, 40)))
 
     # === CỘT 3: CHẤT LƯỢNG MẠNG ===
-    c3_cx = card_x + col_w * 2 + col_w // 2
+    c3_cx = col_w * 2 + col_w // 2
     lbl_q_surf = lbl_font.render(_("Chất lượng"), True, lbl_col)
-    screen.blit(lbl_q_surf, lbl_q_surf.get_rect(center=(c3_cx, card_y + 18)))
+    card_surf.blit(lbl_q_surf, lbl_q_surf.get_rect(center=(c3_cx, 18)))
 
     if net_class == "high":
         q_str = _("Tốt")
@@ -343,14 +352,14 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         q_str = _("Đang kiểm tra...")
         q_col = lbl_col
     v_q_surf = val_font.render(q_str, True, q_col)
-    screen.blit(v_q_surf, v_q_surf.get_rect(center=(c3_cx, card_y + 40)))
+    card_surf.blit(v_q_surf, v_q_surf.get_rect(center=(c3_cx, 40)))
 
     # Kẻ đường phân cách cột
-    pygame.draw.line(screen, div_col, (card_x + col_w, card_y + 10), (card_x + col_w, card_y + 62))
-    pygame.draw.line(screen, div_col, (card_x + col_w * 2, card_y + 10), (card_x + col_w * 2, card_y + 62))
+    pygame.draw.line(card_surf, div_col, (col_w, 10), (col_w, 62))
+    pygame.draw.line(card_surf, div_col, (col_w * 2, 10), (col_w * 2, 62))
 
     # Kẻ đường ngang footer
-    pygame.draw.line(screen, div_col, (card_x + 12, card_y + 68), (card_x + card_w - 12, card_y + 68))
+    pygame.draw.line(card_surf, div_col, (12, 68), (card_w - 12, 68))
 
     # Footer
     if mode == "lan":
@@ -363,7 +372,12 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         foot_str = net_info.get("status") or _("Đang đồng bộ luồng hình ảnh...")
 
     foot_surf = sub_font.render(foot_str, True, lbl_col)
-    screen.blit(foot_surf, foot_surf.get_rect(center=(cx, card_y + 82)))
+    card_surf.blit(foot_surf, foot_surf.get_rect(center=(card_w // 2, 82)))
+
+    # Áp dụng độ trong suốt alpha (Fade out) và vẽ lên màn hình
+    if alpha < 255:
+        card_surf.set_alpha(int(alpha))
+    screen.blit(card_surf, (card_x, card_y))
 
 _DUAL_MON_STD_SIZES = {
     3840: [2160],
@@ -1010,6 +1024,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         })
         if initial_net_info and isinstance(initial_net_info, dict):
             client_network_info.update(initial_net_info)
+    net_card_first_frame_time = None
+    NET_CARD_HOLD_SECS = 1.6
+    NET_CARD_FADE_SECS = 0.8
     if clipboard_sync_manager:
         clipboard_sync_manager.is_client = True
     
@@ -2209,7 +2226,28 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         frame_to_draw = None
 
                 if frame_to_draw is not None:
-                    
+                    # Hiệu ứng mờ dần (Fade Out) cho Card thông số mạng khi khung hình đầu tiên xuất hiện
+                    if net_card_first_frame_time is None:
+                        net_card_first_frame_time = time.time()
+
+                    elapsed_since_frame = time.time() - net_card_first_frame_time
+                    total_show_time = NET_CARD_HOLD_SECS + NET_CARD_FADE_SECS
+                    if elapsed_since_frame < total_show_time:
+                        if elapsed_since_frame <= NET_CARD_HOLD_SECS:
+                            card_alpha = 255
+                        else:
+                            fade_ratio = (elapsed_since_frame - NET_CARD_HOLD_SECS) / NET_CARD_FADE_SECS
+                            card_alpha = max(0, min(255, int(255 * (1.0 - fade_ratio))))
+
+                        if card_alpha > 0:
+                            with client_network_lock:
+                                cur_net_info = dict(client_network_info)
+                            _draw_network_speed_test_card(
+                                screen, window_w // 2, window_h // 2,
+                                window_w, window_h, pygame_theme, is_android, cur_net_info,
+                                font_names, alpha=card_alpha, draw_title=False
+                            )
+
                     state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
                     if state['is_recording'] and state['writer']:
                         try:
@@ -2239,6 +2277,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         except Exception as e:
                             print(f"[Client] Recording error: {e}")
                 else:
+                    net_card_first_frame_time = None
                     if reconnect_queue:
                         try:
                             while not reconnect_queue.empty():

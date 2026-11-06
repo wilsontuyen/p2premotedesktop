@@ -253,7 +253,8 @@ class Broker:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             if os.name == "nt":
                 # idle 3s, retry moi 1s — phat hien day mang dut / app dong dot ngot
-                sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 3000, 1000))
+                sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                sock.ioctl(sio_keepalive, (1, 3000, 1000))
         except Exception:
             pass
 
@@ -1212,7 +1213,8 @@ class Broker:
                 try:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     if os.name == "nt":
-                        sock.ioctl(socket.SIOC_KEEPALIVE_VALS, (1, 30000, 10000))
+                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                        sock.ioctl(sio_keepalive, (1, 30000, 10000))
                 except Exception:
                     pass
                 sock.settimeout(8.0)
