@@ -522,5 +522,15 @@
   "Đã dừng quét ({s} - {e}). Đã tìm thấy {count} máy.": "Đã dừng quét ({s} - {e}). Đã tìm thấy {count} máy.",
   "Quét hoàn tất ({s} - {e})! Tìm thấy {count} máy trực tuyến.": "Quét hoàn tất ({s} - {e})! Tìm thấy {count} máy trực tuyến.",
   "Quét các máy tính theo dải địa chỉ IP đã nhập (không phân biệt loại kết nối VPN)": "Quét các máy tính theo dải địa chỉ IP đã nhập (không phân biệt loại kết nối VPN)",
-  "Nhập dải IP cần quét (VD: 192.168.10.1 đến 192.168.10.254 hoặc gõ tắt 192.168.10.xxx)": "Nhập dải IP cần quét (VD: 192.168.10.1 đến 192.168.10.254 hoặc gõ tắt 192.168.10.xxx)"
+  "Nhập dải IP cần quét (VD: 192.168.10.1 đến 192.168.10.254 hoặc gõ tắt 192.168.10.xxx)": "Nhập dải IP cần quét (VD: 192.168.10.1 đến 192.168.10.254 hoặc gõ tắt 192.168.10.xxx)",
+  "Độ trễ (Latency)": "Độ trễ (Latency)",
+  "Tốc độ trung bình": "Tốc độ trung bình",
+  "Chất lượng": "Chất lượng",
+  "Mạng LAN (Siêu tốc)": "Mạng LAN (Siêu tốc)",
+  "Phương thức kết nối: Mạng nội bộ (LAN)": "Phương thức kết nối: Mạng nội bộ (LAN)",
+  "Phương thức kết nối: Kết nối trực tiếp P2P": "Phương thức kết nối: Kết nối trực tiếp P2P",
+  "Phương thức kết nối: Máy chủ Trung chuyển (Relay)": "Phương thức kết nối: Máy chủ Trung chuyển (Relay)",
+  "Đang đo...": "Đang đo...",
+  "Đang đồng bộ luồng hình ảnh...": "Đang đồng bộ luồng hình ảnh...",
+  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)..."
 }

@@ -491,5 +491,15 @@
   "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN": "Clear all scanned peers in LAN & VPN list",
   "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.": "Filter ON: Showing only named computers (hiding unknown IP addresses).\nClick to turn OFF and show all devices.",
   "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.": "Filter OFF: Showing all devices (including unknown IPs).\nClick to turn ON and show named computers only.",
-  "Đóng cửa sổ máy tính mạng LAN & VPN": "Close LAN & VPN computers window"
+  "Đóng cửa sổ máy tính mạng LAN & VPN": "Close LAN & VPN computers window",
+  "Độ trễ (Latency)": "Latency",
+  "Tốc độ trung bình": "Average Speed",
+  "Chất lượng": "Quality",
+  "Mạng LAN (Siêu tốc)": "LAN (High-speed)",
+  "Phương thức kết nối: Mạng nội bộ (LAN)": "Connection Mode: Local Network (LAN)",
+  "Phương thức kết nối: Kết nối trực tiếp P2P": "Connection Mode: Direct P2P",
+  "Phương thức kết nối: Máy chủ Trung chuyển (Relay)": "Connection Mode: Relay Server",
+  "Đang đo...": "Testing...",
+  "Đang đồng bộ luồng hình ảnh...": "Synchronizing screen stream...",
+  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Testing network speed (Ping: {ping:.1f}ms)..."
 }

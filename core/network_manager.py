@@ -152,6 +152,7 @@ def client_quick_link_probe(sock, password, status_cb=None):
             pong_data = json.loads(pong_msg.decode("utf-8"))
             if pong_data.get("action") == "speed_test_pong":
                 ping = (time.time() - t0) * 1000.0
+                _status(_("Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...").format(ping=ping))
         dummy_size = 262144
         if ping > 200.0:
             dummy_size = 65536
@@ -2211,7 +2212,15 @@ class NetworkMixin:
                     client_android_speed_test(sock, password, self.update_status)
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
                 sock.settimeout(None)
-                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, is_android, os_release, res.get("monitor_count"), res.get("monitors"))
+                lan_net_info = {
+                    "ping": 1.0,
+                    "latency": 1.0,
+                    "bandwidth": 100.0,
+                    "avg_speed": 100.0,
+                    "net_class": "high",
+                    "mode": "lan"
+                }
+                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, is_android, os_release, res.get("monitor_count"), res.get("monitors"), lan_net_info)
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
                 self.update_status(_("Bị từ chối kết nối"))
@@ -3218,11 +3227,25 @@ class NetworkMixin:
                     net_class_viet = _("Yếu (Low-speed)")
                 else:
                     net_class_viet = _("Trung bình (Medium)")
-                if is_android or not is_lan_socket(sock):
-                    status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
-                    print(f"[Client] {status_text}")
-                    if not is_reconnect and retry_count == 0:
-                        notify_status(status_text)
+                status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
+                print(f"[Client] {status_text}")
+                if not is_reconnect and retry_count == 0:
+                    notify_status(status_text)
+                
+                conn_mode = "lan" if is_lan_socket(sock) else (conn_mode_info.get("mode", "direct") if conn_mode_info else "direct")
+                net_info = {
+                    "ping": round(float(avg_ping), 1),
+                    "latency": round(float(avg_ping), 1),
+                    "bandwidth": round(float(bandwidth), 2),
+                    "avg_speed": round(float(bandwidth), 2),
+                    "net_class": net_class,
+                    "mode": conn_mode
+                }
+                if reconnect_queue:
+                    try:
+                        reconnect_queue.put(f"NET_INFO|{json.dumps(net_info)}")
+                    except Exception:
+                        pass
                 try:
                     sock.settimeout(None)
                     sock.setblocking(True)
@@ -3235,7 +3258,7 @@ class NetworkMixin:
                     try:
                         if viewer_pid and sys.platform == "win32":
                             sock_data = sock.share(viewer_pid)
-                            reconnect_queue.put(("CONNECTED", ("SHARED_SOCK", sock_data), host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors")))
+                            reconnect_queue.put(("CONNECTED", ("SHARED_SOCK", sock_data), host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
                             
                             def delayed_reconnect_close():
                                 try:
@@ -3251,7 +3274,7 @@ class NetworkMixin:
                             threading.Thread(target=delayed_reconnect_close, daemon=True).start()
                             
                         else:
-                            reconnect_queue.put(("CONNECTED", sock, host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors")))
+                            reconnect_queue.put(("CONNECTED", sock, host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
                     except Exception as e:
                         print(f"Failed to put socket in reconnect queue: {e}")
                         reconnect_queue.put("FAILED|" + str(e))
@@ -3340,7 +3363,7 @@ class NetworkMixin:
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
             
-    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release="", monitor_count=None, monitors=None):
+    def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release="", monitor_count=None, monitors=None, net_info=None):
         if self._is_host_only_app() or run_client_viewer_loop is None:
             try:
                 sock.close()
@@ -3353,7 +3376,7 @@ class NetworkMixin:
             cmd_queue = mp.Queue()
             p = mp.Process(
                 target=run_client_viewer_loop,
-                args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release, cmd_queue, monitor_count, monitors),
+                args=(sock, host_w, host_h, computer_name, is_domain, partner_id, reconnect_queue, partner_pass, is_android, os_release, cmd_queue, monitor_count, monitors, net_info),
                 daemon=True,
             )
             p.start()

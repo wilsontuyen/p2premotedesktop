@@ -153,6 +153,218 @@ client_need_resync_monitors = False
 client_host_cursor_lock = threading.Lock()
 client_host_cursor_data = {"rx": 0.5, "ry": 0.5, "visible": False, "seq": 0}
 
+client_network_lock = threading.Lock()
+client_network_info = {
+    "ping": None,
+    "latency": None,
+    "bandwidth": None,
+    "avg_speed": None,
+    "net_class": None,
+    "mode": None,
+    "status": ""
+}
+client_last_ping_send_time = 0.0
+client_net_bytes_count = 0
+client_net_speed_timer = 0.0
+
+
+def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_theme, is_android, net_info, font_names="Segoe UI, Arial"):
+    """
+    Vẽ thông tin mạng (Ping / Latency, Tốc độ trung bình / Băng thông, Chất lượng, Phương thức kết nối)
+    lên màn hình chờ của Viewer khi đang đợi khung hình từ máy chủ.
+    """
+    if is_android:
+        card_bg = (40, 42, 48)
+        card_border = (65, 72, 85)
+        text_title = (220, 220, 220)
+        lbl_col = (150, 155, 165)
+        val_col = (235, 240, 245)
+        div_col = (55, 60, 70)
+        title_text = _("Đang nhận màn hình máy Android...")
+    else:
+        title_text = _("Đang kết nối / Đang chờ màn hình từ máy chủ...")
+        if pygame_theme == "crystal":
+            card_bg = (255, 255, 255)
+            card_border = (175, 215, 225)
+            text_title = (80, 120, 130)
+            lbl_col = (115, 135, 145)
+            val_col = (45, 65, 75)
+            div_col = (230, 240, 243)
+        elif pygame_theme == "light":
+            card_bg = (255, 255, 255)
+            card_border = (215, 220, 230)
+            text_title = (110, 115, 125)
+            lbl_col = (130, 135, 145)
+            val_col = (50, 55, 65)
+            div_col = (235, 238, 242)
+        elif pygame_theme == "gray":
+            card_bg = (68, 74, 83)
+            card_border = (98, 106, 118)
+            text_title = (220, 220, 225)
+            lbl_col = (175, 182, 192)
+            val_col = (245, 247, 250)
+            div_col = (85, 93, 104)
+        elif pygame_theme == "pink":
+            card_bg = (255, 255, 255)
+            card_border = (235, 205, 215)
+            text_title = (150, 100, 120)
+            lbl_col = (160, 120, 135)
+            val_col = (75, 45, 55)
+            div_col = (248, 230, 236)
+        elif pygame_theme == "orange":
+            card_bg = (255, 255, 255)
+            card_border = (240, 215, 185)
+            text_title = (150, 110, 70)
+            lbl_col = (160, 125, 95)
+            val_col = (75, 55, 35)
+            div_col = (248, 236, 222)
+        elif pygame_theme == "red":
+            card_bg = (255, 255, 255)
+            card_border = (240, 205, 210)
+            text_title = (150, 90, 100)
+            lbl_col = (160, 115, 120)
+            val_col = (75, 45, 50)
+            div_col = (248, 228, 232)
+        else:
+            card_bg = (40, 42, 48)
+            card_border = (65, 72, 85)
+            text_title = (200, 200, 200)
+            lbl_col = (150, 155, 165)
+            val_col = (235, 240, 245)
+            div_col = (55, 60, 70)
+
+    try:
+        title_font = pygame.font.SysFont(font_names, 20, bold=True)
+        lbl_font = pygame.font.SysFont(font_names, 13)
+        val_font = pygame.font.SysFont(font_names, 16, bold=True)
+        sub_font = pygame.font.SysFont(font_names, 12)
+    except Exception:
+        title_font = pygame.font.Font(None, 24)
+        lbl_font = pygame.font.Font(None, 16)
+        val_font = pygame.font.Font(None, 20)
+        sub_font = pygame.font.Font(None, 15)
+
+    # 1. Tiêu đề trạng thái
+    wait_surf = title_font.render(title_text, True, text_title)
+    wait_rect = wait_surf.get_rect(center=(cx, cy - 60))
+    screen.blit(wait_surf, wait_rect)
+
+    # 2. Khung Card thông số mạng
+    card_w = min(480, max(360, window_w - 40))
+    card_h = 96
+    card_x = cx - card_w // 2
+    card_y = cy - 20
+    card_rect = pygame.Rect(card_x, card_y, card_w, card_h)
+
+    try:
+        pygame.draw.rect(screen, card_bg, card_rect, border_radius=10)
+        pygame.draw.rect(screen, card_border, card_rect, width=1, border_radius=10)
+    except TypeError:
+        pygame.draw.rect(screen, card_bg, card_rect)
+        pygame.draw.rect(screen, card_border, card_rect, width=1)
+
+    ping = net_info.get("ping") if net_info.get("ping") is not None else net_info.get("latency")
+    bw = net_info.get("bandwidth") if net_info.get("bandwidth") is not None else net_info.get("avg_speed")
+    net_class = net_info.get("net_class")
+    mode = net_info.get("mode")
+
+    col_w = card_w // 3
+
+    # === CỘT 1: PING / LATENCY ===
+    c1_cx = card_x + col_w // 2
+    lbl_ping_surf = lbl_font.render(_("Độ trễ (Latency)"), True, lbl_col)
+    screen.blit(lbl_ping_surf, lbl_ping_surf.get_rect(center=(c1_cx, card_y + 18)))
+
+    if ping is not None and float(ping) >= 0:
+        p_val = float(ping)
+        if p_val < 1.0:
+            ping_str = "< 1 ms"
+            p_col = (34, 160, 80)
+        else:
+            ping_str = f"{p_val:.1f} ms"
+            if p_val <= 45.0:
+                p_col = (34, 160, 80)
+            elif p_val <= 95.0:
+                p_col = (220, 140, 20)
+            else:
+                p_col = (225, 60, 60)
+        v_ping_surf = val_font.render(ping_str, True, p_col)
+        v_ping_rect = v_ping_surf.get_rect(center=(c1_cx + 6, card_y + 40))
+        dot_x = v_ping_rect.left - 8
+        dot_y = v_ping_rect.centery
+        pygame.draw.circle(screen, p_col, (dot_x, dot_y), 4)
+        screen.blit(v_ping_surf, v_ping_rect)
+    else:
+        v_ping_surf = val_font.render(_("Đang đo..."), True, lbl_col)
+        screen.blit(v_ping_surf, v_ping_surf.get_rect(center=(c1_cx, card_y + 40)))
+
+    # === CỘT 2: TỐC ĐỘ MẠNG / BĂNG THÔNG ===
+    c2_cx = card_x + col_w + col_w // 2
+    lbl_bw_surf = lbl_font.render(_("Tốc độ trung bình"), True, lbl_col)
+    screen.blit(lbl_bw_surf, lbl_bw_surf.get_rect(center=(c2_cx, card_y + 18)))
+
+    if mode == "lan":
+        v_bw_surf = val_font.render("> 100 Mbps", True, (34, 160, 80))
+        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 36)))
+        s_bw_surf = sub_font.render(_("Mạng LAN (Siêu tốc)"), True, lbl_col)
+        screen.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, card_y + 53)))
+    elif bw is not None and float(bw) > 0:
+        b_val = float(bw)
+        if b_val >= 20.0:
+            b_col = (34, 160, 80)
+        elif b_val >= 5.0:
+            b_col = (220, 140, 20)
+        else:
+            b_col = (225, 60, 60)
+        v_bw_surf = val_font.render(f"{b_val:.2f} Mbps", True, b_col)
+        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 36)))
+        mb_str = f"~ {b_val / 8.0:.2f} MB/s"
+        s_bw_surf = sub_font.render(mb_str, True, lbl_col)
+        screen.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, card_y + 53)))
+    else:
+        v_bw_surf = val_font.render(_("Đang đo..."), True, lbl_col)
+        screen.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, card_y + 40)))
+
+    # === CỘT 3: CHẤT LƯỢNG MẠNG ===
+    c3_cx = card_x + col_w * 2 + col_w // 2
+    lbl_q_surf = lbl_font.render(_("Chất lượng"), True, lbl_col)
+    screen.blit(lbl_q_surf, lbl_q_surf.get_rect(center=(c3_cx, card_y + 18)))
+
+    if net_class == "high":
+        q_str = _("Tốt")
+        q_col = (34, 160, 80)
+    elif net_class == "low":
+        q_str = _("Yếu")
+        q_col = (225, 60, 60)
+    elif net_class == "medium":
+        q_str = _("Trung bình")
+        q_col = (220, 140, 20)
+    else:
+        q_str = _("Đang kiểm tra...")
+        q_col = lbl_col
+    v_q_surf = val_font.render(q_str, True, q_col)
+    screen.blit(v_q_surf, v_q_surf.get_rect(center=(c3_cx, card_y + 40)))
+
+    # Kẻ đường phân cách cột
+    pygame.draw.line(screen, div_col, (card_x + col_w, card_y + 10), (card_x + col_w, card_y + 62))
+    pygame.draw.line(screen, div_col, (card_x + col_w * 2, card_y + 10), (card_x + col_w * 2, card_y + 62))
+
+    # Kẻ đường ngang footer
+    pygame.draw.line(screen, div_col, (card_x + 12, card_y + 68), (card_x + card_w - 12, card_y + 68))
+
+    # Footer
+    if mode == "lan":
+        foot_str = _("Phương thức kết nối: Mạng nội bộ (LAN)")
+    elif mode == "direct":
+        foot_str = _("Phương thức kết nối: Kết nối trực tiếp P2P")
+    elif mode == "relay":
+        foot_str = _("Phương thức kết nối: Máy chủ Trung chuyển (Relay)")
+    else:
+        foot_str = net_info.get("status") or _("Đang đồng bộ luồng hình ảnh...")
+
+    foot_surf = sub_font.render(foot_str, True, lbl_col)
+    screen.blit(foot_surf, foot_surf.get_rect(center=(cx, card_y + 82)))
+
 _DUAL_MON_STD_SIZES = {
     3840: [2160],
     2560: [1440, 1600, 1080],
@@ -427,14 +639,43 @@ def client_receiver_thread(sock, password):
                 print("[Client] WARNING: Received empty message (decryption may have failed). Skipping.")
                 continue
                 
-            global client_last_recv_time
+            global client_last_recv_time, client_net_bytes_count, client_net_speed_timer
             client_last_recv_time = time.time()
+            with client_network_lock:
+                client_net_bytes_count += len(msg)
+                if client_net_speed_timer <= 0:
+                    client_net_speed_timer = client_last_recv_time
+                dur_b = client_last_recv_time - client_net_speed_timer
+                if dur_b >= 1.0:
+                    realtime_bw = (client_net_bytes_count * 8.0) / (dur_b * 1024.0 * 1024.0)
+                    client_network_info["realtime_bandwidth"] = round(realtime_bw, 2)
+                    if not client_network_info.get("bandwidth"):
+                        client_network_info["bandwidth"] = round(realtime_bw, 2)
+                        client_network_info["avg_speed"] = round(realtime_bw, 2)
+                    else:
+                        prev_bw = client_network_info.get("bandwidth", realtime_bw)
+                        client_network_info["bandwidth"] = round(prev_bw * 0.7 + realtime_bw * 0.3, 2)
+                        client_network_info["avg_speed"] = client_network_info["bandwidth"]
+                    client_net_bytes_count = 0
+                    client_net_speed_timer = client_last_recv_time
                 
             if msg.startswith(b'{'):
                 try:
                     event = json.loads(msg.decode('utf-8'))
                     evt_type = event.get("type", "")
                     if evt_type == "pong":
+                        global client_last_ping_send_time
+                        if client_last_ping_send_time > 0:
+                            cur_rtt = (time.time() - client_last_ping_send_time) * 1000.0
+                            if 0 < cur_rtt < 10000:
+                                with client_network_lock:
+                                    client_network_info["ping"] = round(cur_rtt, 1)
+                                    client_network_info["latency"] = round(cur_rtt, 1)
+                                    cur_avg = client_network_info.get("avg_ping")
+                                    if cur_avg is not None and cur_avg > 0:
+                                        client_network_info["avg_ping"] = round(cur_avg * 0.7 + cur_rtt * 0.3, 1)
+                                    else:
+                                        client_network_info["avg_ping"] = round(cur_rtt, 1)
                         continue
                     elif evt_type == "host_cursor":
                         rx_val = event.get("rx")
@@ -747,7 +988,7 @@ def format_id_groups(pid):
     return s
 
 # Client Main View Pygame Loop
-def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None, monitor_count=None, monitors=None):
+def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=False, partner_id="", reconnect_queue=None, partner_pass="", is_android=False, os_release="", boot_sock_queue=None, monitor_count=None, monitors=None, initial_net_info=None):
     cmd_queue = boot_sock_queue
     import sys
     import os
@@ -755,7 +996,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     import ctypes
     import queue
     import json
-    global client_switching_desktop_countdown, client_host_computer_name_override, client_host_resolution
+    global client_switching_desktop_countdown, client_host_computer_name_override, client_host_resolution, client_network_info
+    with client_network_lock:
+        client_network_info.clear()
+        client_network_info.update({
+            "ping": None,
+            "latency": None,
+            "bandwidth": None,
+            "avg_speed": None,
+            "net_class": None,
+            "mode": None,
+            "status": ""
+        })
+        if initial_net_info and isinstance(initial_net_info, dict):
+            client_network_info.update(initial_net_info)
     if clipboard_sync_manager:
         clipboard_sync_manager.is_client = True
     
@@ -984,12 +1238,25 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             msg = reconnect_queue.get_nowait()
                             if isinstance(msg, str) and msg.startswith("STATUS|"):
                                 connecting_status = msg.split("|", 1)[1]
+                                with client_network_lock:
+                                    client_network_info["status"] = connecting_status
+                            elif isinstance(msg, str) and msg.startswith("NET_INFO|"):
+                                try:
+                                    n_data = json.loads(msg.split("|", 1)[1])
+                                    if isinstance(n_data, dict):
+                                        with client_network_lock:
+                                            client_network_info.update(n_data)
+                                except Exception:
+                                    pass
                             elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
                                 msg_type, sock_item, real_w, real_h, is_dom, is_andr, os_rel, zalo_p, comp_n = msg[:9]
                                 if len(msg) > 9 and msg[9] is not None:
                                     monitor_count = int(msg[9] or 1)
                                 if len(msg) > 10 and msg[10] is not None:
                                     monitors = list(msg[10] or [])
+                                if len(msg) > 11 and isinstance(msg[11], dict):
+                                    with client_network_lock:
+                                        client_network_info.update(msg[11])
                                 if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
                                     sock = socket.fromshare(sock_item[1])
                                 elif hasattr(sock_item, 'fileno'):
@@ -1261,6 +1528,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     try:
                         now = time.time()
                         if now - last_ping_time >= 3.0:
+                            global client_last_ping_send_time
+                            client_last_ping_send_time = now
                             if not send_msg(sock, json.dumps({"type": "ping"}).encode('utf-8'), partner_pass):
                                 break
                             last_ping_time = now
@@ -1970,44 +2239,48 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         except Exception as e:
                             print(f"[Client] Recording error: {e}")
                 else:
+                    if reconnect_queue:
+                        try:
+                            while not reconnect_queue.empty():
+                                q_msg = reconnect_queue.get_nowait()
+                                if isinstance(q_msg, str) and q_msg.startswith("NET_INFO|"):
+                                    try:
+                                        n_data = json.loads(q_msg.split("|", 1)[1])
+                                        if isinstance(n_data, dict):
+                                            with client_network_lock:
+                                                client_network_info.update(n_data)
+                                    except Exception:
+                                        pass
+                                elif isinstance(q_msg, str) and q_msg.startswith("STATUS|"):
+                                    with client_network_lock:
+                                        client_network_info["status"] = q_msg.split("|", 1)[1]
+                        except Exception:
+                            pass
+
                     if is_android:
                         screen.fill((30, 30, 30))
-                        try:
-                            wait_font = pygame.font.SysFont(font_names, 22, bold=True)
-                        except Exception:
-                            wait_font = pygame.font.Font(None, 28)
-                        wait_surf = wait_font.render(_("Đang nhận màn hình máy Android..."), True, (220, 220, 220))
-                        wait_rect = wait_surf.get_rect(center=(window_w // 2, window_h // 2))
-                        screen.blit(wait_surf, wait_rect)
                     else:
                         if pygame_theme == "light":
                             screen.fill((240, 240, 245))
-                            text_col = (110, 115, 125)
                         elif pygame_theme == "gray":
                             screen.fill((82, 89, 98))
-                            text_col = (220, 220, 225)
                         elif pygame_theme == "pink":
                             screen.fill((255, 240, 245))
-                            text_col = (150, 100, 120)
                         elif pygame_theme == "crystal":
                             screen.fill((224, 247, 250))
-                            text_col = (80, 120, 130)
                         elif pygame_theme == "orange":
                             screen.fill((255, 243, 224))
-                            text_col = (150, 110, 70)
                         elif pygame_theme == "red":
                             screen.fill((255, 235, 238))
-                            text_col = (150, 90, 100)
                         else:
                             screen.fill((30, 30, 30))
-                            text_col = (200, 200, 200)
-                        try:
-                            wait_font = pygame.font.SysFont(font_names, 20, bold=True)
-                        except Exception:
-                            wait_font = pygame.font.Font(None, 24)
-                        wait_surf = wait_font.render(_("Đang kết nối / Đang chờ màn hình từ máy chủ..."), True, text_col)
-                        wait_rect = wait_surf.get_rect(center=(window_w // 2, window_h // 2))
-                        screen.blit(wait_surf, wait_rect)
+
+                    with client_network_lock:
+                        cur_net_info = dict(client_network_info)
+                    _draw_network_speed_test_card(
+                        screen, window_w // 2, window_h // 2,
+                        window_w, window_h, pygame_theme, is_android, cur_net_info, font_names
+                    )
                     
                 # Draw red border if blinking (focus requested)
                 if blink_frames_remaining > 0:
