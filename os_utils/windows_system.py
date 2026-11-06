@@ -89,30 +89,36 @@ def ensure_task_battery_support(task_name=None):
     if sys.platform != "win32":
         return
     try:
-        import subprocess
         import os
         tasks = [task_name] if task_name else ["EasyRemoteDesktopAgent", "EasyRemoteDesktopHostAgent"]
         for tn in tasks:
             if not tn:
                 continue
-            # 1. PowerShell: cập nhật trực tiếp qua API Task Scheduler
-            import base64
-            ps_cmd = (
-                f"$t = Get-ScheduledTask -TaskName '{tn}' -ErrorAction SilentlyContinue; "
-                f"if ($t) {{ "
-                f"$t.Settings.DisallowStartIfOnBatteries = $false; "
-                f"$t.Settings.StopIfGoingOnBatteries = $false; "
-                f"$t.Settings.ExecutionTimeLimit = 'PT0S'; "
-                f"Set-ScheduledTask -InputObject $t -ErrorAction SilentlyContinue "
-                f"}}"
-            )
-            b64 = base64.b64encode(ps_cmd.encode("utf-16le")).decode("ascii")
-            subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", b64],
-                capture_output=True, timeout=8
-            )
-            # 2. XML fallback (hỗ trợ cả Windows 7/8/Server)
+            # 1. Cố gắng dùng COM API native của Windows Task Scheduler (không spawn PowerShell, không kích hoạt AV)
+            configured = False
             try:
+                import win32com.client
+                service = win32com.client.Dispatch("Schedule.Service")
+                service.Connect()
+                folder = service.GetFolder("\\")
+                task = folder.GetTask(tn)
+                defn = task.Definition
+                settings = defn.Settings
+                settings.DisallowStartIfOnBatteries = False
+                settings.StopIfGoingOnBatteries = False
+                settings.ExecutionTimeLimit = "PT0S"
+                # TASK_CREATE_OR_UPDATE = 6, TASK_LOGON_SERVICE_ACCOUNT = 5
+                folder.RegisterTaskDefinition(tn, defn, 6, None, None, 5)
+                configured = True
+            except Exception:
+                pass
+
+            if configured:
+                continue
+
+            # 2. XML fallback qua schtasks (tương thích Win7/8/Server, hoàn toàn không gọi PowerShell)
+            try:
+                import subprocess
                 res = subprocess.run(["schtasks.exe", "/query", "/tn", tn, "/xml"], capture_output=True, text=True, timeout=6)
                 if res.returncode == 0 and res.stdout:
                     xml = res.stdout

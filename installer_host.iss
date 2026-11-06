@@ -4,8 +4,8 @@ AppName=Easy Remote Desktop Host
 AppVersion=AI Pro Version
 AppPublisher=P2P Remote Desktop
 AppCopyright=Copyright (C) 2026 P2P Remote Desktop
-VersionInfoVersion=2026
-VersionInfoTextVersion=AI Pro Version
+VersionInfoVersion=1.0.0.0
+VersionInfoTextVersion=1.0.0.0
 VersionInfoCompany=P2P Remote Desktop
 VersionInfoDescription=Easy Remote Desktop Host Installer
 VersionInfoProductName=Easy Remote Desktop Host
@@ -49,23 +49,21 @@ Name: "{group}\Uninstall Easy Remote Desktop Host"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop Host"; Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden
-Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostAgent"" dir=in action=allow program=""{app}\RemoteDesktopHost.exe"" enable=yes profile=any"; Flags: runhidden
-Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostService"" dir=in action=allow program=""{app}\RemoteDesktopHostService.exe"" enable=yes profile=any"; Flags: runhidden
-Filename: "cmd.exe"; Parameters: "/c schtasks.exe /create /tn ""EasyRemoteDesktopHostAgent"" /tr ""\""{app}\RemoteDesktopHostService.exe\"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f > ""{app}\Logs\task_creation.log"" 2>&1"; Flags: runhidden
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$t = Get-ScheduledTask -TaskName 'EasyRemoteDesktopHostAgent' -ErrorAction SilentlyContinue; if ($t) {{ $t.Settings.DisallowStartIfOnBatteries = $false; $t.Settings.StopIfGoingOnBatteries = $false; $t.Settings.ExecutionTimeLimit = 'PT0S'; Set-ScheduledTask -InputObject $t }"""; Flags: runhidden
-Filename: "cmd.exe"; Parameters: "/c schtasks.exe /run /tn ""EasyRemoteDesktopHostAgent"" > ""{app}\Logs\task_run.log"" 2>&1"; Flags: runhidden
-Filename: "powershell.exe"; Parameters: "-Command ""Start-Sleep -Seconds 5"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostAgent"" dir=in action=allow program=""{app}\RemoteDesktopHost.exe"" enable=yes profile=any"; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""EasyRemoteDesktopHostService"" dir=in action=allow program=""{app}\RemoteDesktopHostService.exe"" enable=yes profile=any"; Flags: runhidden
+Filename: "{sys}\schtasks.exe"; Parameters: "/create /tn ""EasyRemoteDesktopHostAgent"" /tr """"{app}\RemoteDesktopHostService.exe"""" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f"; Flags: runhidden
+Filename: "{sys}\schtasks.exe"; Parameters: "/run /tn ""EasyRemoteDesktopHostAgent"""; Flags: runhidden
 Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-Filename: "schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
-Filename: "schtasks.exe"; Parameters: "/delete /tn ""EasyRemoteDesktopHostAgent"" /f"; Flags: runhidden waituntilterminated
-Filename: "taskkill.exe"; Parameters: "/F /IM RemoteDesktopHostService.exe"; Flags: runhidden waituntilterminated
-Filename: "taskkill.exe"; Parameters: "/F /IM RemoteDesktopHost.exe"; Flags: runhidden waituntilterminated
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\schtasks.exe"; Parameters: "/end /tn ""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""EasyRemoteDesktopHostAgent"" /f"; Flags: runhidden waituntilterminated
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM RemoteDesktopHostService.exe"; Flags: runhidden waituntilterminated
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM RemoteDesktopHost.exe"; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostAgent"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""EasyRemoteDesktopHostService"""; Flags: runhidden waituntilterminated
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -74,8 +72,8 @@ var
 begin
   if CurStep = ssInstall then
   begin
-    Exec('schtasks.exe', '/end /tn "EasyRemoteDesktopHostAgent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec('taskkill.exe', '/F /IM RemoteDesktopHostService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec('taskkill.exe', '/F /IM RemoteDesktopHost.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/end /tn "EasyRemoteDesktopHostAgent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM RemoteDesktopHostService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM RemoteDesktopHost.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
