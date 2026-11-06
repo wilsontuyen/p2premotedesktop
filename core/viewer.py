@@ -962,6 +962,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             try: reconnect_queue.put("CANCEL_CONNECT")
                             except: pass
                         break
+                    elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_ESCAPE, pygame.K_x):
+                        outer_running = False
+                        if cmd_queue:
+                            try: cmd_queue.put("CANCEL_CONNECT")
+                            except: pass
+                        if reconnect_queue:
+                            try: reconnect_queue.put("CANCEL_CONNECT")
+                            except: pass
+                        break
                     elif ev.type == pygame.VIDEORESIZE:
                         window_w, window_h = ev.w, ev.h
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
@@ -1047,7 +1056,6 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pass
 
                 if connecting_error:
-                    screen.fill((0, 0, 0))
                     formatted_partner_id = format_id_groups(partner_id)
                     h_title = computer_name or (_("Máy đối tác: ") + (formatted_partner_id or str(partner_id)))
                     if h_title.startswith("ID: "):
@@ -1055,35 +1063,85 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     raw_pid = str(partner_id or "").replace(" ", "")
                     has_id_in_title = bool(raw_pid and (raw_pid in h_title.replace(" ", "")))
 
-                    if not has_id_in_title and partner_id:
-                        t_surf = title_font.render(h_title, True, (255, 255, 255))
-                        t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 70))
-                        screen.blit(t_surf, t_rect)
-
-                        id_surf = id_font.render(f"ID: {formatted_partner_id}", True, (200, 200, 200))
-                        id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 36))
-                        screen.blit(id_surf, id_rect)
-                    else:
-                        t_surf = title_font.render(h_title, True, (255, 255, 255))
-                        t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 60))
-                        screen.blit(t_surf, t_rect)
-
-                    e_surf = status_font.render(connecting_error, True, (255, 90, 90))
-                    e_rect = e_surf.get_rect(center=(window_w // 2, window_h // 2 + 5))
-                    screen.blit(e_surf, e_rect)
-
-                    hint_surf = sub_font.render(_("Cửa sổ sẽ tự đóng sau vài giây..."), True, (150, 150, 150))
-                    hint_rect = hint_surf.get_rect(center=(window_w // 2, window_h // 2 + 55))
-                    screen.blit(hint_surf, hint_rect)
-                    pygame.display.flip()
-
+                    err_duration = 5.0
                     err_start = time.time()
-                    while time.time() - err_start < 3.5:
+                    user_closed = False
+
+                    while (time.time() - err_start < err_duration) and not user_closed:
+                        remaining = max(1, int(err_duration - (time.time() - err_start) + 0.9))
+                        mouse_pos = pygame.mouse.get_pos()
+                        btn_w, btn_h = 140, 36
+                        btn_rect = pygame.Rect(window_w // 2 - btn_w // 2, window_h // 2 + 75, btn_w, btn_h)
+                        is_btn_hover = btn_rect.collidepoint(mouse_pos)
+
                         for ev in pygame.event.get():
-                            if ev.type in (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                            if ev.type == pygame.QUIT:
+                                user_closed = True
                                 break
-                        time.sleep(0.05)
+                            elif ev.type == pygame.KEYDOWN:
+                                user_closed = True
+                                break
+                            elif ev.type == pygame.MOUSEBUTTONDOWN:
+                                user_closed = True
+                                break
+                            elif ev.type == pygame.VIDEORESIZE:
+                                window_w, window_h = ev.w, ev.h
+                                screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+
+                        if user_closed:
+                            break
+
+                        screen.fill((0, 0, 0))
+
+                        # Tiêu đề máy & ID
+                        if not has_id_in_title and partner_id:
+                            t_surf = title_font.render(h_title, True, (255, 255, 255))
+                            t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 85))
+                            screen.blit(t_surf, t_rect)
+
+                            id_surf = id_font.render(f"ID: {formatted_partner_id}", True, (200, 200, 200))
+                            id_rect = id_surf.get_rect(center=(window_w // 2, window_h // 2 - 50))
+                            screen.blit(id_surf, id_rect)
+                        else:
+                            t_surf = title_font.render(h_title, True, (255, 255, 255))
+                            t_rect = t_surf.get_rect(center=(window_w // 2, window_h // 2 - 75))
+                            screen.blit(t_surf, t_rect)
+
+                        # Render thông điệp lỗi (hỗ trợ nhiều dòng phân tách bởi \n)
+                        err_lines = [ln.strip() for ln in str(connecting_error).replace("\r", "").split("\n") if ln.strip()]
+                        line_y = window_h // 2 - 20 if len(err_lines) > 1 else window_h // 2 - 10
+                        for line in err_lines:
+                            line_surf = status_font.render(line, True, (255, 90, 90))
+                            line_rect = line_surf.get_rect(center=(window_w // 2, line_y))
+                            screen.blit(line_surf, line_rect)
+                            line_y += line_surf.get_height() + 4
+
+                        # Dòng gợi ý tự đóng
+                        hint_text = _("Cửa sổ sẽ tự đóng sau {sec} giây...").format(sec=remaining)
+                        hint_surf = sub_font.render(hint_text, True, (150, 150, 150))
+                        hint_rect = hint_surf.get_rect(center=(window_w // 2, line_y + 14))
+                        screen.blit(hint_surf, hint_rect)
+
+                        # Nút Đóng bằng tay
+                        btn_rect.y = line_y + 36
+                        is_btn_hover = btn_rect.collidepoint(mouse_pos)
+                        btn_bg = (55, 62, 75) if is_btn_hover else (35, 39, 48)
+                        btn_border = (0, 173, 181) if is_btn_hover else (80, 85, 95)
+                        pygame.draw.rect(screen, btn_bg, btn_rect, border_radius=6)
+                        pygame.draw.rect(screen, btn_border, btn_rect, width=1, border_radius=6)
+                        btn_txt_surf = sub_font.render(_("Đóng (Close)"), True, (255, 255, 255))
+                        screen.blit(btn_txt_surf, btn_txt_surf.get_rect(center=btn_rect.center))
+
+                        pygame.display.flip()
+                        clock.tick(30)
+
                     outer_running = False
+                    if cmd_queue:
+                        try: cmd_queue.put("CANCEL_CONNECT")
+                        except: pass
+                    if reconnect_queue:
+                        try: reconnect_queue.put("CANCEL_CONNECT")
+                        except: pass
                     break
 
                 if connecting_done:
@@ -1122,6 +1180,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
         if not outer_running or sock is None:
             uninstall_keyboard_hook()
+            try:
+                pygame.display.quit()
+            except Exception:
+                pass
             return
         
         global client_host_monitor_count, client_host_sent_monitor_info, client_host_monitor_rects, client_true_remote_res, client_mon_left_on, client_mon_right_on, client_need_resync_monitors

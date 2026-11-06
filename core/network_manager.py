@@ -1137,6 +1137,9 @@ class NetworkMixin:
         def schedule_refresh(delay_ms=160):
             if not dialog.winfo_exists():
                 return
+            # Khi đang trong tiến trình Quét VPN, không cập nhật giao diện để tránh chớp nháy màn hình
+            if scan_state.get("is_scanning", False):
+                return
             if refresh_timer[0] is not None:
                 try:
                     dialog.after_cancel(refresh_timer[0])
@@ -1234,9 +1237,8 @@ class NetworkMixin:
                     self.lan_peers[p["hwid"]] = p
                     scan_state.setdefault("online_status", {})[p["hwid"]] = True
 
-            # Cập nhật trực tiếp lên danh sách ngay khi phát hiện máy mới (bộ đệm 250ms chống giật)
-            if dialog.winfo_exists():
-                schedule_refresh(250)
+            # Không cập nhật giao diện trong lúc đang quét để tránh giật nháy màn hình liên tục.
+            # Giao diện danh sách máy sẽ được cập nhật đúng 1 lần khi toàn bộ quá trình quét kết thúc.
 
         def _extract_ip_prefix(ip_text):
             m = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.', str(ip_text or "").strip())
@@ -1308,11 +1310,15 @@ class NetworkMixin:
 
             def _thread():
                 try:
+                    last_prog_time = [0.0]
                     def _prog(cur, tot, target_ip):
-                        if dialog.winfo_exists():
-                            dialog.after(0, lambda c=cur, t=tot, tip=target_ip: progress_label.config(
-                                text=_("Đang quét {ip} ({c}/{t})...").format(ip=tip, c=c, t=t)
-                            ) if dialog.winfo_exists() else None)
+                        now = time.time()
+                        if cur == tot or (now - last_prog_time[0] >= 0.08):
+                            last_prog_time[0] = now
+                            if dialog.winfo_exists():
+                                dialog.after(0, lambda c=cur, t=tot, tip=target_ip: progress_label.config(
+                                    text=_("Đang quét {ip} ({c}/{t})...").format(ip=tip, c=c, t=t)
+                                ) if dialog.winfo_exists() else None)
 
                     with self.lan_peers_lock:
                         current_known = dict(self.lan_peers)
@@ -1349,7 +1355,8 @@ class NetworkMixin:
                             bg="#8E44AD",
                             activebackground="#9B59B6"
                         ) if dialog.winfo_exists() else None)
-                        schedule_refresh(50)
+                        # Cập nhật lại toàn bộ danh sách máy đúng 1 lần duy nhất sau khi quét xong
+                        dialog.after(50, lambda: refresh_list() if dialog.winfo_exists() else None)
 
             threading.Thread(target=_thread, daemon=True).start()
 

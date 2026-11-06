@@ -644,7 +644,7 @@ class ConfirmDialog(tk.Toplevel):
         self.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
 
 class InfoDialog(tk.Toplevel):
-    def __init__(self, parent, title, message, button_text=None, show_cancel=False, cancel_text=None, on_ok=None, on_cancel=None):
+    def __init__(self, parent, title, message, button_text=None, show_cancel=False, cancel_text=None, on_ok=None, on_cancel=None, auto_close_sec=None):
         super().__init__(parent)
         self.withdraw()  # Ẩn tạm thời để tránh nháy
         self.title(title)
@@ -676,13 +676,32 @@ class InfoDialog(tk.Toplevel):
         btn_frame = tk.Frame(self, bg="#1E1E24")
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15), side=tk.BOTTOM)
         
+        self._countdown_id = None
         def _ok():
-            self.destroy()
+            if self._countdown_id is not None:
+                try:
+                    self.after_cancel(self._countdown_id)
+                except Exception:
+                    pass
+                self._countdown_id = None
+            try:
+                self.destroy()
+            except Exception:
+                pass
             if on_ok:
                 on_ok()
                 
         def _cancel():
-            self.destroy()
+            if self._countdown_id is not None:
+                try:
+                    self.after_cancel(self._countdown_id)
+                except Exception:
+                    pass
+                self._countdown_id = None
+            try:
+                self.destroy()
+            except Exception:
+                pass
             if on_cancel:
                 on_cancel()
                 
@@ -708,6 +727,28 @@ class InfoDialog(tk.Toplevel):
             self.protocol("WM_DELETE_WINDOW", _cancel)
         else:
             self.protocol("WM_DELETE_WINDOW", _ok)
+
+        self.bind("<Escape>", lambda e: _cancel() if show_cancel else _ok())
+        self.bind("<Return>", lambda e: _ok())
+        self.bind("<KP_Enter>", lambda e: _ok())
+        try:
+            btn_ok.focus_set()
+        except Exception:
+            pass
+
+        if auto_close_sec is not None and auto_close_sec > 0:
+            def update_countdown(remaining):
+                if not self.winfo_exists():
+                    return
+                if remaining > 0:
+                    try:
+                        btn_ok.config(text=f"{button_text} ({remaining}s)")
+                    except Exception:
+                        pass
+                    self._countdown_id = self.after(1000, update_countdown, remaining - 1)
+                else:
+                    _ok()
+            update_countdown(auto_close_sec)
         
         self.update_idletasks()
         # Tính toán chiều cao tự động dựa trên nội dung

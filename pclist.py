@@ -155,7 +155,7 @@ class SavedListMixin:
                         except Exception:
                             pass
                 msg = f"{_('Đã nhập khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                InfoDialog(self, _("Thành công"), msg)
+                InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể nhập khẩu: {e}")
 
@@ -175,9 +175,9 @@ class SavedListMixin:
                 if os.path.exists(src):
                     shutil.copy2(src, filepath)
                     msg = f"{_('Đã xuất khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                    InfoDialog(self, _("Thành công"), msg)
+                    InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
                 else:
-                    messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."))
+                    InfoDialog(self, _("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."), auto_close_sec=5)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
 
@@ -221,7 +221,7 @@ class SavedListMixin:
                             pass
 
                 msg = f"{_('Đã nhập khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                InfoDialog(self, _("Thành công"), msg)
+                InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể nhập khẩu: {e}")
 
@@ -247,15 +247,15 @@ class SavedListMixin:
                     import shutil
                     shutil.copy2(src, filepath)
                     msg = f"{_('Đã xuất khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                    InfoDialog(self, _("Thành công"), msg)
+                    InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
                 elif hasattr(self, 'lan_peers') and self.lan_peers:
                     import json
                     with open(filepath, 'w', encoding='utf-8') as f:
                         json.dump(self.lan_peers, f, indent=2, ensure_ascii=False)
                     msg = f"{_('Đã xuất khẩu danh sách máy tính LAN & VPN thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                    InfoDialog(self, _("Thành công"), msg)
+                    InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
                 else:
-                    messagebox.showwarning(_("Cảnh báo"), _("Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu."))
+                    InfoDialog(self, _("Cảnh báo"), _("Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu."), auto_close_sec=5)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
 
