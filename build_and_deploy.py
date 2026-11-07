@@ -64,9 +64,47 @@ def verify_project_syntax(ws_dir=workspace_dir, log_fn=log):
                     files_to_check.append(os.path.join(sub_dir, fname))
 
     errors = []
+    import ast
     for fpath in files_to_check:
         try:
             py_compile.compile(fpath, doraise=True)
+            with open(fpath, "r", encoding="utf-8") as src_f:
+                tree = ast.parse(src_f.read(), filename=fpath)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    var_stores = []
+                    has_local_import_i18n = False
+                    stack = list(node.body)
+                    for arg in node.args.args + node.args.kwonlyargs:
+                        if arg.arg == "_":
+                            var_stores.append(node.lineno)
+                    while stack:
+                        cur = stack.pop()
+                        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                            continue
+                        if isinstance(cur, ast.Name) and cur.id == "_" and isinstance(cur.ctx, (ast.Store, ast.Del)):
+                            var_stores.append(cur.lineno)
+                        elif isinstance(cur, (ast.Import, ast.ImportFrom)):
+                            for alias in cur.names:
+                                if (alias.asname or alias.name) == "_":
+                                    has_local_import_i18n = True
+                        elif isinstance(cur, ast.ExceptHandler) and cur.name == "_":
+                            var_stores.append(cur.lineno)
+                        stack.extend(ast.iter_child_nodes(cur))
+                    if var_stores:
+                        call_lines = [
+                            sub.lineno for sub in ast.walk(node)
+                            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == "_"
+                        ]
+                        if call_lines:
+                            err_msg = (
+                                f"SHADOWED '_' ERROR in {os.path.relpath(fpath, ws_dir)}:{node.lineno} "
+                                f"func '{node.name}' assigns local '_' at {sorted(set(var_stores))} "
+                                f"while calling _('...') at {sorted(set(call_lines))}"
+                            )
+                            if log_fn:
+                                log_fn(f"CRITICAL: {err_msg}")
+                            errors.append(err_msg)
         except py_compile.PyCompileError as pe:
             err_msg = f"SYNTAX ERROR in {os.path.relpath(fpath, ws_dir)}: {pe}"
             if log_fn:

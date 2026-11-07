@@ -495,7 +495,6 @@
   "Mật khẩu: chưa lưu": "Mật khẩu: chưa lưu",
   "Đang bật máy {name} - {id}": "Đang bật máy {name} - {id}",
   "Đã gửi tín hiệu Wake-on-LAN qua mạng...": "Đã gửi tín hiệu Wake-on-LAN qua mạng...",
-  "Có phiên điều khiển từ xa đang kết nối": "Có phiên điều khiển từ xa đang kết nối",
   "Nhập khẩu (Import)": "Nhập khẩu (Import)",
   "Xuất khẩu (Export)": "Xuất khẩu (Export)",
   "Danh sách máy tính chính": "Danh sách máy tính chính",
@@ -532,5 +531,10 @@
   "Phương thức kết nối: Máy chủ Trung chuyển (Relay)": "Phương thức kết nối: Máy chủ Trung chuyển (Relay)",
   "Đang đo...": "Đang đo...",
   "Đang đồng bộ luồng hình ảnh...": "Đang đồng bộ luồng hình ảnh...",
-  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)..."
+  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...",
+  "📡 Máy tính mạng LAN & VPN": "📡 Máy tính mạng LAN & VPN",
+  "🔍 Quét dải IP": "🔍 Quét dải IP",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.",
+  "Xóa sạch danh sách": "Xóa sạch danh sách",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?"
 }

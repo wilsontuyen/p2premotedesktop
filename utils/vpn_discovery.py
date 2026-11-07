@@ -143,11 +143,16 @@ def detect_vpn_interfaces():
                 ip.startswith('26.')
             )
             
-            # Nhận diện giao diện mạng VPN chung (không phân biệt IKEv2, PPTP, L2TP, OpenVPN, Tailscale...)
+            # Nhận diện giao diện mạng phụ / đường hầm chung (không phân biệt loại kết nối VPN cụ thể)
+            win_if_meta = _get_win_if_by_ip(ip) if os.name == 'nt' else None
+            if win_if_meta is not None:
+                if win_if_meta.get("is_tunnel") or (not win_if_meta.get("is_default_gw") and not win_if_meta.get("is_hypervisor")):
+                    is_vpn = True
             if iface_name in connected_ras or any(k in name_lower for k in (
                 "wan miniport", "ikev2", "l2tp", "sstp", "pptp", "vpn", "aua",
                 "tailscale", "hamachi", "radmin", "zerotier", "zt", "wireguard", "wg",
-                "tap", "tun", "openvpn", "wintun"
+                "tap", "tun", "openvpn", "wintun", "anyconnect", "forti", "pangp",
+                "globalprotect", "softether", "sonicwall", "warp", "nordlynx", "proton"
             )):
                 is_vpn = True
             elif ip.startswith('100.'):
@@ -199,18 +204,41 @@ def detect_vpn_interfaces():
 
 
 import ipaddress
+import select
 _PHYSICAL_LAN_SUBNETS_CACHE = None
 _PHYSICAL_LAN_SUBNETS_TIME = 0
 
 
 def get_physical_lan_subnets():
-    """Lấy danh sách subnet IP cảng card mạng LAN vật lý cục bộ (loại trừ VPN và loopback)."""
+    """Lấy danh sách subnet IP của card mạng LAN vật lý cục bộ (loại trừ giao diện đường hầm/VPN và loopback)."""
     global _PHYSICAL_LAN_SUBNETS_CACHE, _PHYSICAL_LAN_SUBNETS_TIME
     now = time.time()
     if _PHYSICAL_LAN_SUBNETS_CACHE is not None and (now - _PHYSICAL_LAN_SUBNETS_TIME) < 5.0:
         return _PHYSICAL_LAN_SUBNETS_CACHE
     subnets = []
-    vpn_keywords = ('wan miniport', 'ikev2', 'l2tp', 'sstp', 'pptp', 'vpn', 'aua', 'tailscale', 'hamachi', 'radmin', 'zerotier', 'wireguard', 'openvpn', 'tap', 'tun', 'wintun')
+    vpn_keywords = (
+        'wan miniport', 'ikev2', 'l2tp', 'sstp', 'pptp', 'vpn', 'aua',
+        'tailscale', 'hamachi', 'radmin', 'zerotier', 'wireguard', 'openvpn',
+        'tap', 'tun', 'wintun', 'anyconnect', 'forti', 'pangp', 'globalprotect',
+        'softether', 'sonicwall', 'warp', 'nordlynx', 'proton'
+    )
+    if os.name == 'nt':
+        try:
+            for item in _query_windows_ipv4_interfaces():
+                if item.get("is_tunnel") or item.get("is_hypervisor"):
+                    continue
+                descr_low = item.get("descr", "").lower()
+                if any(k in descr_low for k in vpn_keywords):
+                    continue
+                net = item.get("network")
+                if net is not None:
+                    subnets.append(net)
+            if subnets:
+                _PHYSICAL_LAN_SUBNETS_CACHE = subnets
+                _PHYSICAL_LAN_SUBNETS_TIME = now
+                return subnets
+        except Exception:
+            pass
     try:
         import psutil
         for iface_name, addrs in psutil.net_if_addrs().items():
@@ -321,9 +349,10 @@ def get_rdp_name(ip, timeout=0.8):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s, _ = connect_tcp_any_route(ip, 3389, timeout=timeout)
+        if not s:
+            return None
         s.settimeout(timeout)
-        s.connect((ip, 3389))
         # Gói tin RDP Connection Request packet (TPKT + X.224 Connection Request)
         s.send(b'\x03\x00\x00\x13\x0e\xe0\x00\x00\x00\x00\x00\x01\x00\x08\x00\x03\x00\x00\x00')
         resp = s.recv(1024)
@@ -445,6 +474,26 @@ def resolve_hostname_safe(ip, timeout=0.6):
     """Phân giải tên máy tính an toàn qua Reverse DNS / NetBIOS với bộ nhớ đệm."""
     info = resolve_host_info_safe(ip, timeout=timeout)
     return info[0]
+
+
+def get_all_lan_peers_json_paths():
+    """Trả về tất cả các đường dẫn lan_peers.json tiềm năng (APPDATA, thư mục app, Program Files) để hợp nhất không bao giờ mất máy."""
+    paths = []
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        paths.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
+    if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
+        app_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    inst = os.path.join(app_dir, "lan_peers.json")
+    if inst not in paths:
+        paths.append(inst)
+    if sys.platform == "win32":
+        pf_inst = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
+        if pf_inst not in paths:
+            paths.append(pf_inst)
+    return paths
 
 
 def get_lan_peers_json_path():
@@ -659,67 +708,116 @@ def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
 
 
 
+_SHARED_VIRTUAL_MAC_PREFIXES = (
+    "0A0027",        # VirtualBox Host-Only
+    "005056C0",      # VMware VMnet1 / VMnet8
+    "02004C4F4F50",  # Npcap / Wireshark Loopback Adapter
+    "00FF",          # TAP-Windows / OpenVPN Virtual Adapter
+    "0242AC",        # Docker Bridge
+    "00155D",        # Hyper-V / WSL Virtual Switch
+)
+
+
+def _is_valid_unique_physical_mac(hex_mac):
+    if not hex_mac or len(hex_mac) != 12:
+        return False
+    u = hex_mac.upper()
+    if all(c == '0' for c in u) or all(c == 'F' for c in u):
+        return False
+    if any(u.startswith(pfx) for pfx in _SHARED_VIRTUAL_MAC_PREFIXES):
+        return False
+    return True
+
+
+def _is_real_verified_name(peer_dict):
+    if not peer_dict or not peer_dict.get("name_verified"):
+        return False
+    nm = str(peer_dict.get("computer_name") or "").strip().lower().split('.')[0].strip()
+    if not nm or nm in ("unknown", "không rõ", "localhost"):
+        return False
+    if re.match(r"^unknown-\d+$", nm) or re.match(r"^\d+\.\d+\.\d+\.\d+$", nm):
+        return False
+    return True
+
+
+def _is_exact_saved_match(matched_comp, comp_name=None, hwid=None):
+    """Chỉ trả về True khi bản ghi trong saved_computers khớp CHÍNH XÁC 100% theo ID 12 số hoặc tên máy (không khớp mờ theo từ đơn)."""
+    if not matched_comp:
+        return False
+    m_id = ''.join(ch for ch in str(matched_comp.get("id") or "") if ch.isdigit())
+    h_id = ''.join(ch for ch in str(hwid or "") if ch.isdigit())
+    if len(m_id) == 12 and len(h_id) == 12 and m_id == h_id:
+        return True
+    m_name = str(matched_comp.get("name") or "").strip().lower()
+    c_name = str(comp_name or "").strip().lower()
+    if m_name and c_name and m_name == c_name:
+        return True
+    return False
+
+
 def are_same_machine(hwid1, p1, hwid2, p2):
     """
-    Kiểm tra xem 2 bản ghi có thuộc về cùng 1 máy tính vật lý hay không:
-    1. Trùng HWID/ID chính xác (hoặc trùng saved_id).
-    2. Trùng địa chỉ MAC vật lý (không phân biệt chữ hoa/thường, dấu gạch nối hay hai chấm).
-    3. Trùng tên máy tính đã xác định (không phải tên rỗng, unknown, localhost hay fallback Unknown-xxx/PC-xxx chưa xác thực).
-    4. Trùng IP (local_ip hoặc source_ip) kèm tên máy không mâu thuẫn.
+    Kiểm tra xem 2 bản ghi có thuộc về cùng 1 máy tính vật lý hay không.
+    Nguyên tắc an toàn tuyệt đối (không tự động gộp nhầm làm mất máy):
+    - Nếu cả 2 có HWID 12 số đã xác thực khác nhau -> CHẮC CHẮN là 2 máy khác nhau (kể cả trùng tên ADMIN hay trùng IP cũ).
+    - Nếu cả 2 có tên máy tính đã xác thực khác nhau (và không cùng HWID 12 số đã xác thực) -> CHẮC CHẮN là 2 máy khác nhau.
     """
     if not p1 or not p2:
         return False
 
-    # 1. Trùng HWID hoặc ID đã lưu (saved_id / signaling host id)
-    id_candidates_1 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid1, p1.get("hwid"), p1.get("saved_id")) if x}
-    id_candidates_1.discard('')
-    id_candidates_2 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid2, p2.get("hwid"), p2.get("saved_id")) if x}
-    id_candidates_2.discard('')
-    if id_candidates_1 and id_candidates_2 and id_candidates_1.intersection(id_candidates_2):
-        return True
+    h1_ver = ''.join(ch for ch in str(p1.get("hwid") or hwid1 or "") if ch.isdigit())
+    h2_ver = ''.join(ch for ch in str(p2.get("hwid") or hwid2 or "") if ch.isdigit())
+
+    # Bảo vệ 1: Hai HWID 12 số đã xác thực khác nhau -> tuyệt đối KHÔNG bao giờ gộp (dù trùng tên máy hay trùng IP DHCP cũ)
+    if p1.get("hwid_verified") and p2.get("hwid_verified") and len(h1_ver) == 12 and len(h2_ver) == 12:
+        return h1_ver == h2_ver
 
     n1 = str(p1.get("computer_name") or "").strip().lower()
     n2 = str(p2.get("computer_name") or "").strip().lower()
     n1_clean = n1.split('.')[0].strip()
     n2_clean = n2.split('.')[0].strip()
+    real_v1 = _is_real_verified_name(p1)
+    real_v2 = _is_real_verified_name(p2)
 
-    # Nếu cả 2 máy đã xác thực HWID 12 số khác nhau VÀ tên máy khác nhau -> chắc chắn là 2 máy khác nhau
-    # (tránh gộp nhầm qua VPN khi cả 2 máy cùng cài VirtualBox 0A-00-27-... hoặc trùng IP Wi-Fi nhà 192.168.1.x)
-    h1_ver = ''.join(ch for ch in str(p1.get("hwid") or "") if ch.isdigit())
-    h2_ver = ''.join(ch for ch in str(p2.get("hwid") or "") if ch.isdigit())
-    if (
-        p1.get("hwid_verified") and p2.get("hwid_verified")
-        and len(h1_ver) == 12 and len(h2_ver) == 12 and h1_ver != h2_ver
-        and n1_clean and n2_clean and n1_clean != n2_clean
-        and not re.match(r"^(unknown|pc)-\d+$", n1_clean)
-        and not re.match(r"^(unknown|pc)-\d+$", n2_clean)
-    ):
+    # 1. Trùng HWID chính xác (khi cả 2 không mâu thuẫn tên đã xác thực)
+    id_set_1 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid1, p1.get("hwid")) if x}
+    id_set_1.discard('')
+    id_set_2 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid2, p2.get("hwid")) if x}
+    id_set_2.discard('')
+    if id_set_1 and id_set_2 and id_set_1.intersection(id_set_2):
+        # Nếu một bên chỉ là synthetic hash mà hai tên máy xác thực lại khác nhau -> không gộp nhầm
+        if real_v1 and real_v2 and n1_clean != n2_clean and not (p1.get("hwid_verified") and p2.get("hwid_verified")):
+            return False
+        return True
+
+    # Bảo vệ 2: Hai tên máy tính thực sự đã xác thực khác nhau -> KHÔNG gộp theo MAC ảo, saved_id mờ hay IP DHCP cũ
+    if real_v1 and real_v2 and n1_clean != n2_clean:
         return False
 
-    # 2. Trùng MAC vật lý (bỏ qua MAC ảo mặc định của VirtualBox 0A-00-27-00-00-xx)
+    # 2. Trùng MAC vật lý 6-byte duy nhất (loại trừ toàn bộ MAC card ảo VirtualBox/VMware/Npcap/TAP/Docker/Hyper-V)
     macs1 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p1.get("macs", "")).split(",") if m.strip()]
     macs2 = [re.sub(r'[^A-Fa-f0-9]', '', m).upper() for m in str(p2.get("macs", "")).split(",") if m.strip()]
-    valid_macs1 = [m for m in macs1 if len(m) >= 12 and not m.startswith("0A00270000") and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
-    valid_macs2 = [m for m in macs2 if len(m) >= 12 and not m.startswith("0A00270000") and not all(c == '0' for c in m) and not all(c.upper() == 'F' for c in m)]
+    valid_macs1 = [m for m in macs1 if _is_valid_unique_physical_mac(m)]
+    valid_macs2 = [m for m in macs2 if _is_valid_unique_physical_mac(m)]
     if valid_macs1 and valid_macs2:
         if any(m in valid_macs2 for m in valid_macs1):
             return True
 
-    # 3. Trùng tên máy tính (không phân biệt hoa/thường, bỏ domain suffix .local/.lan/...)
+    # 3. Trùng tên máy tính đã xác thực (ví dụ cùng 1 máy đổi IP DHCP/VPN mới)
     if n1_clean and n2_clean and n1_clean == n2_clean:
         if n1_clean not in ("unknown", "không rõ", "localhost") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", n1_clean):
-            # Nếu tên dạng Unknown-xxx hoặc PC-xxx (ví dụ Unknown-48, PC-201) thì cả 2 phải được verified
-            if not re.match(r"^(unknown|pc)-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
-                return True
+            if not re.match(r"^unknown-\d+$", n1_clean):
+                if not re.match(r"^pc-\d+$", n1_clean) or (p1.get("name_verified") and p2.get("name_verified")):
+                    return True
 
-    # 4. Trùng IP thực tế (ưu tiên source_ip khi qua VPN) kèm tên máy không mâu thuẫn
-    ips1 = [x.strip() for x in (str(p1.get("local_ip", "")) + "," + str(p1.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
-    ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + str(p2.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
-    common_ips = set(ips1).intersection(set(ips2))
-    if common_ips:
-        is_fallback_1 = (not p1.get("name_verified")) or re.match(r"^(unknown|pc)-\d+$", n1_clean) or n1_clean in ("unknown", "không rõ")
-        is_fallback_2 = (not p2.get("name_verified")) or re.match(r"^(unknown|pc)-\d+$", n2_clean) or n2_clean in ("unknown", "không rõ")
-        if is_fallback_1 or is_fallback_2 or n1_clean == n2_clean:
+    # 4. Trùng IP thực tế CHỈ khi cả 2 cùng là fallback chưa xác thực trên cùng source_ip
+    # (Tuyệt đối KHÔNG gộp một IP fallback Unknown-xxx vào một máy đã có tên xác thực để tránh mất máy cũ khi DHCP cấp lại IP)
+    src1 = str(p1.get("source_ip") or "").strip()
+    src2 = str(p2.get("source_ip") or "").strip()
+    if not real_v1 and not real_v2:
+        ips1 = [x.strip() for x in (str(p1.get("local_ip", "")) + "," + src1).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
+        ips2 = [x.strip() for x in (str(p2.get("local_ip", "")) + "," + src2).split(",") if x.strip() and not x.strip().startswith("127.") and x.strip() != "192.168.56.1"]
+        if set(ips1).intersection(set(ips2)) and (not src1 or not src2 or src1 == src2):
             return True
 
     return False
@@ -860,15 +958,148 @@ def make_stable_hwid(ip, comp_name="", mac=""):
     return str(twelve)
 
 
+_WIN_IF_CACHE = None
+_WIN_IF_TIME = 0
 _TUNNEL_IF_CACHE = None
 _TUNNEL_IF_TIME = 0
 
 
+def _query_windows_ipv4_interfaces():
+    """
+    Đọc danh sách toàn bộ giao diện IPv4 đang hoạt động từ iphlpapi (GetIpAddrTable + GetIfEntry + GetBestInterface)
+    hoàn toàn không phụ thuộc tên phần mềm VPN hay loại kết nối VPN (PPTP, L2TP, SSTP, IKEv2, WireGuard,
+    OpenVPN TUN/TAP/Wintun, Tailscale, ZeroTier, Radmin, Hamachi, SoftEther, AnyConnect, FortiClient...).
+    """
+    global _WIN_IF_CACHE, _WIN_IF_TIME
+    if os.name != 'nt':
+        return []
+    now = time.time()
+    if _WIN_IF_CACHE is not None and (now - _WIN_IF_TIME) < 5.0:
+        return _WIN_IF_CACHE
+
+    items = []
+    try:
+        import ctypes
+        iphlp = ctypes.windll.iphlpapi
+
+        # Xác định interface mặc định đi Internet hiện tại (nếu có)
+        default_gw_if = 0
+        try:
+            best_inet = ctypes.c_ulong(0)
+            inet_dword = struct.unpack('<I', socket.inet_aton('8.8.8.8'))[0]
+            if iphlp.GetBestInterface(inet_dword, ctypes.byref(best_inet)) == 0:
+                default_gw_if = int(best_inet.value)
+        except Exception:
+            default_gw_if = 0
+
+        sz = ctypes.c_ulong(0)
+        iphlp.GetIpAddrTable(None, ctypes.byref(sz), 0)
+        if sz.value > 0:
+            buf = ctypes.create_string_buffer(sz.value)
+            if iphlp.GetIpAddrTable(buf, ctypes.byref(sz), 0) == 0:
+                n = struct.unpack_from('<I', buf, 0)[0]
+                for i in range(n):
+                    off = 4 + i * 24
+                    if off + 12 > len(buf.raw):
+                        continue
+                    addr_str = socket.inet_ntoa(buf.raw[off:off + 4])
+                    if_idx = int(struct.unpack_from('<I', buf, off + 4)[0])
+                    mask_str = socket.inet_ntoa(buf.raw[off + 8:off + 12])
+                    if (
+                        not addr_str
+                        or addr_str == '0.0.0.0'
+                        or addr_str.startswith('127.')
+                        or addr_str.startswith('169.254.')
+                    ):
+                        continue
+
+                    if_type = 0
+                    phys_len = 0
+                    descr = ""
+                    try:
+                        # MIB_IFROW chuẩn 860 bytes trên cả x86 & x64
+                        ifrow = ctypes.create_string_buffer(860)
+                        struct.pack_into('<I', ifrow, 512, if_idx)
+                        if iphlp.GetIfEntry(ifrow) == 0:
+                            if_type = int(struct.unpack_from('<I', ifrow, 516)[0])
+                            phys_len = int(struct.unpack_from('<I', ifrow, 528)[0])
+                            dlen = min(256, int(struct.unpack_from('<I', ifrow, 600)[0]))
+                            descr = ifrow.raw[604:604 + dlen].rstrip(b'\x00').decode('latin1', 'ignore').strip()
+                    except Exception:
+                        pass
+
+                    descr_low = descr.lower()
+                    is_hypervisor = any(h in descr_low for h in (
+                        'virtualbox host-only', 'vmware virtual ethernet', 'vmnet',
+                        'hyper-v virtual ethernet', 'wsl', 'loopback'
+                    )) or addr_str == '192.168.56.1'
+
+                    # MIB_IF_TYPE_PPP=23, IF_TYPE_PROP_VIRTUAL=53, IF_TYPE_TUNNEL=131, hoặc /32 point-to-point, hoặc không có MAC vật lý
+                    is_tunnel_type = (
+                        mask_str == '255.255.255.255'
+                        or if_type in (23, 53, 131)
+                        or phys_len == 0
+                        or any(k in descr_low for k in (
+                            'miniport', 'vpn', 'tap', 'tun', 'wintun', 'wireguard',
+                            'zerotier', 'tailscale', 'radmin', 'hamachi', 'anyconnect',
+                            'forti', 'pangp', 'globalprotect', 'softether', 'sonicwall',
+                            'warp', 'nordlynx', 'proton'
+                        ))
+                    ) and not is_hypervisor
+
+                    net_obj = None
+                    if mask_str and mask_str != '255.255.255.255':
+                        try:
+                            net_obj = ipaddress.IPv4Network(f"{addr_str}/{mask_str}", strict=False)
+                        except Exception:
+                            net_obj = None
+
+                    items.append({
+                        "if_idx": if_idx,
+                        "ip": addr_str,
+                        "mask": mask_str,
+                        "network": net_obj,
+                        "if_type": if_type,
+                        "descr": descr,
+                        "is_tunnel": is_tunnel_type,
+                        "is_hypervisor": is_hypervisor,
+                        "is_default_gw": (if_idx == default_gw_if),
+                    })
+    except Exception:
+        pass
+
+    _WIN_IF_CACHE = items
+    _WIN_IF_TIME = now
+    return items
+
+
+def _get_win_if_by_ip(ip):
+    for item in _query_windows_ipv4_interfaces():
+        if item.get("ip") == ip:
+            return item
+    return None
+
+
+def _get_best_if_index_win(target_ip):
+    """Truy vấn nhanh interface index mà Windows OS sẽ định tuyến mặc định cho target_ip."""
+    if os.name != 'nt':
+        return 0
+    try:
+        import ctypes
+        best_idx = ctypes.c_ulong(0)
+        dest_dword = struct.unpack('<I', socket.inet_aton(target_ip))[0]
+        if ctypes.windll.iphlpapi.GetBestInterface(dest_dword, ctypes.byref(best_idx)) == 0:
+            return int(best_idx.value)
+    except Exception:
+        pass
+    return 0
+
+
 def get_vpn_tunnel_if_indices():
     """
-    Lấy danh sách (if_index, ip) của các giao diện đường hầm VPN/PPP đang hoạt động trên Windows
-    (không phân biệt IKEv2, PPTP, L2TP, SSTP, WireGuard, OpenVPN...).
-    Dùng cho IP_UNICAST_IF khi dải IP VPN cần quét bị trùng lặp với dải mạng LAN vật lý cục bộ.
+    Lấy danh sách (if_index, ip) của mọi giao diện đường hầm / mạng phụ đang hoạt động trên Windows
+    (hoàn toàn không phân biệt kiểu kết nối VPN: PPTP, L2TP, SSTP, IKEv2, WireGuard, OpenVPN TUN/TAP/Wintun,
+    Tailscale, ZeroTier, Radmin, Hamachi, SoftEther, Cisco AnyConnect, FortiClient...).
     """
     global _TUNNEL_IF_CACHE, _TUNNEL_IF_TIME
     if os.name != 'nt':
@@ -878,70 +1109,203 @@ def get_vpn_tunnel_if_indices():
         return _TUNNEL_IF_CACHE
 
     tunnels = []
-    try:
-        import ctypes
-        iphlp = ctypes.windll.iphlpapi
-        sz = ctypes.c_ulong(0)
-        iphlp.GetIpAddrTable(None, ctypes.byref(sz), 0)
-        if sz.value > 0:
-            buf = ctypes.create_string_buffer(sz.value)
-            if iphlp.GetIpAddrTable(buf, ctypes.byref(sz), 0) == 0:
-                n = struct.unpack_from('<I', buf, 0)[0]
-                for i in range(n):
-                    off = 4 + i * 24
-                    if off + 12 <= len(buf.raw):
-                        addr_str = socket.inet_ntoa(buf.raw[off:off + 4])
-                        if_idx = struct.unpack_from('<I', buf, off + 4)[0]
-                        mask_str = socket.inet_ntoa(buf.raw[off + 8:off + 12])
-                        if addr_str.startswith('127.') or addr_str.startswith('169.254.') or addr_str == '0.0.0.0':
-                            continue
-                        if mask_str == '255.255.255.255':
-                            tunnels.append((if_idx, addr_str))
-    except Exception:
-        pass
+    seen_idx = set()
+    for item in _query_windows_ipv4_interfaces():
+        if item.get("is_hypervisor"):
+            continue
+        if item.get("is_tunnel") or not item.get("is_default_gw"):
+            idx = item["if_idx"]
+            if idx not in seen_idx:
+                seen_idx.add(idx)
+                tunnels.append((idx, item["ip"]))
 
     _TUNNEL_IF_CACHE = tunnels
     _TUNNEL_IF_TIME = now
     return tunnels
 
 
+def _get_alternate_route_candidates(target_ip):
+    """
+    Trả về danh sách (if_idx, if_ip, is_tunnel_bool) các giao diện mạng thay thế cần thử song song
+    nếu định tuyến mặc định của hệ điều hành (best_if_idx) không kết nối được tới target_ip.
+    Hỗ trợ đầy đủ:
+    - Split-tunnel VPN không đẩy default gateway / route cho subnet từ xa (IKEv2, L2TP, PPTP, WireGuard, OpenVPN...).
+    - Nhiều kết nối VPN bật đồng thời (ví dụ cả IKEv2 lẫn L2TP cùng hoạt động).
+    - Trùng lặp dải IP giữa mạng LAN cục bộ và mạng từ xa qua bất kỳ loại VPN nào (/32 hoặc /24).
+    """
+    if os.name != 'nt':
+        return [], False
+
+    all_ifs = _query_windows_ipv4_interfaces()
+    if not all_ifs:
+        return [], False
+
+    best_if = _get_best_if_index_win(target_ip)
+    best_is_tunnel = False
+    for item in all_ifs:
+        if item["if_idx"] == best_if:
+            best_is_tunnel = bool(item.get("is_tunnel"))
+            break
+
+    try:
+        ip_obj = ipaddress.IPv4Address(target_ip)
+    except Exception:
+        return [], best_is_tunnel
+
+    candidates = []
+    seen_idx = set()
+    for item in all_ifs:
+        idx = item["if_idx"]
+        if idx == best_if or idx in seen_idx or item["ip"] == target_ip:
+            continue
+        net_obj = item.get("network")
+        in_subnet = bool(net_obj is not None and ip_obj in net_obj)
+        if item.get("is_hypervisor") and not in_subnet:
+            continue
+        # Thử giao diện này nếu:
+        # 1) Nó là giao diện đường hầm/VPN bất kỳ, HOẶC
+        # 2) target_ip nằm trực tiếp trong subnet của giao diện (ví dụ LAN cục bộ bị route VPN metric thấp đè lên), HOẶC
+        # 3) Nó là card mạng phụ (không phải cổng Internet mặc định)
+        if item.get("is_tunnel") or in_subnet or not item.get("is_default_gw"):
+            seen_idx.add(idx)
+            candidates.append((idx, item["ip"], bool(item.get("is_tunnel") or not in_subnet)))
+
+    return candidates, best_is_tunnel
+
+
 def connect_tcp_any_route(ip, port, timeout=1.05):
     """
-    Kết nối TCP tới (ip, port) không phân biệt loại kết nối VPN (IKEv2, PPTP, L2TP, OpenVPN...):
-    1. Thử định tuyến mặc định của hệ điều hành trước.
-    2. Nếu thất bại VÀ dải IP đích bị trùng với dải mạng LAN vật lý cục bộ trong khi máy đang có
-       đường hầm VPN hoạt động (ví dụ: LAN nhà/văn phòng cùng là 192.168.10.x với VPN từ xa),
-       tự động thử ép gói tin đi qua từng giao diện đường hầm VPN bằng IP_UNICAST_IF (Windows).
+    Kết nối TCP đa tuyến (Happy-Eyeballs) tới (ip, port) hoàn toàn không phân biệt kiểu kết nối VPN:
+    1. Khởi tạo kết nối theo định tuyến mặc định của hệ điều hành ngay lập tức (0ms).
+       Nếu kết nối thành công nhanh trong 120ms đầu (99% trường hợp LAN / VPN thông thường), trả về ngay mà không mở thêm socket phụ.
+    2. Nếu quá 120ms chưa hoàn tất hoặc bị từ chối sớm trên tuyến mặc định, tự động kích hoạt song song (non-blocking select)
+       qua tất cả các giao diện đường hầm / mạng phụ hợp lệ bằng IP_UNICAST_IF trong cùng khung thời gian timeout.
+       Tuyến nào bắt tay TCP thành công trước sẽ thắng ngay lập tức và đóng các socket còn lại.
     Trả về: (connected_socket, used_vpn_tunnel_bool) hoặc (None, False)
     """
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    try:
-        s.connect((ip, port))
-        return s, False
-    except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
+    if not ip:
+        return None, False
 
-    if os.name == 'nt' and is_in_physical_lan_subnet(ip):
-        tunnels = get_vpn_tunnel_if_indices()
-        for if_idx, tun_ip in tunnels:
-            if ip == tun_ip:
-                continue
-            s_tun = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s_tun.settimeout(min(timeout, 0.85))
+    if os.name != 'nt':
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((ip, port))
+            return s, False
+        except Exception:
             try:
-                # IPPROTO_IP = 0, IP_UNICAST_IF = 31 (network byte order)
-                s_tun.setsockopt(socket.IPPROTO_IP, 31, struct.pack('!I', if_idx))
-                s_tun.connect((ip, port))
-                return s_tun, True
+                s.close()
             except Exception:
+                pass
+            return None, False
+
+    alt_candidates, best_is_tunnel = _get_alternate_route_candidates(ip)
+
+    # Nếu không có giao diện thay thế nào khác -> dùng connect chuẩn gọn nhẹ
+    if not alt_candidates:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((ip, port))
+            return s, best_is_tunnel
+        except Exception:
+            try:
+                s.close()
+            except Exception:
+                pass
+            return None, False
+
+    # Non-blocking Staggered Happy-Eyeballs trên tuyến mặc định + các giao diện thay thế
+    active = {}  # sock -> is_tunnel_bool
+    deadline = time.monotonic() + max(0.25, float(timeout))
+
+    def _close_all(except_sock=None):
+        for sk in list(active.keys()):
+            if sk is not except_sock:
                 try:
-                    s_tun.close()
+                    sk.close()
                 except Exception:
                     pass
+        active.clear()
+
+    def _start_nb_socket(if_idx=None, is_tun=False):
+        sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sk.setblocking(False)
+            if if_idx is not None:
+                # IPPROTO_IP = 0, IP_UNICAST_IF = 31 (network byte order)
+                sk.setsockopt(socket.IPPROTO_IP, 31, struct.pack('!I', int(if_idx)))
+            rc = sk.connect_ex((ip, int(port)))
+            if rc == 0:
+                sk.setblocking(True)
+                sk.settimeout(timeout)
+                return sk  # Kết nối tức thì
+            # WSAEWOULDBLOCK=10035, EINPROGRESS=10036/115
+            if rc in (10035, 10036, 115):
+                active[sk] = is_tun
+                return None
+        except Exception:
+            pass
+        try:
+            sk.close()
+        except Exception:
+            pass
+        return None
+
+    try:
+        # Bước 1: Thử tuyến mặc định của OS trước trong tối đa 120ms
+        imm = _start_nb_socket(if_idx=None, is_tun=best_is_tunnel)
+        if imm is not None:
+            return imm, best_is_tunnel
+
+        if active:
+            head_start = min(0.12, max(0.02, deadline - time.monotonic()))
+            sk_list = list(active.keys())
+            _, wlist, xlist = select.select([], sk_list, sk_list, head_start)
+            for sk in wlist:
+                if sk in active and sk.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                    won_tun = active[sk]
+                    _close_all(except_sock=sk)
+                    sk.setblocking(True)
+                    sk.settimeout(timeout)
+                    return sk, won_tun
+            for sk in set(wlist + xlist):
+                if sk in active:
+                    active.pop(sk, None)
+                    try:
+                        sk.close()
+                    except Exception:
+                        pass
+
+        # Bước 2: Mở song song trên các giao diện đường hầm / mạng thay thế trong phần thời gian còn lại
+        for if_idx, _if_ip, is_tun in alt_candidates:
+            imm_alt = _start_nb_socket(if_idx=if_idx, is_tun=is_tun)
+            if imm_alt is not None:
+                _close_all(except_sock=imm_alt)
+                return imm_alt, is_tun
+
+        while active:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                break
+            sk_list = list(active.keys())
+            _, wlist, xlist = select.select([], sk_list, sk_list, min(rem, 0.25))
+            for sk in wlist:
+                if sk in active and sk.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                    won_tun = active[sk]
+                    _close_all(except_sock=sk)
+                    sk.setblocking(True)
+                    sk.settimeout(timeout)
+                    return sk, won_tun
+            for sk in set(wlist + xlist):
+                if sk in active:
+                    active.pop(sk, None)
+                    try:
+                        sk.close()
+                    except Exception:
+                        pass
+    finally:
+        _close_all()
 
     return None, False
 
@@ -1077,9 +1441,25 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
             except Exception:
                 data = {}
 
+            def _known_matches_peer(resp_hwid_clean="", resp_name="", resp_name_ver=False):
+                if not known_peer:
+                    return False
+                kh_c = ''.join(ch for ch in str(known_peer.get("hwid") or "") if ch.isdigit())
+                if len(resp_hwid_clean) == 12 and known_peer.get("hwid_verified") and len(kh_c) == 12 and resp_hwid_clean != kh_c:
+                    return False
+                kn_c = str(known_peer.get("computer_name") or "").strip().lower().split('.')[0].strip()
+                rn_c = str(resp_name or "").strip().lower().split('.')[0].strip()
+                if (
+                    resp_name_ver and rn_c and rn_c not in ("unknown", "không rõ") and not re.match(r"^unknown-\d+$", rn_c)
+                    and _is_real_verified_name(known_peer) and kn_c and rn_c != kn_c
+                    and not (len(resp_hwid_clean) == 12 and known_peer.get("hwid_verified") and resp_hwid_clean == kh_c)
+                ):
+                    return False
+                return True
+
             known_name = str(known_peer.get("computer_name") or "").strip() if known_peer else ""
             known_verified = bool(known_peer.get("name_verified")) if known_peer else False
-            known_has_real_name = bool(known_name and known_name.lower() not in ("unknown", "không rõ") and not re.match(r"^(unknown|pc)-\d+$", known_name.lower()))
+            known_has_real_name = bool(known_name and known_name.lower() not in ("unknown", "không rõ") and not re.match(r"^unknown-\d+$", known_name.lower()))
             known_mac = str(known_peer.get("macs") or "").strip() if known_peer else ""
             known_os = str(known_peer.get("os") or "").strip() if known_peer else ""
             known_hwid = str(known_peer.get("hwid") or "").strip() if known_peer else ""
@@ -1088,8 +1468,17 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
 
             # Bản mới phản hồi probe_pong
             if data.get("type") == "probe_pong":
+                pong_hwid_raw = str(data.get("hwid") or "").strip()
+                clean_pong_hwid = ''.join(ch for ch in pong_hwid_raw if ch.isdigit())
                 comp_name = data.get("computer_name")
                 is_verified = bool(comp_name)
+
+                # Nếu IP này nay đã được DHCP/VPN cấp cho một máy tính KHÁC với known_peer -> hủy liên kết known_peer ngay để không ghi đè/xóa máy cũ!
+                if known_peer and not _known_matches_peer(clean_pong_hwid, comp_name, is_verified):
+                    known_peer = None
+                    known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
+                    known_verified = known_has_real_name = False
+
                 nb_mac = data.get("macs", "") or known_mac
                 os_name = data.get("os", "") or known_os
                 if not comp_name:
@@ -1108,30 +1497,28 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                 if not nb_mac:
                     nb_mac = get_mac_from_arp(ip)
 
-                pong_hwid_raw = str(data.get("hwid") or "").strip()
-                clean_pong_hwid = ''.join(ch for ch in pong_hwid_raw if ch.isdigit())
                 if len(clean_pong_hwid) == 12:
                     hwid = clean_pong_hwid
-                    # HWID đã xác thực từ gói tin probe_pong -> Không dùng known_saved_id lỗi thời
                     matched_comp = match_saved_computer(comp_name, hwid, None)
                     saved_pw = matched_comp.get("password", "") if matched_comp else ""
-                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or hwid
+                    saved_id = hwid
                     hwid_verified = True
                 else:
                     matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
                     m_clean_id = ''.join(ch for ch in str(matched_comp.get("id", "")) if ch.isdigit()) if matched_comp else ""
                     clean_kh = ''.join(ch for ch in str(known_hwid or "") if ch.isdigit())
-                    if m_clean_id and len(m_clean_id) == 12:
+                    exact_match = _is_exact_saved_match(matched_comp, comp_name, known_hwid)
+                    if exact_match and m_clean_id and len(m_clean_id) == 12:
                         hwid = m_clean_id
                         saved_id = m_clean_id
                         hwid_verified = True
                     elif clean_kh and len(clean_kh) == 12:
                         hwid = clean_kh
-                        saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
-                        hwid_verified = True
+                        saved_id = known_saved_id or hwid
+                        hwid_verified = bool(known_peer and known_peer.get("hwid_verified"))
                     else:
                         hwid = make_stable_hwid(ip, comp_name, nb_mac)
-                        saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                        saved_id = known_saved_id or hwid
                         hwid_verified = False
                     saved_pw = matched_comp.get("password", "") if matched_comp else ""
 
@@ -1163,37 +1550,45 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
 
             # Bản cũ hoặc phản hồi mật khẩu sai (xác nhận 100% đang chạy app)
             if data.get("status") == "error":
-                if known_has_real_name:
+                r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
+                if known_peer and r_ver and not _known_matches_peer("", r_name, r_ver):
+                    known_peer = None
+                    known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
+                    known_verified = known_has_real_name = False
+
+                if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
+                    comp_name = r_name
+                    nb_mac = r_mac or known_mac
+                    os_name = r_os or known_os
+                    is_verified = True
+                elif known_has_real_name:
                     comp_name = known_name
-                    nb_mac = known_mac
-                    os_name = known_os
+                    nb_mac = known_mac or r_mac
+                    os_name = known_os or r_os
                     is_verified = known_verified or True
                 else:
-                    comp_name, nb_mac, os_name, is_verified = resolve_host_info_safe(ip)
-                    if not nb_mac:
-                        nb_mac = known_mac
-                    if not os_name:
-                        os_name = known_os
+                    comp_name, nb_mac, os_name, is_verified = r_name, (r_mac or known_mac), (r_os or known_os), r_ver
                 if not nb_mac:
                     nb_mac = get_mac_from_arp(ip)
 
-                # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có
+                # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có (chỉ lấy ID khi khớp chính xác)
                 matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
                 saved_pw = matched_comp.get("password", "") if matched_comp else ""
                 m_clean_id = ''.join(ch for ch in str(matched_comp.get("id", "")) if ch.isdigit()) if matched_comp else ""
                 clean_kh = ''.join(ch for ch in str(known_hwid or "") if ch.isdigit())
+                exact_match = _is_exact_saved_match(matched_comp, comp_name, known_hwid)
 
-                if m_clean_id and len(m_clean_id) == 12:
+                if exact_match and m_clean_id and len(m_clean_id) == 12:
                     hwid = m_clean_id
                     saved_id = m_clean_id
                     hwid_verified = True
                 elif clean_kh and len(clean_kh) == 12:
                     hwid = clean_kh
-                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
-                    hwid_verified = True
+                    saved_id = known_saved_id or hwid
+                    hwid_verified = bool(known_peer and known_peer.get("hwid_verified"))
                 else:
                     hwid = make_stable_hwid(ip, comp_name, nb_mac)
-                    saved_id = (matched_comp.get("id", "") if matched_comp else "") or known_saved_id or hwid
+                    saved_id = known_saved_id or hwid
                     hwid_verified = False
 
                 final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
@@ -1230,8 +1625,8 @@ def probe_peer_direct(peer_info, timeout=0.85):
     """
     Thăm dò trực tiếp trạng thái Online của một máy tính trong mạng LAN / VPN qua TCP:
     - Thử kết nối tới source_ip và các IP trong local_ip trên cổng port (mặc định BOUND_PORT).
-    - Gửi gói tin probe với APP_KEY và kiểm tra phản hồi từ host.
-    - Không cần thông qua Signaling Server.
+    - Kiểm tra danh tính máy phản hồi khớp với peer_info (nếu IP cũ đã bị DHCP cấp cho máy khác thì bỏ qua IP đó,
+      trả về Offline chứ TUYỆT ĐỐI không ghi đè hay làm mất peer_info).
     
     Trả về: (is_online: bool, updated_info: dict hoặc None)
     """
@@ -1254,16 +1649,17 @@ def probe_peer_direct(peer_info, timeout=0.85):
     port = int(peer_info.get("port") or BOUND_PORT)
     raw_net = str(peer_info.get("network_type") or "").strip()
     vpn_label = "LAN" if (not raw_net or raw_net.upper() == "LAN") else "VPN"
+    peer_hwid = peer_info.get("hwid") or peer_info.get("saved_id") or ""
 
     for ip in candidate_ips:
         res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
-        if res:
+        if res and are_same_machine(peer_hwid, peer_info, res.get("hwid"), res):
             return True, res
 
     if port != 12345:
         for ip in candidate_ips:
             res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
-            if res:
+            if res and are_same_machine(peer_hwid, peer_info, res.get("hwid"), res):
                 return True, res
 
     return False, None
@@ -1368,7 +1764,10 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_cal
             my_hostname = socket.gethostname().strip().lower()
             if my_clean and (my_clean == res_hwid or my_clean == res_saved_id):
                 res = None
-            elif res_name and res_name == my_hostname and res_name not in ("unknown", "không rõ", "localhost"):
+            elif (
+                not (res.get("hwid_verified") and len(res_hwid) == 12 and len(my_clean) == 12 and res_hwid != my_clean)
+                and res_name and res_name == my_hostname and res_name not in ("unknown", "không rõ", "localhost")
+            ):
                 res = None
 
         should_notify = False

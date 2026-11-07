@@ -462,5 +462,10 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "區域網路與VPN計算機列表匯入成功！",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "區域網路與VPN計算機列表匯出成功！",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "未找到可匯出的區域網路與VPN計算機資料。",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "檔案格式無效。檔案必須包含JSON資料。"
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "檔案格式無效。檔案必須包含JSON資料。",
+  "📡 Máy tính mạng LAN & VPN": "📡 區域網路與VPN計算機",
+  "🔍 Quét dải IP": "🔍 掃描IP段",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "清單中尚無電腦。\n請輸入IP範圍並點擊「掃描IP段」或「重新整理」以搜尋網路中的電腦。",
+  "Xóa sạch danh sách": "清空清單",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "您確定要清空整個區域網路與VPN計算機清單嗎？"
 }

@@ -462,5 +462,10 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "Список компьютеров LAN и VPN успешно импортирован!",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "Список компьютеров LAN và VPN успешно экспортирован!",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "Данные компьютеров LAN и VPN для экспорта не найдены.",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Неверный формат файла. Файл должен содержать данные JSON."
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "Неверный формат файла. Файл должен содержать данные JSON.",
+  "📡 Máy tính mạng LAN & VPN": "📡 Компьютеры LAN & VPN",
+  "🔍 Quét dải IP": "🔍 Сканировать диапазон IP",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "В списке пока нет компьютеров.\nВведите диапазон IP и нажмите «Сканировать диапазон IP» или «Обновить».",
+  "Xóa sạch danh sách": "Очистить весь список",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "Вы уверены, что хотите полностью очистить список компьютеров LAN и VPN?"
 }

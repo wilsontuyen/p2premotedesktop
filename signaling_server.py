@@ -295,7 +295,7 @@ def handle_client(conn, addr):
             print(f"[+] Client mới kết nối từ: {addr}")
             rest = bytearray()
             # FIX LỖI CPU: Giới hạn số byte tối đa đọc tiêu đề để không bị treo vòng lặp
-            for _ in range(1024): 
+            for _idx in range(1024): 
                 chunk = conn.recv(1)
                 if not chunk: break
                 rest.extend(chunk)

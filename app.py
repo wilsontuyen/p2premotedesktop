@@ -1522,30 +1522,89 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def load_lan_peers(self):
-        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers
-        lan_file = get_lan_peers_json_path()
-        if os.path.exists(lan_file):
+        from utils.vpn_discovery import get_lan_peers_json_path, get_all_lan_peers_json_paths, deduplicate_lan_peers, merge_peers, get_last_seen_epoch
+        combined = {}
+        candidate_files = []
+        primary_file = get_lan_peers_json_path()
+        if primary_file:
+            candidate_files.append(primary_file)
+        for p in get_all_lan_peers_json_paths():
+            if p not in candidate_files:
+                candidate_files.append(p)
+
+        for fpath in candidate_files:
+            if not fpath or not os.path.exists(fpath):
+                continue
             try:
-                with open(lan_file, 'r', encoding='utf-8') as f:
+                with open(fpath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if isinstance(data, dict):
-                    return deduplicate_lan_peers(data)
-                return data
-            except:
+                    for k, v in data.items():
+                        if not isinstance(v, dict):
+                            continue
+                        if k in combined:
+                            if get_last_seen_epoch(v.get("last_seen", 0)) >= get_last_seen_epoch(combined[k].get("last_seen", 0)):
+                                combined[k] = merge_peers(v, combined[k])
+                            else:
+                                combined[k] = merge_peers(combined[k], v)
+                        else:
+                            combined[k] = dict(v)
+            except Exception:
                 pass
-        return {}
+        return deduplicate_lan_peers(combined) if combined else {}
 
 
-    def save_lan_peers(self):
-        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers, match_saved_computer
+    def save_lan_peers(self, allow_shrink=False):
+        from utils.vpn_discovery import (
+            get_lan_peers_json_path, get_all_lan_peers_json_paths,
+            deduplicate_lan_peers, match_saved_computer, _is_exact_saved_match,
+            are_same_machine, merge_peers, get_last_seen_epoch
+        )
         lan_file = get_lan_peers_json_path()
         try:
             from datetime import datetime
             import hashlib
-            import shutil
             with self.lan_peers_lock:
+                # Nếu không phải thao tác xóa chủ động của người dùng (allow_shrink=False),
+                # hợp nhất thêm dữ liệu đang có trên đĩa để TUYỆT ĐỐI không bao giờ tự động làm mất máy
+                if not allow_shrink:
+                    for fpath in get_all_lan_peers_json_paths():
+                        if not fpath or not os.path.exists(fpath):
+                            continue
+                        try:
+                            with open(fpath, 'r', encoding='utf-8') as rf:
+                                disk_data = json.load(rf)
+                            if isinstance(disk_data, dict):
+                                for dk, dv in disk_data.items():
+                                    if not isinstance(dv, dict):
+                                        continue
+                                    already_present = False
+                                    for mk, mv in list(self.lan_peers.items()):
+                                        if mk == dk or are_same_machine(mk, mv, dk, dv):
+                                            if get_last_seen_epoch(mv.get("last_seen", 0)) >= get_last_seen_epoch(dv.get("last_seen", 0)):
+                                                self.lan_peers[mk] = merge_peers(mv, dv)
+                                            else:
+                                                self.lan_peers[mk] = merge_peers(dv, mv)
+                                            already_present = True
+                                            break
+                                    if not already_present:
+                                        self.lan_peers[dk] = dict(dv)
+                        except Exception:
+                            pass
+
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
                 dump_data = {}
+
+                my_hostname = socket.gethostname().strip().lower()
+                my_hwid = getattr(self, "my_id_clean", "") or ""
+                if not my_hwid:
+                    try:
+                        from utils.hwid import get_hwid
+                        my_hwid = get_hwid()[0]
+                    except Exception:
+                        my_hwid = ""
+                clean_my_hwid = ''.join(ch for ch in str(my_hwid) if ch.isdigit())
+
                 for k, v in self.lan_peers.items():
                     v_copy = dict(v)
                     k_clean = ''.join(ch for ch in str(k) if ch.isdigit())
@@ -1553,19 +1612,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     canonical_k = k_clean if len(k_clean) == 12 else (h_clean if len(h_clean) == 12 else k)
                     v_copy["hwid"] = canonical_k
 
-                    # Nhận diện máy tính hiện tại (self)
+                    # Nhận diện máy tính hiện tại (self): chỉ bỏ qua nếu trùng HWID của mình,
+                    # hoặc trùng tên máy khi peer CHƯA có HWID 12 số xác thực khác mình
                     p_name = str(v_copy.get("computer_name") or "").strip().lower()
-                    my_hostname = socket.gethostname().strip().lower()
-                    my_hwid = getattr(self, "my_id_clean", "") or ""
-                    if not my_hwid:
-                        try:
-                            from utils.hwid import get_hwid
-                            my_hwid = get_hwid()[0]
-                        except Exception:
-                            my_hwid = ""
-                    clean_my_hwid = ''.join(ch for ch in str(my_hwid) if ch.isdigit())
-                    if clean_my_hwid and (p_name == my_hostname or canonical_k == clean_my_hwid):
-                        # Bỏ qua máy hiện tại, không lưu vào lan_peers.json
+                    peer_has_distinct_verified_hwid = (
+                        bool(v_copy.get("hwid_verified"))
+                        and len(str(canonical_k)) == 12 and str(canonical_k).isdigit()
+                        and len(clean_my_hwid) == 12
+                        and canonical_k != clean_my_hwid
+                    )
+                    if clean_my_hwid and canonical_k == clean_my_hwid:
+                        continue
+                    if not peer_has_distinct_verified_hwid and clean_my_hwid and p_name and p_name == my_hostname and p_name not in ("unknown", "không rõ", "localhost"):
                         continue
 
                     # 1. Format last_seen sang chuỗi ngày giờ full YYYY-MM-DD HH:MM:SS
@@ -1575,7 +1633,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     elif not isinstance(ls, str) or "-" not in str(ls) or ":" not in str(ls):
                         v_copy["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    # 2. Tự động đồng bộ saved_password và saved_id từ saved_computers.xml nếu chưa có
+                    # 2. Tự động đồng bộ saved_password và MAC từ saved_computers.xml nếu chưa có
                     spw = str(v_copy.get("saved_password") or "").strip()
                     matched = match_saved_computer(v_copy.get("computer_name"), canonical_k, v_copy.get("saved_id"))
                     if not spw and matched and matched.get("password"):
@@ -1584,14 +1642,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                         v_copy["macs"] = str(matched["mac"]).strip()
                         v["macs"] = v_copy["macs"]
 
-                    # 3. Đảm bảo saved_id đồng bộ chuẩn với HWID 12 số
-                    if len(canonical_k) == 12:
+                    # 3. Đảm bảo saved_id chỉ lấy từ matched khi khớp CHÍNH XÁC tên máy hoặc ID (tránh gán nhầm làm gộp mất máy!)
+                    if len(str(canonical_k)) == 12 and str(canonical_k).isdigit():
                         v_copy["saved_id"] = canonical_k
-                    elif matched and matched.get("id"):
+                    elif matched and _is_exact_saved_match(matched, v_copy.get("computer_name"), canonical_k) and matched.get("id"):
                         m_clean = ''.join(ch for ch in str(matched["id"]) if ch.isdigit())
                         if len(m_clean) == 12:
                             v_copy["saved_id"] = m_clean
                             v_copy["hwid"] = m_clean
+                            canonical_k = m_clean
                     elif not v_copy.get("saved_id"):
                         v_copy["saved_id"] = canonical_k
 
@@ -1609,16 +1668,25 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     v["hwid"] = v_copy["hwid"]
                     dump_data[canonical_k] = v_copy
 
-            with open(lan_file, 'w', encoding='utf-8') as f:
-                json.dump(dump_data, f, ensure_ascii=False, indent=4)
+            def _atomic_write_json(target_path, payload):
+                t_dir = os.path.dirname(os.path.abspath(target_path))
+                os.makedirs(t_dir, exist_ok=True)
+                tmp_path = f"{target_path}.{os.getpid()}.tmp"
+                with open(tmp_path, 'w', encoding='utf-8') as wf:
+                    json.dump(payload, wf, ensure_ascii=False, indent=4)
+                os.replace(tmp_path, target_path)
 
-            if sys.platform == "win32":
-                st = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
+            _atomic_write_json(lan_file, dump_data)
+
+            # Đồng bộ sang các đường dẫn phụ có quyền ghi (APPDATA & thư mục cài đặt) để chạy quyền Admin hay User đều đồng nhất 100%
+            for mirror_path in get_all_lan_peers_json_paths():
                 try:
-                    if os.path.abspath(st) != os.path.abspath(lan_file):
-                        st_dir = os.path.dirname(st)
-                        if os.path.exists(st_dir) and os.access(st_dir, os.W_OK):
-                            shutil.copy2(lan_file, st)
+                    if os.path.abspath(mirror_path) == os.path.abspath(lan_file):
+                        continue
+                    m_dir = os.path.dirname(os.path.abspath(mirror_path))
+                    if os.path.exists(m_dir) and os.access(m_dir, os.W_OK):
+                        if not os.path.exists(mirror_path) or os.access(mirror_path, os.W_OK):
+                            _atomic_write_json(mirror_path, dump_data)
                 except Exception:
                     pass
         except Exception:

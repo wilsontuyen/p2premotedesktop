@@ -501,5 +501,10 @@
   "Phương thức kết nối: Máy chủ Trung chuyển (Relay)": "Connection Mode: Relay Server",
   "Đang đo...": "Testing...",
   "Đang đồng bộ luồng hình ảnh...": "Synchronizing screen stream...",
-  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Testing network speed (Ping: {ping:.1f}ms)..."
+  "Đang đo tốc độ mạng (Ping: {ping:.1f}ms)...": "Testing network speed (Ping: {ping:.1f}ms)...",
+  "📡 Máy tính mạng LAN & VPN": "📡 LAN & VPN Computers",
+  "🔍 Quét dải IP": "🔍 Scan IP Range",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "No computers in the list yet.\nEnter an IP range and click 'Scan IP Range' or 'Refresh' to discover computers.",
+  "Xóa sạch danh sách": "Clear All Computers",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "Are you sure you want to clear the entire LAN & VPN computer list?"
 }

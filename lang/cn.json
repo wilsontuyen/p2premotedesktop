@@ -469,5 +469,10 @@
   "Xóa sạch toàn bộ danh sách các máy đã quét trong mạng LAN & VPN": "清除局域网和VPN列表中所有已扫描的计算机",
   "Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị.": "过滤已开启：仅显示已命名计算机（隐藏未知IP）。\n点击关闭以显示所有设备。",
   "Đang TẮT lọc: Hiển thị tất cả thiết bị (bao gồm cả IP chưa rõ tên).\nBấm để BẬT và chỉ hiện các máy có tên xác định.": "过滤已关闭：显示所有设备（包括未知IP）。\n点击开启以仅显示已命名计算机。",
-  "Đóng cửa sổ máy tính mạng LAN & VPN": "关闭局域网和VPN计算机窗口"
+  "Đóng cửa sổ máy tính mạng LAN & VPN": "关闭局域网和VPN计算机窗口",
+  "📡 Máy tính mạng LAN & VPN": "📡 局域网和VPN计算机",
+  "🔍 Quét dải IP": "🔍 扫描IP段",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "列表中尚无计算机。\n请输入IP范围并点击'扫描IP段'或'刷新'以查找网络中的计算机。",
+  "Xóa sạch danh sách": "清空列表",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "您确定要清空整个局域网和VPN计算机列表吗？"
 }

@@ -526,21 +526,24 @@ class NetworkMixin:
                 if peer_hwid == self.my_id_clean:
                     continue
                     
+                clean_peer_hwid = ''.join(ch for ch in str(peer_hwid) if ch.isdigit())
                 peer_info = {
                     "computer_name": beacon.get("computer_name", "Unknown"),
                     "name_verified": True,
+                    "hwid_verified": (len(clean_peer_hwid) == 12),
                     "local_ip": beacon.get("local_ip", addr[0]),
                     "port": int(beacon.get("port", 12345)),
-                    "hwid": peer_hwid,
+                    "hwid": clean_peer_hwid if len(clean_peer_hwid) == 12 else peer_hwid,
                     "macs": beacon.get("macs", ""),
                     "last_seen": time.time(),
                     "source_ip": addr[0],
                 }
+                peer_key = peer_info["hwid"]
                 
                 with self.lan_peers_lock:
                     matched_k = None
                     for k, v in self.lan_peers.items():
-                        if k == peer_hwid or are_same_machine(k, v, peer_hwid, peer_info):
+                        if k == peer_key or are_same_machine(k, v, peer_key, peer_info):
                             matched_k = k
                             break
                     old_ip = None
@@ -548,17 +551,17 @@ class NetworkMixin:
                         old_info = self.lan_peers[matched_k]
                         old_ip = old_info.get("local_ip")
                         peer_info = merge_peers(peer_info, old_info)
-                        if matched_k != peer_hwid:
+                        if matched_k != peer_key:
                             self.lan_peers.pop(matched_k, None)
                     is_new = matched_k is None
                     should_save = is_new or (old_ip != peer_info.get("local_ip"))
-                    self.lan_peers[peer_hwid] = peer_info
+                    self.lan_peers[peer_key] = peer_info
                     
                 if should_save:
                     self.save_lan_peers()
                     
                 if is_new:
-                    fmt_id = f"{peer_hwid[:3]} {peer_hwid[3:6]} {peer_hwid[6:9]} {peer_hwid[9:]}" if len(peer_hwid) == 12 else peer_hwid
+                    fmt_id = f"{peer_key[:3]} {peer_key[3:6]} {peer_key[6:9]} {peer_key[9:]}" if len(peer_key) == 12 else peer_key
                     print(f"[LAN Discovery] Phát hiện máy mới: {peer_info['computer_name']} ({fmt_id}) tại {peer_info['local_ip']}:{peer_info['port']}")
             except socket.timeout:
                 continue
@@ -567,20 +570,39 @@ class NetworkMixin:
                     print(f"[LAN Discovery] Listener error: {e}")
                 time.sleep(1)
 
+    def _merge_stored_lan_peers_safe(self):
+        """Hợp nhất dữ liệu từ đĩa vào bộ nhớ mà KHÔNG bao giờ ghi đè làm mất các máy đang có trong bộ nhớ."""
+        try:
+            stored = self.load_lan_peers()
+            if stored and isinstance(stored, dict):
+                with self.lan_peers_lock:
+                    combined = dict(self.lan_peers)
+                    for sk, sv in stored.items():
+                        if not isinstance(sv, dict):
+                            continue
+                        found_k = None
+                        for mk, mv in list(combined.items()):
+                            if mk == sk or are_same_machine(mk, mv, sk, sv):
+                                found_k = mk
+                                break
+                        if found_k:
+                            if get_last_seen_epoch(combined[found_k].get("last_seen", 0)) >= get_last_seen_epoch(sv.get("last_seen", 0)):
+                                combined[found_k] = merge_peers(combined[found_k], sv)
+                            else:
+                                combined[found_k] = merge_peers(sv, combined[found_k])
+                        else:
+                            combined[sk] = dict(sv)
+                    self.lan_peers = deduplicate_lan_peers(combined)
+                self.save_lan_peers()
+        except Exception:
+            pass
+
     def show_lan_computers_dialog(self):
         """Hiển thị dialog danh sách các máy tính phát hiện được trong mạng LAN & VPN."""
         if self._is_host_only_app():
             return
         if hasattr(self, 'lan_computers_dialog') and self.lan_computers_dialog.winfo_exists():
-            # Đọc lại file lan_peers.json đã có đưa vào dialog hiển thị
-            try:
-                stored = self.load_lan_peers()
-                if stored and isinstance(stored, dict):
-                    with self.lan_peers_lock:
-                        self.lan_peers = deduplicate_lan_peers(dict(stored))
-                    self.save_lan_peers()
-            except Exception:
-                pass
+            self._merge_stored_lan_peers_safe()
             if self.lan_computers_dialog.state() == 'withdrawn':
                 self.lan_computers_dialog.deiconify()
             self.lan_computers_dialog.lift()
@@ -589,15 +611,7 @@ class NetworkMixin:
                 self._lan_refresh_list_func()
             return
 
-        # Đọc lại file lan_peers.json đã có đưa vào dialog hiển thị các máy
-        try:
-            stored = self.load_lan_peers()
-            if stored and isinstance(stored, dict):
-                with self.lan_peers_lock:
-                    self.lan_peers = deduplicate_lan_peers(dict(stored))
-                self.save_lan_peers()
-        except Exception:
-            pass
+        self._merge_stored_lan_peers_safe()
             
         dialog = tk.Toplevel(self)
         dialog.withdraw()  # Ẩn tạm thời để tính toán kích thước/vị trí tránh nháy hình
@@ -678,35 +692,41 @@ class NetworkMixin:
             except Exception as e:
                 print(f"[Custom IP] Save error: {e}")
 
-        # Giá trị dải IP mặc định (ưu tiên dải đã lưu lần trước -> subnet VPN gợi ý -> subnet LAN hiện tại)
-        default_start = "192.168.1.1"
-        default_end = "192.168.1.254"
-        try:
-            detected_vpns = detect_vpn_interfaces()
-            if detected_vpns:
-                bp = detected_vpns[0].get("base_prefix", "")
-                if bp:
-                    default_start = f"{bp}1"
-                    default_end = f"{bp}254"
-            else:
-                local_ip_first = getattr(self, 'local_ip', '').split(',')[0].strip()
-                if local_ip_first and '.' in local_ip_first:
-                    parts = local_ip_first.split('.')
+        # Giá trị dải IP mặc định (ưu tiên dải đã lưu lần trước -> dải IP giao diện mạng phụ/VPN -> dải LAN hiện tại)
+        saved_s, saved_e = load_saved_custom_ip("", "")
+        if saved_s and saved_e:
+            init_start, init_end = saved_s, saved_e
+        else:
+            default_start = "192.168.1.1"
+            default_end = "192.168.1.254"
+            try:
+                from utils.vpn_discovery import get_vpn_tunnel_if_indices
+                tun_ifs = get_vpn_tunnel_if_indices()
+                picked_ip = tun_ifs[0][1] if tun_ifs else ""
+                if not picked_ip:
+                    detected_vpns = detect_vpn_interfaces()
+                    if detected_vpns:
+                        bp = detected_vpns[0].get("base_prefix", "")
+                        if bp:
+                            picked_ip = f"{bp}1"
+                if not picked_ip:
+                    picked_ip = getattr(self, 'local_ip', '').split(',')[0].strip()
+                if picked_ip and '.' in picked_ip:
+                    parts = picked_ip.split('.')
                     if len(parts) == 4:
                         default_start = f"{parts[0]}.{parts[1]}.{parts[2]}.1"
                         default_end = f"{parts[0]}.{parts[1]}.{parts[2]}.254"
-        except Exception:
-            pass
+            except Exception:
+                pass
+            init_start, init_end = default_start, default_end
 
-        init_start, init_end = load_saved_custom_ip(default_start, default_end)
-
-        # VPN / IP Range Toolbar (quét trực tiếp theo dải IP nhập vào, không phân biệt loại kết nối VPN)
+        # IP Range Toolbar (quét trực tiếp theo dải IP nhập vào, không phân biệt loại kết nối VPN)
         toolbar_bg = getattr(self, 'card_color', '#252836')
         vpn_toolbar = tk.Frame(dialog, bg=toolbar_bg, bd=0, padx=10, pady=6)
         vpn_toolbar.pack(fill=tk.X, padx=20, pady=(0, 6))
 
         btn_vpn_scan = tk.Button(
-            vpn_toolbar, text=_("🛡 Quét VPN"), font=("Segoe UI", 8, "bold"),
+            vpn_toolbar, text=_("🔍 Quét dải IP"), font=("Segoe UI", 8, "bold"),
             fg="#FFFFFF", activeforeground="#FFFFFF", bg="#8E44AD", activebackground="#9B59B6",
             relief=tk.FLAT, bd=0, padx=12, pady=3, cursor="hand2"
         )
@@ -1026,12 +1046,18 @@ class NetworkMixin:
             tk.Button(btn_f, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=pwd_win.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
         def delete_lan_peer(hwid, peer_info):
-            """Xóa máy tính khỏi danh sách LAN & VPN."""
+            """Xóa máy tính khỏi danh sách LAN & VPN (chỉ khi người dùng bấm Xóa và xác nhận)."""
             comp_name = peer_info.get("computer_name", hwid)
             if self.show_custom_question(_("Xóa máy tính"), _("Bạn có chắc muốn xóa") + f" '{comp_name}' " + _("khỏi danh sách?"), parent=dialog):
                 with self.lan_peers_lock:
-                    self.lan_peers.pop(hwid, None)
-                self.save_lan_peers()
+                    keys_to_del = [
+                        k for k, v in list(self.lan_peers.items())
+                        if k == hwid or are_same_machine(k, v, hwid, peer_info)
+                    ]
+                    for dk in keys_to_del:
+                        self.lan_peers.pop(dk, None)
+                        scan_state.setdefault("online_status", {}).pop(dk, None)
+                self.save_lan_peers(allow_shrink=True)
                 refresh_list()
                 progress_label.config(text=_("Đã xóa '{name}' khỏi danh sách!").format(name=comp_name))
                 dialog.after(3000, lambda: progress_label.config(text=""))
@@ -1121,7 +1147,7 @@ class NetworkMixin:
                     self.tw = None
                 self.lbl_widget = None
 
-        # Gắn tooltip cho thanh nhập dải IP và nút Quét VPN
+        # Gắn tooltip cho thanh nhập dải IP và nút Quét dải IP
         RowTooltip(
             btn_vpn_scan,
             _("Quét các máy tính theo dải địa chỉ IP đã nhập (không phân biệt loại kết nối VPN)"),
@@ -1138,7 +1164,7 @@ class NetworkMixin:
         def schedule_refresh(delay_ms=160):
             if not dialog.winfo_exists():
                 return
-            # Khi đang trong tiến trình Quét VPN, không cập nhật giao diện để tránh chớp nháy màn hình
+            # Khi đang trong tiến trình Quét dải IP, không cập nhật giao diện để tránh chớp nháy màn hình
             if scan_state.get("is_scanning", False):
                 return
             if refresh_timer[0] is not None:
@@ -1150,6 +1176,7 @@ class NetworkMixin:
 
         def _is_self_peer(p_hwid, p_info):
             """Kiểm tra xem peer có phải là máy tính hiện tại (self) hay không."""
+            from utils.vpn_discovery import _is_valid_unique_physical_mac
             my_clean = ''.join(ch for ch in str(getattr(self, "my_id_clean", "") or "") if ch.isdigit())
             if not my_clean:
                 try:
@@ -1163,10 +1190,10 @@ class NetworkMixin:
             if my_clean and (my_clean == k_clean or my_clean == h_clean or my_clean == s_clean):
                 return True
 
-            p_name = str((p_info or {}).get("computer_name") or "").strip().lower()
-            my_hostname = socket.gethostname().strip().lower()
-            if p_name and p_name == my_hostname and p_name not in ("unknown", "không rõ", "localhost"):
-                return True
+            # Nếu cả máy mình và máy đích đều có HWID thực 12 chữ số (đã xác thực) và KHÁC nhau,
+            # chắc chắn KHÔNG phải chính mình (kể cả khi 2 máy cài cùng tên Windows như 'ADMIN' hay 'PC')
+            if len(my_clean) == 12 and len(h_clean) == 12 and (p_info or {}).get("hwid_verified") and h_clean != my_clean:
+                return False
 
             try:
                 my_ips = get_all_local_ipv4()
@@ -1176,11 +1203,13 @@ class NetworkMixin:
             src_ip = str((p_info or {}).get("source_ip") or "").strip()
             if src_ip and not src_ip.startswith("127.") and src_ip in my_ips:
                 return True
-
-            # Nếu cả máy mình và máy đích đều có HWID thực 12 chữ số (đã xác thực từ probe_pong) và KHÁC nhau,
-            # tuyệt đối không loại nhầm chỉ vì trùng IP phụ (VirtualBox 192.168.56.1 / mạng nhà 192.168.1.x)
-            if len(my_clean) == 12 and len(h_clean) == 12 and (p_info or {}).get("hwid_verified") and h_clean != my_clean:
+            if src_ip and not src_ip.startswith("127.") and src_ip not in my_ips:
                 return False
+
+            p_name = str((p_info or {}).get("computer_name") or "").strip().lower()
+            my_hostname = socket.gethostname().strip().lower()
+            if p_name and p_name == my_hostname and p_name not in ("unknown", "không rõ", "localhost"):
+                return True
 
             p_ips = [x.strip() for x in str((p_info or {}).get("local_ip") or "").split(",") if x.strip()]
             if any(ip in my_ips for ip in p_ips if not ip.startswith("127.") and ip != "192.168.56.1"):
@@ -1196,14 +1225,14 @@ class NetworkMixin:
             my_mac_list = [
                 re.sub(r'[^A-Fa-f0-9]', '', m).upper()
                 for m in my_macs_raw.split(',')
-                if len(m) >= 12 and not re.sub(r'[^A-Fa-f0-9]', '', m).upper().startswith("0A00270000")
+                if _is_valid_unique_physical_mac(re.sub(r'[^A-Fa-f0-9]', '', m))
             ]
             p_macs = [
                 re.sub(r'[^A-Fa-f0-9]', '', m).upper()
                 for m in str((p_info or {}).get("macs") or "").split(',')
-                if len(m) >= 12 and not re.sub(r'[^A-Fa-f0-9]', '', m).upper().startswith("0A00270000")
+                if _is_valid_unique_physical_mac(re.sub(r'[^A-Fa-f0-9]', '', m))
             ]
-            if any(m in my_mac_list for m in p_macs if not all(c == '0' for c in m)):
+            if any(m in my_mac_list for m in p_macs):
                 return True
             return False
 
@@ -1352,7 +1381,7 @@ class NetworkMixin:
                     if dialog.winfo_exists():
                         dialog.after(0, lambda: btn_vpn_scan.config(
                             state=tk.NORMAL,
-                            text=_("🛡 Quét VPN"),
+                            text=_("🔍 Quét dải IP"),
                             bg="#8E44AD",
                             activebackground="#9B59B6"
                         ) if dialog.winfo_exists() else None)
@@ -1372,13 +1401,16 @@ class NetworkMixin:
         filter_named_tip_box = [None]
 
         def is_named_peer(info):
+            # Nếu máy đã được người dùng lưu mật khẩu thì luôn hiển thị, không bao giờ ẩn
+            if info.get("saved_password"):
+                return True
             name = (info.get("computer_name") or "").strip()
             if not name or name.lower() in ("unknown", "không rõ"):
                 return False
-            # Nếu là fallback dạng Unknown-xxx hoặc PC-xxx (ví dụ: Unknown-48, PC-201) và chưa được xác thực
-            if not info.get("name_verified", True):
+            # Ẩn các mục fallback chưa xác thực dạng Unknown-xxx (nhưng VẪN hiển thị máy thật đặt tên PC-01, PC-102...)
+            if re.match(r"^unknown-\d{1,3}$", name, re.IGNORECASE):
                 return False
-            if re.match(r"^(unknown|pc)-\d{1,3}$", name, re.IGNORECASE):
+            if not info.get("name_verified", True):
                 return False
             return True
 
@@ -1433,17 +1465,11 @@ class NetworkMixin:
 
             with self.lan_peers_lock:
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
-                # Loại bỏ hoàn toàn ID và máy hiện tại ra khỏi danh sách
-                self_keys = [k for k, v in list(self.lan_peers.items()) if _is_self_peer(k, v)]
-                for sk in self_keys:
-                    try:
-                        del self.lan_peers[sk]
-                    except Exception:
-                        pass
+                # Chỉ hiển thị các máy khác (ẩn chính mình khỏi giao diện, KHÔNG tự ý xóa bản ghi khỏi lan_peers)
                 peers = {h: i for h, i in self.lan_peers.items() if not _is_self_peer(h, i)}
 
             if not peers:
-                tk.Label(new_scroll_frame, text=_("Chưa có máy tính nào trong danh sách.\nBấm nút 'Làm mới' hoặc 'Quét VPN' bên dưới để dò tìm các máy trong mạng."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
+                tk.Label(new_scroll_frame, text=_("Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng."), font=("Segoe UI", 9), fg=self.text_gray, bg=self.entry_bg, justify=tk.CENTER).pack(pady=40, padx=20)
                 status_label.config(text=_("Danh sách máy tính (0 máy)"))
                 _finish_swap()
                 return
@@ -1647,17 +1673,19 @@ class NetworkMixin:
                 actual_hwid = clean_info_hwid if len(clean_info_hwid) == 12 else (clean_hwid_key if len(clean_hwid_key) == 12 else "")
 
                 # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
+                from utils.vpn_discovery import _is_exact_saved_match
                 matched = match_saved_computer(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
                 saved_pw = matched.get("password", "") if matched else ""
                 saved_mac = matched.get("mac", "") if matched else ""
                 if saved_mac and not info.get("macs"):
                     info["macs"] = saved_mac
                 m_id_clean = ''.join(ch for ch in str(matched.get("id", "")) if ch.isdigit()) if matched else ""
+                exact_saved = _is_exact_saved_match(matched, info.get("computer_name"), actual_hwid or hwid)
 
                 is_hwid_verified = bool(info.get("hwid_verified", False))
                 if is_hwid_verified and actual_hwid:
                     clean_hwid = actual_hwid
-                elif m_id_clean and len(m_id_clean) == 12:
+                elif exact_saved and m_id_clean and len(m_id_clean) == 12:
                     clean_hwid = m_id_clean
                     info["hwid_verified"] = True
                 elif actual_hwid:
@@ -1923,6 +1951,9 @@ class NetworkMixin:
                     if not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
                         return
                     is_on, u_data = probe_peer_direct(inf, timeout=0.85)
+                    # Chỉ chấp nhận cập nhật nếu u_data thực sự là cùng 1 máy tính với bản ghi h (tránh ghi đè khi DHCP đổi IP)
+                    if is_on and u_data and not are_same_machine(h, inf, u_data.get("hwid"), u_data):
+                        is_on, u_data = False, None
                     scan_state.setdefault("online_status", {})[h] = is_on
                     if is_on and u_data:
                         with self.lan_peers_lock:
@@ -1947,11 +1978,17 @@ class NetworkMixin:
                 _probe_all_peers_bg(filtered_peers, cur_probe_gen)
 
         def clear_all_peers():
-            """Xóa sạch toàn bộ danh sách máy đã quét và lưu file rỗng."""
+            """Xóa sạch toàn bộ danh sách máy đã quét (chỉ khi người dùng xác nhận)."""
+            if not self.show_custom_question(
+                _("Xóa sạch danh sách"),
+                _("Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?"),
+                parent=dialog
+            ):
+                return
             with self.lan_peers_lock:
                 self.lan_peers.clear()
             scan_state.setdefault("online_status", {}).clear()
-            self.save_lan_peers()
+            self.save_lan_peers(allow_shrink=True)
             refresh_list()
             progress_label.config(text=_("Đã xóa sạch danh sách máy đã quét!"))
             dialog.after(2500, lambda: progress_label.config(text=""))
@@ -2911,7 +2948,14 @@ class NetworkMixin:
                 notify_status(_("Đang thử kết nối LAN trực tiếp..."))
             local_ip = lan_target.get("local_ip", "")
             local_port = lan_target.get("port", 12345)
-            ips_to_try = [ip.strip() for ip in local_ip.split(',') if ip.strip()]
+            ips_to_try = []
+            src_ip = str(lan_target.get("source_ip") or "").strip()
+            if src_ip and not src_ip.startswith("127."):
+                ips_to_try.append(src_ip)
+            for ip_part in local_ip.split(','):
+                ip_c = ip_part.strip()
+                if ip_c and not ip_c.startswith("127.") and ip_c not in ips_to_try:
+                    ips_to_try.append(ip_c)
             ports_to_try = [local_port]
             for p_port in [12345, 12346, 12347, 12348]:
                 if p_port not in ports_to_try:
@@ -2921,10 +2965,11 @@ class NetworkMixin:
                 if connected or is_cancelled(): break
                 for p_port in ports_to_try:
                     if connected or is_cancelled(): break
+                    s = None
                     try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1.5)
-                        s.connect((try_ip, p_port))
+                        s, _route_desc = connect_tcp_any_route(try_ip, p_port, timeout=1.5)
+                        if not s:
+                            continue
                         s.settimeout(2.5)
                         # Handshake
                         socket_passwords[s] = partner_pass
@@ -2941,7 +2986,7 @@ class NetworkMixin:
                                 handshake_done = True
                                 cached_res_payload = tmp_res
                                 conn_mode_info = {"mode": "lan", "ip": try_ip, "port": p_port}
-                                print(f"[Client] Connected & Handshaked via LAN Direct: {try_ip}:{p_port}")
+                                print(f"[Client] Connected & Handshaked via LAN Direct ({_route_desc}): {try_ip}:{p_port}")
                                 break
                         if not connected:
                             force_close_socket(s)

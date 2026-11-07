@@ -462,5 +462,10 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN コンピュータリストが正常にインポートされました。",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN & VPN コンピュータリストが正常にエクスポートされました。",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "エクスポートする LAN & VPN コンピュータデータが見つかりません。",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "無効なファイル形式です。ファイルにはJSONデータが含まれている必要があります。"
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "無効なファイル形式です。ファイルにはJSONデータが含まれている必要があります。",
+  "📡 Máy tính mạng LAN & VPN": "📡 LAN & VPN コンピュータ",
+  "🔍 Quét dải IP": "🔍 IP範囲スキャン",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "リストにコンピュータがありません。\nIP範囲を入力して「IP範囲スキャン」または「更新」をクリックしてください。",
+  "Xóa sạch danh sách": "リストをすべて消去",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "LAN & VPN コンピュータ一覧をすべて消去してもよろしいですか？"
 }

@@ -462,5 +462,10 @@
   "Đã nhập khẩu danh sách máy tính LAN & VPN thành công!": "LAN 및 VPN 컴퓨터 목록을 성공적으로 가져왔습니다!",
   "Đã xuất khẩu danh sách máy tính LAN & VPN thành công!": "LAN 및 VPN 컴퓨터 목록을 성공적으로 내보냈습니다!",
   "Không tìm thấy dữ liệu máy tính LAN & VPN để xuất khẩu.": "내보낼 LAN 및 VPN 컴퓨터 데이터를 찾을 수 없습니다.",
-  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "잘못된 파일 형식입니다. 파일에 JSON 데이터가 포함되어 있어야 합니다."
+  "Định dạng tệp không hợp lệ. Tệp phải chứa dữ liệu JSON.": "잘못된 파일 형식입니다. 파일에 JSON 데이터가 포함되어 있어야 합니다.",
+  "📡 Máy tính mạng LAN & VPN": "📡 LAN 및 VPN 컴퓨터",
+  "🔍 Quét dải IP": "🔍 IP 대역 스캔",
+  "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "목록에 컴퓨터가 없습니다.\nIP 대역을 입력하고 'IP 대역 스캔' 또는 '새로고침'을 클릭하세요.",
+  "Xóa sạch danh sách": "목록 전체 삭제",
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "전체 LAN 및 VPN 컴퓨터 목록을 삭제하시겠습니까?"
 }

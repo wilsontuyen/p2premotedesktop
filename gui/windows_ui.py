@@ -778,7 +778,7 @@ def setup_windows_ui(self):
         # 1. File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=_("Danh sách (Saved Computers)"), command=self.show_saved_computers_dialog)
-        file_menu.add_command(label=E(_("Quét mạng LAN & VPN (Discovery)")), command=self.show_lan_computers_dialog)
+        file_menu.add_command(label=E(_("Máy tính mạng LAN & VPN")), command=self.show_lan_computers_dialog)
         file_menu.add_separator()
         # Submenu: Nhập khẩu
         import_menu = tk.Menu(file_menu, tearoff=0)
@@ -1017,8 +1017,8 @@ def setup_windows_ui(self):
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
-        # LAN / VPN Discovery button - Quét máy trong mạng nội bộ và VPN
-        lan_btn = create_flat_button(right_panel, text=E(_("📡 Quét mạng LAN & VPN")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
+        # LAN / VPN Computers button - Danh sách & dò tìm máy trong mạng nội bộ và VPN
+        lan_btn = create_flat_button(right_panel, text=E(_("📡 Máy tính mạng LAN & VPN")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
