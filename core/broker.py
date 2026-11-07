@@ -1532,9 +1532,19 @@ def _run_worker_session(app, cmd):
         try:
             app.host_receiver_thread(ds, client_state, password)
         finally:
+            client_state["running"] = False
+            try:
+                if "wake_event" in client_state:
+                    client_state["wake_event"].set()
+            except Exception:
+                pass
             try:
                 if clipboard_mgr:
                     clipboard_mgr.remove_socket(ds)
+            except Exception:
+                pass
+            try:
+                force_close_socket(ds)
             except Exception:
                 pass
     t_send = threading.Thread(target=app.host_sender_thread, args=(ds, monitor, client_state, password), daemon=True)

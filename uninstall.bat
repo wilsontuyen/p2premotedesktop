@@ -8,11 +8,12 @@ net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo.
     echo ========================================================
-    echo  Administrator privileges are required to uninstall.
-    echo  Relaunching as Administrator...
+    echo  Please right-click uninstall.bat and select:
+    echo  "Run as administrator"
     echo ========================================================
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
+    echo.
+    pause
+    exit /b 1
 )
 
 echo.
@@ -22,20 +23,12 @@ echo ========================================================
 echo.
 
 set "INSTALL_DIR=C:\Program Files (x86)\Easy Remote Desktop"
-set "TASK_NAME=EasyRemoteDesktopAgent"
+set "EXE_SVC=%INSTALL_DIR%\RemoteDesktopService.exe"
 
-echo [+] Stopping and deleting scheduled task...
-schtasks /end /tn "%TASK_NAME%" >nul 2>&1
-schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1
-
-echo [+] Closing running application processes...
-taskkill /F /IM RemoteDesktopService.exe >nul 2>&1
-taskkill /F /IM RemoteDesktopP2P.exe >nul 2>&1
-timeout /t 2 /nobreak >nul
-
-echo [+] Removing Windows Firewall exceptions...
-netsh advfirewall firewall delete rule name="EasyRemoteDesktopAgent" >nul 2>&1
-netsh advfirewall firewall delete rule name="EasyRemoteDesktopService" >nul 2>&1
+if exist "%EXE_SVC%" (
+    echo [+] Stopping and removing Windows Service...
+    "%EXE_SVC%" --uninstall-service
+)
 
 echo [+] Removing shortcuts...
 del /f /q "%PUBLIC%\Desktop\Easy Remote Desktop.lnk" >nul 2>&1

@@ -3323,7 +3323,10 @@ class FileCopyClientMixin:
         self.is_rendering = True
         self._expect_repaste_until = 0.0
         self._rearm_delayed_after_render = False
-        self._clipboard_paste_id = getattr(self, "_clipboard_paste_id", 0) + 1
+        if hasattr(self, "_next_paste_id"):
+            self._clipboard_paste_id = self._next_paste_id()
+        else:
+            self._clipboard_paste_id = getattr(self, "_clipboard_paste_id", 0) + 1
         self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
         self._last_paste_start = now
         paste_tok = int(getattr(self, "_clipboard_paste_id", 0) or 0)
@@ -3653,12 +3656,14 @@ class FileCopyClientMixin:
                     # Yêu cầu truyền file thực tế từ đối tác
                     self._allow_file_xfer = True
                     self._receive_cancelled = False
-                    self.request_pending_files(files_to_download, paste_id=paste_tok)
+                    sent_ok = bool(self.request_pending_files(files_to_download, paste_id=paste_tok))
             
                     # Chờ batch_end của paste_id này (không dùng event chung).
                     succeeded = False
                     wait_start = time.time()
                     last_hb = wait_start
+                    last_req_at = wait_start
+                    req_retries = 0
                     my_done = (getattr(self, "_paste_done", None) or {}).get(paste_tok) or self.transfer_done_event
                     while True:
                         if paste_tok in (getattr(self, "_cancelled_paste_ids", None) or set()):
@@ -3673,6 +3678,29 @@ class FileCopyClientMixin:
                                 succeeded = True
                             break
                         now = time.time()
+                        has_started_job = paste_tok in (getattr(self, "_paste_result_paths", None) or {})
+                        if not has_started_job:
+                            for j in (getattr(self, "_xfer_jobs", None) or {}).values():
+                                try:
+                                    if int(j.get("paste_id") or 0) == int(paste_tok):
+                                        has_started_job = True
+                                        break
+                                except Exception:
+                                    pass
+                        if not has_started_job:
+                            if not sent_ok:
+                                if (now - wait_start) > 10.0:
+                                    print(f"[Clipboard] Khong gui duoc request_files sau 10s paste_id={paste_tok}, dong dialog.")
+                                    log_debug(f"[render_format] Không gửi được request_files sau 10s paste_id={paste_tok}, đóng dialog.")
+                                    break
+                                if (now - last_req_at) >= 0.5:
+                                    last_req_at = now
+                                    sent_ok = bool(self.request_pending_files(files_to_download, paste_id=paste_tok))
+                            elif req_retries < 3 and (now - last_req_at) >= 3.5:
+                                last_req_at = now
+                                req_retries += 1
+                                log_debug(f"[render_format] Chưa nhận batch_start cho paste_id={paste_tok}, gửi lại request_files (lần {req_retries}).")
+                                self.request_pending_files(files_to_download, paste_id=paste_tok)
                         if now - last_hb >= 60.0:
                             last_hb = now
                             rec = 0
@@ -3896,7 +3924,7 @@ class FileCopyClientMixin:
         target_sock = self._live_xfer_sock()
         if not files_req or not target_sock:
             log_debug(f"[request_pending_files] Bỏ qua: files={len(files_req)}, live_sock={bool(target_sock)}")
-            return
+            return False
         self._allow_file_xfer = True
         self._receive_cancelled = False
         try:
@@ -3906,7 +3934,7 @@ class FileCopyClientMixin:
         if pid in (getattr(self, "_cancelled_paste_ids", None) or set()):
             print(f"[FileTransfer] Bo request_pending_files paste_id={pid} (blacklist Huy).")
             log_debug(f"[request_pending_files] Bỏ qua paste_id={pid} do nằm trong blacklist Hủy.")
-            return
+            return False
 
         payload = json.dumps({
             "type": "request_files",
@@ -3916,6 +3944,8 @@ class FileCopyClientMixin:
 
         ok = send_msg(target_sock, payload)
         if not ok:
+            if hasattr(self, "_evict_broken_socket"):
+                self._evict_broken_socket(target_sock)
             # Thử gửi qua các active_sockets khác nếu có
             for alt_sock in list(getattr(self, "active_sockets", []) or []):
                 if alt_sock != target_sock and getattr(alt_sock, "fileno", lambda: -1)() >= 0:
@@ -3923,12 +3953,15 @@ class FileCopyClientMixin:
                         ok = True
                         self.sock = alt_sock
                         break
+                    elif hasattr(self, "_evict_broken_socket"):
+                        self._evict_broken_socket(alt_sock)
         log_debug(f"[request_pending_files] Đã gửi request_files: ok={ok} paste_id={pid} files={len(files_req)}")
         try:
             from utils.logger import clip_trace
             clip_trace(f"[request_pending_files] sent request_files ok={ok} paste_id={pid} n={len(files_req)}")
         except Exception:
             pass
+        return bool(ok)
 
     def _enqueue_file_offer(self, files, offer_id=None):
         """Hàng đợi copy file (RAM). Áp từng offer; nếu xếp hàng thì lấy cái mới nhất."""

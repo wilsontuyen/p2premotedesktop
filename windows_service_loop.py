@@ -5,6 +5,9 @@ import win32process
 import win32security
 import win32event
 import win32profile
+import win32service
+import ctypes
+from ctypes import wintypes
 import sys
 import os
 import time
@@ -12,6 +15,16 @@ import json
 import socket
 import traceback
 import threading
+
+try:
+    import psutil
+except Exception:
+    psutil = None
+
+try:
+    import win32com.client
+except Exception:
+    pass
 
 if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
     try: sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
@@ -33,13 +46,6 @@ try:
     ensure_utf8_bom(log_file)
 except Exception:
     log_file = os.path.join(app_dir, "Logs", "service.log")
-
-try:
-    from os_utils.windows_system import boost_process_priority, ensure_task_battery_support
-    boost_process_priority()
-    ensure_task_battery_support()
-except Exception:
-    pass
 
 
 # Broker architecture (Phase 1): broker Session 0 giu ket noi viewer, agent chay
@@ -662,42 +668,41 @@ def ensure_broker_running():
 
 
 def cleanup_stale_agent_processes():
-    """Host: chi kill broker/worker/clipboard — giu GUI ID/password. Full app: taskkill nhu cu."""
+    """Dọn dẹp các tiến trình helper cũ (--broker, --capture-worker, --clipboard-agent, --headless) qua Win32 API, giữ nguyên GUI của người dùng."""
+    target_exe = "remotedesktophost.exe" if HOST_PRODUCT else "remotedesktopp2p.exe"
+    my_pid = os.getpid()
     try:
-        import subprocess
-        if not HOST_PRODUCT:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "RemoteDesktopP2P.exe"],
-                shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            log("Đã dọn dẹp các tiến trình RemoteDesktopP2P.exe còn sót lại.")
-            return
-        try:
-            import psutil
-        except Exception:
-            # Fallback: van taskkill (co the dong GUI) neu thieu psutil.
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "RemoteDesktopHost.exe"],
-                shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            log("Host cleanup fallback taskkill RemoteDesktopHost.exe")
-            return
-        helper_flags = ("--broker", "--capture-worker", "--clipboard-agent", "--headless")
-        killed = 0
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                name = (proc.info.get("name") or "").lower()
-                if name != "remotedesktophost.exe":
+        if psutil is not None:
+            helper_flags = ("--broker", "--capture-worker", "--clipboard-agent", "--headless")
+            killed = 0
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    pid = proc.info.get("pid")
+                    if not pid or pid == my_pid:
+                        continue
+                    name = (proc.info.get("name") or "").lower()
+                    if name != target_exe:
+                        continue
+                    cmd = proc.info.get("cmdline") or []
+                    joined = " ".join(str(x) for x in cmd).lower()
+                    if not any(f in joined for f in helper_flags):
+                        continue  # Giữ cửa sổ GUI người dùng
+                    terminate_process_with_pid(pid)
+                    killed += 1
+                except Exception:
                     continue
-                cmd = proc.info.get("cmdline") or []
-                joined = " ".join(str(x) for x in cmd).lower()
-                if not any(f in joined for f in helper_flags):
-                    continue  # Host GUI
-                terminate_process_with_pid(proc.info["pid"])
+            log(f"Đã dọn dẹp {killed} tiến trình helper {target_exe} còn sót lại (giữ GUI).")
+            return
+
+        # Fallback Win32 API thuần (không gọi taskkill.exe) nếu không có psutil
+        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        killed = 0
+        for p in procs:
+            sid, pid, p_name = p[0], p[1], (p[2] or "").lower()
+            if pid and pid != my_pid and p_name == target_exe and sid == 0:
+                terminate_process_with_pid(pid)
                 killed += 1
-            except Exception:
-                continue
-        log(f"Host: da don {killed} process helper (giu GUI).")
+        log(f"Đã dọn dẹp {killed} tiến trình Session 0 {target_exe} qua WTSEnumerateProcesses.")
     except Exception as e:
         log(f"Lỗi khi dọn dẹp tiến trình lúc khởi động: {e}")
 
@@ -1135,34 +1140,46 @@ def wts_session_notification_thread():
     if not wtsapi32.WTSRegisterSessionNotification(hwnd, 1):
         log(f"WTSRegisterSessionNotification thất bại: {ctypes.get_last_error()}")
         return
+    global _wts_notify_registered
+    _wts_notify_registered = True
     log("Đã đăng ký WTSRegisterSessionNotification (LOGOFF=Signing out, LOCK=LogonUI).")
     msg = wintypes.MSG()
     while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
         user32.TranslateMessage(ctypes.byref(msg))
         user32.DispatchMessageW(ctypes.byref(msg))
 
+_wts_notify_registered = False
+
 def terminate_process_with_pid(pid):
-    if not pid:
+    if not pid or pid == os.getpid():
         return
     log(f"Đang cố gắng dừng tiến trình {pid}")
-    success = False
     try:
-        h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, pid)
+        h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, int(pid))
         win32api.TerminateProcess(h_proc, 0)
         win32api.CloseHandle(h_proc)
         log(f"Đã dừng tiến trình {pid} qua Windows API.")
-        success = True
+        return
     except Exception as e:
-        log(f"Không thể dừng Agent {pid} qua Windows API: {e}")
+        log(f"Không thể dừng tiến trình {pid} qua win32api: {e}")
 
-    if not success:
-        try:
-            import subprocess
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], shell=False, creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log(f"Đã dừng tiến trình {pid} qua lệnh taskkill.")
-            success = True
-        except Exception as e:
-            log(f"Không thể dừng Agent {pid} qua lệnh taskkill: {e}")
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        h_proc = kernel32.OpenProcess(0x0001, False, int(pid))  # PROCESS_TERMINATE
+        if h_proc:
+            try:
+                if kernel32.TerminateProcess(h_proc, 0):
+                    log(f"Đã dừng tiến trình {pid} qua kernel32.TerminateProcess.")
+            finally:
+                kernel32.CloseHandle(h_proc)
+    except Exception as e:
+        log(f"Không thể dừng tiến trình {pid} qua kernel32: {e}")
 
 def is_process_alive(pid):
     """Check if a process with the given PID is still running."""
@@ -1181,18 +1198,23 @@ def is_process_alive(pid):
         pass
     return False
 
-def main():
+def main(stop_event=None):
+    global broker_pid
     enable_all_privileges()
+    try:
+        from os_utils.windows_system import boost_process_priority
+        boost_process_priority()
+    except Exception:
+        pass
     product = "Host Agent" if HOST_PRODUCT else "Agent"
     log(f"Vòng lặp service Easy Remote Desktop {product} bắt đầu chạy. HOST_PRODUCT={HOST_PRODUCT}")
     install_power_event_handler()
     configure_uac_registry()
     
-    # Clean up lingering helper processes (Host keeps GUI alive).
+    # Clean up lingering helper processes (keeps user GUI alive).
     cleanup_stale_agent_processes()
 
     # Start Service Events Listener thread
-    import threading
     t = threading.Thread(target=service_events_listener_thread, daemon=True)
     t.start()
     t_wts = threading.Thread(target=wts_session_notification_thread, daemon=True)
@@ -1214,7 +1236,7 @@ def main():
     winlogon_standby_pid = None
     preferred_session_id = None
 
-    while True:
+    while not (stop_event is not None and stop_event.is_set()):
         try:
             if BROKER_MODE:
                 ensure_broker_running()
@@ -1509,9 +1531,509 @@ def main():
         except Exception as e:
             log(f"Lỗi trong vòng lặp chính: {e}\n{traceback.format_exc()}")
 
+        if stop_event is not None and stop_event.is_set():
+            break
+
         # Sign-out / logon: WTS callback đánh thức ngay (đừng sleep 1s lúc desktop bình thường).
         _wake_service.wait(0.15 if (not is_logged_in or is_screen_locked or in_signing_out or in_lock_transition) else 1.0)
         _wake_service.clear()
 
+    log("Đang dừng vòng lặp Service và dọn dẹp các tiến trình worker...")
+    for pid_to_stop in (current_agent_pid, winlogon_standby_pid, gui_agent_pid, clipboard_agent_pid, broker_pid):
+        if pid_to_stop and is_process_alive(pid_to_stop):
+            terminate_process_with_pid(pid_to_stop)
+    broker_pid = None
+    log("Vòng lặp Service đã dừng hoàn toàn.")
+
+
+def _get_service_spec():
+    if HOST_PRODUCT:
+        return {
+            "service_name": "EasyRemoteDesktopHostService",
+            "display_name": "Easy Remote Desktop Host Service",
+            "description": "Provides unattended P2P remote desktop access, UAC, and sign-in screen support for Easy Remote Desktop Host.",
+            "legacy_task": "EasyRemoteDesktopHostAgent",
+            "app_exe": "RemoteDesktopHost.exe",
+            "svc_exe": "RemoteDesktopHostService.exe",
+            "fw_app_rule": "EasyRemoteDesktopHostAgent",
+            "fw_svc_rule": "EasyRemoteDesktopHostService",
+        }
+    return {
+        "service_name": "EasyRemoteDesktopService",
+        "display_name": "Easy Remote Desktop Service",
+        "description": "Provides unattended P2P remote desktop access, UAC, and sign-in screen support for Easy Remote Desktop.",
+        "legacy_task": "EasyRemoteDesktopAgent",
+        "app_exe": "RemoteDesktopP2P.exe",
+        "svc_exe": "RemoteDesktopService.exe",
+        "fw_app_rule": "EasyRemoteDesktopAgent",
+        "fw_svc_rule": "EasyRemoteDesktopService",
+    }
+
+
+def _remove_legacy_scheduled_task(task_name):
+    """Dừng và xóa Scheduled Task thế hệ cũ qua COM API (không gọi schtasks.exe)."""
+    if not task_name:
+        return
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    try:
+        import win32com.client
+        sched = win32com.client.Dispatch("Schedule.Service")
+        sched.Connect()
+        folder = sched.GetFolder("\\")
+        try:
+            t = folder.GetTask(task_name)
+            try:
+                t.Stop(0)
+            except Exception:
+                pass
+            folder.DeleteTask(task_name, 0)
+            log(f"Đã xóa Scheduled Task cũ '{task_name}' qua COM API.")
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"Bỏ qua dọn dẹp Scheduled Task cũ '{task_name}': {e}")
+
+
+def _configure_firewall_rules(spec, add=True):
+    """Thêm hoặc xóa quy tắc Windows Firewall trực tiếp qua COM HNetCfg.FwPolicy2 (không gọi netsh.exe)."""
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    try:
+        import win32com.client
+        fw_policy = win32com.client.Dispatch("HNetCfg.FwPolicy2")
+        rules = fw_policy.Rules
+        entries = [
+            (spec["fw_app_rule"], os.path.join(app_dir, spec["app_exe"])),
+            (spec["fw_svc_rule"], os.path.join(app_dir, spec["svc_exe"])),
+        ]
+        for rule_name, prog_path in entries:
+            for _ in range(5):
+                try:
+                    rules.Remove(rule_name)
+                except Exception:
+                    break
+            if add and os.path.exists(prog_path):
+                rule = win32com.client.Dispatch("HNetCfg.FWRule")
+                rule.Name = rule_name
+                rule.Description = f"{spec['display_name']} ({os.path.basename(prog_path)})"
+                rule.ApplicationName = os.path.abspath(prog_path)
+                rule.Protocol = 256        # NET_FW_IP_PROTOCOL_ANY
+                rule.Direction = 1         # NET_FW_RULE_DIR_IN
+                rule.Action = 1            # NET_FW_ACTION_ALLOW
+                rule.Profiles = 0x7FFFFFFF # NET_FW_PROFILE2_ALL
+                rule.Enabled = True
+                rules.Add(rule)
+                log(f"Đã cấu hình Firewall rule '{rule_name}' qua COM API cho {prog_path}")
+    except Exception as e:
+        log(f"Cấu hình Firewall COM gặp lỗi (không chặn cài đặt): {e}")
+
+
+def _wait_service_state(h_svc, desired_state, timeout_sec=8.0):
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            st = win32service.QueryServiceStatus(h_svc)
+            if st[1] == desired_state:
+                return True
+        except Exception:
+            break
+        time.sleep(0.2)
+    return False
+
+
+def install_windows_service():
+    """Đăng ký và khởi chạy Windows SCM Service native + cấu hình Firewall COM."""
+    enable_all_privileges()
+    spec = _get_service_spec()
+    svc_name = spec["service_name"]
+    log(f"Bắt đầu cài đặt Windows Service '{svc_name}'...")
+
+    # 1. Xóa Scheduled Task thế hệ cũ nếu có
+    _remove_legacy_scheduled_task(spec["legacy_task"])
+
+    # 2. Cấu hình Windows Firewall qua COM API
+    _configure_firewall_rules(spec, add=True)
+
+    # 3. Xác định đường dẫn thực thi cho SCM
+    if getattr(sys, "frozen", False) or hasattr(sys, "__compiled__"):
+        svc_exe_path = os.path.abspath(sys.executable)
+    else:
+        cand = os.path.join(app_dir, spec["svc_exe"])
+        if os.path.exists(cand):
+            svc_exe_path = os.path.abspath(cand)
+        else:
+            svc_exe_path = None
+
+    if svc_exe_path:
+        bin_path = f'"{svc_exe_path}" --service'
+    else:
+        bin_path = f'"{os.path.abspath(sys.executable)}" "{os.path.abspath(__file__)}" --service'
+
+    h_scm = None
+    h_svc = None
+    try:
+        h_scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
+        try:
+            h_svc = win32service.OpenService(h_scm, svc_name, win32service.SERVICE_ALL_ACCESS)
+            st = win32service.QueryServiceStatus(h_svc)
+            if st[1] != win32service.SERVICE_STOPPED:
+                try:
+                    win32service.ControlService(h_svc, win32service.SERVICE_CONTROL_STOP)
+                except Exception:
+                    pass
+                _wait_service_state(h_svc, win32service.SERVICE_STOPPED, timeout_sec=8.0)
+
+            win32service.ChangeServiceConfig(
+                h_svc,
+                win32service.SERVICE_WIN32_OWN_PROCESS,
+                win32service.SERVICE_AUTO_START,
+                win32service.SERVICE_ERROR_NORMAL,
+                bin_path,
+                None,
+                0,
+                None,
+                "LocalSystem",
+                "",
+                spec["display_name"],
+            )
+            log(f"Đã cập nhật cấu hình Windows Service '{svc_name}' -> {bin_path}")
+        except Exception:
+            h_svc = win32service.CreateService(
+                h_scm,
+                svc_name,
+                spec["display_name"],
+                win32service.SERVICE_ALL_ACCESS,
+                win32service.SERVICE_WIN32_OWN_PROCESS,
+                win32service.SERVICE_AUTO_START,
+                win32service.SERVICE_ERROR_NORMAL,
+                bin_path,
+                None,
+                0,
+                None,
+                "LocalSystem",
+                None,
+            )
+            log(f"Đã tạo mới Windows Service '{svc_name}' -> {bin_path}")
+
+        try:
+            win32service.ChangeServiceConfig2(
+                h_svc, win32service.SERVICE_CONFIG_DESCRIPTION, spec["description"]
+            )
+        except Exception:
+            pass
+
+        try:
+            win32service.ChangeServiceConfig2(
+                h_svc, win32service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, False
+            )
+        except Exception:
+            pass
+
+        try:
+            failure_actions = {
+                "ResetPeriod": 86400,
+                "RebootMsg": "",
+                "Command": "",
+                "Actions": [
+                    (win32service.SC_ACTION_RESTART, 3000),
+                    (win32service.SC_ACTION_RESTART, 5000),
+                    (win32service.SC_ACTION_RESTART, 10000),
+                ],
+            }
+            win32service.ChangeServiceConfig2(
+                h_svc, win32service.SERVICE_CONFIG_FAILURE_ACTIONS, failure_actions
+            )
+        except Exception as fe:
+            log(f"Không đặt được FailureActions (bỏ qua): {fe}")
+
+        try:
+            win32service.StartService(h_svc, None)
+            log(f"Đã gửi lệnh StartService cho '{svc_name}'.")
+        except Exception as se:
+            if getattr(se, "winerror", 0) != 1056:  # ERROR_SERVICE_ALREADY_RUNNING
+                log(f"StartService '{svc_name}' lỗi: {se}")
+                return False
+
+        _wait_service_state(h_svc, win32service.SERVICE_RUNNING, timeout_sec=6.0)
+        log(f"Cài đặt và khởi chạy Windows Service '{svc_name}' thành công.")
+        return True
+    except Exception as e:
+        log(f"Lỗi cài đặt Windows Service '{svc_name}': {e}\n{traceback.format_exc()}")
+        return False
+    finally:
+        if h_svc:
+            try:
+                win32service.CloseServiceHandle(h_svc)
+            except Exception:
+                pass
+        if h_scm:
+            try:
+                win32service.CloseServiceHandle(h_scm)
+            except Exception:
+                pass
+
+
+def uninstall_windows_service():
+    """Gỡ bỏ Windows SCM Service, xóa Firewall rules COM và tắt toàn bộ tiến trình liên quan qua Win32 API."""
+    enable_all_privileges()
+    spec = _get_service_spec()
+    svc_name = spec["service_name"]
+    log(f"Bắt đầu gỡ bỏ Windows Service '{svc_name}'...")
+
+    # 1. Dừng và xóa Windows Service
+    h_scm = None
+    h_svc = None
+    try:
+        h_scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
+        try:
+            h_svc = win32service.OpenService(h_scm, svc_name, win32service.SERVICE_ALL_ACCESS)
+            try:
+                st = win32service.QueryServiceStatus(h_svc)
+                if st[1] != win32service.SERVICE_STOPPED:
+                    win32service.ControlService(h_svc, win32service.SERVICE_CONTROL_STOP)
+                    _wait_service_state(h_svc, win32service.SERVICE_STOPPED, timeout_sec=8.0)
+            except Exception:
+                pass
+            win32service.DeleteService(h_svc)
+            log(f"Đã xóa Windows Service '{svc_name}'.")
+        except Exception as se:
+            log(f"Bỏ qua xóa Service '{svc_name}': {se}")
+    except Exception as e:
+        log(f"Không mở được SCM khi gỡ '{svc_name}': {e}")
+    finally:
+        if h_svc:
+            try:
+                win32service.CloseServiceHandle(h_svc)
+            except Exception:
+                pass
+        if h_scm:
+            try:
+                win32service.CloseServiceHandle(h_scm)
+            except Exception:
+                pass
+
+    # 2. Xóa Scheduled Task cũ nếu có
+    _remove_legacy_scheduled_task(spec["legacy_task"])
+
+    # 3. Gỡ bỏ quy tắc Windows Firewall
+    _configure_firewall_rules(spec, add=False)
+
+    # 4. Dừng các tiến trình ứng dụng/service còn chạy để bộ gỡ cài đặt xóa sạch file không bị khóa
+    my_pid = os.getpid()
+    target_names = {spec["app_exe"].lower(), spec["svc_exe"].lower()}
+    try:
+        if psutil is not None:
+            for proc in psutil.process_iter(["pid", "name"]):
+                try:
+                    pid = proc.info.get("pid")
+                    name = (proc.info.get("name") or "").lower()
+                    if pid and pid != my_pid and name in target_names:
+                        terminate_process_with_pid(pid)
+                except Exception:
+                    continue
+        else:
+            procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+            for p in procs:
+                pid, p_name = p[1], (p[2] or "").lower()
+                if pid and pid != my_pid and p_name in target_names:
+                    terminate_process_with_pid(pid)
+    except Exception as pe:
+        log(f"Dọn tiến trình khi gỡ gặp lỗi: {pe}")
+
+    time.sleep(0.5)
+    log(f"Hoàn tất gỡ bỏ '{svc_name}'.")
+    return True
+
+
+# --- Native Win32 SCM Service Dispatcher (ctypes advapi32, tương thích 100% Nuitka standalone) ---
+_scm_service_main_ref = None
+_scm_ctrl_handler_ref = None
+_scm_service_name_buf = None
+_scm_dispatch_table = None
+_scm_status_handle = None
+_service_stop_event = threading.Event()
+
+
+class _SCM_SERVICE_STATUS(ctypes.Structure):
+    _fields_ = [
+        ("dwServiceType", wintypes.DWORD),
+        ("dwCurrentState", wintypes.DWORD),
+        ("dwControlsAccepted", wintypes.DWORD),
+        ("dwWin32ExitCode", wintypes.DWORD),
+        ("dwServiceSpecificExitCode", wintypes.DWORD),
+        ("dwCheckPoint", wintypes.DWORD),
+        ("dwWaitHint", wintypes.DWORD),
+    ]
+
+
+class _SCM_TABLE_ENTRYW(ctypes.Structure):
+    _fields_ = [
+        ("lpServiceName", ctypes.c_void_p),
+        ("lpServiceProc", ctypes.c_void_p),
+    ]
+
+
+class _WTSSESSION_NOTIFICATION(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("dwSessionId", wintypes.DWORD),
+    ]
+
+
+def run_scm_service():
+    """Chạy tiến trình dưới quyền quản lý trực tiếp của Windows Service Control Manager (SCM)."""
+    global _scm_service_main_ref, _scm_ctrl_handler_ref, _scm_service_name_buf
+    global _scm_dispatch_table, _scm_status_handle
+
+    spec = _get_service_spec()
+    svc_name = spec["service_name"]
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+
+    LPSERVICE_MAIN_FUNCTIONW = ctypes.WINFUNCTYPE(None, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR))
+    LPHANDLER_FUNCTION_EX = ctypes.WINFUNCTYPE(wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID)
+
+    advapi32.RegisterServiceCtrlHandlerExW.argtypes = [wintypes.LPCWSTR, LPHANDLER_FUNCTION_EX, wintypes.LPVOID]
+    advapi32.RegisterServiceCtrlHandlerExW.restype = wintypes.HANDLE
+    advapi32.SetServiceStatus.argtypes = [wintypes.HANDLE, ctypes.POINTER(_SCM_SERVICE_STATUS)]
+    advapi32.SetServiceStatus.restype = wintypes.BOOL
+    advapi32.StartServiceCtrlDispatcherW.argtypes = [ctypes.POINTER(_SCM_TABLE_ENTRYW)]
+    advapi32.StartServiceCtrlDispatcherW.restype = wintypes.BOOL
+
+    SERVICE_WIN32_OWN_PROCESS = 0x00000010
+    SERVICE_STOPPED = 0x00000001
+    SERVICE_START_PENDING = 0x00000002
+    SERVICE_STOP_PENDING = 0x00000003
+    SERVICE_RUNNING = 0x00000004
+
+    SERVICE_ACCEPT_STOP = 0x00000001
+    SERVICE_ACCEPT_SHUTDOWN = 0x00000004
+    SERVICE_ACCEPT_SESSIONCHANGE = 0x00000080
+    SERVICE_ACCEPT_PRESHUTDOWN = 0x00000100
+
+    SERVICE_CONTROL_STOP = 0x00000001
+    SERVICE_CONTROL_INTERROGATE = 0x00000004
+    SERVICE_CONTROL_SHUTDOWN = 0x00000005
+    SERVICE_CONTROL_SESSIONCHANGE = 0x0000000E
+    SERVICE_CONTROL_PRESHUTDOWN = 0x0000000F
+
+    NO_ERROR = 0
+    ERROR_CALL_NOT_IMPLEMENTED = 120
+
+    def _report_status(state, controls=0, exit_code=0, checkpoint=0, wait_hint=0):
+        if not _scm_status_handle:
+            return
+        st = _SCM_SERVICE_STATUS()
+        st.dwServiceType = SERVICE_WIN32_OWN_PROCESS
+        st.dwCurrentState = state
+        st.dwControlsAccepted = controls
+        st.dwWin32ExitCode = exit_code
+        st.dwServiceSpecificExitCode = 0
+        st.dwCheckPoint = checkpoint
+        st.dwWaitHint = wait_hint
+        advapi32.SetServiceStatus(_scm_status_handle, ctypes.byref(st))
+
+    def _ctrl_handler_ex(dw_control, dw_event_type, lp_event_data, lp_context):
+        try:
+            if dw_control == SERVICE_CONTROL_INTERROGATE:
+                return NO_ERROR
+            if dw_control in (SERVICE_CONTROL_PRESHUTDOWN, SERVICE_CONTROL_SHUTDOWN):
+                log(f"SCM nhận sự kiện tắt máy (control={dw_control}) — thông báo broker và dừng service.")
+                notify_broker_power_event("shutdown")
+                _report_status(SERVICE_STOP_PENDING, controls=0, checkpoint=1, wait_hint=5000)
+                _service_stop_event.set()
+                _wake_service.set()
+                return NO_ERROR
+            if dw_control == SERVICE_CONTROL_STOP:
+                log("SCM nhận lệnh SERVICE_CONTROL_STOP.")
+                _report_status(SERVICE_STOP_PENDING, controls=0, checkpoint=1, wait_hint=5000)
+                _service_stop_event.set()
+                _wake_service.set()
+                return NO_ERROR
+            if dw_control == SERVICE_CONTROL_SESSIONCHANGE:
+                _wake_service.set()
+                if (not _wts_notify_registered) and lp_event_data:
+                    try:
+                        notif = ctypes.cast(lp_event_data, ctypes.POINTER(_WTSSESSION_NOTIFICATION)).contents
+                        sid = int(notif.dwSessionId)
+                        code = int(dw_event_type)
+                        if code == 6:
+                            _push_session_event("logoff", sid)
+                        elif code == 7:
+                            _push_session_event("lock", sid)
+                        elif code in (1, 3):
+                            _push_session_event("connect", sid)
+                        elif code in (5, 8):
+                            _push_session_event("interactive", sid)
+                        elif code == 4:
+                            _handle_session_disconnect(sid)
+                            _push_session_event("remote_disconnect", sid)
+                    except Exception:
+                        pass
+                return NO_ERROR
+        except Exception as ce:
+            log(f"Lỗi trong SCM HandlerEx: {ce}")
+        return ERROR_CALL_NOT_IMPLEMENTED
+
+    def _service_main(dw_argc, lpsz_argv):
+        global _scm_status_handle
+        _service_stop_event.clear()
+        _scm_status_handle = advapi32.RegisterServiceCtrlHandlerExW(svc_name, _scm_ctrl_handler_ref, None)
+        if not _scm_status_handle:
+            log(f"RegisterServiceCtrlHandlerExW thất bại: {ctypes.get_last_error()}")
+            return
+
+        _report_status(SERVICE_START_PENDING, controls=0, checkpoint=1, wait_hint=10000)
+        accepted = (
+            SERVICE_ACCEPT_STOP
+            | SERVICE_ACCEPT_SHUTDOWN
+            | SERVICE_ACCEPT_PRESHUTDOWN
+            | SERVICE_ACCEPT_SESSIONCHANGE
+        )
+        _report_status(SERVICE_RUNNING, controls=accepted, checkpoint=0, wait_hint=0)
+        log(f"SCM Service '{svc_name}' đã chuyển sang trạng thái SERVICE_RUNNING.")
+        try:
+            main(stop_event=_service_stop_event)
+        except Exception as me:
+            log(f"Lỗi nghiêm trọng trong SCM ServiceMain: {me}\n{traceback.format_exc()}")
+        finally:
+            _report_status(SERVICE_STOPPED, controls=0, exit_code=0, checkpoint=0, wait_hint=0)
+
+    _scm_ctrl_handler_ref = LPHANDLER_FUNCTION_EX(_ctrl_handler_ex)
+    _scm_service_main_ref = LPSERVICE_MAIN_FUNCTIONW(_service_main)
+    _scm_service_name_buf = ctypes.create_unicode_buffer(svc_name)
+
+    table = (_SCM_TABLE_ENTRYW * 2)()
+    table[0].lpServiceName = ctypes.addressof(_scm_service_name_buf)
+    table[0].lpServiceProc = ctypes.cast(_scm_service_main_ref, ctypes.c_void_p).value
+    table[1].lpServiceName = None
+    table[1].lpServiceProc = None
+    _scm_dispatch_table = table
+
+    ok = advapi32.StartServiceCtrlDispatcherW(_scm_dispatch_table)
+    if not ok:
+        err = ctypes.get_last_error()
+        # ERROR_FAILED_SERVICE_CONTROLLER_CONNECT (1063): chạy trực tiếp từ dòng lệnh thay vì SCM
+        if err == 1063:
+            log("Chạy trực tiếp ngoài SCM (err=1063) — chuyển sang vòng lặp main() trực tiếp.")
+            main()
+        else:
+            log(f"StartServiceCtrlDispatcherW thất bại với mã lỗi: {err}")
+
+
 if __name__ == '__main__':
-    main()
+    if "--install-service" in sys.argv:
+        sys.exit(0 if install_windows_service() else 1)
+    elif "--uninstall-service" in sys.argv:
+        sys.exit(0 if uninstall_windows_service() else 1)
+    elif "--service" in sys.argv:
+        run_scm_service()
+    else:
+        main()

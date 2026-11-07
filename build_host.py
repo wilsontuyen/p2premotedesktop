@@ -5,7 +5,7 @@ import shutil
 import time
 import glob
 
-from build_and_deploy import log, run_cmd, shorten_openblas_dll, try_authenticode_sign, verify_project_syntax
+from build_and_deploy import compile_inno_installer, log, run_cmd, shorten_openblas_dll, try_authenticode_sign, verify_project_syntax
 
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 output_dir = os.path.join(workspace_dir, "dist_nuitka_host")
@@ -88,17 +88,10 @@ def strip_host_unused(app_dist_dir):
 
 def compile_host_installer():
     iss_file = os.path.join(workspace_dir, "installer_host.iss")
-    iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if not os.path.exists(iscc_path):
-        iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
-    if not os.path.exists(iscc_path):
-        log("WARNING: ISCC.exe not found, skipping installer.")
-        return False
-    if not run_cmd(f'"{iscc_path}" "{iss_file}"'):
+    if not compile_inno_installer(iss_file, INSTALLER_NAME):
         log("ERROR: Host installer compile failed.")
         return False
     installer = os.path.join(workspace_dir, INSTALLER_NAME)
-    try_authenticode_sign(installer)
     if os.path.exists(installer):
         mb = os.path.getsize(installer) / (1024 * 1024)
         log(f"Installer: {installer} ({mb:.1f} MB)")
@@ -194,6 +187,7 @@ def main():
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
+        f'--include-module=win32service --include-module=win32com.client --include-module=pythoncom '
         f'--windows-company-name="{company_name}" --windows-product-name="P2P Remote Desktop Host Service" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="Easy Remote Desktop Host Service" '

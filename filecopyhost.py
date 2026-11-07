@@ -1038,7 +1038,7 @@ class FileCopyHostMixin:
             self._send_worker_started = True
             threading.Thread(target=self._send_job_loop, daemon=True, name="ClipSendQ").start()
 
-    def _enqueue_send_job(self, files, my_id, paste_id):
+    def _enqueue_send_job(self, files, my_id, paste_id, peer_sock=None):
         """Hàng đợi FIFO — paste trước gửi xong mới tới paste sau (không tranh băng thông)."""
         self._ensure_send_worker()
         files_list = list(files or [])
@@ -1046,6 +1046,12 @@ class FileCopyHostMixin:
             tok = int(paste_id or 0)
         except Exception:
             tok = 0
+        if tok and peer_sock is not None and getattr(peer_sock, "fileno", lambda: -1)() >= 0:
+            ps_map = getattr(self, "_peer_sock_by_paste", None)
+            if ps_map is None:
+                self._peer_sock_by_paste = {}
+                ps_map = self._peer_sock_by_paste
+            ps_map[tok] = peer_sock
         send_dlg_id = tok or my_id
         active_n = len(getattr(self, "_active_send_ids", None) or [])
         # Đang có batch khác trên dây / trong hàng → dialog này chờ lượt.
@@ -1056,8 +1062,28 @@ class FileCopyHostMixin:
             "files": files_list,
             "my_id": my_id,
             "paste_id": paste_id,
+            "peer_sock": peer_sock,
         })
         print(f"[FileTransfer] Xep hang gui FIFO paste_id={paste_id} xfer_id={my_id} (cho={self._send_job_q.qsize()})")
+
+    def _cleanup_send_tracking(self, my_id, paste_id=None):
+        try:
+            getattr(self, "_active_send_ids", set()).discard(my_id)
+        except Exception:
+            pass
+        try:
+            mp = getattr(self, "_send_id_by_paste", None) or {}
+            for k, sids in list(mp.items()):
+                sids.discard(my_id)
+                if not sids:
+                    mp.pop(k, None)
+                    (getattr(self, "_peer_sock_by_paste", None) or {}).pop(k, None)
+            if paste_id:
+                tok = int(paste_id or 0)
+                if tok and tok not in mp:
+                    (getattr(self, "_peer_sock_by_paste", None) or {}).pop(tok, None)
+        except Exception:
+            pass
 
     def _send_job_loop(self):
         """Một lúc chỉ gửi một batch — paste sau đợi paste trước xong."""
@@ -1074,32 +1100,28 @@ class FileCopyHostMixin:
             cancelled = getattr(self, "_cancelled_paste_ids", None) or set()
             if tok and tok in cancelled:
                 print(f"[FileTransfer] Bo hang doi paste_id={tok} (da Huy).")
-                try:
-                    getattr(self, "_active_send_ids", set()).discard(my_id)
-                except Exception:
-                    pass
+                self._cleanup_send_tracking(my_id, tok)
                 try:
                     self.close_dialog(job_id=tok or my_id, reason="bo hang doi da huy")
                 except Exception:
                     pass
                 continue
-            sock = self._live_xfer_sock()
+            req_sock = (getattr(self, "_peer_sock_by_paste", None) or {}).get(tok) or job.get("peer_sock")
+            sock = self._live_xfer_sock(preferred_sock=req_sock)
             if not sock:
                 for _ in range(240):
                     if tok and tok in (getattr(self, "_cancelled_paste_ids", None) or set()):
                         break
                     if self._send_should_stop(my_id):
                         break
-                    sock = self._live_xfer_sock()
+                    req_sock = (getattr(self, "_peer_sock_by_paste", None) or {}).get(tok) or job.get("peer_sock")
+                    sock = self._live_xfer_sock(preferred_sock=req_sock)
                     if sock:
                         break
                     time.sleep(0.25)
             if not sock:
                 print("[FileTransfer] Bo hang doi — khong co socket sau khi cho reconnect.")
-                try:
-                    getattr(self, "_active_send_ids", set()).discard(my_id)
-                except Exception:
-                    pass
+                self._cleanup_send_tracking(my_id, tok)
                 try:
                     self.close_dialog(job_id=tok or my_id, reason="khong co socket")
                 except Exception:
@@ -1218,7 +1240,7 @@ class FileCopyHostMixin:
                 log_debug(f"[_process_send_requests] Đã gửi file_start cho {filename}, size={file_size}")
                 file_sent_bytes = 0
                 try:
-                    live = self._live_xfer_sock() or sock
+                    live = self._live_xfer_sock(preferred_sock=sock)
                     lan = is_lan_socket(live)
                     if lan:
                         tune_socket_for_lan_bulk(live)
@@ -1247,7 +1269,7 @@ class FileCopyHostMixin:
                                     fh.seek(0)
                                     already = 0
                                 file_sent_bytes = already
-                                live = self._live_xfer_sock() or sock
+                                live = self._live_xfer_sock(preferred_sock=sock)
                                 lan = is_lan_socket(live)
                                 if lan:
                                     tune_socket_for_lan_bulk(live)
@@ -1372,10 +1394,7 @@ class FileCopyHostMixin:
                 except Exception:
                     pass
         finally:
-            try:
-                getattr(self, "_active_send_ids", set()).discard(my_id)
-            except Exception:
-                pass
+            self._cleanup_send_tracking(my_id, paste_id)
             if not getattr(self, "_active_send_ids", None):
                 self.transfer_in_progress = False
             log_debug(f"[_process_send_requests] Kết thúc hàm gửi file xfer_id={my_id}.")
@@ -1767,6 +1786,7 @@ def run_clipboard_agent_mode():
     _agent_pending_offer_id = 0
     _agent_last_ctrl_c_time = 0.0
     _agent_paste_id = 0
+    _agent_paste_seq = ((int(time.time() * 1000) ^ (os.getpid() << 8)) % 800000000) + 100000000
     _agent_accept_files = False
     _agent_allow_xfer = False
     _agent_xfer_cancel_at = 0.0
@@ -2748,7 +2768,7 @@ def run_clipboard_agent_mode():
 
     def _agent_trigger_paste(source="render_format", dest_override=None):
         """Kích hoạt dán file (từ WM_RENDERFORMAT hoặc LMB context menu Paste)."""
-        nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id
+        nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id, _agent_paste_seq
         nonlocal _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_last_paste_start
         nonlocal _agent_accept_files, _agent_allow_xfer, _agent_cached_explorer_path, _ignore_destroy
         nonlocal _agent_allow_delayed, _agent_last_paste_finish_time
@@ -2836,11 +2856,12 @@ def run_clipboard_agent_mode():
                             _ignore_destroy = False
                 return False
 
+            _agent_paste_seq += 1
             log_overwrite_conflict(
-                f"TRIGGER_PASTE source={source} launch paste_id={_agent_paste_id + 1} (active={len(_agent_jobs)})"
+                f"TRIGGER_PASTE source={source} launch paste_id={_agent_paste_seq} (active={len(_agent_jobs)})"
             )
             _agent_expect_repaste_until = 0.0
-            _agent_paste_id += 1
+            _agent_paste_id = _agent_paste_seq
             paste_id = _agent_paste_id
             _agent_last_lbutton_time = 0.0
             _agent_last_ctrl_v_time = 0.0

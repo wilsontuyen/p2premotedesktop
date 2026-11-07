@@ -118,6 +118,8 @@ def main():
         f'"{python_path}" -m nuitka --standalone --windows-console-mode=disable '
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
+        f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
+        f'--include-module=win32service --include-module=win32com.client --include-module=pythoncom '
         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="{service_desc}" '
@@ -174,18 +176,18 @@ def main():
     shorten_openblas_dll(app_dist_dir)
     log_dist_size(app_dist_dir, "Full app.dist")
 
-    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân vào bộ cài đặt phân phối
-    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt"):
+    # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân hoặc file .bat cài đặt cũ vào bộ cài đặt phân phối
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt", "install.bat", "uninstall.bat"):
         pf_dist = os.path.join(app_dist_dir, personal_file)
         if os.path.exists(pf_dist):
             try:
                 os.remove(pf_dist)
-                log(f"Removed personal data file from app.dist: {personal_file}")
+                log(f"Removed excluded file from app.dist: {personal_file}")
             except Exception as e:
                 log(f"Warning: could not remove {personal_file} from app.dist: {e}")
 
-    # Copy icons, install.bat, uninstall.bat, readme.txt, and disclaimer to app.dist
-    files_to_copy = ["app_icon.png", "app_icon.ico", "install.bat", "uninstall.bat", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt"]
+    # Copy icons, readme.txt, and disclaimer to app.dist
+    files_to_copy = ["app_icon.png", "app_icon.ico", "readme.txt", "disclaimer_vi.txt", "disclaimer_en.txt"]
     for file_name in files_to_copy:
         src = os.path.join(workspace_dir, file_name)
         dst = os.path.join(app_dist_dir, file_name)
@@ -208,38 +210,17 @@ def main():
         except Exception as e:
             log(f"Failed to copy lang directory: {e}")
 
-    # Build Inno Setup Installer
+    # Build Inno Setup Installer (with signed inner Setup.tmp + unins000.exe + outer installer)
     log("Building Installer via Inno Setup...")
-    iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if not os.path.exists(iscc_path):
-        iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
-    
-    if os.path.exists(iscc_path):
-        iss_file = os.path.join(workspace_dir, "installer.iss")
-        if os.path.exists(iss_file):
-            cmd = f'"{iscc_path}" "{iss_file}"'
-            if not run_cmd(cmd):
-                log("WARNING: Inno Setup build failed.")
-            else:
-                log("Successfully built setup.exe using Inno Setup.")
-                installer_path = os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe")
-                try_authenticode_sign(installer_path)
-                log_file_size(installer_path, "Full installer")
+    iss_file = os.path.join(workspace_dir, "installer.iss")
+    if os.path.exists(iss_file):
+        if compile_inno_installer(iss_file, "EasyRemoteDesktop_Installer.exe"):
+            installer_path = os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe")
+            log_file_size(installer_path, "Full installer")
         else:
-            log("WARNING: installer.iss not found. Skipping installer build.")
+            log("WARNING: Inno Setup build failed.")
     else:
-        # Fallback to checking if iscc is in PATH
-        cmd = f'iscc "{os.path.join(workspace_dir, "installer.iss")}"'
-        try:
-            if not run_cmd(cmd):
-                log("WARNING: Inno Setup build failed.")
-            else:
-                log("Successfully built setup.exe using Inno Setup.")
-                installer_path = os.path.join(workspace_dir, "EasyRemoteDesktop_Installer.exe")
-                try_authenticode_sign(installer_path)
-                log_file_size(installer_path, "Full installer")
-        except Exception:
-            log("WARNING: Inno Setup compiler (ISCC.exe) not found. Skipping installer build.")
+        log("WARNING: installer.iss not found. Skipping installer build.")
 
     # 6. Show Popup Notification
     try:
@@ -369,25 +350,86 @@ def shorten_openblas_dll(app_dist_dir):
         os.rename(long_path, dest)
     log(f"Renamed {long_name} -> {short_name} (patched {patched} files).")
 
-def try_authenticode_sign(exe_path):
-    """Ký Authenticode nếu máy có signtool + chứng chỉ code signing (cách đúng để giảm Defender ML)."""
-    if not os.path.exists(exe_path):
-        return
+def find_signtool():
     signtool = None
     kit = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Windows Kits", "10", "bin")
     if os.path.isdir(kit):
         for root, _dirs, files in os.walk(kit):
             if "signtool.exe" in files and os.path.basename(root).lower() == "x64":
                 signtool = os.path.join(root, "signtool.exe")
+    return signtool
+
+
+def run_cmd_args(args, cwd=workspace_dir):
+    log("Running command args: " + " ".join(f'"{a}"' if " " in a else a for a in args))
+    p = subprocess.Popen(args, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=cwd)
+    while True:
+        line = p.stdout.readline()
+        if not line:
+            break
+        try:
+            print(line, end="")
+        except UnicodeEncodeError:
+            print(line.encode("ascii", "replace").decode("ascii"), end="")
+        try:
+            with open(log_path, "a", encoding="utf-8-sig") as f:
+                f.write(line)
+        except Exception:
+            pass
+    p.wait()
+    if p.returncode != 0:
+        log(f"Command failed with exit code {p.returncode}")
+        return False
+    return True
+
+
+def compile_inno_installer(iss_file, installer_name):
+    """Biên dịch Inno Setup kèm ký Authenticode cho cả Setup.tmp (%TEMP%), unins000.exe và file cài đặt cuối."""
+    iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    if not os.path.exists(iscc_path):
+        iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"
+    if not os.path.exists(iscc_path):
+        found = shutil.which("iscc")
+        if found:
+            iscc_path = found
+        else:
+            log("WARNING: ISCC.exe not found, skipping installer.")
+            return False
+
+    signtool = find_signtool()
+    installer_path = os.path.join(workspace_dir, installer_name)
+
+    if signtool:
+        # $q trong Inno Setup được thay bằng dấu nháy kép ", $f được thay bằng đường dẫn file cần ký
+        sign_def = f"/Smysign=$q{signtool}$q sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f"
+        if run_cmd_args([iscc_path, "/DSIGN_INSTALLER=1", sign_def, iss_file]):
+            log(f"Successfully built and signed installer (including inner Setup.tmp & unins000.exe): {installer_path}")
+            return True
+        log("WARNING: Signed ISCC compile failed (chưa cài chứng chỉ hoặc timestamp server bận). Thử biên dịch không bật SignTool...")
+
+    if not run_cmd_args([iscc_path, iss_file]):
+        return False
+    try_authenticode_sign(installer_path)
+    return True
+
+
+def try_authenticode_sign(exe_path):
+    """Ký Authenticode nếu máy có signtool + chứng chỉ code signing (cách đúng để giảm Defender ML)."""
+    if not os.path.exists(exe_path):
+        return
+    signtool = find_signtool()
     if not signtool:
         log("Không tìm thấy signtool.exe — bỏ qua ký Authenticode. Defender ML có thể vẫn cảnh báo installer chưa ký.")
         log("Cách xử lý: chứng chỉ code signing, hoặc gửi file lên https://www.microsoft.com/en-us/wdsi/filesubmission")
         return
     cmd = f'"{signtool}" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "{exe_path}"'
-    if run_cmd(cmd):
-        log(f"Đã ký Authenticode: {exe_path}")
-    else:
-        log("Không ký được (chưa có chứng chỉ code signing). Gửi Microsoft WDSI nếu Defender cảnh báo.")
+    for attempt in range(4):
+        if attempt > 0:
+            time.sleep(1.5)
+        if run_cmd(cmd):
+            log(f"Đã ký Authenticode: {exe_path}")
+            return
+    log("Không ký được (chưa có chứng chỉ code signing hoặc file đang bận). Gửi Microsoft WDSI nếu Defender cảnh báo.")
 
 if __name__ == "__main__":
     main()

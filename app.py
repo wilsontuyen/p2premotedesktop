@@ -449,18 +449,40 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     except Exception as ree:
                         print(f"[Diagnostics] Registry read failed: {ree}")
                     
-                    # Check scheduled task status in background: schtasks is slow (~2-4s)
-                    # and must not delay TCP listen / screen capture during signout/logon.
-                    def _diag_schtask():
+                    # Query Windows SCM Service status directly via Win32 API (fast, no schtasks/shell spawn)
+                    def _diag_scm_service():
                         try:
-                            import subprocess
-                            tasks = ["EasyRemoteDesktopHostAgent"] if getattr(self, "is_host_only", False) else ["EasyRemoteDesktopAgent"]
-                            for tn in tasks:
-                                res = subprocess.run(f'schtasks /query /tn "{tn}" /fo list', shell=True, capture_output=True, text=True)
-                                print(f"[Diagnostics] Scheduled Task {tn}:\n{res.stdout if res.returncode == 0 else res.stderr}")
+                            import ctypes
+                            from ctypes import wintypes
+                            advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+                            advapi32.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+                            advapi32.OpenSCManagerW.restype = wintypes.HANDLE
+                            advapi32.OpenServiceW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
+                            advapi32.OpenServiceW.restype = wintypes.HANDLE
+                            advapi32.QueryServiceStatus.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD * 7)]
+                            advapi32.QueryServiceStatus.restype = wintypes.BOOL
+                            advapi32.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+                            advapi32.CloseServiceHandle.restype = wintypes.BOOL
+
+                            svc_name = "EasyRemoteDesktopHostService" if getattr(self, "is_host_only", False) else "EasyRemoteDesktopService"
+                            h_scm = advapi32.OpenSCManagerW(None, None, 0x0001)  # SC_MANAGER_CONNECT
+                            if h_scm:
+                                try:
+                                    h_svc = advapi32.OpenServiceW(h_scm, svc_name, 0x0004)  # SERVICE_QUERY_STATUS
+                                    if h_svc:
+                                        try:
+                                            st = (wintypes.DWORD * 7)()
+                                            if advapi32.QueryServiceStatus(h_svc, ctypes.byref(st)):
+                                                print(f"[Diagnostics] Windows Service {svc_name}: CurrentState={st[1]}")
+                                        finally:
+                                            advapi32.CloseServiceHandle(h_svc)
+                                    else:
+                                        print(f"[Diagnostics] Windows Service {svc_name}: not installed (err={ctypes.get_last_error()})")
+                                finally:
+                                    advapi32.CloseServiceHandle(h_scm)
                         except Exception as te:
-                            print(f"[Diagnostics] Failed to query scheduled task: {te}")
-                    threading.Thread(target=_diag_schtask, name="DiagSchtask", daemon=True).start()
+                            print(f"[Diagnostics] Failed to query SCM service: {te}")
+                    threading.Thread(target=_diag_scm_service, name="DiagSCMService", daemon=True).start()
             except Exception as de:
                 print(f"[Diagnostics] Diagnostics gathering failed: {de}")
         except Exception as e:
@@ -2869,16 +2891,52 @@ Comment=Remote Desktop P2P AutoStart
         return False
 
     def ensure_host_background_agent(self):
-        """Ensure SYSTEM Host service is registered/running with battery support."""
+        """Ensure SYSTEM Host Windows Service is registered and running (no schtasks/LoLBin spawn)."""
         if sys.platform != "win32":
             return False
         if self.check_if_service_active():
             return True
         try:
+            import ctypes
+            from ctypes import wintypes
             import subprocess
             is_host = getattr(self, "is_host_only", False)
             service_exe_name = "RemoteDesktopHostService.exe" if is_host else "RemoteDesktopService.exe"
-            task = "EasyRemoteDesktopHostAgent" if is_host else "EasyRemoteDesktopAgent"
+            svc_name = "EasyRemoteDesktopHostService" if is_host else "EasyRemoteDesktopService"
+
+            # 1. Try starting existing Windows SCM Service directly via Win32 API
+            try:
+                advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+                advapi32.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+                advapi32.OpenSCManagerW.restype = wintypes.HANDLE
+                advapi32.OpenServiceW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
+                advapi32.OpenServiceW.restype = wintypes.HANDLE
+                advapi32.StartServiceW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p]
+                advapi32.StartServiceW.restype = wintypes.BOOL
+                advapi32.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+                advapi32.CloseServiceHandle.restype = wintypes.BOOL
+
+                h_scm = advapi32.OpenSCManagerW(None, None, 0x0001)  # SC_MANAGER_CONNECT
+                if h_scm:
+                    try:
+                        h_svc = advapi32.OpenServiceW(h_scm, svc_name, 0x0010 | 0x0004)  # SERVICE_START | SERVICE_QUERY_STATUS
+                        if h_svc:
+                            try:
+                                advapi32.StartServiceW(h_svc, 0, None)
+                            finally:
+                                advapi32.CloseServiceHandle(h_svc)
+                    finally:
+                        advapi32.CloseServiceHandle(h_scm)
+            except Exception:
+                pass
+
+            for _ in range(8):
+                if self.check_if_service_active():
+                    print(f"[Host] Background service ({svc_name}) is running.")
+                    return True
+                time.sleep(0.2)
+
+            # 2. Fallback (if running elevated and service not yet installed): register via our own binary
             service_exe = os.path.join(app_dir, service_exe_name)
             if not os.path.exists(service_exe):
                 for sub in (
@@ -2894,23 +2952,17 @@ Comment=Remote Desktop P2P AutoStart
                         break
             if not os.path.exists(service_exe):
                 return False
-            tr = f'"{service_exe}"'
-            create = [
-                "schtasks.exe", "/create", "/tn", task,
-                "/tr", tr, "/sc", "onstart",
-                "/ru", "NT AUTHORITY\\SYSTEM", "/rl", "highest", "/f",
-            ]
-            run = ["schtasks.exe", "/run", "/tn", task]
-            subprocess.run(create, capture_output=True, text=True, timeout=10)
-            try:
-                from os_utils.windows_system import ensure_task_battery_support
-                ensure_task_battery_support(task)
-            except Exception:
-                pass
-            subprocess.run(run, capture_output=True, text=True, timeout=10)
+            subprocess.run(
+                [service_exe, "--install-service"],
+                shell=False,
+                creationflags=0x08000000,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
             for _ in range(12):
                 if self.check_if_service_active():
-                    print(f"[Host] Background agent ({task}) is running.")
+                    print(f"[Host] Background service ({svc_name}) installed and running.")
                     return True
                 time.sleep(0.25)
         except Exception as e:

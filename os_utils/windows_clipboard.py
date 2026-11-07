@@ -811,6 +811,9 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._partial_output_paths = []
         self._gui_poll_gen = 0
         self._clipboard_paste_id = 0
+        self._paste_id_seq = ((int(time.time() * 1000) ^ (os.getpid() << 8)) % 800000000) + 100000000
+        self._socket_order = []
+        self._peer_sock_by_paste = {}
         self._cancel_gen = 0
         self._suppress_request_files_until = 0.0
         self._allow_file_xfer = False
@@ -1090,16 +1093,32 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             except Exception as e:
                 log_debug(f"[process_gui_queue] Lỗi: {e}")
 
+    def _next_paste_id(self):
+        with self.lock:
+            seq = getattr(self, "_paste_id_seq", 0)
+            if not seq:
+                seq = ((int(time.time() * 1000) ^ (os.getpid() << 8)) % 800000000) + 100000000
+            seq += 1
+            self._paste_id_seq = seq
+            return seq
+
     def add_socket(self, sock):
         if not ENABLE_CLIPBOARD_SYNC or not sock: return
         with self.lock:
-            # Loại bỏ các socket đã đóng khỏi active_sockets
+            # Loại bỏ các socket đã đóng khỏi active_sockets và danh sách thứ tự
             self.active_sockets = {s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0}
+            order = [s for s in getattr(self, "_socket_order", []) if s != sock and s in self.active_sockets]
+            order.append(sock)
+            self._socket_order = order
             self.active_sockets.add(sock)
-            # Với Client hoặc khi socket cũ không còn sống, cập nhật self.sock sang socket mới
-            if getattr(self, "is_client", False) or not self.sock or getattr(self.sock, 'fileno', lambda: -1)() < 0:
-                self.sock = sock
+            # Luôn ưu tiên cập nhật self.sock sang kết nối mới nhất để tránh kẹt ở socket cũ đã đứt ngầm
+            self.sock = sock
             self._xfer_sock_gen = getattr(self, "_xfer_sock_gen", 0) + 1
+            # Khi không có phiên truyền tải nào đang hoạt động, dọn dẹp blacklist cũ từ phiên trước
+            if not getattr(self, "_active_send_ids", None) and not getattr(self, "_xfer_jobs", None):
+                cancelled = getattr(self, "_cancelled_paste_ids", None)
+                if cancelled:
+                    cancelled.clear()
         try:
             role = "HOST_HEADLESS" if (self.app and getattr(self.app, "is_headless", False)) else "CLIENT"
             log_overwrite_conflict(
@@ -1109,17 +1128,44 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         except Exception:
             pass
 
+    def _evict_broken_socket(self, sock):
+        """Loại bỏ socket lỗi/đứt ngầm ngay khi send_msg thất bại để không lặp vô hạn trên socket chết."""
+        if not sock:
+            return
+        with self.lock:
+            self.active_sockets.discard(sock)
+            order = [s for s in getattr(self, "_socket_order", []) if s != sock and getattr(s, 'fileno', lambda: -1)() >= 0 and s in self.active_sockets]
+            self._socket_order = order
+            peer_map = getattr(self, "_peer_sock_by_paste", None) or {}
+            for k, v in list(peer_map.items()):
+                if v == sock:
+                    peer_map.pop(k, None)
+            if self.sock == sock or not self.sock or getattr(self.sock, 'fileno', lambda: -1)() < 0 or self.sock not in self.active_sockets:
+                if order:
+                    self.sock = order[-1]
+                else:
+                    alive = [s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0]
+                    self.sock = alive[0] if alive else None
+
     def remove_socket(self, sock):
         if not ENABLE_CLIPBOARD_SYNC or not sock: return
         with self.lock:
             if sock in self.active_sockets:
                 self.active_sockets.discard(sock)
+            order = [s for s in getattr(self, "_socket_order", []) if s != sock and getattr(s, 'fileno', lambda: -1)() >= 0 and s in self.active_sockets]
+            self._socket_order = order
+            peer_map = getattr(self, "_peer_sock_by_paste", None) or {}
+            for k, v in list(peer_map.items()):
+                if v == sock:
+                    peer_map.pop(k, None)
             socket_passwords.pop(sock, None)
-            peer_roles.pop(sock, None)
-            if self.sock == sock or (self.sock and getattr(self.sock, 'fileno', lambda: -1)() < 0):
-                # Chọn socket còn sống khác trong active_sockets
-                alive = [s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0]
-                self.sock = alive[0] if alive else None
+            if self.sock == sock or (self.sock and (getattr(self.sock, 'fileno', lambda: -1)() < 0 or self.sock not in self.active_sockets)):
+                # Chọn socket mới nhất còn sống trong active_sockets
+                if order:
+                    self.sock = order[-1]
+                else:
+                    alive = [s for s in self.active_sockets if getattr(s, 'fileno', lambda: -1)() >= 0]
+                    self.sock = alive[0] if alive else None
         try:
             role = "HOST_HEADLESS" if (self.app and getattr(self.app, "is_headless", False)) else "CLIENT"
             log_overwrite_conflict(
@@ -1432,7 +1478,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             dests, [], extra_paths=extra, staging_xids=abort_xids, wipe_all_staging=False
         )
 
-    def _live_xfer_sock(self):
+    def _live_xfer_sock(self, preferred_sock=None):
         with self.lock:
             # Loại bỏ socket chết khỏi active_sockets
             dead = {s for s in self.active_sockets if getattr(s, "fileno", lambda: -1)() < 0}
@@ -1441,11 +1487,26 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 socket_passwords.pop(d, None)
                 if self.sock == d:
                     self.sock = None
-            if self.sock is not None and getattr(self.sock, "fileno", lambda: -1)() >= 0:
+            order = [
+                s for s in getattr(self, "_socket_order", [])
+                if s in self.active_sockets and getattr(s, "fileno", lambda: -1)() >= 0
+            ]
+            self._socket_order = order
+            if preferred_sock is not None and getattr(preferred_sock, "fileno", lambda: -1)() >= 0:
+                if preferred_sock in self.active_sockets or preferred_sock == self.sock:
+                    return preferred_sock
+            if (
+                self.sock is not None
+                and self.sock in self.active_sockets
+                and getattr(self.sock, "fileno", lambda: -1)() >= 0
+            ):
+                return self.sock
+            if order:
+                self.sock = order[-1]
                 return self.sock
             alive = [s for s in self.active_sockets if getattr(s, "fileno", lambda: -1)() >= 0]
             if alive:
-                self.sock = alive[0]
+                self.sock = alive[-1]
                 return self.sock
             self.sock = None
             return None
@@ -1488,16 +1549,22 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 pass
 
     def _send_file_msg(self, sock, data_bytes, my_id):
-        """Gửi gói file; nếu mạng đứt thì chờ socket mới rồi gửi lại cùng gói (chunk có offset nên an toàn)."""
+        """Gửi gói file; nếu mạng đứt thì loại bỏ socket lỗi và chờ socket mới để gửi lại (chunk có offset nên an toàn)."""
         if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
             return False
         waiting = False
         last_log = 0.0
+        disconnect_since = None
         sock_gen = getattr(self, "_xfer_sock_gen", 0)
+        preferred = sock
+        failed_socks = set()
         while True:
             if self._send_should_stop(my_id):
                 return False
-            live = self._live_xfer_sock() or sock
+            live = self._live_xfer_sock(preferred_sock=preferred)
+            if live is None and preferred is not None and preferred not in failed_socks:
+                if getattr(preferred, "fileno", lambda: -1)() >= 0:
+                    live = preferred
             if live:
                 if send_msg(live, data_bytes):
                     if waiting or getattr(self, "_xfer_sock_gen", 0) != sock_gen:
@@ -1505,7 +1572,20 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                         if waiting:
                             print("[FileTransfer] Resume gui sau khi ket noi lai.")
                     return True
+                failed_socks.add(live)
+                if preferred == live:
+                    preferred = None
+                self._evict_broken_socket(live)
+                log_debug(f"[_send_file_msg] send_msg thất bại trên socket, đã loại bỏ socket lỗi (xfer_id={my_id}).")
+                if self._live_xfer_sock() is not None:
+                    continue
             now = time.time()
+            if disconnect_since is None:
+                disconnect_since = now
+            elif (now - disconnect_since) > 60.0:
+                print(f"[FileTransfer] Qua thoi gian cho reconnect (60s) xfer_id={my_id} — huy gui.")
+                log_debug(f"[_send_file_msg] Quá 60s chờ kết nối lại xfer_id={my_id} — dừng gửi.")
+                return False
             if not waiting:
                 waiting = True
                 print("[FileTransfer] Mat ket noi luc gui — cho reconnect de resume...")
@@ -2024,6 +2104,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         return (not seq) or seq != at
 
     def handle_received_packet(self, packet):
+        peer_sock = packet.pop("_peer_sock", None) if isinstance(packet, dict) else None
+        if peer_sock is not None and getattr(peer_sock, "fileno", lambda: -1)() >= 0:
+            with self.lock:
+                if peer_sock in self.active_sockets:
+                    self.sock = peer_sock
         ptype = packet.get("type")
         
         if ptype == "clear_clipboard":
@@ -2069,7 +2154,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         elif ptype == "resume_query":
             xid = packet.get("xfer_id")
             snap = self._resume_snapshot(xid)
-            live = self._live_xfer_sock()
+            live = self._live_xfer_sock(preferred_sock=peer_sock)
             if live:
                 try:
                     send_msg(live, json.dumps(snap).encode("utf-8"))
@@ -2118,11 +2203,26 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             cancelled = getattr(self, "_cancelled_paste_ids", None) or set()
             if tok and tok in cancelled:
                 print(f"[FileTransfer] Bo request_files paste_id={tok} (blacklist Huy).")
+                log_debug(f"[request_files] Bỏ qua paste_id={tok} (nằm trong blacklist Hủy).")
                 return
             if not tok and time.time() < getattr(self, "_suppress_request_files_until", 0):
                 print("[FileTransfer] Bo request_files khong paste_id sau Huy.")
+                log_debug("[request_files] Bỏ qua gói không có paste_id ngay sau khi Hủy.")
                 return
             files_to_send = packet.get("files", [])
+            if tok and peer_sock is not None and getattr(peer_sock, "fileno", lambda: -1)() >= 0:
+                ps_map = getattr(self, "_peer_sock_by_paste", None)
+                if ps_map is None:
+                    self._peer_sock_by_paste = {}
+                    ps_map = self._peer_sock_by_paste
+                ps_map[tok] = peer_sock
+            if tok:
+                active_sids = getattr(self, "_active_send_ids", None) or set()
+                tok_sids = (getattr(self, "_send_id_by_paste", None) or {}).get(tok) or set()
+                if any(s in active_sids for s in tok_sids):
+                    print(f"[FileTransfer] Bo request_files trung lap dang chay paste_id={tok}.")
+                    log_debug(f"[request_files] Bỏ qua gói retry của paste_id={tok} (phiên gửi đang hoạt động).")
+                    return
             now = time.time()
             last_rf_time = float(getattr(self, "_last_peer_request_files_time", 0.0) or 0.0)
             last_rf_files = getattr(self, "_last_peer_request_files_list", None)
@@ -2137,9 +2237,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             if tok:
                 self._clipboard_paste_id = tok
             if not self._arm_file_xfer("peer_request_files"):
+                log_debug(f"[request_files] _arm_file_xfer trả về False cho paste_id={tok}.")
                 return
             sid = getattr(self, "_send_xfer_id", 0)
-            self._enqueue_send_job(files_to_send, sid, tok)
+            log_debug(f"[request_files] Xếp hàng gửi {len(files_to_send)} file (paste_id={tok}, xfer_id={sid}).")
+            self._enqueue_send_job(files_to_send, sid, tok, peer_sock=peer_sock)
             return
 
         elif ptype == "paste_conflict_query":

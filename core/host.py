@@ -3135,7 +3135,10 @@ class HostMixin:
                     client_state["running"] = False
                     t_sender.join()
                     if clipboard_sync_manager:
-                        clipboard_sync_manager.remove_socket(conn)
+                        try:
+                            clipboard_sync_manager.remove_socket(conn)
+                        except Exception:
+                            pass
                     if not _is_legacy_windows_host():
                         set_windows_graphics_effects(True)
                     
@@ -4042,6 +4045,8 @@ class HostMixin:
                     evt_type = event.get("type", "")
                     if evt_type in CLIPBOARD_PKT_TYPES:
                         if clipboard_sync_manager:
+                            if isinstance(event, dict):
+                                event["_peer_sock"] = conn
                             clipboard_sync_manager.enqueue_packet(event)
                     else:
                         input_queue.put(event)

@@ -719,6 +719,8 @@ def client_receiver_thread(sock, password):
                         continue
                     elif evt_type in CLIPBOARD_PKT_TYPES:
                         if clipboard_sync_manager:
+                            if isinstance(event, dict):
+                                event["_peer_sock"] = sock
                             clipboard_sync_manager.enqueue_packet(event)
                         continue
                     elif evt_type == "domain_status":

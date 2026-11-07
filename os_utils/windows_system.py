@@ -85,61 +85,28 @@ def boost_process_priority():
 
 
 def ensure_task_battery_support(task_name=None):
-    """Cấu hình Scheduled Task cho phép chạy trên Pin và không bị Windows tự ngắt."""
+    """Nếu còn Scheduled Task cũ trên máy, cấu hình chạy trên Pin qua COM API native (tuyệt đối không gọi schtasks/PowerShell)."""
     if sys.platform != "win32":
         return
     try:
-        import os
+        import win32com.client
         tasks = [task_name] if task_name else ["EasyRemoteDesktopAgent", "EasyRemoteDesktopHostAgent"]
+        service = win32com.client.Dispatch("Schedule.Service")
+        service.Connect()
+        folder = service.GetFolder("\\")
         for tn in tasks:
             if not tn:
                 continue
-            # 1. Cố gắng dùng COM API native của Windows Task Scheduler (không spawn PowerShell, không kích hoạt AV)
-            configured = False
             try:
-                import win32com.client
-                service = win32com.client.Dispatch("Schedule.Service")
-                service.Connect()
-                folder = service.GetFolder("\\")
                 task = folder.GetTask(tn)
                 defn = task.Definition
                 settings = defn.Settings
-                settings.DisallowStartIfOnBatteries = False
-                settings.StopIfGoingOnBatteries = False
-                settings.ExecutionTimeLimit = "PT0S"
-                # TASK_CREATE_OR_UPDATE = 6, TASK_LOGON_SERVICE_ACCOUNT = 5
-                folder.RegisterTaskDefinition(tn, defn, 6, None, None, 5)
-                configured = True
-            except Exception:
-                pass
-
-            if configured:
-                continue
-
-            # 2. XML fallback qua schtasks (tương thích Win7/8/Server, hoàn toàn không gọi PowerShell)
-            try:
-                import subprocess
-                res = subprocess.run(["schtasks.exe", "/query", "/tn", tn, "/xml"], capture_output=True, text=True, timeout=6)
-                if res.returncode == 0 and res.stdout:
-                    xml = res.stdout
-                    needs_fix = False
-                    if "<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>" in xml:
-                        xml = xml.replace("<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>", "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>")
-                        needs_fix = True
-                    if "<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>" in xml:
-                        xml = xml.replace("<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>", "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>")
-                        needs_fix = True
-                    if "<ExecutionTimeLimit>PT72H</ExecutionTimeLimit>" in xml:
-                        xml = xml.replace("<ExecutionTimeLimit>PT72H</ExecutionTimeLimit>", "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>")
-                        needs_fix = True
-                    if needs_fix:
-                        import tempfile
-                        tmp_xml = os.path.join(tempfile.gettempdir(), f"{tn}_bat.xml")
-                        with open(tmp_xml, "w", encoding="utf-16") as f:
-                            f.write(xml)
-                        subprocess.run(["schtasks.exe", "/create", "/tn", tn, "/xml", tmp_xml, "/ru", "NT AUTHORITY\\SYSTEM", "/f"], capture_output=True, timeout=6)
-                        try: os.remove(tmp_xml)
-                        except Exception: pass
+                if settings.DisallowStartIfOnBatteries or settings.StopIfGoingOnBatteries or settings.ExecutionTimeLimit != "PT0S":
+                    settings.DisallowStartIfOnBatteries = False
+                    settings.StopIfGoingOnBatteries = False
+                    settings.ExecutionTimeLimit = "PT0S"
+                    # TASK_CREATE_OR_UPDATE = 6, TASK_LOGON_SERVICE_ACCOUNT = 5
+                    folder.RegisterTaskDefinition(tn, defn, 6, None, None, 5)
             except Exception:
                 pass
     except Exception:
