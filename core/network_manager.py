@@ -101,9 +101,9 @@ def client_android_speed_test(sock, password, status_cb=None):
                 if dur > 0 and len(got) == dummy_size:
                     bandwidth = (dummy_size * 8.0) / (dur * 1024.0 * 1024.0)
 
-        if bandwidth > 20.0 and avg_ping < 30.0:
+        if bandwidth >= 20.0 and avg_ping <= 45.0:
             net_class = "high"
-        elif bandwidth < 5.0 or avg_ping > 80.0:
+        elif bandwidth < 5.0 or avg_ping > 95.0:
             net_class = "low"
         else:
             net_class = "medium"
@@ -177,9 +177,9 @@ def client_quick_link_probe(sock, password, status_cb=None):
                 dur = time.time() - t_start
                 if dur > 0 and len(got) == dummy_size:
                     bandwidth = (dummy_size * 8.0) / (dur * 1024.0 * 1024.0)
-        if bandwidth > 20.0 and ping < 30.0:
+        if bandwidth >= 20.0 and ping <= 45.0:
             net_class = "high"
-        elif bandwidth < 5.0 or ping > 80.0:
+        elif bandwidth < 5.0 or ping > 95.0:
             net_class = "low"
         else:
             net_class = "medium"

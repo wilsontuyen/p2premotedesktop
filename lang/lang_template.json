@@ -536,5 +536,10 @@
   "🔍 Quét dải IP": "🔍 Quét dải IP",
   "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.": "Chưa có máy tính nào trong danh sách.\nNhập dải IP và bấm 'Quét dải IP' hoặc bấm 'Làm mới' để dò tìm các máy trong mạng.",
   "Xóa sạch danh sách": "Xóa sạch danh sách",
-  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?"
+  "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?": "Bạn có chắc chắn muốn xóa toàn bộ danh sách máy tính mạng LAN & VPN không?",
+  "Tốt": "Tốt",
+  "Trung bình": "Trung bình",
+  "Xấu": "Xấu",
+  "Kém": "Kém",
+  "Yếu": "Yếu"
 }

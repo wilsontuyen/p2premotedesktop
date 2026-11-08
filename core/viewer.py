@@ -168,6 +168,67 @@ client_net_bytes_count = 0
 client_net_speed_timer = 0.0
 
 
+def determine_network_quality(ping=None, bw=None, mode=None):
+    """
+    Đánh giá chất lượng mạng động theo thời gian thực (high / medium / low)
+    đồng bộ trực tiếp với ngưỡng hiển thị của Độ trễ (Latency) và Tốc độ trung bình (Bandwidth):
+    - high (Tốt - Xanh lá): Độ trễ <= 45ms và Tốc độ >= 20 Mbps (hoặc LAN).
+    - medium (Trung bình - Cam): Độ trễ 45ms - 95ms hoặc Tốc độ 5 - 20 Mbps (không có chỉ số nào Xấu).
+    - low (Xấu - Đỏ): Độ trễ > 95ms hoặc Tốc độ < 5 Mbps.
+    """
+    try:
+        p_val = float(ping) if (ping is not None and float(ping) >= 0) else None
+    except (ValueError, TypeError):
+        p_val = None
+
+    try:
+        b_val = float(bw) if (bw is not None and float(bw) >= 0) else None
+    except (ValueError, TypeError):
+        b_val = None
+
+    ping_level = None
+    if p_val is not None:
+        if p_val <= 45.0:
+            ping_level = "high"
+        elif p_val <= 95.0:
+            ping_level = "medium"
+        else:
+            ping_level = "low"
+
+    bw_level = None
+    if mode == "lan":
+        bw_level = "high"
+    elif b_val is not None:
+        if b_val >= 20.0:
+            bw_level = "high"
+        elif b_val >= 5.0:
+            bw_level = "medium"
+        else:
+            bw_level = "low"
+
+    if ping_level == "low" or bw_level == "low":
+        return "low"
+    if ping_level == "medium" or bw_level == "medium":
+        return "medium"
+    if ping_level == "high" or bw_level == "high":
+        return "high"
+    return None
+
+
+def _refresh_client_network_quality_unlocked():
+    """Cập nhật trực tiếp net_class trong client_network_info (gọi khi đã giữ client_network_lock)."""
+    ping_val = client_network_info.get("ping")
+    if ping_val is None:
+        ping_val = client_network_info.get("latency")
+    bw_val = client_network_info.get("bandwidth")
+    if bw_val is None:
+        bw_val = client_network_info.get("avg_speed")
+    mode_val = client_network_info.get("mode")
+    q = determine_network_quality(ping=ping_val, bw=bw_val, mode=mode_val)
+    if q is not None:
+        client_network_info["net_class"] = q
+
+
 def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_theme, is_android, net_info, font_names="Segoe UI, Arial", alpha=255, draw_title=True):
     """
     Vẽ thông tin mạng (Ping / Latency, Tốc độ trung bình / Băng thông, Chất lượng, Phương thức kết nối)
@@ -274,8 +335,11 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
 
     ping = net_info.get("ping") if net_info.get("ping") is not None else net_info.get("latency")
     bw = net_info.get("bandwidth") if net_info.get("bandwidth") is not None else net_info.get("avg_speed")
-    net_class = net_info.get("net_class")
     mode = net_info.get("mode")
+
+    # Đánh giá chất lượng mạng động theo thời gian thực trực tiếp từ Ping và Băng thông
+    dynamic_class = determine_network_quality(ping=ping, bw=bw, mode=mode)
+    net_class = dynamic_class if dynamic_class is not None else net_info.get("net_class")
 
     col_w = card_w // 3
 
@@ -317,7 +381,7 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         card_surf.blit(v_bw_surf, v_bw_surf.get_rect(center=(c2_cx, 36)))
         s_bw_surf = sub_font.render(_("Mạng LAN (Siêu tốc)"), True, lbl_col)
         card_surf.blit(s_bw_surf, s_bw_surf.get_rect(center=(c2_cx, 53)))
-    elif bw is not None and float(bw) > 0:
+    elif bw is not None and float(bw) >= 0:
         b_val = float(bw)
         if b_val >= 20.0:
             b_col = (34, 160, 80)
@@ -343,7 +407,7 @@ def _draw_network_speed_test_card(screen, cx, cy, window_w, window_h, pygame_the
         q_str = _("Tốt")
         q_col = (34, 160, 80)
     elif net_class == "low":
-        q_str = _("Yếu")
+        q_str = _("Xấu")
         q_col = (225, 60, 60)
     elif net_class == "medium":
         q_str = _("Trung bình")
@@ -670,6 +734,7 @@ def client_receiver_thread(sock, password):
                         prev_bw = client_network_info.get("bandwidth", realtime_bw)
                         client_network_info["bandwidth"] = round(prev_bw * 0.7 + realtime_bw * 0.3, 2)
                         client_network_info["avg_speed"] = client_network_info["bandwidth"]
+                    _refresh_client_network_quality_unlocked()
                     client_net_bytes_count = 0
                     client_net_speed_timer = client_last_recv_time
                 
@@ -690,6 +755,7 @@ def client_receiver_thread(sock, password):
                                         client_network_info["avg_ping"] = round(cur_avg * 0.7 + cur_rtt * 0.3, 1)
                                     else:
                                         client_network_info["avg_ping"] = round(cur_rtt, 1)
+                                    _refresh_client_network_quality_unlocked()
                         continue
                     elif evt_type == "host_cursor":
                         rx_val = event.get("rx")
@@ -1026,6 +1092,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         })
         if initial_net_info and isinstance(initial_net_info, dict):
             client_network_info.update(initial_net_info)
+            _refresh_client_network_quality_unlocked()
     net_card_first_frame_time = None
     NET_CARD_HOLD_SECS = 1.6
     NET_CARD_FADE_SECS = 0.8
@@ -1265,6 +1332,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                     if isinstance(n_data, dict):
                                         with client_network_lock:
                                             client_network_info.update(n_data)
+                                            _refresh_client_network_quality_unlocked()
                                 except Exception:
                                     pass
                             elif isinstance(msg, tuple) and msg[0] == "CONNECTED":
@@ -1276,6 +1344,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 if len(msg) > 11 and isinstance(msg[11], dict):
                                     with client_network_lock:
                                         client_network_info.update(msg[11])
+                                        _refresh_client_network_quality_unlocked()
                                 if isinstance(sock_item, tuple) and sock_item[0] == "SHARED_SOCK":
                                     sock = socket.fromshare(sock_item[1])
                                 elif hasattr(sock_item, 'fileno'):
@@ -2290,6 +2359,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                         if isinstance(n_data, dict):
                                             with client_network_lock:
                                                 client_network_info.update(n_data)
+                                                _refresh_client_network_quality_unlocked()
                                     except Exception:
                                         pass
                                 elif isinstance(q_msg, str) and q_msg.startswith("STATUS|"):
