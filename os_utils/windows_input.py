@@ -364,6 +364,21 @@ def send_input_mouse_click_at(x, y, button_name, pressed):
         if not flags:
             return 0
 
+        # Menu XAML (Start > Power > Shut down/Restart) cần nhận sự kiện hover (pointer-enter)
+        # trước khi nhận click; nếu click ngay khi con trỏ vừa nhảy tới (do mouse_move bị gộp/mất)
+        # thì lần đầu bị miss. Nên "mồi" hover trước khi nhấn chuột xuống.
+        if pressed:
+            try:
+                pt = wintypes.POINT()
+                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                if abs(pt.x - int(x)) > 1 or abs(pt.y - int(y)) > 1:
+                    send_input_mouse_move(x, y)
+                    time.sleep(0.04)
+                    send_input_mouse_move(x, y)
+                    time.sleep(0.02)
+            except Exception:
+                pass
+
         try:
             ctypes.windll.user32.SetCursorPos(int(x), int(y))
         except Exception:
