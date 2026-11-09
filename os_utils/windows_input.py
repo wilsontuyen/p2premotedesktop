@@ -303,6 +303,7 @@ _cached_screen_h = 0
 _cached_screen_x = 0
 _cached_screen_y = 0
 _cached_screen_time = 0
+_last_press_ts = 0.0
 
 def _mouse_abs_norm(x, y):
     """Chuẩn hoá toạ độ màn hình ảo 0..65535 cho SendInput ABSOLUTE|VIRTUALDESK."""
@@ -364,26 +365,28 @@ def send_input_mouse_click_at(x, y, button_name, pressed):
         if not flags:
             return 0
 
-        # Menu XAML (Start > Power > Shut down/Restart) cần nhận sự kiện hover (pointer-enter)
-        # trước khi nhận click; nếu click ngay khi con trỏ vừa nhảy tới (do mouse_move bị gộp/mất)
-        # thì lần đầu bị miss. Nên "mồi" hover trước khi nhấn chuột xuống.
+        # Menu XAML (Start, nút Nguồn ở màn hình Login...) cần nhận sự kiện WM_MOUSEMOVE thật
+        # (pointer-enter/hover) trước khi nhận click. SetCursorPos rồi SendInput cùng toạ độ
+        # sẽ KHÔNG sinh mouse-move vì con trỏ đã ở sẵn đó -> click đầu tiên bị miss.
+        # Vì vậy chỉ dùng SendInput: nhích 1 bước lệch rồi vào đúng điểm, rồi mới nhấn.
+        global _last_press_ts
         if pressed:
             try:
-                pt = wintypes.POINT()
-                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                if abs(pt.x - int(x)) > 1 or abs(pt.y - int(y)) > 1:
-                    send_input_mouse_move(x, y)
-                    time.sleep(0.04)
-                    send_input_mouse_move(x, y)
-                    time.sleep(0.02)
+                move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                for (ax, ay, delay) in ((nx - 120, ny - 120, 0.03), (nx, ny, 0.06)):
+                    mv = INPUT()
+                    mv.type = INPUT_MOUSE
+                    mv.union.mi = MOUSEINPUT(max(0, min(65535, ax)), max(0, min(65535, ay)), 0, move_flags, 0, None)
+                    _send_input_with_retry(1, ctypes.byref(mv), ctypes.sizeof(INPUT))
+                    time.sleep(delay)
             except Exception:
                 pass
-
-        try:
-            ctypes.windll.user32.SetCursorPos(int(x), int(y))
-        except Exception:
-            pass
-
+            _last_press_ts = time.monotonic()
+        else:
+            # Giữ nút tối thiểu ~50ms để XAML kịp ghi nhận down trước up
+            gap = time.monotonic() - _last_press_ts
+            if gap < 0.05:
+                time.sleep(0.05 - gap)
         inp = INPUT()
         inp.type = INPUT_MOUSE
         inp.union.mi = MOUSEINPUT(
@@ -421,10 +424,6 @@ def send_input_mouse_scroll(dx, dy):
 def send_input_mouse_move(x, y):
     try:
         nx, ny = _mouse_abs_norm(x, y)
-        try:
-            ctypes.windll.user32.SetCursorPos(int(x), int(y))
-        except Exception:
-            pass
         inp = INPUT()
         inp.type = INPUT_MOUSE
         inp.union.mi = MOUSEINPUT(
@@ -433,11 +432,12 @@ def send_input_mouse_move(x, y):
             0, None
         )
         res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        # SendInput trước (sinh WM_MOUSEMOVE thật cho XAML); SetCursorPos chỉ để hiệu chỉnh sai số làm tròn
         try:
-            ctypes.windll.user32.mouse_event(
-                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                nx, ny, 0, 0
-            )
+            pt = wintypes.POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            if pt.x != int(x) or pt.y != int(y):
+                ctypes.windll.user32.SetCursorPos(int(x), int(y))
         except Exception:
             pass
         return res
