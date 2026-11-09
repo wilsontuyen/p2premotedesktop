@@ -826,19 +826,12 @@ class NetworkMixin:
                             comps[idx]["group"] = ""
                     updated_any = True
 
-            if not updated_any:
-                new_entry = {
-                    "name": comp_name or target_hwid,
-                    "id": fmt_saved_id,
-                    "password": new_pw,
-                    "group": ""
-                }
-                if new_mac is not None:
-                    new_entry["mac"] = new_mac
-                comps.append(new_entry)
-            self.save_saved_computers(comps)
-            if hasattr(self, '_reorder_saved_computers_func'):
-                self.after(50, self._reorder_saved_computers_func)
+            # Máy LAN/VPN chưa có trong "Danh sách máy tính đã lưu" thì KHÔNG tự thêm vào;
+            # mật khẩu/MAC của nó chỉ được lưu trong lan_peers.json (bước 2 bên dưới).
+            if updated_any:
+                self.save_saved_computers(comps)
+                if hasattr(self, '_reorder_saved_computers_func'):
+                    self.after(50, self._reorder_saved_computers_func)
 
             # 2. Cập nhật trực tiếp vào peer_info và toàn bộ bản ghi tương ứng trong self.lan_peers rồi ghi ra lan_peers.json
             pw_md5 = hash_password_md5(new_pw)
