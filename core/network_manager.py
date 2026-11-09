@@ -37,6 +37,19 @@ from utils.vpn_discovery import (
 from utils.logger import log_debug
 
 
+def _peer_lan_password(info):
+    """Lấy mật khẩu plaintext đã lưu riêng cho máy LAN/VPN (mã hóa trong lan_peers.json),
+    dùng cho máy không nằm trong 'Danh sách máy tính đã lưu'."""
+    try:
+        enc = (info or {}).get("lan_password_enc")
+        if enc:
+            from core.host import decrypt_text
+            return decrypt_text(enc) or ""
+    except Exception:
+        pass
+    return ""
+
+
 def _handshake_is_android(res):
     if not isinstance(res, dict):
         return False
@@ -835,7 +848,10 @@ class NetworkMixin:
 
             # 2. Cập nhật trực tiếp vào peer_info và toàn bộ bản ghi tương ứng trong self.lan_peers rồi ghi ra lan_peers.json
             pw_md5 = hash_password_md5(new_pw)
+            from core.host import encrypt_text
+            pw_enc = encrypt_text(new_pw)
             peer_info["saved_password"] = pw_md5
+            peer_info["lan_password_enc"] = pw_enc
             peer_info["saved_id"] = canonical_id
             peer_info["hwid"] = canonical_id
             if new_mac is not None:
@@ -846,6 +862,7 @@ class NetworkMixin:
                 for k, v in list(self.lan_peers.items()):
                     if k == target_hwid or k == canonical_id or are_same_machine(k, v, canonical_id, peer_info):
                         v["saved_password"] = pw_md5
+                        v["lan_password_enc"] = pw_enc
                         v["saved_id"] = canonical_id
                         v["hwid"] = canonical_id
                         if new_mac is not None:
@@ -862,7 +879,7 @@ class NetworkMixin:
 
             # 1. Tìm đối chiếu máy tính trong saved_computers (chỉ khớp chính xác HWID, saved_id hoặc tên)
             existing_comp = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
-            saved_pw = existing_comp.get("password", "") if existing_comp else ""
+            saved_pw = (existing_comp.get("password", "") if existing_comp else "") or _peer_lan_password(peer_info)
             saved_id = (existing_comp.get("id", "") if existing_comp else "") or peer_info.get("saved_id") or hwid
 
             # Đồng bộ lại thông tin vào peer_info (mã hóa MD5 mật khẩu, không xóa hash cũ nếu chưa khớp)
@@ -958,7 +975,7 @@ class NetworkMixin:
         def open_change_lan_password_dialog(hwid, peer_info):
             """Hộp thoại thay đổi mật khẩu và địa chỉ MAC cho máy trong danh sách LAN & VPN."""
             existing = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
-            current_pw = existing.get("password", "") if existing else ""
+            current_pw = (existing.get("password", "") if existing else "") or _peer_lan_password(peer_info)
             current_mac = str(peer_info.get("macs") or (existing.get("mac") if existing else "") or "").strip()
             
             pwd_win = tk.Toplevel(dialog)
@@ -1517,7 +1534,7 @@ class NetworkMixin:
                     status_str = _("Đang kiểm tra kết nối...")
 
                 matched_c = match_saved_computer(h_info.get("computer_name"), h_info.get("hwid"), h_info.get("saved_id"))
-                sp = (matched_c.get("password", "") if matched_c else "") or h_info.get("saved_password", "")
+                sp = (matched_c.get("password", "") if matched_c else "") or _peer_lan_password(h_info) or h_info.get("saved_password", "")
                 pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
 
                 raw_net_tip = str(h_info.get('network_type') or 'LAN').strip()
@@ -1668,7 +1685,7 @@ class NetworkMixin:
                 # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
                 from utils.vpn_discovery import _is_exact_saved_match
                 matched = match_saved_computer(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
-                saved_pw = matched.get("password", "") if matched else ""
+                saved_pw = (matched.get("password", "") if matched else "") or _peer_lan_password(info)
                 saved_mac = matched.get("mac", "") if matched else ""
                 if saved_mac and not info.get("macs"):
                     info["macs"] = saved_mac
@@ -1912,7 +1929,7 @@ class NetworkMixin:
                 k_tip = ui_item.get("key_tooltip")
                 if k_lbl and k_lbl.winfo_exists():
                     matched_c = match_saved_computer(inf.get("computer_name"), inf.get("hwid"), inf.get("saved_id"))
-                    sp = (matched_c.get("password", "") if matched_c else "") or inf.get("saved_password", "")
+                    sp = (matched_c.get("password", "") if matched_c else "") or _peer_lan_password(inf) or inf.get("saved_password", "")
                     h_pw = bool(sp)
                     k_lbl.config(
                         bg="#145A32" if h_pw else "#4A5568",

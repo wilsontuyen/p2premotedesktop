@@ -872,6 +872,8 @@ def merge_peers(p_winner, p_loser):
         res["os"] = p_loser["os"]
 
     # 5. Saved Password & Saved ID
+    if not res.get("lan_password_enc") and p_loser.get("lan_password_enc"):
+        res["lan_password_enc"] = p_loser["lan_password_enc"]
     if not res.get("saved_password") and p_loser.get("saved_password"):
         res["saved_password"] = p_loser["saved_password"]
     w_hwid = ''.join(ch for ch in str(res.get("hwid") or "") if ch.isdigit())
