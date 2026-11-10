@@ -3100,12 +3100,14 @@ Comment=Remote Desktop P2P AutoStart
     # Background Network Initialization
 
     def add_firewall_rule_for_app(self):
+        # COM native thay cho `netsh` qua shell=True (tránh spawn cmd.exe -> lỗi 0xc0000142
+        # khi user vừa login đã Shutdown/Restart).
+        if sys.platform != "win32":
+            return
         try:
-            import sys, os, subprocess
             exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
-            rule_name = "EasyRemoteDesktop_P2P"
-            subprocess.run(f'netsh advfirewall firewall delete rule name="{rule_name}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow program="{exe_path}" enable=yes profile=any', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            from os_utils.windows_system import ensure_firewall_rule_native
+            ensure_firewall_rule_native("EasyRemoteDesktop_P2P", exe_path)
         except Exception:
             pass
 
@@ -3302,9 +3304,12 @@ Comment=Remote Desktop P2P AutoStart
         def force_terminate():
             import time
             time.sleep(1.0)
+            # Kill tiến trình con bằng psutil, KHÔNG spawn `cmd.exe /c taskkill`:
+            # khi Windows đang Shutdown/Restart, cmd.exe mới sẽ lỗi 0xc0000142.
             try:
-                import os, subprocess
-                subprocess.run(f"taskkill /F /PID {os.getpid()} /T", shell=True, creationflags=0x08000000)
+                if sys.platform == "win32":
+                    from os_utils.windows_system import kill_process_tree_native
+                    kill_process_tree_native()
             except:
                 pass
             try:

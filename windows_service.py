@@ -156,8 +156,8 @@ class EasyRemoteDesktopService(win32serviceutil.ServiceFramework):
         
         # Clean up any lingering agent processes
         try:
-            import subprocess
-            subprocess.run("taskkill /F /IM RemoteDesktopP2P.exe", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            from os_utils.windows_system import kill_processes_by_name_native
+            kill_processes_by_name_native("RemoteDesktopP2P.exe")
             log("Cleaned up lingering RemoteDesktopP2P.exe processes.")
         except Exception as e:
             log(f"Error cleaning up processes on startup: {e}")

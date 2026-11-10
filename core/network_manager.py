@@ -235,12 +235,15 @@ class NetworkMixin:
         return bool(getattr(self, "is_host_only", False) or HOST_ONLY_BUILD)
 
     def add_firewall_rule_for_app(self):
+        # Dùng COM HNetCfg.FwPolicy2 thay cho `netsh` qua shell=True: spawn cmd.exe lúc
+        # app autostart ngay sau khi login, nếu user bấm Shutdown/Restart liền thì
+        # cmd.exe chết khi khởi tạo DLL và bật dialog "cmd.exe - Application Error 0xc0000142".
+        if sys.platform != "win32":
+            return
         try:
-            import sys, os, subprocess
             exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
-            rule_name = "EasyRemoteDesktop_P2P"
-            subprocess.run(f'netsh advfirewall firewall delete rule name="{rule_name}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow program="{exe_path}" enable=yes profile=any', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            from os_utils.windows_system import ensure_firewall_rule_native
+            ensure_firewall_rule_native("EasyRemoteDesktop_P2P", exe_path)
         except Exception:
             pass
 

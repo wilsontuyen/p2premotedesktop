@@ -113,6 +113,142 @@ def ensure_task_battery_support(task_name=None):
         pass
 
 
+def is_system_shutting_down():
+    """True khi Windows đang Shutdown/Restart/Sign-out (SM_SHUTTINGDOWN).
+
+    Trong giai đoạn này mọi tiến trình con mới (cmd.exe, netsh.exe, taskkill.exe...)
+    đều có thể chết khi khởi tạo user32.dll và bật dialog lỗi 0xc0000142,
+    nên tuyệt đối không spawn thêm tiến trình khi hàm này trả về True.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        SM_SHUTTINGDOWN = 0x2000
+        return bool(ctypes.windll.user32.GetSystemMetrics(SM_SHUTTINGDOWN))
+    except Exception:
+        return False
+
+
+def ensure_firewall_rule_native(rule_name, exe_path):
+    """Tạo/cập nhật rule Inbound Allow cho exe qua COM HNetCfg.FwPolicy2.
+
+    Không spawn cmd.exe / netsh.exe (tránh lỗi 0xc0000142 khi user vừa login đã
+    Shutdown/Restart, và tránh heuristic AV). Cần quyền Admin; nếu không có quyền
+    thì bỏ qua lặng lẽ. Trả về True nếu rule đã hợp lệ / tạo thành công.
+    """
+    if sys.platform != "win32" or not exe_path:
+        return False
+    if is_system_shutting_down():
+        return False
+    co_inited = False
+    try:
+        import pythoncom
+        try:
+            pythoncom.CoInitialize()
+            co_inited = True
+        except Exception:
+            pass
+        import os
+        import win32com.client
+        NET_FW_RULE_DIR_IN = 1
+        NET_FW_ACTION_ALLOW = 1
+        NET_FW_PROFILE2_ALL = 0x7FFFFFFF
+        policy = win32com.client.Dispatch("HNetCfg.FwPolicy2")
+        rules = policy.Rules
+        want = os.path.normcase(os.path.abspath(exe_path))
+
+        # Rule đã đúng cấu hình -> không đụng tới (không xoá/tạo lại mỗi lần khởi động)
+        try:
+            existing = rules.Item(rule_name)
+        except Exception:
+            existing = None
+        if existing is not None:
+            try:
+                same_app = os.path.normcase(os.path.abspath(existing.ApplicationName or "")) == want
+                if (same_app and existing.Enabled and existing.Direction == NET_FW_RULE_DIR_IN
+                        and existing.Action == NET_FW_ACTION_ALLOW):
+                    return True
+            except Exception:
+                pass
+            # Xoá mọi rule trùng tên (cũ / sai đường dẫn)
+            for _ in range(32):
+                try:
+                    rules.Item(rule_name)
+                except Exception:
+                    break
+                try:
+                    rules.Remove(rule_name)
+                except Exception:
+                    break
+
+        rule = win32com.client.Dispatch("HNetCfg.FWRule")
+        rule.Name = rule_name
+        rule.ApplicationName = exe_path
+        rule.Direction = NET_FW_RULE_DIR_IN
+        rule.Action = NET_FW_ACTION_ALLOW
+        rule.Profiles = NET_FW_PROFILE2_ALL
+        rule.Enabled = True
+        rules.Add(rule)
+        return True
+    except Exception:
+        # Không có quyền Admin hoặc Firewall service không chạy -> bỏ qua
+        return False
+    finally:
+        if co_inited:
+            try:
+                import pythoncom
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+
+def kill_process_tree_native(pid=None, include_self=True):
+    """Kill cây tiến trình bằng psutil (TerminateProcess), không spawn taskkill/cmd.exe."""
+    try:
+        import os
+        import psutil
+        pid = pid or os.getpid()
+        try:
+            parent = psutil.Process(pid)
+        except Exception:
+            return
+        try:
+            children = parent.children(recursive=True)
+        except Exception:
+            children = []
+        for child in children:
+            try:
+                child.kill()
+            except Exception:
+                pass
+        if include_self and pid != os.getpid():
+            try:
+                parent.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def kill_processes_by_name_native(exe_name, exclude_pids=()):
+    """Thay thế `taskkill /F /IM <exe>` mà không spawn cmd.exe / taskkill.exe."""
+    try:
+        import os
+        import psutil
+        target = (exe_name or "").lower()
+        skip = set(exclude_pids or ()) | {os.getpid()}
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                if proc.info["pid"] in skip:
+                    continue
+                if (proc.info.get("name") or "").lower() == target:
+                    proc.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def get_desktop_name_from_handle(hdesk):
     if not hdesk:
         return ""
