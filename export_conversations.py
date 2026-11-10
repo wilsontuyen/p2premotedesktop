@@ -29,7 +29,7 @@ def get_readable_text(log_path, dest_path):
                     content = data.get("content", "")
                     tool_calls = data.get("tool_calls", [])
                     
-                    if source == "USER_EXPLICIT" and content:
+                    if (source in ("USER_EXPLICIT", "USER") or data.get("type") == "USER_INPUT") and content:
                         # try to extract only USER_REQUEST if possible
                         req_match = re.search(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", content, re.DOTALL | re.IGNORECASE)
                         if req_match:
@@ -111,7 +111,7 @@ def process_conversation(brain_dir, conv_dir):
                 continue
             if first_data is None:
                 first_data = d
-            if d.get("source") == "USER_EXPLICIT" and d.get("content"):
+            if (d.get("source") in ("USER_EXPLICIT", "USER") or d.get("type") == "USER_INPUT") and d.get("content"):
                 first_user_data = d
                 break
 
@@ -143,14 +143,69 @@ def process_conversation(brain_dir, conv_dir):
     get_readable_text(log_path, dest_path)
     return True
 
+def update_readme():
+    files = [f for f in os.listdir(output_dir) if f.endswith(".txt")]
+    files.sort()
+
+    readme_path = os.path.join(output_dir, "README.md")
+    with open(readme_path, "w", encoding="utf-8") as out:
+        out.write("# Lịch sử trò chuyện (Conversation History)\n\n")
+        out.write("Thư mục này chứa lịch sử tất cả các cuộc hội thoại giữa tôi và bạn từ trước đến nay, được xuất tự động dưới dạng tệp văn bản (`.txt`) để lưu trữ trong kho mã nguồn.\n\n")
+        out.write("## Danh sách các cuộc hội thoại\n\n")
+        out.write("| STT | Thời gian | Yêu cầu ban đầu | Tệp chi tiết |\n")
+        out.write("| --- | --- | --- | --- |\n")
+        
+        for idx, fname in enumerate(files, 1):
+            fpath = os.path.join(output_dir, fname)
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})(\d{2})_", fname)
+            if m:
+                dt_str = f"{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}"
+            else:
+                dt_str = ""
+            
+            initial_req = ""
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("========== USER =========="):
+                            continue
+                        if line and not line.startswith("=="):
+                            initial_req = line
+                            break
+            except Exception:
+                pass
+            if len(initial_req) > 80:
+                initial_req = initial_req[:77] + "..."
+            initial_req = initial_req.replace("|", "\\|")
+            out.write(f"| {idx} | {dt_str} | {initial_req} | [{fname}]({fname}) |\n")
+    print(f"Updated {readme_path} with {len(files)} entries.")
+
 if __name__ == "__main__":
+    import sys
+    target_conv = sys.argv[1] if len(sys.argv) > 1 else None
+
     count = 0
-    for b_dir in brain_dirs:
-        if not os.path.exists(b_dir):
-            continue
-        for item in os.listdir(b_dir):
-            path = os.path.join(b_dir, item)
+    if target_conv:
+        found = False
+        for b_dir in brain_dirs:
+            path = os.path.join(b_dir, target_conv)
             if os.path.isdir(path):
-                if process_conversation(b_dir, item):
+                if process_conversation(b_dir, target_conv):
                     count += 1
+                    found = True
+                    break
+        if not found:
+            print(f"Conversation {target_conv} not found.")
+    else:
+        for b_dir in brain_dirs:
+            if not os.path.exists(b_dir):
+                continue
+            for item in os.listdir(b_dir):
+                path = os.path.join(b_dir, item)
+                if os.path.isdir(path):
+                    if process_conversation(b_dir, item):
+                        count += 1
+    
+    update_readme()
     print(f"Done processing {count} conversations.")

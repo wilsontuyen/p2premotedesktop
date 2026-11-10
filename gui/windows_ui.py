@@ -961,7 +961,7 @@ def setup_windows_ui(self):
         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
 
         # Nút gọi Danh sách máy tính đã lưu
-        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog)
+        saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
         
         # RIGHT PANEL: Control Remote Computer
