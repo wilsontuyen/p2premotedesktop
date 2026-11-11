@@ -280,7 +280,14 @@ def main():
     strip_host_unused(app_dist_dir)
 
     # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân vào bộ cài đặt Host phân phối
-    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt"):
+    data_dist = os.path.join(app_dist_dir, "Data")
+    if os.path.isdir(data_dist):
+        try:
+            shutil.rmtree(data_dist)
+            log("Removed personal Data directory from Host app.dist")
+        except Exception as e:
+            log(f"Warning: could not remove Data directory from Host app.dist: {e}")
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt", "host_hwid.txt", "fm_config.json"):
         pf_dist = os.path.join(app_dist_dir, personal_file)
         if os.path.exists(pf_dist):
             try:

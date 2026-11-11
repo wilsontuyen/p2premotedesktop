@@ -252,7 +252,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 base_dir = os.path.dirname(sys.executable)
             else:
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            return os.path.join(base_dir, "fm_config.json")
+            data_dir = os.path.join(base_dir, "Data")
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+            except Exception:
+                pass
+            return os.path.join(data_dir, "fm_config.json")
 
         def load_last_local_dir():
             import json

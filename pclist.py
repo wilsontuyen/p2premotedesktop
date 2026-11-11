@@ -38,79 +38,74 @@ def E(text):
     return text
 
 
+_DATA_DIR_MIGRATED = False
+_CONFIG_FILENAMES = (
+    "lan_peers.json",
+    "saved_computers.xml",
+    "window_config.json",
+    "custom_ip_range.json",
+    "session_pass.txt",
+    "host_hwid.txt",
+    "fm_config.json",
+)
+
+
 def get_app_data_dir():
-    """App data / config directory (shared with window_config.json path in app)."""
-    if sys.platform != "win32":
-        if sys.platform == "darwin":
-            path = os.path.expanduser("~/Library/Application Support/RemoteDesktopP2P")
-        else:
-            if os.path.exists("/opt/p2p_remote"):
-                path = "/opt/p2p_remote/config"
-            else:
-                path = os.path.expanduser("~/.config/RemoteDesktopP2P")
-        try:
-            os.makedirs(path, exist_ok=True)
-            os.chmod(path, 0o777)
-        except Exception:
-            pass
-        return path
-
-    # Windows: ưu tiên thư mục cài đặt của app nếu có quyền ghi, chỉ fallback sang APPDATA khi bị chặn quyền ghi
+    """Thư mục lưu trữ toàn bộ cấu hình của ứng dụng: luôn là <app_dir>/Data."""
+    global _DATA_DIR_MIGRATED
     if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False) or ("__compiled__" in globals()):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         exe_dir = os.path.dirname(os.path.abspath(__file__))
 
-    if os.path.exists(exe_dir) and os.access(exe_dir, os.W_OK):
-        return exe_dir
-
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        path = os.path.join(appdata, "EasyRemoteDesktop")
-        try:
-            os.makedirs(path, exist_ok=True)
-            return path
-        except Exception:
-            pass
-
-    return exe_dir
-
-
-def get_computers_xml_path():
-    """Resolve saved_computers.xml (ưu tiên thư mục của app/installed copy, sau đó là user APPDATA)."""
-    # Thu thập các đường dẫn file saved_computers.xml trong thư mục của app
-    candidates = []
-    if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False) or ("__compiled__" in globals()):
-        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    if sys.platform != "win32" and os.path.exists("/opt/p2p_remote"):
+        base_dir = "/opt/p2p_remote"
     else:
-        exe_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates.append(os.path.join(exe_dir, "saved_computers.xml"))
+        base_dir = exe_dir
 
+    data_dir = os.path.join(base_dir, "Data")
     try:
-        cwd_xml = os.path.join(os.getcwd(), "saved_computers.xml")
-        if cwd_xml not in candidates:
-            candidates.append(cwd_xml)
+        os.makedirs(data_dir, exist_ok=True)
+        if sys.platform != "win32":
+            os.chmod(data_dir, 0o777)
     except Exception:
         pass
 
-    if sys.platform == "win32":
-        candidates.append(r"C:\Program Files (x86)\Easy Remote Desktop\saved_computers.xml")
-        candidates.append(r"C:\Program Files\Easy Remote Desktop\saved_computers.xml")
-    else:
-        candidates.append("/opt/p2p_remote/config/saved_computers.xml")
+    if not _DATA_DIR_MIGRATED:
+        _DATA_DIR_MIGRATED = True
+        legacy_dirs = [base_dir]
+        if sys.platform == "win32":
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                legacy_dirs.append(os.path.join(appdata, "EasyRemoteDesktop"))
+        for ldir in legacy_dirs:
+            if not ldir or not os.path.isdir(ldir) or os.path.abspath(ldir) == os.path.abspath(data_dir):
+                continue
+            for fname in _CONFIG_FILENAMES:
+                old_file = os.path.join(ldir, fname)
+                if not os.path.isfile(old_file):
+                    continue
+                new_file = os.path.join(data_dir, fname)
+                try:
+                    if not os.path.exists(new_file):
+                        shutil.copy2(old_file, new_file)
+                    os.remove(old_file)
+                except Exception:
+                    pass
+            # Dọn dẹp thư mục APPDATA\EasyRemoteDesktop cũ nếu đã trống
+            if sys.platform == "win32" and ldir.lower().endswith("easyremotedesktop") and "appdata" in ldir.lower():
+                try:
+                    if not os.listdir(ldir):
+                        os.rmdir(ldir)
+                except Exception:
+                    pass
 
-    # 1. Kiểm tra các thư mục của app trước: nếu có file, ưu tiên sử dụng
-    for inst in candidates:
-        if os.path.exists(inst):
-            if os.access(inst, os.W_OK):
-                return inst
+    return data_dir
 
-    # Nếu chưa có file nhưng thư mục exe_dir có quyền ghi, tạo tại exe_dir
-    if os.path.exists(exe_dir) and os.access(exe_dir, os.W_OK):
-        return os.path.join(exe_dir, "saved_computers.xml")
 
-    user_path = os.path.join(get_app_data_dir(), "saved_computers.xml")
-    return user_path
+def get_computers_xml_path():
+    """Trả về đường dẫn duy nhất của saved_computers.xml trong thư mục <app_dir>/Data."""
+    return os.path.join(get_app_data_dir(), "saved_computers.xml")
 
 
 class SavedListMixin:
@@ -1331,14 +1326,6 @@ class SavedListMixin:
                 self._saved_computers_mtime = os.path.getmtime(computers_file)
             except Exception:
                 self._saved_computers_mtime = None
-
-            try:
-                installed_p = r"C:\Program Files (x86)\Easy Remote Desktop\saved_computers.xml"
-                if os.path.abspath(computers_file) != os.path.abspath(installed_p):
-                    if os.path.exists(os.path.dirname(installed_p)) and os.access(os.path.dirname(installed_p), os.W_OK):
-                        shutil.copy2(computers_file, installed_p)
-            except Exception:
-                pass
 
             try:
                 self._ensure_status_query_worker()

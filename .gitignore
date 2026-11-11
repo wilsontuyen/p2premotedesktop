@@ -59,6 +59,8 @@ test_clipboard_copy.txt
 test/
 
 # Window & User configs / personal data
+Data/
+/Data/
 window_config.json
 saved_computers.xml
 lan_peers.json
@@ -66,6 +68,8 @@ config.json
 app.ini
 custom_ip_range.json
 session_pass.txt
+host_hwid.txt
+fm_config.json
 
 # Chat logs & internal conversation data (keep locally, never upload to git)
 _internal_data/

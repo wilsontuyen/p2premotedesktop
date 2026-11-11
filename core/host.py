@@ -2851,7 +2851,9 @@ class HostMixin:
             # Reload random password from session_pass.txt (headless) and ALWAYS reload fixed_password from XML during handshake
             if self.is_headless:
                 try:
-                    pass_path = os.path.join(app_dir, "session_pass.txt")
+                    pass_path = os.path.join(app_dir, "Data", "session_pass.txt")
+                    if not os.path.exists(pass_path):
+                        pass_path = os.path.join(app_dir, "session_pass.txt")
                     if os.path.exists(pass_path):
                         with open(pass_path, "r", encoding="utf-8-sig") as f:
                             val = f.read().strip()

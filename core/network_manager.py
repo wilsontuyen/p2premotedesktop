@@ -637,7 +637,7 @@ class NetworkMixin:
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)  # Gắn transient vào cửa sổ chính để không tạo thêm icon riêng trên Taskbar (giống Danh sách máy tính đã lưu)
 
-        w, h = 640, 540
+        w, h = 680, 540
         parent_x = self.winfo_x()
         parent_y = self.winfo_y()
         parent_w = self.winfo_width()
@@ -657,7 +657,7 @@ class NetworkMixin:
             pass
 
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.minsize(600, 480)
+        dialog.minsize(640, 480)
         dialog.deiconify()
         dialog.lift()
         dialog.focus_force()
@@ -670,21 +670,12 @@ class NetworkMixin:
         lbl_desc.pack(pady=(0, 8))
 
         def get_custom_ip_file():
+            data_dir = os.path.join(app_dir, "Data")
             try:
-                from pclist import get_app_data_dir
-                b = get_app_data_dir()
+                os.makedirs(data_dir, exist_ok=True)
             except Exception:
-                b = os.path.dirname(os.path.abspath(__file__))
-            if sys.platform == "win32" and not os.access(b, os.W_OK):
-                appdata = os.environ.get("APPDATA")
-                if appdata:
-                    folder = os.path.join(appdata, "EasyRemoteDesktop")
-                    try:
-                        os.makedirs(folder, exist_ok=True)
-                        return os.path.join(folder, "custom_ip_range.json")
-                    except Exception:
-                        pass
-            return os.path.join(b, "custom_ip_range.json")
+                pass
+            return os.path.join(data_dir, "custom_ip_range.json")
 
         def load_saved_custom_ip(default_s, default_e):
             fpath = get_custom_ip_file()
@@ -1181,7 +1172,12 @@ class NetworkMixin:
         )
 
         # Bộ đệm cập nhật danh sách chống nháy giật màn hình
+        if not hasattr(self, "lan_collapsed_groups"):
+            self.lan_collapsed_groups = set()
         refresh_timer = [None]
+        reorder_timer = [None]
+        auto_probe_timer = [None]
+        rescan_group_ref = [None]
         def schedule_refresh(delay_ms=160):
             if not dialog.winfo_exists():
                 return
@@ -1417,9 +1413,12 @@ class NetworkMixin:
         entry_start.bind("<KP_Enter>", lambda e: run_vpn_scan_background())
         entry_end.bind("<KP_Enter>", lambda e: run_vpn_scan_background())
 
-        # Biến lọc: Chỉ hiện máy có tên xác định (mặc định BẬT)
-        filter_named_var = tk.BooleanVar(value=True)
+        # Biến lọc: Chỉ hiện máy có tên xác định (mặc định BẬT) và Ẩn máy Offline (mặc định TẮT)
+        filter_named_var = tk.BooleanVar(value=getattr(self, "_lan_filter_named", True))
         filter_named_tip_box = [None]
+        hide_offline_var = tk.BooleanVar(value=getattr(self, "_lan_hide_offline", False))
+        hide_offline_tip_box = [None]
+        reorder_lan_list_ref = [None]
 
         def is_named_peer(info):
             # Nếu máy đã được người dùng lưu mật khẩu thì luôn hiển thị, không bao giờ ẩn
@@ -1436,7 +1435,9 @@ class NetworkMixin:
             return True
 
         def toggle_filter_named():
-            filter_named_var.set(not filter_named_var.get())
+            new_val = not filter_named_var.get()
+            filter_named_var.set(new_val)
+            self._lan_filter_named = new_val
             _update_filter_btn_ui()
             refresh_list()
 
@@ -1461,9 +1462,48 @@ class NetworkMixin:
             except Exception:
                 pass
 
+        def toggle_hide_offline():
+            new_val = not hide_offline_var.get()
+            hide_offline_var.set(new_val)
+            self._lan_hide_offline = new_val
+            _update_hide_offline_btn_ui()
+            if reorder_lan_list_ref[0] is not None:
+                reorder_lan_list_ref[0]()
+            else:
+                refresh_list()
+
+        def _update_hide_offline_btn_ui():
+            try:
+                if hide_offline_var.get():
+                    btn_hide_offline.config(
+                        text=_("Ẩn máy Offline: BẬT"),
+                        bg="#27AE60",
+                        activebackground="#2ECC71"
+                    )
+                    if hide_offline_tip_box[0]:
+                        hide_offline_tip_box[0].update_text(_("Đang BẬT ẩn máy Offline: Chỉ hiển thị các máy đang trực tuyến (Online).\nBấm để TẮT và hiển thị cả máy Offline."))
+                else:
+                    btn_hide_offline.config(
+                        text=_("Ẩn máy Offline: TẮT"),
+                        bg="#5D6D7E",
+                        activebackground="#7F8C8D"
+                    )
+                    if hide_offline_tip_box[0]:
+                        hide_offline_tip_box[0].update_text(_("Đang TẮT ẩn máy Offline: Hiển thị cả máy Online và Offline.\nBấm để BẬT và chỉ hiển thị các máy đang Online."))
+            except Exception:
+                pass
+
         def refresh_list():
             if not dialog.winfo_exists():
                 return
+            reorder_lan_list_ref[0] = None
+            rescan_group_ref[0] = None
+            if reorder_timer[0] is not None:
+                try:
+                    dialog.after_cancel(reorder_timer[0])
+                except Exception:
+                    pass
+                reorder_timer[0] = None
             try:
                 cur_scroll = canvas.yview()
             except Exception:
@@ -1513,17 +1553,74 @@ class NetworkMixin:
                 _finish_swap()
                 return
 
-            # Sắp xếp: máy nhóm "LAN" lên trên cùng, sau đó là các nhóm "VPN khác" ở dưới; theo thứ tự bảng chữ cái
+            from utils.vpn_discovery import is_in_physical_lan_subnet
+
+            def _resolve_peer_group(h_key, h_info):
+                primary_ip_check = str(h_info.get('source_ip') or '').strip() or str(h_info.get('local_ip') or '').split(',')[0].strip()
+                is_physical_lan = is_in_physical_lan_subnet(primary_ip_check)
+                net_type = str(h_info.get("network_type") or "LAN").strip()
+                nt_lower = net_type.lower()
+                if nt_lower != "lan":
+                    if "custom" in nt_lower and is_physical_lan:
+                        normalized_net = "LAN"
+                    else:
+                        normalized_net = "VPN"
+                    if h_info.get("network_type") != normalized_net:
+                        h_info["network_type"] = normalized_net
+                        with self.lan_peers_lock:
+                            if h_key in self.lan_peers:
+                                self.lan_peers[h_key]["network_type"] = normalized_net
+                    return normalized_net
+                return "LAN"
+
+            def _get_peer_online_state(h_key, h_info):
+                online_state = scan_state.get("online_status", {})
+                if h_key in online_state:
+                    return online_state[h_key]
+                age = time.time() - get_last_seen_epoch(h_info.get("last_seen", 0))
+                return True if age < 30 else None
+
+            # Sắp xếp: nhóm "LAN" lên trên, nhóm "VPN" ở dưới; trong mỗi nhóm máy Online đưa lên trên, sau đó theo bảng chữ cái
             def _peer_sort_key(item):
                 hwid, p = item
-                net_type = str(p.get("network_type") or "").strip().lower()
-                is_lan = (not net_type or net_type == "lan")
-                group_rank = 0 if is_lan else 1
+                grp = _resolve_peer_group(hwid, p)
+                group_rank = 0 if grp == "LAN" else 1
+                is_on = _get_peer_online_state(hwid, p)
+                online_rank = 0 if is_on is True else (1 if is_on is None else 2)
                 comp_name = (p.get("computer_name") or "").strip().lower()
-                return (group_rank, comp_name)
+                return (group_rank, online_rank, comp_name)
 
             sorted_items = sorted(filtered_peers.items(), key=_peer_sort_key)
             row_ui_map = {}
+            group_headers = {}
+
+            for grp_name in ("LAN", "VPN"):
+                icon = "▶" if grp_name in self.lan_collapsed_groups else "▼"
+                hdr_lbl = tk.Label(
+                    new_scroll_frame,
+                    text=f"{icon} {grp_name}",
+                    font=("Segoe UI", 9, "bold"),
+                    fg=self.text_gray,
+                    bg=self.entry_bg,
+                    anchor=tk.W,
+                    cursor="hand2",
+                )
+                hdr_lbl.is_group_header = True
+                hdr_lbl.group_name = grp_name
+
+                def _toggle_lan_group(event, g=grp_name):
+                    if g in self.lan_collapsed_groups:
+                        self.lan_collapsed_groups.remove(g)
+                        just_expanded = True
+                    else:
+                        self.lan_collapsed_groups.add(g)
+                        just_expanded = False
+                    reorder_lan_list()
+                    if just_expanded and rescan_group_ref[0] is not None:
+                        rescan_group_ref[0](g, reset_dots=True)
+
+                hdr_lbl.bind("<Button-1>", _toggle_lan_group)
+                group_headers[grp_name] = hdr_lbl
 
             def _make_tooltip_text(h_info, is_on, f_id):
                 ip_str = h_info.get('local_ip', '')
@@ -1685,7 +1782,6 @@ class NetworkMixin:
                 if _is_self_peer(hwid, info):
                     continue
                 row = tk.Frame(new_scroll_frame, bg=self.card_color, bd=0)
-                row.pack(fill=tk.X, padx=5, pady=2)
 
                 clean_hwid_key = ''.join(ch for ch in str(hwid) if ch.isdigit())
                 clean_info_hwid = ''.join(ch for ch in str(info.get("hwid") or "") if ch.isdigit())
@@ -1737,45 +1833,23 @@ class NetworkMixin:
                 fmt_id = f"{clean_disp[:3]} {clean_disp[3:6]} {clean_disp[6:9]} {clean_disp[9:]}" if len(clean_disp) == 12 else (clean_disp or info.get("saved_id") or hwid)
 
                 # Trạng thái trực tuyến (None = đang kiểm tra, True = online, False = offline)
-                online_state = scan_state.get("online_status", {})
-                if hwid in online_state:
-                    peer_online = online_state[hwid]
-                else:
-                    age = time.time() - get_last_seen_epoch(info.get("last_seen", 0))
-                    peer_online = True if age < 30 else None
+                peer_online = _get_peer_online_state(hwid, info)
 
                 dot_color = "#2ECC71" if peer_online is True else ("#FF4D4D" if peer_online is False else "#8A8A9A")
                 lbl_dot = tk.Label(row, text="●", font=("Segoe UI", 9), fg=dot_color, bg=self.card_color)
                 lbl_dot.pack(side=tk.LEFT, padx=(8, 4))
 
-                # Network Badge (chỉ phân biệt LAN hoặc VPN chung, không phân biệt loại giao thức VPN cụ thể)
-                from utils.vpn_discovery import is_in_physical_lan_subnet
-                primary_ip_check = str(info.get('source_ip') or '').strip() or str(info.get('local_ip') or '').split(',')[0].strip()
-                is_physical_lan = is_in_physical_lan_subnet(primary_ip_check)
-
-                net_type = str(info.get("network_type") or "LAN").strip()
-                nt_lower = net_type.lower()
-                if nt_lower != "lan":
-                    if "custom" in nt_lower and is_physical_lan:
-                        badge_text = "LAN"
-                        badge_bg = "#145A32"
-                        badge_fg = "#D4EFDF"
-                        normalized_net = "LAN"
-                    else:
-                        badge_text = "VPN"
-                        badge_bg = "#1B334D"
-                        badge_fg = "#56CCF2"
-                        normalized_net = "VPN"
-                    if info.get("network_type") != normalized_net:
-                        info["network_type"] = normalized_net
-                        with self.lan_peers_lock:
-                            if hwid in self.lan_peers:
-                                self.lan_peers[hwid]["network_type"] = normalized_net
+                # Network Badge & Group ("LAN" hoặc "VPN")
+                normalized_net = _resolve_peer_group(hwid, info)
+                if normalized_net == "VPN":
+                    badge_text = "VPN"
+                    badge_bg = "#1B334D"
+                    badge_fg = "#56CCF2"
                 else:
                     badge_text = "LAN"
                     badge_bg = "#145A32"
                     badge_fg = "#D4EFDF"
-                    
+
                 lbl_badge = tk.Label(row, text=badge_text, font=("Segoe UI", 7, "bold"), bg=badge_bg, fg=badge_fg, padx=4, pady=1)
                 lbl_badge.pack(side=tk.LEFT, padx=(0, 8))
 
@@ -1861,9 +1935,14 @@ class NetworkMixin:
                 # Gắn sự kiện click và menu chuột phải cho toàn hàng (bỏ nút Kết nối, nhấp chuột trực tiếp để kết nối)
                 bind_targets = [row, lbl_name, lbl_id, lbl_badge, lbl_dot, right_box]
 
+                row.comp_id = hwid
+                row.comp_name = info.get("computer_name", "Unknown")
+                row.comp_group = normalized_net
+
                 row_ui_map[hwid] = {
                     "row": row,
                     "dot": lbl_dot,
+                    "badge": lbl_badge,
                     "wol_container": wol_container,
                     "lbl_key": lbl_key,
                     "key_tooltip": key_tooltip_obj,
@@ -1871,7 +1950,9 @@ class NetworkMixin:
                     "tooltip": tooltip_obj,
                     "menu": row_menu,
                     "sync_menu_wol": _sync_menu_wol,
-                    "fmt_id": fmt_id
+                    "fmt_id": fmt_id,
+                    "peer_online": peer_online,
+                    "comp_group": normalized_net,
                 }
 
                 def on_row_click(e, h=hwid, i=info):
@@ -1899,6 +1980,120 @@ class NetworkMixin:
             if any_peer_synced:
                 self.save_lan_peers()
 
+            empty_offline_lbl = tk.Label(
+                new_scroll_frame,
+                text="",
+                font=("Segoe UI", 9),
+                fg=self.text_gray,
+                bg=self.entry_bg,
+                justify=tk.CENTER
+            )
+
+            def reorder_lan_list():
+                if not dialog.winfo_exists() or not new_scroll_frame.winfo_exists():
+                    return
+                try:
+                    for ch in new_scroll_frame.winfo_children():
+                        ch.pack_forget()
+
+                    hide_off = hide_offline_var.get()
+                    st_map = scan_state.get("online_status", {})
+                    grouped_rows = {"LAN": [], "VPN": []}
+                    total_in_group = {"LAN": 0, "VPN": 0}
+                    visible_count = 0
+                    hidden_offline_count = 0
+
+                    for h_id, ui_it in row_ui_map.items():
+                        r = ui_it.get("row")
+                        if not r or not r.winfo_exists():
+                            continue
+                        grp = ui_it.get("comp_group") or getattr(r, "comp_group", "LAN")
+                        if grp not in grouped_rows:
+                            grp = "VPN"
+                        total_in_group[grp] = total_in_group.get(grp, 0) + 1
+                        val = st_map[h_id] if h_id in st_map else ui_it.get("peer_online")
+                        if hide_off and val is not True:
+                            hidden_offline_count += 1
+                            continue
+                        visible_count += 1
+                        grouped_rows[grp].append((h_id, r, ui_it))
+
+                    # Cập nhật dòng trạng thái tổng số máy hiển thị / đã ẩn
+                    try:
+                        extra_notes = []
+                        if hide_off and hidden_offline_count > 0:
+                            extra_notes.append(_("Đã ẩn {n} máy Offline").format(n=hidden_offline_count))
+                        if hidden_count > 0 and filter_named_var.get():
+                            extra_notes.append(_("Đã ẩn {n} máy chưa rõ tên").format(n=hidden_count))
+                        suffix_note = f" ({', '.join(extra_notes)})" if extra_notes else ""
+                        status_label.config(text=_("Tìm thấy ") + str(visible_count) + _(" máy trong mạng LAN & VPN") + suffix_note)
+                    except Exception:
+                        pass
+
+                    def _online_rank(h_id, ui_it):
+                        st = scan_state.get("online_status", {})
+                        val = st[h_id] if h_id in st else ui_it.get("peer_online")
+                        if val is True:
+                            return 0
+                        if val is None:
+                            return 1
+                        return 2
+
+                    first_grp = True
+                    for grp in ("LAN", "VPN"):
+                        grp_items = grouped_rows.get(grp, [])
+                        if not grp_items and total_in_group.get(grp, 0) == 0:
+                            continue
+                        if not grp_items and hide_off and grp not in self.lan_collapsed_groups:
+                            # Vẫn giữ tiêu đề nhóm nếu nhóm có máy để người dùng có thể thu/bung nhóm quét lại
+                            pass
+                        hdr = group_headers.get(grp)
+                        if hdr and hdr.winfo_exists():
+                            icon = "▶" if grp in self.lan_collapsed_groups else "▼"
+                            hdr.config(text=f"{icon} {grp}")
+                            top_pad = 8 if first_grp else 14
+                            hdr.pack(fill=tk.X, padx=10, pady=(top_pad, 4))
+                            first_grp = False
+
+                        if grp not in self.lan_collapsed_groups and grp_items:
+                            grp_items.sort(
+                                key=lambda item: (
+                                    _online_rank(item[0], item[2]),
+                                    str(item[2].get("info", {}).get("computer_name") or getattr(item[1], "comp_name", "")).strip().lower(),
+                                )
+                            )
+                            for _h_id, r, _ui_it in grp_items:
+                                r.pack(fill=tk.X, padx=5, pady=2)
+
+                    if visible_count == 0 and len(row_ui_map) > 0 and hide_off:
+                        if scan_state.get("is_probing", False):
+                            empty_offline_lbl.config(text=_("Đang kiểm tra trạng thái trực tuyến của các máy..."))
+                        else:
+                            empty_offline_lbl.config(
+                                text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
+                            )
+                        empty_offline_lbl.pack(pady=24, padx=20)
+
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                except Exception:
+                    pass
+
+            reorder_lan_list_ref[0] = reorder_lan_list
+
+            def schedule_reorder_lan(delay_ms=120):
+                if not dialog.winfo_exists():
+                    return
+                if reorder_timer[0] is not None:
+                    try:
+                        dialog.after_cancel(reorder_timer[0])
+                    except Exception:
+                        pass
+                reorder_timer[0] = dialog.after(delay_ms, reorder_lan_list)
+
+            # Sắp xếp và phân nhóm ("LAN", "VPN") trước khi hiển thị
+            scan_state["is_probing"] = bool(filtered_peers)
+            reorder_lan_list()
+
             # Hoàn tất hiển thị giao diện mới mượt mà (double-buffering)
             _finish_swap()
 
@@ -1914,6 +2109,9 @@ class NetworkMixin:
                 if not ui_item:
                     return
 
+                prev_online = ui_item.get("peer_online")
+                ui_item["peer_online"] = is_on
+
                 # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
                 d = ui_item.get("dot")
                 if d and d.winfo_exists():
@@ -1927,10 +2125,33 @@ class NetworkMixin:
 
                 # 2. Cập nhật tooltip (gộp an toàn qua merge_peers để không bao giờ mất saved_password hay tên máy verified)
                 inf = ui_item.get("info", {})
+                group_changed = False
                 if u_data:
                     merged_ui = merge_peers(u_data, inf)
                     merged_ui["hwid"] = inf.get("hwid") or h_id
                     inf.update(merged_ui)
+                    new_grp = _resolve_peer_group(h_id, inf)
+                    if new_grp != ui_item.get("comp_group"):
+                        ui_item["comp_group"] = new_grp
+                        r_w = ui_item.get("row")
+                        if r_w and r_w.winfo_exists():
+                            r_w.comp_group = new_grp
+                        b_w = ui_item.get("badge")
+                        if b_w and b_w.winfo_exists():
+                            if new_grp == "VPN":
+                                b_w.config(text="VPN", bg="#1B334D", fg="#56CCF2")
+                            else:
+                                b_w.config(text="LAN", bg="#145A32", fg="#D4EFDF")
+                        group_changed = True
+
+                # Đồng bộ trạng thái sang Danh sách máy tính đã lưu (nếu máy có mặt ở cả 2 danh sách)
+                try:
+                    c_id_sync = ''.join(ch for ch in str(inf.get("hwid") or inf.get("saved_id") or h_id) if ch.isdigit())
+                    if len(c_id_sync) == 12 and hasattr(self, "update_saved_computer_status") and (is_on is True or prev_online != is_on):
+                        self.update_saved_computer_status(c_id_sync, bool(is_on))
+                except Exception:
+                    pass
+
                 tip = ui_item.get("tooltip")
                 if tip:
                     tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
@@ -1963,6 +2184,10 @@ class NetworkMixin:
                 if m_ctx and sync_fn and m_ctx.winfo_exists():
                     sync_fn(m_ctx, inf, is_on)
 
+                # 5. Sắp xếp lại danh sách trong mỗi nhóm để đưa máy Online lên trên
+                if prev_online != is_on or group_changed:
+                    schedule_reorder_lan()
+
             def _probe_all_peers_bg(peers_to_check, gen):
                 from concurrent.futures import ThreadPoolExecutor
                 from utils.vpn_discovery import probe_peer_direct
@@ -1986,14 +2211,87 @@ class NetworkMixin:
                         dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
 
                 def _worker():
-                    items = list(peers_to_check.items())
-                    if not items:
-                        return
-                    with ThreadPoolExecutor(max_workers=min(25, max(1, len(items)))) as executor:
-                        list(executor.map(_check_one, items))
-                    self.save_lan_peers()
+                    try:
+                        items = list(peers_to_check.items())
+                        if not items:
+                            return
+                        with ThreadPoolExecutor(max_workers=min(25, max(1, len(items)))) as executor:
+                            list(executor.map(_check_one, items))
+                        self.save_lan_peers()
+                    finally:
+                        if scan_state.get("probe_gen") == gen:
+                            scan_state["is_probing"] = False
+                            if dialog.winfo_exists():
+                                dialog.after(0, lambda: schedule_reorder_lan(20) if dialog.winfo_exists() else None)
 
                 threading.Thread(target=_worker, daemon=True).start()
+
+            def _rescan_group_peers(target_group=None, reset_dots=True):
+                """Quét lại trạng thái Online / Offline cho nhóm vừa bung (LAN hoặc VPN) và cập nhật vào danh sách."""
+                if not dialog.winfo_exists() or scan_state.get("is_scanning", False):
+                    return
+                target_peers = {}
+                for h_id, ui_it in row_ui_map.items():
+                    grp = ui_it.get("comp_group") or _resolve_peer_group(h_id, ui_it.get("info", {}))
+                    if target_group is None or grp == target_group:
+                        inf = ui_it.get("info") or filtered_peers.get(h_id, {})
+                        target_peers[h_id] = inf
+                        if reset_dots:
+                            d = ui_it.get("dot")
+                            if d and d.winfo_exists():
+                                d.config(fg="#8A8A9A")
+                        # Tái sử dụng luồng quét trạng thái như bên "Danh sách máy tính đã lưu" nếu máy có HWID 12 số
+                        try:
+                            c_id = ''.join(ch for ch in str(inf.get("hwid") or inf.get("saved_id") or h_id) if ch.isdigit())
+                            if len(c_id) == 12 and hasattr(self, "_start_saved_status_probe"):
+                                threading.Thread(
+                                    target=lambda cid=c_id: self._start_saved_status_probe(cid, force=True),
+                                    daemon=True
+                                ).start()
+                        except Exception:
+                            pass
+
+                if target_group in (None, "LAN"):
+                    def _send_beacon_bg():
+                        try:
+                            comp_name = platform.node()
+                            beacon = json.dumps({
+                                "sig": LAN_APP_SIGNATURE,
+                                "hwid": getattr(self, "my_id_clean", ""),
+                                "computer_name": comp_name,
+                                "port": BOUND_PORT,
+                                "local_ip": getattr(self, 'local_ip', get_local_ip()),
+                                "macs": getattr(self, 'my_macs', "")
+                            }).encode('utf-8')
+                            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                            sock.settimeout(0.8)
+                            try:
+                                sock.sendto(beacon, ('255.255.255.255', LAN_DISCOVERY_PORT))
+                            except Exception:
+                                pass
+                            try:
+                                local_ips = getattr(self, 'local_ip', '').split(',')
+                                for lip in local_ips:
+                                    lip = lip.strip()
+                                    if lip and not lip.startswith('127.'):
+                                        parts = lip.split('.')
+                                        if len(parts) == 4:
+                                            sock.sendto(beacon, (f"{parts[0]}.{parts[1]}.{parts[2]}.255", LAN_DISCOVERY_PORT))
+                            except Exception:
+                                pass
+                            sock.close()
+                        except Exception:
+                            pass
+                    threading.Thread(target=_send_beacon_bg, daemon=True).start()
+
+                if target_peers:
+                    scan_state["probe_gen"] = scan_state.get("probe_gen", 0) + 1
+                    new_gen = scan_state["probe_gen"]
+                    scan_state["is_probing"] = True
+                    _probe_all_peers_bg(target_peers, new_gen)
+
+            rescan_group_ref[0] = _rescan_group_peers
 
             if filtered_peers:
                 _probe_all_peers_bg(filtered_peers, cur_probe_gen)
@@ -2052,6 +2350,28 @@ class NetworkMixin:
         self._lan_refresh_list_func = refresh_list
         refresh_list()
 
+        def _auto_probe_expanded_groups():
+            if not dialog.winfo_exists():
+                return
+            try:
+                if (
+                    dialog.state() != "withdrawn"
+                    and not scan_state.get("is_scanning", False)
+                    and not scan_state.get("is_probing", False)
+                    and rescan_group_ref[0] is not None
+                ):
+                    expanded_grps = [g for g in ("LAN", "VPN") if g not in self.lan_collapsed_groups]
+                    if len(expanded_grps) == 2:
+                        rescan_group_ref[0](None, reset_dots=False)
+                    elif len(expanded_grps) == 1:
+                        rescan_group_ref[0](expanded_grps[0], reset_dots=False)
+            except Exception:
+                pass
+            if dialog.winfo_exists():
+                auto_probe_timer[0] = dialog.after(5000, _auto_probe_expanded_groups)
+
+        auto_probe_timer[0] = dialog.after(5000, _auto_probe_expanded_groups)
+
         def on_dialog_close():
             self._lan_refresh_list_func = None
             scan_state["cancel_event"].set()
@@ -2062,6 +2382,18 @@ class NetworkMixin:
                 except Exception:
                     pass
                 refresh_timer[0] = None
+            if reorder_timer[0] is not None:
+                try:
+                    dialog.after_cancel(reorder_timer[0])
+                except Exception:
+                    pass
+                reorder_timer[0] = None
+            if auto_probe_timer[0] is not None:
+                try:
+                    dialog.after_cancel(auto_probe_timer[0])
+                except Exception:
+                    pass
+                auto_probe_timer[0] = None
             try:
                 canvas.unbind_all("<MouseWheel>")
             except: pass
@@ -2134,6 +2466,33 @@ class NetworkMixin:
             _("Đang BẬT lọc: Chỉ hiện các máy có tên xác định (ẩn các IP chưa rõ tên).\nBấm để TẮT và hiển thị tất cả thiết bị."), 
             bg="#FFFFFF", fg="#000000", border_color="#B0B7C3"
         )
+        _update_filter_btn_ui()
+
+        # Nút lọc "Ẩn máy Offline" (nằm kế bên phải nút "Hiện tên máy: BẬT / TẮT")
+        btn_hide_offline = tk.Button(
+            btn_frame,
+            text=_("Ẩn máy Offline: BẬT") if hide_offline_var.get() else _("Ẩn máy Offline: TẮT"),
+            font=("Segoe UI", 9, "bold"),
+            fg="#FFFFFF",
+            activeforeground="#FFFFFF",
+            bg="#27AE60" if hide_offline_var.get() else "#5D6D7E",
+            activebackground="#2ECC71" if hide_offline_var.get() else "#7F8C8D",
+            relief=tk.FLAT,
+            bd=0,
+            pady=4,
+            padx=12,
+            cursor="hand2",
+            command=toggle_hide_offline
+        )
+        btn_hide_offline.pack(side=tk.LEFT, padx=(8, 0))
+        hide_offline_tip_box[0] = RowTooltip(
+            btn_hide_offline,
+            _("Đang BẬT ẩn máy Offline: Chỉ hiển thị các máy đang trực tuyến (Online).\nBấm để TẮT và hiển thị cả máy Offline.")
+            if hide_offline_var.get()
+            else _("Đang TẮT ẩn máy Offline: Hiển thị cả máy Online và Offline.\nBấm để BẬT và chỉ hiển thị các máy đang Online."),
+            bg="#FFFFFF", fg="#000000", border_color="#B0B7C3"
+        )
+        _update_hide_offline_btn_ui()
 
         btn_close = tk.Button(
             btn_frame, 

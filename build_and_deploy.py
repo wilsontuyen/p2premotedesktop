@@ -260,7 +260,14 @@ def main():
     log_dist_size(app_dist_dir, "Full app.dist")
 
     # Tuyệt đối KHÔNG đóng gói dữ liệu cá nhân hoặc file .bat cài đặt cũ vào bộ cài đặt phân phối
-    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt", "install.bat", "uninstall.bat"):
+    data_dist = os.path.join(app_dist_dir, "Data")
+    if os.path.isdir(data_dist):
+        try:
+            shutil.rmtree(data_dist)
+            log("Removed personal Data directory from app.dist")
+        except Exception as e:
+            log(f"Warning: could not remove Data directory from app.dist: {e}")
+    for personal_file in ("saved_computers.xml", "lan_peers.json", "config.json", "app.ini", "window_config.json", "custom_ip_range.json", "session_pass.txt", "host_hwid.txt", "fm_config.json", "install.bat", "uninstall.bat"):
         pf_dist = os.path.join(app_dist_dir, personal_file)
         if os.path.exists(pf_dist):
             try:

@@ -541,5 +541,15 @@
   "Trung bình": "Trung bình",
   "Xấu": "Xấu",
   "Kém": "Kém",
-  "Yếu": "Yếu"
+  "Yếu": "Yếu",
+  "🏷 Hiện tên máy: BẬT": "🏷 Hiện tên máy: BẬT",
+  "🏷 Hiện tên máy: TẮT": "🏷 Hiện tên máy: TẮT",
+  "Ẩn máy Offline: BẬT": "Ẩn máy Offline: BẬT",
+  "Ẩn máy Offline: TẮT": "Ẩn máy Offline: TẮT",
+  "Đang BẬT ẩn máy Offline: Chỉ hiển thị các máy đang trực tuyến (Online).\nBấm để TẮT và hiển thị cả máy Offline.": "Đang BẬT ẩn máy Offline: Chỉ hiển thị các máy đang trực tuyến (Online).\nBấm để TẮT và hiển thị cả máy Offline.",
+  "Đang TẮT ẩn máy Offline: Hiển thị cả máy Online và Offline.\nBấm để BẬT và chỉ hiển thị các máy đang Online.": "Đang TẮT ẩn máy Offline: Hiển thị cả máy Online và Offline.\nBấm để BẬT và chỉ hiển thị các máy đang Online.",
+  "Đã ẩn {n} máy Offline": "Đã ẩn {n} máy Offline",
+  "Đã ẩn {n} máy chưa rõ tên": "Đã ẩn {n} máy chưa rõ tên",
+  "Đang kiểm tra trạng thái trực tuyến của các máy...": "Đang kiểm tra trạng thái trực tuyến của các máy...",
+  "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.": "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline."
 }

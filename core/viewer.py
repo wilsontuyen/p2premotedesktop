@@ -1147,28 +1147,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     
     try:
         pygame_theme = "dark"
-        try:
-            import json, os
-            with open("window_config.json", "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                pygame_theme = cfg.get("theme", "dark")
-                
-                # Cấu hình lại ngôn ngữ cho tiến trình mới
-                from core.i18n import load_language
-                load_language(cfg.get("language", "vi"))
-        except:
-            pass
-        
-        # Đọc quality_mode từ config (quality = 4K, speed = tốc độ)
         client_quality_mode = "quality"
         try:
-            cfg_path = os.path.join(os.environ.get("APPDATA", ""), "EasyRemoteDesktop", "window_config.json")
+            import json, os
+            cfg_path = os.path.join(app_dir, "Data", "window_config.json")
             if not os.path.exists(cfg_path):
-                cfg_path = "window_config.json"
+                cfg_path = os.path.join(app_dir, "window_config.json")
             if os.path.exists(cfg_path):
                 with open(cfg_path, "r", encoding="utf-8") as f:
-                    cfg2 = json.load(f)
-                    client_quality_mode = cfg2.get("quality_mode", "quality")
+                    cfg = json.load(f)
+                    pygame_theme = cfg.get("theme", "dark")
+                    client_quality_mode = cfg.get("quality_mode", "quality")
+                    # Cấu hình lại ngôn ngữ cho tiến trình mới
+                    from core.i18n import load_language
+                    load_language(cfg.get("language", "vi"))
         except:
             pass
 

@@ -9,8 +9,25 @@ HWID_FILENAME = "host_hwid.txt"
 
 def _hwid_data_dir():
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "Data")
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except Exception:
+        pass
+    old_p = os.path.join(base_dir, HWID_FILENAME)
+    new_p = os.path.join(data_dir, HWID_FILENAME)
+    if os.path.isfile(old_p):
+        try:
+            if not os.path.exists(new_p):
+                import shutil
+                shutil.copy2(old_p, new_p)
+            os.remove(old_p)
+        except Exception:
+            pass
+    return data_dir
 
 
 def load_saved_hwid():

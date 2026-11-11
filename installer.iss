@@ -43,10 +43,11 @@ vietnamese.RunProgram=Chạy Easy Remote Desktop
 
 [Dirs]
 Name: "{app}"; Permissions: users-modify
+Name: "{app}\Data"; Permissions: users-modify
 Name: "{app}\Logs"; Permissions: users-modify
 
 [Files]
-Source: "dist_nuitka\app.dist\*"; DestDir: "{app}"; Excludes: "saved_computers.xml,lan_peers.json,config.json,app.ini,window_config.json,custom_ip_range.json,session_pass.txt,install.bat,uninstall.bat,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist_nuitka\app.dist\*"; DestDir: "{app}"; Excludes: "Data\*,saved_computers.xml,lan_peers.json,config.json,app.ini,window_config.json,custom_ip_range.json,session_pass.txt,host_hwid.txt,fm_config.json,install.bat,uninstall.bat,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "disclaimer_vi.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "disclaimer_en.txt"; DestDir: "{app}"; Flags: ignoreversion
 

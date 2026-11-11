@@ -476,70 +476,43 @@ def resolve_hostname_safe(ip, timeout=0.6):
     return info[0]
 
 
-def get_all_lan_peers_json_paths():
-    """Trả về tất cả các đường dẫn lan_peers.json tiềm năng (APPDATA, thư mục app, Program Files) để hợp nhất không bao giờ mất máy."""
-    paths = []
-    appdata = os.environ.get('APPDATA', '')
-    if appdata:
-        paths.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
-    if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
-        app_dir = os.path.dirname(os.path.abspath(sys.executable))
-    else:
-        app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    inst = os.path.join(app_dir, "lan_peers.json")
-    if inst not in paths:
-        paths.append(inst)
-    if sys.platform == "win32":
-        pf_inst = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
-        if pf_inst not in paths:
-            paths.append(pf_inst)
-    return paths
-
-
 def get_lan_peers_json_path():
-    """Lấy đường dẫn đầy đủ tới file lan_peers.json, ưu tiên thư mục cài đặt app rồi tới APPDATA."""
-    candidates = []
+    """Trả về đường dẫn duy nhất tới file lan_peers.json trong thư mục <app_dir>/Data."""
     if getattr(sys, 'frozen', False) or hasattr(sys, '__compiled__') or ("__compiled__" in globals()):
         app_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    inst = os.path.join(app_dir, "lan_peers.json")
-    candidates.append(inst)
-
-    if sys.platform == "win32":
-        pf_inst = r"C:\Program Files (x86)\Easy Remote Desktop\lan_peers.json"
-        if pf_inst not in candidates:
-            candidates.append(pf_inst)
-
-    appdata = os.environ.get('APPDATA', '')
-    if appdata:
-        user_path = os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json")
-        candidates.append(user_path)
-    else:
-        user_path = inst
-
-    for c_path in candidates:
-        if os.path.exists(c_path):
-            if os.access(c_path, os.W_OK):
-                return c_path
-            else:
-                try:
-                    os.makedirs(os.path.dirname(user_path), exist_ok=True)
-                    if not os.path.exists(user_path):
-                        import shutil
-                        shutil.copy2(c_path, user_path)
-                    return user_path
-                except Exception:
-                    return c_path
-
-    # Nếu chưa có file nào tồn tại, kiểm tra quyền ghi của thư mục app_dir trước
-    if os.access(app_dir, os.W_OK):
-        return inst
+    if sys.platform != "win32" and os.path.exists("/opt/p2p_remote"):
+        app_dir = "/opt/p2p_remote"
+    data_dir = os.path.join(app_dir, "Data")
     try:
-        os.makedirs(os.path.dirname(user_path), exist_ok=True)
-        return user_path
+        os.makedirs(data_dir, exist_ok=True)
     except Exception:
-        return inst
+        pass
+    target_path = os.path.join(data_dir, "lan_peers.json")
+
+    # Di trú 1 lần nếu có file lan_peers.json cũ ở ngoài thư mục gốc hoặc APPDATA
+    legacy_paths = [os.path.join(app_dir, "lan_peers.json")]
+    if sys.platform == "win32":
+        appdata = os.environ.get('APPDATA', '')
+        if appdata:
+            legacy_paths.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
+    for old_p in legacy_paths:
+        if old_p and os.path.isfile(old_p) and os.path.abspath(old_p) != os.path.abspath(target_path):
+            try:
+                if not os.path.exists(target_path):
+                    import shutil
+                    shutil.copy2(old_p, target_path)
+                os.remove(old_p)
+            except Exception:
+                pass
+
+    return target_path
+
+
+def get_all_lan_peers_json_paths():
+    """Trả về danh sách chứa duy nhất đường dẫn <app_dir>/Data/lan_peers.json (không lưu nhiều nơi)."""
+    return [get_lan_peers_json_path()]
 
 
 def hash_password_md5(pw):

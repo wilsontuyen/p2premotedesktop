@@ -117,6 +117,27 @@ def _app_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _data_dir():
+    base = _app_dir()
+    d = os.path.join(base, "Data")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    for fname in ("session_pass.txt", "saved_computers.xml", "host_hwid.txt"):
+        old_p = os.path.join(base, fname)
+        new_p = os.path.join(d, fname)
+        if os.path.isfile(old_p):
+            try:
+                if not os.path.exists(new_p):
+                    import shutil
+                    shutil.copy2(old_p, new_p)
+                os.remove(old_p)
+            except Exception:
+                pass
+    return d
+
+
 def _read_line(sock, max_len=8192):
     """Doc mot dong ket thuc bang \\n, tung byte mot (khong over-read sang frame)."""
     buf = bytearray()
@@ -298,7 +319,7 @@ class Broker:
         file_val = None
         file_mtime = 0.0
         try:
-            p = os.path.join(_app_dir(), "session_pass.txt")
+            p = os.path.join(_data_dir(), "session_pass.txt")
             if os.path.exists(p):
                 file_mtime = os.path.getmtime(p)
                 with open(p, "r", encoding="utf-8-sig") as f:
@@ -321,34 +342,21 @@ class Broker:
         file_mtime = 0.0
         has_xml = False
         try:
-            import glob
             import xml.etree.ElementTree as ET
-            xml_candidates = [os.path.join(_app_dir(), "saved_computers.xml")]
-            if os.name == "nt":
-                # Fallback tương thích ngược cho các máy Host từng lưu ở APPDATA
-                for up in glob.glob(r"C:\Users\*\AppData\Roaming\EasyRemoteDesktop\saved_computers.xml"):
-                    if up not in xml_candidates:
-                        xml_candidates.append(up)
-            existing_xmls = [xp for xp in xml_candidates if os.path.exists(xp)]
-            # Ưu tiên file có thời gian sửa đổi mới nhất có chứa fixed_password (hoặc file ở _app_dir)
-            existing_xmls.sort(key=lambda xp: os.path.getmtime(xp), reverse=True)
-            for xp in existing_xmls:
-                try:
-                    mt = os.path.getmtime(xp)
-                    root = ET.parse(xp).getroot()
-                    has_xml = True
-                    if mt > file_mtime:
+            xp = os.path.join(_data_dir(), "saved_computers.xml")
+            if os.path.exists(xp):
+                mt = os.path.getmtime(xp)
+                root = ET.parse(xp).getroot()
+                has_xml = True
+                if mt > file_mtime:
+                    file_mtime = mt
+                node = root.find("fixed_password")
+                if node is not None and node.text:
+                    v = _decrypt_fixed_password(node.text)
+                    v = (v or "").strip()
+                    if v:
+                        file_val = v
                         file_mtime = mt
-                    node = root.find("fixed_password")
-                    if node is not None and node.text:
-                        v = _decrypt_fixed_password(node.text)
-                        v = (v or "").strip()
-                        if v:
-                            file_val = v
-                            file_mtime = mt
-                            break
-                except Exception:
-                    continue
         except Exception as e:
             print(f"[Broker] doc mat khau co dinh loi: {e}")
 
@@ -361,10 +369,10 @@ class Broker:
         return file_val
 
     def _persist_fixed_password_in_app_dir(self, password):
-        """Cập nhật DUY NHẤT thẻ <fixed_password> tại chỗ trong saved_computers.xml (giữ nguyên 100% <group>, <group_states>, <computer>, <zalo_phone>)."""
+        """Cập nhật DUY NHẤT thẻ <fixed_password> tại chỗ trong Data/saved_computers.xml (giữ nguyên 100% <group>, <group_states>, <computer>, <zalo_phone>)."""
         try:
             import xml.etree.ElementTree as ET
-            xml_path = os.path.join(_app_dir(), "saved_computers.xml")
+            xml_path = os.path.join(_data_dir(), "saved_computers.xml")
             if os.path.exists(xml_path):
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
@@ -403,7 +411,7 @@ class Broker:
 
         if persist_disk and has_sp and sp_val:
             try:
-                p = os.path.join(_app_dir(), "session_pass.txt")
+                p = os.path.join(_data_dir(), "session_pass.txt")
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(sp_val)
                 now_ts = max(now_ts, os.path.getmtime(p))
@@ -413,7 +421,7 @@ class Broker:
         if persist_disk and has_fp:
             self._persist_fixed_password_in_app_dir(fp_val)
             try:
-                xp = os.path.join(_app_dir(), "saved_computers.xml")
+                xp = os.path.join(_data_dir(), "saved_computers.xml")
                 if os.path.exists(xp):
                     now_ts = max(now_ts, os.path.getmtime(xp))
             except Exception:

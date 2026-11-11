@@ -589,7 +589,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             # Khong sinh/ghi de session_pass.txt — neu worker ghi de, GUI hien mat khau A
             # con broker doc mat khau B → handshake "khong giai ma duoc".
             self.my_password = ""
-            pass_path = os.path.join(app_dir, "session_pass.txt")
+            pass_path = os.path.join(get_app_data_dir(), "session_pass.txt")
             try:
                 if os.path.exists(pass_path):
                     with open(pass_path, "r", encoding="utf-8-sig") as f:
@@ -880,7 +880,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         if self.is_headless:
             self.my_password = str(random.randint(1000, 9999))
             try:
-                pass_path = os.path.join(app_dir, "session_pass.txt")
+                pass_path = os.path.join(get_app_data_dir(), "session_pass.txt")
                 with open(pass_path, "w", encoding="utf-8") as f:
                     f.write(self.my_password)
                 print(f"[Host Service] Generated and saved session password to {pass_path}")
@@ -896,7 +896,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             # Mỗi lần mở GUI: mật khẩu kết nối mới. Broker đọc lại session_pass.txt lúc handshake.
             self.my_password = str(random.randint(1000, 9999))
             try:
-                pass_path = os.path.join(app_dir, "session_pass.txt")
+                pass_path = os.path.join(get_app_data_dir(), "session_pass.txt")
                 with open(pass_path, "w", encoding="utf-8") as f:
                     f.write(self.my_password)
                 print(f"[Host GUI] New session password saved to {pass_path}")
@@ -1598,7 +1598,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
         wrote_file = False
         try:
-            pass_path = os.path.join(app_dir, "session_pass.txt")
+            pass_path = os.path.join(get_app_data_dir(), "session_pass.txt")
             with open(pass_path, "w", encoding="utf-8") as f:
                 f.write(self.my_password)
             wrote_file = True
@@ -1623,19 +1623,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
 
     def load_lan_peers(self):
-        from utils.vpn_discovery import get_lan_peers_json_path, get_all_lan_peers_json_paths, deduplicate_lan_peers, merge_peers, get_last_seen_epoch
+        from utils.vpn_discovery import get_lan_peers_json_path, deduplicate_lan_peers, merge_peers, get_last_seen_epoch
         combined = {}
-        candidate_files = []
-        primary_file = get_lan_peers_json_path()
-        if primary_file:
-            candidate_files.append(primary_file)
-        for p in get_all_lan_peers_json_paths():
-            if p not in candidate_files:
-                candidate_files.append(p)
-
-        for fpath in candidate_files:
-            if not fpath or not os.path.exists(fpath):
-                continue
+        fpath = get_lan_peers_json_path()
+        if fpath and os.path.exists(fpath):
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -1657,7 +1648,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
 
     def save_lan_peers(self, allow_shrink=False):
         from utils.vpn_discovery import (
-            get_lan_peers_json_path, get_all_lan_peers_json_paths,
+            get_lan_peers_json_path,
             deduplicate_lan_peers, match_saved_computer, _is_exact_saved_match,
             are_same_machine, merge_peers, get_last_seen_epoch
         )
@@ -1668,30 +1659,27 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             with self.lan_peers_lock:
                 # Nếu không phải thao tác xóa chủ động của người dùng (allow_shrink=False),
                 # hợp nhất thêm dữ liệu đang có trên đĩa để TUYỆT ĐỐI không bao giờ tự động làm mất máy
-                if not allow_shrink:
-                    for fpath in get_all_lan_peers_json_paths():
-                        if not fpath or not os.path.exists(fpath):
-                            continue
-                        try:
-                            with open(fpath, 'r', encoding='utf-8') as rf:
-                                disk_data = json.load(rf)
-                            if isinstance(disk_data, dict):
-                                for dk, dv in disk_data.items():
-                                    if not isinstance(dv, dict):
-                                        continue
-                                    already_present = False
-                                    for mk, mv in list(self.lan_peers.items()):
-                                        if mk == dk or are_same_machine(mk, mv, dk, dv):
-                                            if get_last_seen_epoch(mv.get("last_seen", 0)) >= get_last_seen_epoch(dv.get("last_seen", 0)):
-                                                self.lan_peers[mk] = merge_peers(mv, dv)
-                                            else:
-                                                self.lan_peers[mk] = merge_peers(dv, mv)
-                                            already_present = True
-                                            break
-                                    if not already_present:
-                                        self.lan_peers[dk] = dict(dv)
-                        except Exception:
-                            pass
+                if not allow_shrink and lan_file and os.path.exists(lan_file):
+                    try:
+                        with open(lan_file, 'r', encoding='utf-8') as rf:
+                            disk_data = json.load(rf)
+                        if isinstance(disk_data, dict):
+                            for dk, dv in disk_data.items():
+                                if not isinstance(dv, dict):
+                                    continue
+                                already_present = False
+                                for mk, mv in list(self.lan_peers.items()):
+                                    if mk == dk or are_same_machine(mk, mv, dk, dv):
+                                        if get_last_seen_epoch(mv.get("last_seen", 0)) >= get_last_seen_epoch(dv.get("last_seen", 0)):
+                                            self.lan_peers[mk] = merge_peers(mv, dv)
+                                        else:
+                                            self.lan_peers[mk] = merge_peers(dv, mv)
+                                        already_present = True
+                                        break
+                                if not already_present:
+                                    self.lan_peers[dk] = dict(dv)
+                    except Exception:
+                        pass
 
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
                 dump_data = {}
@@ -1778,18 +1766,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 os.replace(tmp_path, target_path)
 
             _atomic_write_json(lan_file, dump_data)
-
-            # Đồng bộ sang các đường dẫn phụ có quyền ghi (APPDATA & thư mục cài đặt) để chạy quyền Admin hay User đều đồng nhất 100%
-            for mirror_path in get_all_lan_peers_json_paths():
-                try:
-                    if os.path.abspath(mirror_path) == os.path.abspath(lan_file):
-                        continue
-                    m_dir = os.path.dirname(os.path.abspath(mirror_path))
-                    if os.path.exists(m_dir) and os.access(m_dir, os.W_OK):
-                        if not os.path.exists(mirror_path) or os.access(mirror_path, os.W_OK):
-                            _atomic_write_json(mirror_path, dump_data)
-                except Exception:
-                    pass
         except Exception:
             pass
 
@@ -1835,11 +1811,6 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 ET.indent(root, space="  ")
 
             tree.write(computers_file, encoding="utf-8", xml_declaration=True)
-            app_xml = os.path.join(app_dir, "saved_computers.xml")
-            if os.path.abspath(app_xml) != os.path.abspath(computers_file):
-                if os.path.exists(app_dir) and os.access(app_dir, os.W_OK):
-                    import shutil
-                    shutil.copy2(computers_file, app_xml)
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
 
