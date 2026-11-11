@@ -238,6 +238,10 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
         )
         win32api.CloseHandle(h_process)
         win32api.CloseHandle(h_thread)
+        try:
+            _register_spawned_pid(dwProcessId, cmd_line=cmd_line, desktop=desktop)
+        except Exception:
+            pass
         return dwProcessId
     except Exception as e:
         err_code = getattr(e, 'winerror', 0)
@@ -660,6 +664,10 @@ def ensure_broker_running():
         broker_pid = handles[2]
         try:
             win32api.CloseHandle(handles[0]); win32api.CloseHandle(handles[1])
+        except Exception:
+            pass
+        try:
+            _register_spawned_pid(broker_pid, cmd_line=b_cmd, desktop="Session0")
         except Exception:
             pass
         log(f"Broker (Session 0) da khoi chay voi PID {broker_pid}")
@@ -1150,9 +1158,473 @@ def wts_session_notification_thread():
 
 _wts_notify_registered = False
 
+# ==============================================================================
+# GIÁM SÁT SẬP TIẾN TRÌNH & THU THẬP LOG LỖI MỨC HỆ THỐNG (SERVICE CRASH MONITOR)
+# ==============================================================================
+
+_crash_watch_lock = threading.Lock()
+_tracked_procs = {}               # pid -> dict(h_proc, role, cmdline, session_id, desktop, start_ts, exe_name)
+_intentionally_stopped_pids = {}  # pid -> ts_marked
+_logged_event_records = set()     # EventLog RecordNumber đã ghi nhận để tránh lặp
+_last_evt_record_num = None
+
+
+def _classify_process_role(name_lower, cmdline_str, desktop_hint=""):
+    cmd_l = (cmdline_str or "").lower()
+    if "--broker" in cmd_l:
+        return "Broker (Session 0)", "broker.log"
+    if "--capture-worker" in cmd_l:
+        desk = desktop_hint or ("winlogon" if "winlogon" in cmd_l else "default")
+        return f"CaptureWorker ({desk})", "agent.log"
+    if "--clipboard-agent" in cmd_l:
+        return "ClipboardAgent", "clipboard_agent.log"
+    if "--headless" in cmd_l:
+        return "HeadlessAgent", "agent.log"
+    if "--service" in cmd_l or "service" in name_lower:
+        return "WindowsService", "service.log"
+    if "multiprocessing-fork" in cmd_l or "--multiprocessing-fork" in cmd_l:
+        return "Viewer (Cửa sổ điều khiển Pygame)", "viewer.log"
+    return "GUI (Giao diện chính người dùng)", "gui.log"
+
+
+def _open_process_watch_handle(pid):
+    """Mở và giữ handle tiến trình để đảm bảo đọc được ExitCode kể cả sau khi tiến trình sập đột ngột."""
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
+    for access in (
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+        win32con.PROCESS_QUERY_INFORMATION | SYNCHRONIZE,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+        win32con.PROCESS_QUERY_INFORMATION,
+    ):
+        try:
+            h = win32api.OpenProcess(access, False, int(pid))
+            if h:
+                return h
+        except Exception:
+            continue
+    return None
+
+
+def _get_pid_session_id(pid):
+    try:
+        sid = wintypes.DWORD(0)
+        if ctypes.windll.kernel32.ProcessIdToSessionId(int(pid), ctypes.byref(sid)):
+            return int(sid.value)
+    except Exception:
+        pass
+    return -1
+
+
+def _register_spawned_pid(pid, cmd_line="", desktop=""):
+    if not pid or int(pid) == os.getpid():
+        return
+    pid = int(pid)
+    with _crash_watch_lock:
+        if pid in _tracked_procs:
+            return
+        h_proc = _open_process_watch_handle(pid)
+        if not h_proc:
+            return
+        role, log_fname = _classify_process_role("", cmd_line, desktop)
+        _tracked_procs[pid] = {
+            "h_proc": h_proc,
+            "role": role,
+            "log_file": log_fname,
+            "cmdline": cmd_line or "",
+            "session_id": _get_pid_session_id(pid),
+            "desktop": desktop or "",
+            "start_ts": time.time(),
+            "exe_name": os.path.basename(sys.executable),
+        }
+
+
+def configure_wer_local_dumps():
+    """
+    Cấu hình Windows Error Reporting (WER LocalDumps) trong Registry HKLM để khi ứng dụng
+    bị crash ở mức C/DLL (Access Violation 0xC0000005, Stack Overrun 0xC0000409, Heap Corruption 0xC0000374),
+    nhân Windows tự động lưu file MiniDump (.dmp) vào thư mục Logs/CrashDumps.
+    """
+    try:
+        import winreg
+        import glob
+        from utils.logger import get_logs_dir
+
+        dump_dir = os.path.join(get_logs_dir(), "CrashDumps")
+        os.makedirs(dump_dir, exist_ok=True)
+
+        # Dọn dẹp nếu có quá 5 file .dmp cũ để tránh tốn dung lượng đĩa
+        dmp_files = glob.glob(os.path.join(dump_dir, "*.dmp"))
+        if len(dmp_files) > 5:
+            dmp_files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+            for old_dmp in dmp_files[:-5]:
+                try:
+                    os.remove(old_dmp)
+                except Exception:
+                    pass
+
+        for exe_name in ("RemoteDesktopP2P.exe", "RemoteDesktopHost.exe", "RemoteDesktopService.exe", "RemoteDesktopHostService.exe"):
+            key_path = rf"SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\{exe_name}"
+            try:
+                key = winreg.CreateKeyEx(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    key_path,
+                    0,
+                    winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+                )
+                winreg.SetValueEx(key, "DumpFolder", 0, winreg.REG_EXPAND_SZ, dump_dir)
+                winreg.SetValueEx(key, "DumpCount", 0, winreg.REG_DWORD, 5)
+                winreg.SetValueEx(key, "DumpType", 0, winreg.REG_DWORD, 1)  # 1 = MiniDump
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+        log(f"Đã cấu hình WER LocalDumps tự động lưu crash dump vào: {dump_dir}")
+    except Exception as e:
+        log(f"Không thể cấu hình WER LocalDumps (bỏ qua): {e}")
+
+
+def _query_windows_event_log_crashes(target_pid=None, max_scan=60):
+    """
+    Đọc trực tiếp Windows Event Log (Application) bằng Win32 API (win32evtlog)
+    để trích xuất thông tin lỗi mức hệ thống từ:
+      - Application Error (Event ID 1000: Faulting application, Faulting module, Exception code, Fault offset)
+      - Windows Error Reporting (Event ID 1001: WER bucket / Crash dump path)
+      - Application Hang (Event ID 1002: treo giao diện / Not Responding)
+    """
+    global _last_evt_record_num
+    results = []
+    h_evt = None
+    try:
+        import win32evtlog
+        h_evt = win32evtlog.OpenEventLog(None, "Application")
+        if not h_evt:
+            return results
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        scanned = 0
+        newest_rec_seen = _last_evt_record_num
+        app_keywords = (
+            "remotedesktopp2p",
+            "remotedesktophost",
+            "remotedesktopservice",
+            "easy remote desktop",
+            os.path.abspath(app_dir).lower(),
+        )
+        now_ts = time.time()
+
+        while scanned < max_scan:
+            events = win32evtlog.ReadEventLog(h_evt, flags, 0)
+            if not events:
+                break
+            for ev in events:
+                scanned += 1
+                rec_num = getattr(ev, "RecordNumber", 0)
+                if newest_rec_seen is None or rec_num > newest_rec_seen:
+                    newest_rec_seen = rec_num
+
+                # Nếu đang poll định kỳ (target_pid=None) và gặp bản ghi cũ đã quét qua thì dừng sớm
+                if target_pid is None and _last_evt_record_num is not None and rec_num <= _last_evt_record_num:
+                    scanned = max_scan
+                    break
+
+                src = getattr(ev, "SourceName", "") or ""
+                if src not in ("Application Error", "Windows Error Reporting", "Application Hang"):
+                    continue
+
+                # Kiểm tra thời gian sự kiện (chỉ lấy trong vòng 180 giây gần nhất)
+                try:
+                    ev_ts = ev.TimeGenerated.timestamp()
+                    if abs(now_ts - ev_ts) > 180:
+                        continue
+                except Exception:
+                    pass
+
+                inserts = [str(x) for x in (getattr(ev, "StringInserts", None) or [])]
+                joined_lower = " | ".join(inserts).lower()
+                if not any(k in joined_lower for k in app_keywords):
+                    # Nếu chạy bằng python.exe trong môi trường dev và khớp target_pid
+                    if target_pid is not None and "python" in joined_lower and (
+                        str(target_pid) in joined_lower or f"{int(target_pid):x}" in joined_lower
+                    ):
+                        pass
+                    else:
+                        continue
+
+                if target_pid is not None:
+                    pid_hex = f"{int(target_pid):x}".lower()
+                    pid_dec = str(int(target_pid))
+                    # Trong Event 1000, inserts[8] thường là PID (hex hoặc dec)
+                    if len(inserts) >= 9:
+                        ev_pid_str = inserts[8].lower().replace("0x", "")
+                        if ev_pid_str not in (pid_hex, pid_dec) and pid_dec not in joined_lower:
+                            continue
+
+                if rec_num in _logged_event_records and target_pid is None:
+                    continue
+                _logged_event_records.add(rec_num)
+
+                ev_id = int(getattr(ev, "EventID", 0)) & 0xFFFF
+                ev_time_str = str(getattr(ev, "TimeGenerated", ""))
+                if src == "Application Error" and ev_id == 1000 and len(inserts) >= 12:
+                    summary = (
+                        f"[EventID 1000 - Application Error @ {ev_time_str}] "
+                        f"App={inserts[0]} (v{inserts[1]}), "
+                        f"FaultModule={inserts[3]} (v{inserts[4]}), "
+                        f"ExceptionCode=0x{inserts[6]}, FaultOffset=0x{inserts[7]}, "
+                        f"PID={inserts[8]}, AppPath={inserts[10]}, ModulePath={inserts[11]}"
+                    )
+                elif src == "Application Hang" and ev_id == 1002 and len(inserts) >= 6:
+                    summary = (
+                        f"[EventID 1002 - Application Hang @ {ev_time_str}] "
+                        f"App={inserts[0]} (v{inserts[1]}), PID={inserts[2]}, "
+                        f"HangType={inserts[4]}, AppPath={inserts[5]}"
+                    )
+                else:
+                    summary = f"[EventID {ev_id} - {src} @ {ev_time_str}] {' | '.join(inserts[:10])}"
+                results.append(summary)
+
+        if newest_rec_seen is not None:
+            _last_evt_record_num = newest_rec_seen
+    except Exception:
+        pass
+    finally:
+        if h_evt:
+            try:
+                import win32evtlog
+                win32evtlog.CloseEventLog(h_evt)
+            except Exception:
+                pass
+    return results
+
+
+def _record_unexpected_process_exit(pid, info, exit_code, intentional=False):
+    """Ghi nhận chi tiết khi một tiến trình của ứng dụng bị sập hoặc thoát bất thường."""
+    try:
+        from utils.logger import decode_windows_exit_code, log_system_crash, read_log_tail, get_logs_dir
+        import glob
+
+        u_code, hex_str, sym, desc = decode_windows_exit_code(exit_code)
+        role = info.get("role", "Unknown")
+        uptime_s = max(0.0, time.time() - float(info.get("start_ts", time.time())))
+        is_ntstatus_crash = (u_code is not None and u_code >= 0x80000000 and u_code not in (0xC000013A, 0x40010004))
+
+        # Nếu do Service chủ động đóng (chuyển session/desktop) và không phải lỗi crash bộ nhớ C/DLL thì chỉ ghi debug nhẹ
+        if intentional and not is_ntstatus_crash:
+            log(f"[ProcessMonitor] Tiến trình {role} (PID {pid}) đã dừng chủ động bởi Service (Exit={hex_str}, Uptime={uptime_s:.1f}s).")
+            return
+
+        # Mã thoát 0 (bình thường) hoặc 99 (Viewer đóng do ngắt kết nối) của GUI / Viewer không phải là sập app
+        if u_code in (0, 99) and ("GUI" in role or "Viewer" in role):
+            log(f"[ProcessMonitor] Tiến trình {role} (PID {pid}) đã đóng bình thường (Exit={u_code}, Uptime={uptime_s:.1f}s).")
+            return
+
+        # Chờ ngắn 0.25s để Windows WER / faulthandler kịp ghi Event Log & native_fault.log
+        time.sleep(0.25)
+        evt_logs = _query_windows_event_log_crashes(target_pid=pid, max_scan=40)
+
+        # Kiểm tra xem có file CrashDump (.dmp) nào vừa sinh ra trong 30 giây gần nhất không
+        recent_dumps = []
+        try:
+            dump_dir = os.path.join(get_logs_dir(), "CrashDumps")
+            if os.path.isdir(dump_dir):
+                now_t = time.time()
+                for dmp in glob.glob(os.path.join(dump_dir, "*.dmp")):
+                    if (now_t - os.path.getmtime(dmp)) <= 30.0:
+                        recent_dumps.append(f"{os.path.basename(dmp)} ({os.path.getsize(dmp)} bytes)")
+        except Exception:
+            pass
+
+        details = {
+            "Vai trò tiến trình": role,
+            "Session ID": info.get("session_id", -1),
+            "Desktop": info.get("desktop") or "default",
+            "Thời gian chạy": f"{uptime_s:.2f} giây",
+            "Lệnh khởi chạy": info.get("cmdline") or info.get("exe_name", ""),
+            "Chủ động dừng": "Có (Service kill)" if intentional else "Không (Tự thoát / Sập đột ngột)",
+            "Windows Event Log": " ; ".join(evt_logs) if evt_logs else "Không có bản ghi Event ID 1000/1001/1002",
+            "Crash Minidump": ", ".join(recent_dumps) if recent_dumps else "Không có",
+        }
+
+        role_log_file = info.get("log_file", "gui.log")
+        extra_logs = {
+            "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
+            "crash.log": read_log_tail("crash.log", max_lines=15),
+            role_log_file: read_log_tail(role_log_file, max_lines=15),
+        }
+
+        title = f"Phát hiện tiến trình {role} (PID {pid}) dừng bất thường với mã {hex_str} ({sym})"
+        log(f"[CRASH DETECTED] {title} — {desc}")
+        if evt_logs:
+            for el in evt_logs:
+                log(f"  -> {el}")
+
+        log_system_crash(
+            title=title,
+            role=f"ServiceMonitor -> {role}",
+            pid=pid,
+            exit_code=exit_code,
+            details=details,
+            extra_logs=extra_logs,
+        )
+    except Exception as e:
+        log(f"[ProcessMonitor] Lỗi khi ghi báo cáo crash cho PID {pid}: {e}")
+
+
+def system_crash_monitor_thread(stop_event=None):
+    """
+    Luồng chạy ngầm trong Windows Service (quyền SYSTEM):
+    1. Tự động phát hiện và giữ Handle của mọi tiến trình thuộc ứng dụng (GUI, Viewer, Broker, CaptureWorker, ClipboardAgent).
+    2. Ngay khi bất kỳ tiến trình nào bị sập (kể cả sập ở mức C/DLL không có log Python), đọc chính xác mã thoát
+       từ Kernel Handle + truy vấn Windows Event Log (Event ID 1000/1001/1002) + trích xuất đuôi log để ghi vào Logs/system_crash.log.
+    """
+    log("Luồng giám sát sập ứng dụng mức hệ thống (System Crash Monitor) đã khởi động.")
+    # Khởi tạo mốc Event Log hiện tại để không báo cáo lại các sự kiện cũ từ trước khi Service chạy
+    try:
+        _query_windows_event_log_crashes(target_pid=None, max_scan=10)
+    except Exception:
+        pass
+
+    my_pid = os.getpid()
+    target_exes = {"remotedesktopp2p.exe", "remotedesktophost.exe"}
+    last_evt_poll_ts = time.time()
+
+    while not (stop_event is not None and stop_event.is_set()):
+        try:
+            now_ts = time.time()
+            # 1. Dọn dẹp danh sách _intentionally_stopped_pids quá hạn (> 30s)
+            with _crash_watch_lock:
+                expired_pids = [p for p, ts in _intentionally_stopped_pids.items() if (now_ts - ts) > 30.0]
+                for p in expired_pids:
+                    _intentionally_stopped_pids.pop(p, None)
+
+            # 2. Quét phát hiện các tiến trình mới của ứng dụng (bao gồm cả GUI và Viewer do người dùng mở)
+            if psutil is not None:
+                for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                    try:
+                        pid = proc.info.get("pid")
+                        if not pid or pid == my_pid:
+                            continue
+                        with _crash_watch_lock:
+                            if pid in _tracked_procs:
+                                continue
+                        name_l = (proc.info.get("name") or "").lower()
+                        cmd_list = proc.info.get("cmdline") or []
+                        cmd_str = " ".join(str(x) for x in cmd_list)
+                        is_our_proc = False
+                        if name_l in target_exes:
+                            is_our_proc = True
+                        elif name_l in ("python.exe", "pythonw.exe") and "app.py" in cmd_str.lower():
+                            is_our_proc = True
+
+                        if not is_our_proc:
+                            continue
+
+                        h_proc = _open_process_watch_handle(pid)
+                        if not h_proc:
+                            continue
+                        role, log_fname = _classify_process_role(name_l, cmd_str)
+                        with _crash_watch_lock:
+                            _tracked_procs[pid] = {
+                                "h_proc": h_proc,
+                                "role": role,
+                                "log_file": log_fname,
+                                "cmdline": cmd_str,
+                                "session_id": _get_pid_session_id(pid),
+                                "desktop": "",
+                                "start_ts": now_ts,
+                                "exe_name": proc.info.get("name") or name_l,
+                            }
+                    except Exception:
+                        continue
+            else:
+                try:
+                    procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+                    for p in procs:
+                        sid, pid, p_name = p[0], p[1], (p[2] or "").lower()
+                        if not pid or pid == my_pid or p_name not in target_exes:
+                            continue
+                        with _crash_watch_lock:
+                            if pid in _tracked_procs:
+                                continue
+                        h_proc = _open_process_watch_handle(pid)
+                        if h_proc:
+                            with _crash_watch_lock:
+                                _tracked_procs[pid] = {
+                                    "h_proc": h_proc,
+                                    "role": f"AppProcess (Session {sid})",
+                                    "log_file": "gui.log",
+                                    "cmdline": p_name,
+                                    "session_id": sid,
+                                    "desktop": "",
+                                    "start_ts": now_ts,
+                                    "exe_name": p_name,
+                                }
+                except Exception:
+                    pass
+
+            # 3. Kiểm tra trạng thái các tiến trình đang theo dõi qua Kernel Handle đã giữ
+            dead_entries = []
+            with _crash_watch_lock:
+                for pid, info in list(_tracked_procs.items()):
+                    h_proc = info.get("h_proc")
+                    if not h_proc:
+                        _tracked_procs.pop(pid, None)
+                        continue
+                    try:
+                        exit_code = win32process.GetExitCodeProcess(h_proc)
+                        if exit_code != 259:  # 259 = STILL_ACTIVE
+                            try:
+                                win32api.CloseHandle(h_proc)
+                            except Exception:
+                                pass
+                            _tracked_procs.pop(pid, None)
+                            intentional = pid in _intentionally_stopped_pids
+                            _intentionally_stopped_pids.pop(pid, None)
+                            dead_entries.append((pid, info, exit_code, intentional))
+                    except Exception:
+                        try:
+                            win32api.CloseHandle(h_proc)
+                        except Exception:
+                            pass
+                        _tracked_procs.pop(pid, None)
+
+            for pid, info, exit_code, intentional in dead_entries:
+                threading.Thread(
+                    target=_record_unexpected_process_exit,
+                    args=(pid, info, exit_code, intentional),
+                    daemon=True,
+                ).start()
+
+            # 4. Định kỳ mỗi 5 giây quét Windows Event Log để bắt các tiến trình vừa mở đã sập ngay (< 0.8s)
+            if (now_ts - last_evt_poll_ts) >= 5.0:
+                last_evt_poll_ts = now_ts
+                new_evts = _query_windows_event_log_crashes(target_pid=None, max_scan=25)
+                if new_evts:
+                    from utils.logger import log_system_crash, read_log_tail
+                    for ev_summary in new_evts:
+                        log(f"[WindowsEventLog] Phát hiện sự kiện lỗi ứng dụng: {ev_summary}")
+                        log_system_crash(
+                            title="Sự kiện lỗi ứng dụng ghi nhận trong Windows Event Log (Application Error / WER)",
+                            role="WindowsEventLog",
+                            pid=0,
+                            details=ev_summary,
+                            extra_logs={
+                                "native_fault.log": read_log_tail("native_fault.log", max_lines=10),
+                                "crash.log": read_log_tail("crash.log", max_lines=10),
+                                "gui.log": read_log_tail("gui.log", max_lines=10),
+                            },
+                        )
+
+        except Exception as me:
+            log(f"[ProcessMonitor] Lỗi vòng lặp giám sát crash: {me}")
+
+        time.sleep(0.8)
+
+
 def terminate_process_with_pid(pid):
     if not pid or pid == os.getpid():
         return
+    with _crash_watch_lock:
+        _intentionally_stopped_pids[int(pid)] = time.time()
     log(f"Đang cố gắng dừng tiến trình {pid}")
     try:
         h_proc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, int(pid))
@@ -1185,14 +1657,30 @@ def is_process_alive(pid):
     """Check if a process with the given PID is still running."""
     if not pid:
         return False
+    pid_int = int(pid)
+    # Ưu tiên kiểm tra qua handle đang được giữ trong _tracked_procs để không bị mất ExitCode khi tiến trình vừa chết
+    with _crash_watch_lock:
+        tracked = _tracked_procs.get(pid_int)
+        if tracked and tracked.get("h_proc"):
+            try:
+                exit_code = win32process.GetExitCodeProcess(tracked["h_proc"])
+                if exit_code != 259:
+                    from utils.logger import decode_windows_exit_code
+                    _, hex_str, sym, desc = decode_windows_exit_code(exit_code)
+                    log(f"[DEBUG] Tiến trình {pid_int} ({tracked.get('role')}) đã thoát với mã: {exit_code} ({hex_str} - {sym}: {desc})")
+                return exit_code == 259
+            except Exception:
+                pass
     try:
-        h_proc = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION, False, pid)
+        h_proc = _open_process_watch_handle(pid_int)
         if h_proc:
             exit_code = win32process.GetExitCodeProcess(h_proc)
             win32api.CloseHandle(h_proc)
             # STILL_ACTIVE = 259
             if exit_code != 259:
-                log(f"[DEBUG] Tiến trình {pid} đã thoát với mã: {exit_code}")
+                from utils.logger import decode_windows_exit_code
+                _, hex_str, sym, desc = decode_windows_exit_code(exit_code)
+                log(f"[DEBUG] Tiến trình {pid_int} đã thoát với mã: {exit_code} ({hex_str} - {sym}: {desc})")
             return exit_code == 259
     except Exception:
         pass
@@ -1202,6 +1690,11 @@ def main(stop_event=None):
     global broker_pid
     enable_all_privileges()
     try:
+        from utils.logger import install_crash_handlers
+        install_crash_handlers("WindowsService")
+    except Exception:
+        pass
+    try:
         from os_utils.windows_system import boost_process_priority
         boost_process_priority()
     except Exception:
@@ -1210,6 +1703,7 @@ def main(stop_event=None):
     log(f"Vòng lặp service Easy Remote Desktop {product} bắt đầu chạy. HOST_PRODUCT={HOST_PRODUCT}")
     install_power_event_handler()
     configure_uac_registry()
+    configure_wer_local_dumps()
     
     # Clean up lingering helper processes (keeps user GUI alive).
     cleanup_stale_agent_processes()
@@ -1219,6 +1713,8 @@ def main(stop_event=None):
     t.start()
     t_wts = threading.Thread(target=wts_session_notification_thread, daemon=True)
     t_wts.start()
+    t_crash = threading.Thread(target=system_crash_monitor_thread, args=(stop_event,), daemon=True)
+    t_crash.start()
 
     current_agent_pid = None
     gui_agent_pid = None

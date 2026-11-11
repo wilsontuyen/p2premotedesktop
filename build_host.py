@@ -187,7 +187,7 @@ def main():
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
-        f'--include-module=win32service --include-module=win32com.client --include-module=pythoncom '
+        f'--include-module=win32service --include-module=win32evtlog --include-module=faulthandler --include-module=win32com.client --include-module=pythoncom '
         f'--windows-company-name="{company_name}" --windows-product-name="P2P Remote Desktop Host Service" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="Easy Remote Desktop Host Service" '

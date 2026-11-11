@@ -796,8 +796,9 @@ def client_receiver_thread(sock, password):
                             client_is_locked = event.get("is_locked", False)
                         reason = event.get("reason", "No reason provided")
                         try:
-                            with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
-                                df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n")
+                            from utils.logger import get_log_filepath, safe_write_log_line
+                            d_path = get_log_filepath("viewer.log")
+                            safe_write_log_line(d_path, f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [Client] Received domain_status: is_domain={client_is_domain}, is_locked={client_is_locked}, reason={reason}\n", "viewer.log")
                         except:
                             pass
                         continue
@@ -922,7 +923,9 @@ def client_receiver_thread(sock, password):
                         client_latest_frame = pil_img
                 client_switching_desktop_countdown = 0
             except Exception as ie:
-                with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n")
+                from utils.logger import get_log_filepath, safe_write_log_line
+                err_p = get_log_filepath("client_error.log")
+                safe_write_log_line(err_p, time.strftime('[%Y-%m-%d %H:%M:%S]') + _(" - [Client] Lỗi giải mã ảnh Pillow: ") + str(ie) + "\n", "client_error.log")
         except BlockingIOError:
             ensure_session_socket_blocking(sock)
             continue
@@ -930,7 +933,9 @@ def client_receiver_thread(sock, password):
             if getattr(e, "winerror", None) == 10035:
                 ensure_session_socket_blocking(sock)
                 continue
-            with open("client_error.log", "a", encoding="utf-8-sig") as f: f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - [Client] Receiver Error: {e}\n")
+            from utils.logger import get_log_filepath, safe_write_log_line
+            err_p = get_log_filepath("client_error.log")
+            safe_write_log_line(err_p, f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - [Client] Receiver Error: {e}\n", "client_error.log")
             if _non_windows_close_is_shutdown():
                 print(f"[Client] Non-Windows host socket error: {e}. Treating as host shutdown.")
                 client_host_did_shutdown = True
@@ -1078,6 +1083,16 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     import ctypes
     import queue
     import json
+    try:
+        from utils.logger import get_log_filepath, ensure_utf8_bom, install_crash_handlers
+        v_log = get_log_filepath("viewer.log")
+        ensure_utf8_bom(v_log)
+        sys.stdout = open(v_log, "a", encoding="utf-8-sig", buffering=1)
+        sys.stderr = sys.stdout
+        install_crash_handlers("Viewer")
+        print(f"\n--- Viewer started at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}, Partner: {partner_id}, Host: {computer_name}) ---")
+    except Exception:
+        pass
     global client_switching_desktop_countdown, client_host_computer_name_override, client_host_resolution, client_network_info
     with client_network_lock:
         client_network_info.clear()
@@ -2962,11 +2977,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             print("[Client] Viewer exited due to disconnect. Exit code 99.")
             os._exit(99)
         os._exit(0)
-    except Exception as critical_e:
+    except BaseException as critical_e:
         uninstall_keyboard_hook()
-        import traceback
-        with open("client_crash.log", "w", encoding="utf-8-sig") as f:
-            f.write(f"CRITICAL ERROR IN VIEWER LOOP:\n{traceback.format_exc()}\n")
+        if not isinstance(critical_e, (SystemExit, KeyboardInterrupt)):
+            import traceback
+            tb_text = traceback.format_exc()
+            try:
+                from utils.logger import get_log_filepath, safe_write_log_line, log_system_crash
+                c_path = get_log_filepath("client_crash.log")
+                safe_write_log_line(c_path, f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CRITICAL ERROR IN VIEWER LOOP:\n{tb_text}\n", "client_crash.log")
+                log_system_crash(
+                    title=f"Critical Error in Viewer Loop ({type(critical_e).__name__}: {critical_e})",
+                    role="Viewer",
+                    pid=os.getpid(),
+                    details=f"Partner ID: {partner_id} | Host: {computer_name}\n{tb_text}",
+                )
+            except Exception:
+                pass
         # try: pygame.quit()
         # except: pass
         import os

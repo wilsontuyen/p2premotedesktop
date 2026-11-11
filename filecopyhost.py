@@ -2200,7 +2200,7 @@ def run_clipboard_agent_mode():
         nonlocal _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_last_ctrl_v_time, _agent_dummy_h_active
         nonlocal _agent_last_ctrl_c_time, _agent_last_copied_seq, _agent_ctrl_v_held, _agent_shift_ins_held, _agent_lmb_held
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_rmb_cursor_pos, _agent_allow_delayed
-        nonlocal _agent_last_menu_paste_trigger_time, _agent_rmb_is_taskbar, _agent_lmb_dismiss_at
+        nonlocal _agent_last_menu_paste_trigger_time, _agent_rmb_is_taskbar, _agent_lmb_dismiss_at, _agent_cached_explorer_path
         user32 = ctypes.windll.user32
         while True:
             try:

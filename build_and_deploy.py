@@ -65,13 +65,58 @@ def verify_project_syntax(ws_dir=workspace_dir, log_fn=log):
 
     errors = []
     import ast
+    import symtable
     for fpath in files_to_check:
         try:
             py_compile.compile(fpath, doraise=True)
-            with open(fpath, "r", encoding="utf-8") as src_f:
-                tree = ast.parse(src_f.read(), filename=fpath)
+            with open(fpath, "r", encoding="utf-8-sig") as src_f:
+                src_text = src_f.read()
+            tree = ast.parse(src_text, filename=fpath)
+            st = symtable.symtable(src_text, fpath, "exec")
+
+            def _check_unbound_locals(tbl, fn_node):
+                locals_set = {s.get_name() for s in tbl.get_symbols() if s.is_local() and not s.is_parameter()}
+                assigned_so_far = set()
+                def _walk_stmt(n):
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        assigned_so_far.add(n.name)
+                        return
+                    if isinstance(n, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                        return
+                    if isinstance(n, ast.Assign):
+                        _walk_stmt(n.value)
+                        for t in n.targets:
+                            _walk_stmt(t)
+                        return
+                    if isinstance(n, ast.Name):
+                        if isinstance(n.ctx, ast.Load) and n.id in locals_set and n.id not in assigned_so_far:
+                            ub_msg = (
+                                f"UNBOUND LOCAL ERROR in {os.path.relpath(fpath, ws_dir)}:{n.lineno} "
+                                f"func '{tbl.get_name()}' references local '{n.id}' before assignment/import"
+                            )
+                            if log_fn:
+                                log_fn(f"CRITICAL: {ub_msg}")
+                            errors.append(ub_msg)
+                        elif isinstance(n.ctx, (ast.Store, ast.Del)):
+                            assigned_so_far.add(n.id)
+                    elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                        for a in n.names:
+                            assigned_so_far.add((a.asname or a.name).split(".")[0])
+                    elif isinstance(n, ast.ExceptHandler) and n.name:
+                        assigned_so_far.add(n.name)
+                    for child in ast.iter_child_nodes(n):
+                        _walk_stmt(child)
+                for stmt in fn_node.body:
+                    _walk_stmt(stmt)
+
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for child_tbl in st.get_children():
+                        if child_tbl.get_name() == node.name and child_tbl.get_lineno() == node.lineno:
+                            _check_unbound_locals(child_tbl, node)
+                        for sub_tbl in child_tbl.get_children():
+                            if sub_tbl.get_name() == node.name and sub_tbl.get_lineno() == node.lineno:
+                                _check_unbound_locals(sub_tbl, node)
                     var_stores = []
                     has_local_import_i18n = False
                     stack = list(node.body)
@@ -157,7 +202,7 @@ def main():
         f'--assume-yes-for-downloads '
         f'--windows-icon-from-ico=app_icon.ico '
         f'--include-module=os_utils.windows_system --include-module=psutil --include-module=ntsecuritycon '
-        f'--include-module=win32service --include-module=win32com.client --include-module=pythoncom '
+        f'--include-module=win32service --include-module=win32evtlog --include-module=faulthandler --include-module=win32com.client --include-module=pythoncom '
         f'--windows-company-name="{company_name}" --windows-product-name="{service_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '
         f'--windows-file-description="{service_desc}" '
@@ -175,7 +220,7 @@ def main():
     nuitka_cmd = (
         f'"{python_path}" -m nuitka --standalone --windows-console-mode=disable --enable-plugin=tk-inter '
         f'--assume-yes-for-downloads '
-        f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam --include-module=comtypes '
+        f'--windows-icon-from-ico=app_icon.ico --nofollow-import-to=pygame.tests,unittest,sqlite3 --include-module=cv2 --include-module=numpy --include-module=psutil --include-module=ntsecuritycon --include-module=dxcam --include-module=comtypes --include-module=faulthandler '
         f'--no-deployment-flag=excluded-module-usage '
         f'--windows-company-name="{company_name}" --windows-product-name="{app_product_name}" '
         f'--windows-file-version={version_string} --windows-product-version={version_string} '

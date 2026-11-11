@@ -3465,6 +3465,23 @@ class NetworkMixin:
                             except Exception as e:
                                 pass
                         print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
+                        if process.exitcode not in (0, 99, None):
+                            try:
+                                from utils.logger import log_system_crash, read_log_tail
+                                log_system_crash(
+                                    title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {process.pid}, Đối tác: {pid})",
+                                    role="ClientMonitor -> Viewer",
+                                    pid=process.pid,
+                                    exit_code=process.exitcode,
+                                    details={"Partner ID": pid, "Computer Name": computer_name},
+                                    extra_logs={
+                                        "viewer.log": read_log_tail("viewer.log", max_lines=15),
+                                        "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
+                                        "client_crash.log": read_log_tail("client_crash.log", max_lines=15),
+                                    },
+                                )
+                            except Exception:
+                                pass
                         alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
                         if not alive_viewers:
                             self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
@@ -3578,6 +3595,23 @@ class NetworkMixin:
                         except Exception as e:
                             pass
                     print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
+                    if process.exitcode not in (0, 99, None):
+                        try:
+                            from utils.logger import log_system_crash, read_log_tail
+                            log_system_crash(
+                                title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {process.pid}, Đối tác: {pid})",
+                                role="ClientMonitor -> Viewer",
+                                pid=process.pid,
+                                exit_code=process.exitcode,
+                                details={"Partner ID": pid, "Computer Name": computer_name},
+                                extra_logs={
+                                    "viewer.log": read_log_tail("viewer.log", max_lines=15),
+                                    "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
+                                    "client_crash.log": read_log_tail("client_crash.log", max_lines=15),
+                                },
+                            )
+                        except Exception:
+                            pass
                     
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
             

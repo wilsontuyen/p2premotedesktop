@@ -7,13 +7,23 @@ else:
 import traceback
 import os
 try:
-    from utils.logger import get_log_filepath, migrate_legacy_logs
+    from utils.logger import get_log_filepath, migrate_legacy_logs, ensure_utf8_bom, install_crash_handlers
     migrate_legacy_logs()
     crash_log_path = get_log_filepath("early_crash.log")
-    _f = open(crash_log_path, "w", encoding="utf-8-sig", buffering=1)
+    ensure_utf8_bom(crash_log_path)
+    _f = open(crash_log_path, "a", encoding="utf-8-sig", buffering=1)
     sys.stderr = _f
     sys.stdout = _f
-    print("Bắt đầu khởi chạy ứng dụng...")
+    _early_role = (
+        "Broker" if "--broker" in sys.argv else
+        "ClipboardAgent" if "--clipboard-agent" in sys.argv else
+        "CaptureWorker" if "--capture-worker" in sys.argv else
+        "HeadlessAgent" if "--headless" in sys.argv else
+        "ViewerChild" if any("multiprocessing" in str(a) for a in sys.argv) else
+        "GUI"
+    )
+    install_crash_handlers(_early_role)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S') if 'time' in globals() else 'Startup'}] Bắt đầu khởi chạy tiến trình ({_early_role}, PID={os.getpid()})...")
 except:
     pass
 
@@ -208,15 +218,20 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
     # In ra stderr (để hiển thị trên terminal hoặc gui.log)
-    sys.__excepthook__(exc_type, exc_value, exc_traceback)
-    # Ghi vào file với UTF-8 BOM
     try:
-        from utils.logger import ensure_utf8_bom, get_log_filepath
-        crash_path = get_log_filepath("crash.log")
-        ensure_utf8_bom(crash_path)
-        with open(crash_path, "a", encoding="utf-8-sig") as f:
-            f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- CRASH TRACEBACK ---\n")
-            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    except Exception:
+        pass
+    # Ghi vào Logs/crash.log và Logs/system_crash.log với UTF-8 BOM
+    try:
+        from utils.logger import log_system_crash
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        log_system_crash(
+            title=f"Uncaught Exception in App Main Thread ({exc_type.__name__}: {exc_value})",
+            role="AppMain",
+            pid=os.getpid(),
+            details=tb_str,
+        )
     except Exception:
         pass
 
@@ -346,9 +361,84 @@ from core.network_manager import NetworkMixin
 from pclist import SavedListMixin, get_computers_xml_path, get_app_data_dir
 
 class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
+    def after(self, ms, func=None, *args):
+        """
+        Thread-safe wrapper cho tk.Tk.after:
+        Khi một background thread gọi self.after(ms, func, *args), tuyệt đối KHÔNG gọi trực tiếp
+        self.tk.createcommand trên luồng phụ (vì tcl86t.dll không thread-safe, dễ gây lỗi
+        'RuntimeError: main thread is not in main loop' hoặc sập C-level 0xC0000005 / 0xC0000409 Tcl_AsyncDelete).
+        Thay vào đó, đẩy vào hàng đợi _ui_call_queue để luồng chính (Main Thread) thực thi an toàn.
+        """
+        if func is None:
+            if getattr(self, "_main_thread", None) is threading.current_thread():
+                return super().after(ms)
+            time.sleep(max(0.0, float(ms) / 1000.0))
+            return None
+        if getattr(self, "_main_thread", None) is not None and threading.current_thread() is not self._main_thread:
+            q = getattr(self, "_ui_call_queue", None)
+            if q is not None:
+                q.put((ms, func, args))
+                return "bg_queued"
+        try:
+            return super().after(ms, func, *args)
+        except Exception:
+            q = getattr(self, "_ui_call_queue", None)
+            if q is not None:
+                q.put((ms, func, args))
+            return "bg_queued"
+
+    def after_cancel(self, id):
+        if not id or id == "bg_queued":
+            return
+        if getattr(self, "_main_thread", None) is not None and threading.current_thread() is not self._main_thread:
+            q = getattr(self, "_ui_call_queue", None)
+            if q is not None:
+                q.put((0, lambda i=id: self.after_cancel(i), ()))
+                return
+        try:
+            super().after_cancel(id)
+        except Exception:
+            pass
+
+    def _drain_ui_call_queue(self):
+        q = getattr(self, "_ui_call_queue", None)
+        if q is not None:
+            processed = 0
+            while processed < 64:
+                try:
+                    ms, func, args = q.get_nowait()
+                except queue.Empty:
+                    break
+                processed += 1
+                try:
+                    if not ms or int(ms) <= 0:
+                        func(*args)
+                    else:
+                        super().after(int(ms), func, *args)
+                except Exception as cb_err:
+                    try:
+                        from utils.logger import log_system_crash
+                        log_system_crash(
+                            title=f"Exception in Background-Queued UI Callback ({type(cb_err).__name__}: {cb_err})",
+                            role="GUI_Queue",
+                            pid=os.getpid(),
+                            details=traceback.format_exc(),
+                        )
+                    except Exception:
+                        pass
+        try:
+            super().after(20, self._drain_ui_call_queue)
+        except Exception:
+            pass
+
     def __init__(self):
+        self._main_thread = threading.current_thread()
+        self._ui_call_queue = queue.Queue()
         super().__init__()
-        import threading
+        try:
+            super().after(20, self._drain_ui_call_queue)
+        except Exception:
+            pass
         
         # Đảm bảo reset trạng thái BlockInput và màn hình che phủ khi app mới khởi động
         try:
@@ -369,7 +459,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.withdraw()
             
         try:
-            from utils.logger import ensure_utf8_bom, get_log_filepath
+            from utils.logger import ensure_utf8_bom, get_log_filepath, install_tkinter_exception_hook
             log_filename = "agent.log" if self.is_headless else "gui.log"
             log_path = get_log_filepath(log_filename)
             ensure_utf8_bom(log_path)
@@ -377,8 +467,14 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             sys.stderr = sys.stdout
         except Exception:
             pass
-            
+
+        try:
             mode_name = "headless" if self.is_headless else ("host" if self.is_host_only else "GUI")
+            try:
+                from utils.logger import install_tkinter_exception_hook
+                install_tkinter_exception_hook(self, role_name=mode_name)
+            except Exception:
+                pass
             print(f"\n--- App started in {mode_name} mode at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}) ---")
             
             # Run diagnostics check for both GUI and Headless clients
@@ -890,8 +986,13 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         except Exception as e:
             import traceback
             try:
-                with open("mac_crash.log", "w", encoding="utf-8-sig") as f:
-                    traceback.print_exc(file=f)
+                from utils.logger import log_system_crash
+                log_system_crash(
+                    title=f"Exception in setup_ui ({type(e).__name__}: {e})",
+                    role="GUI_Setup",
+                    pid=os.getpid(),
+                    details=traceback.format_exc(),
+                )
             except:
                 pass
             print(f"CRASH IN SETUP_UI: {e}")
@@ -3638,7 +3739,6 @@ if __name__ == '__main__':
                             with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
                                 f.write(f"  -> Failed to send to {conn}: {e}\n")
                 except: pass
-                import time
                 time.sleep(1)
                 sys.exit(0)
             try:
@@ -3653,13 +3753,7 @@ if __name__ == '__main__':
 
         app.mainloop()
         try:
-            import sys
-            if sys.platform == "win32":
-                log_path = "C:\\Program Files (x86)\\Easy Remote Desktop\\agent.log"
-            else:
-                log_path = "/tmp/agent.log"
-            with open(log_path, "a", encoding="utf-8-sig") as f:
-                f.write("\\n[DEBUG] Exited mainloop cleanly!\\n")
+            print("[DEBUG] Exited mainloop cleanly!")
         except:
             pass
         # Keep the process alive just in case
@@ -3668,20 +3762,16 @@ if __name__ == '__main__':
             while True:
                 time.sleep(1)
     except BaseException as e:
-        import traceback
-        import datetime
-        try:
-            import sys, os
-            if sys.platform == "win32":
-                crash_log_path = "C:\\Program Files (x86)\\Easy Remote Desktop\\agent_crash.txt"
-            else:
-                crash_log_path = "/opt/p2p_remote/agent_crash.txt"
-            
-            with open(crash_log_path, "w", encoding="utf-8-sig") as f:
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                f.write(f"[{timestamp}] Exception: {e}\n\n")
-                traceback.print_exc(file=f)
-                f.flush()
-        except:
-            pass
+        if not isinstance(e, (SystemExit, KeyboardInterrupt)):
+            import traceback
+            try:
+                from utils.logger import log_system_crash
+                log_system_crash(
+                    title=f"Fatal Exception in App Entrypoint ({type(e).__name__}: {e})",
+                    role="AppEntry",
+                    pid=os.getpid(),
+                    details=traceback.format_exc(),
+                )
+            except:
+                pass
         raise
