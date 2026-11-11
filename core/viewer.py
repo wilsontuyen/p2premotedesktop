@@ -1725,7 +1725,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             if hwnd:
                                 if sys.platform == "win32":
                                     import ctypes
-                                    ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
+                                    if ctypes.windll.user32.IsIconic(hwnd):
+                                        ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE (chỉ khi đang thu nhỏ, giữ nguyên trạng thái phóng to)
+                                    # Đưa cửa sổ lên trên cùng các cửa sổ khác (TOPMOST rồi bỏ TOPMOST để không ghim vĩnh viễn)
+                                    try:
+                                        _swp_flags = 0x0001 | 0x0002 | 0x0040  # SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW
+                                        ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, _swp_flags)  # HWND_TOPMOST
+                                        ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, _swp_flags)  # HWND_NOTOPMOST
+                                    except Exception:
+                                        pass
                                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                         except:
                             pass

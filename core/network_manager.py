@@ -877,6 +877,14 @@ class NetworkMixin:
             self.save_lan_peers()
 
         def connect_to_peer(hwid, peer_info, force_prompt=False):
+            # Nếu máy này đã có cửa sổ điều khiển đang mở -> không mở thêm, chỉ blink viền đỏ & đưa lên trên cùng
+            if not force_prompt and self._focus_existing_viewer(hwid, peer_info.get("saved_id"), peer_info.get("hwid")):
+                return
+            # Đang trong quá trình kết nối tới máy này (bấm liên tục nhiều lần) -> bỏ qua
+            if not force_prompt and hwid in getattr(self, "_lan_connecting_ids", set()):
+                print(f"[LAN Direct] Connection to {hwid} already in progress, ignoring duplicate click.")
+                return
+
             # Lưu lại hàm gọi để có thể mở lại khi sai mật khẩu
             self._last_lan_connect_fn = lambda fp=True: connect_to_peer(hwid, peer_info, force_prompt=fp)
 
@@ -2143,10 +2151,70 @@ class NetworkMixin:
         btn_close.pack(side=tk.RIGHT)
         RowTooltip(btn_close, _("Đóng cửa sổ máy tính mạng LAN & VPN"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
 
+    def _focus_existing_viewer(self, *candidate_ids):
+        """Nếu đã có cửa sổ Viewer đang mở tới một trong các ID cho trước thì không mở thêm:
+        gửi tín hiệu blink (viền đỏ nhấp nháy) và đưa cửa sổ đó lên trên cùng.
+        Trả về True nếu đã tìm thấy cửa sổ đang mở."""
+        targets = set()
+        for cid in candidate_ids:
+            s = str(cid or "").strip()
+            if not s:
+                continue
+            targets.add(s.replace(" ", ""))
+            digits = "".join(ch for ch in s if ch.isdigit())
+            if digits:
+                targets.add(digits)
+        if not targets:
+            return False
+
+        self.active_viewers = [v for v in getattr(self, "active_viewers", []) if v["process"].is_alive()]
+        for v in self.active_viewers:
+            v_pid = str(v.get("partner_id") or "").strip()
+            if not v_pid:
+                continue
+            v_digits = "".join(ch for ch in v_pid if ch.isdigit())
+            if v_pid.replace(" ", "") not in targets and not (v_digits and v_digits in targets):
+                continue
+            print(f"[Client] Already connected to {v_pid}. Sending blink signal.")
+            # Cho phép tiến trình Viewer giành quyền foreground (tiến trình GUI hiện đang ở foreground)
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    ctypes.windll.user32.AllowSetForegroundWindow(int(v["process"].pid))
+                except Exception:
+                    pass
+            import tempfile
+            blink_file = os.path.join(tempfile.gettempdir(), f"antigravity_blink_{v_pid}.tmp")
+            try:
+                with open(blink_file, "w") as f:
+                    f.write("1")
+            except Exception as write_err:
+                print(f"[Client] Failed to write blink signal: {write_err}")
+            return True
+        return False
+
     def _connect_lan_direct(self, hwid, peer_info, password):
         """Kết nối TCP trực tiếp tới máy trong LAN (không qua Signaling Server)."""
         if self._is_host_only_app():
             return
+        if not hasattr(self, "_lan_connecting_ids"):
+            self._lan_connecting_ids = set()
+        self._lan_connecting_ids.add(hwid)
+        try:
+            self._connect_lan_direct_impl(hwid, peer_info, password)
+        finally:
+            # Giữ cờ "đang kết nối" thêm một nhịp để launch_pygame_viewer (qua self.after) kịp đăng ký viewer
+            def _clear_pending():
+                try:
+                    self._lan_connecting_ids.discard(hwid)
+                except Exception:
+                    pass
+            try:
+                self.after(500, _clear_pending)
+            except Exception:
+                _clear_pending()
+
+    def _connect_lan_direct_impl(self, hwid, peer_info, password):
         import platform
         ip = peer_info.get("local_ip", "")
         port = peer_info.get("port", BOUND_PORT)
@@ -2271,7 +2339,16 @@ class NetworkMixin:
                     "net_class": "high",
                     "mode": "lan"
                 }
-                self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, is_android, os_release, res.get("monitor_count"), res.get("monitors"), lan_net_info)
+                def _launch_lan_viewer():
+                    # Chống mở trùng: nếu trong lúc kết nối đã có cửa sổ tới máy này thì chỉ highlight cửa sổ cũ
+                    if self._focus_existing_viewer(partner_id, peer_info.get("saved_id")):
+                        force_close_socket(sock)
+                        socket_passwords.pop(sock, None)
+                        if hasattr(self, 'connect_btn'):
+                            self.connect_btn.config(state=tk.NORMAL)
+                        return
+                    self.launch_pygame_viewer(sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, password, is_android, os_release, res.get("monitor_count"), res.get("monitors"), lan_net_info)
+                self.after(0, _launch_lan_viewer)
             else:
                 msg = res.get("message", _("Sai mật khẩu!"))
                 self.update_status(_("Bị từ chối kết nối"))
