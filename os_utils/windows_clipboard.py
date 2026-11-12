@@ -186,6 +186,14 @@ class ClipboardEventListener:
     def _mouse_poll_loop(self):
         user32 = ctypes.windll.user32
         while self.running:
+            if self.manager and (
+                not getattr(self.manager, "active_sockets", None)
+                and not getattr(self.manager, "pending_remote_files", None)
+                and not getattr(self.manager, "pygame_hwnd", None)
+                and not getattr(self.manager, "_agent_paste_callback", None)
+            ):
+                time.sleep(0.25)
+                continue
             if user32.GetAsyncKeyState(0x01) & 0x8000:
                 if self.manager:
                     now = time.time()
@@ -744,7 +752,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._prev_lbutton_time = 0.0
         self._prev_lbutton_pos = (0, 0)
         self.last_dblclick_time = 0.0
-        if ENABLE_CLIPBOARD_SYNC:
+        if ENABLE_CLIPBOARD_SYNC and not is_capture_worker_process and not is_broker_process:
             self.listener = ClipboardEventListener(self.on_clipboard_changed, self)
         else:
             self.listener = None
@@ -843,8 +851,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._xfer_need_resync = False
         self._resume_waiters = {}
         self._xfer_sock_gen = 0
-        self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
-        self.cacher_thread.start()
+        if not is_capture_worker_process and not is_broker_process:
+            self.cacher_thread = threading.Thread(target=self._explorer_path_cacher_loop, daemon=True)
+            self.cacher_thread.start()
+        else:
+            self.cacher_thread = None
         threading.Thread(target=self._xfer_watchdog_loop, daemon=True, name="ClipXferWatch").start()
         
         # Named Pipe handle cho headless mode (giao tiếp với Clipboard Agent)
@@ -920,6 +931,9 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 except Exception:
                     pass
                 time.sleep(0.05)
+            else:
+                time.sleep(0.5)
+                break
 
     def poll_gui_queue(self, gen=None):
         if not self.app:
@@ -2613,7 +2627,7 @@ def _bind_clipboard_mixin_globals():
 
 _bind_clipboard_mixin_globals()
 
-if is_clipboard_agent or is_gui_agent:
+if is_clipboard_agent or is_gui_agent or is_broker_process:
     clipboard_sync_manager = None
 else:
     clipboard_sync_manager = ClipboardSyncManager()

@@ -1,4 +1,5 @@
 import sys
+import time
 import ctypes
 
 def get_session_id():
@@ -365,16 +366,24 @@ def attach_thread_for_remote_input():
 
 
 def get_input_desktop_name():
+    now = time.time()
+    cache = getattr(get_input_desktop_name, "_c", (0.0, "default"))
+    if now - cache[0] < 0.08:
+        return cache[1]
+    res = "default"
     try:
         h_input = open_input_desktop_handle()
         if not h_input:
-            return get_desktop_name()
-        try:
-            return _desktop_name_from_handle(h_input) or get_desktop_name()
-        finally:
-            ctypes.windll.user32.CloseDesktop(h_input)
+            res = get_desktop_name()
+        else:
+            try:
+                res = _desktop_name_from_handle(h_input) or get_desktop_name()
+            finally:
+                ctypes.windll.user32.CloseDesktop(h_input)
     except Exception:
-        return get_desktop_name()
+        res = get_desktop_name()
+    get_input_desktop_name._c = (now, res)
+    return res
 
 def is_secure_desktop():
     try:
@@ -389,67 +398,57 @@ def is_secure_desktop():
     except:
         return False
 
+def get_running_process_names(max_age=0.5):
+    """Lấy tập hợp tên tiến trình (lowercase) đang chạy trên hệ thống, ưu tiên WTSEnumerateProcesses siêu nhanh."""
+    if sys.platform != "win32":
+        return frozenset()
+    now = time.time()
+    cache = getattr(get_running_process_names, "_c", (0.0, frozenset()))
+    if now - cache[0] < max_age:
+        return cache[1]
+    names = set()
+    ok = False
+    try:
+        import win32ts
+        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        for p in procs:
+            if p[2]:
+                names.add(str(p[2]).lower())
+        ok = True
+    except Exception:
+        pass
+    if not ok:
+        try:
+            import psutil
+            for p in psutil.process_iter(["name"]):
+                n = p.info.get("name")
+                if n:
+                    names.add(str(n).lower())
+        except Exception:
+            pass
+    frozen = frozenset(names)
+    get_running_process_names._c = (now, frozen)
+    return frozen
+
 def uac_consent_running():
     """consent.exe = hộp thoại UAC (cài phần mềm, Run as admin) trên Secure Desktop."""
     if sys.platform != "win32":
         return False
-    now = __import__("time").time()
-    cache = getattr(uac_consent_running, "_c", (0.0, False))
-    if now - cache[0] < 0.15:
-        return cache[1]
-    found = False
-    try:
-        import psutil
-        for p in psutil.process_iter(["name"]):
-            if str(p.info.get("name") or "").lower() == "consent.exe":
-                found = True
-                break
-    except Exception:
-        found = False
-    uac_consent_running._c = (now, found)
-    return found
+    return "consent.exe" in get_running_process_names(0.35)
 
 
 def is_logonui_running():
     """True nếu LogonUI.exe đang chạy (máy đang ở màn hình khóa / đăng nhập)."""
     if sys.platform != "win32":
         return False
-    now = __import__("time").time()
-    cache = getattr(is_logonui_running, "_c", (0.0, False))
-    if now - cache[0] < 0.2:
-        return cache[1]
-    found = False
-    try:
-        import psutil
-        for p in psutil.process_iter(["name"]):
-            if str(p.info.get("name") or "").lower() == "logonui.exe":
-                found = True
-                break
-    except Exception:
-        found = False
-    is_logonui_running._c = (now, found)
-    return found
+    return "logonui.exe" in get_running_process_names(0.5)
 
 
 def is_explorer_running():
     """True nếu explorer.exe đang chạy trong session người dùng."""
     if sys.platform != "win32":
         return False
-    now = __import__("time").time()
-    cache = getattr(is_explorer_running, "_c", (0.0, False))
-    if now - cache[0] < 0.2:
-        return cache[1]
-    found = False
-    try:
-        import psutil
-        for p in psutil.process_iter(["name"]):
-            if str(p.info.get("name") or "").lower() == "explorer.exe":
-                found = True
-                break
-    except Exception:
-        found = False
-    is_explorer_running._c = (now, found)
-    return found
+    return "explorer.exe" in get_running_process_names(0.5)
 
 
 def check_desktop_change():

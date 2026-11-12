@@ -116,21 +116,8 @@ def _is_winlogon_thread_desktop():
 def _logonui_running():
     if sys.platform != "win32":
         return False
-    now = time.time()
-    cache = getattr(_logonui_running, "_c", (0.0, False))
-    if now - cache[0] < 0.12:
-        return cache[1]
-    found = False
-    try:
-        import psutil
-        for p in psutil.process_iter(["name"]):
-            if str(p.info.get("name") or "").lower() == "logonui.exe":
-                found = True
-                break
-    except Exception:
-        found = False
-    _logonui_running._c = (now, found)
-    return found
+    from os_utils.windows_system import is_logonui_running
+    return is_logonui_running()
 
 def _session_has_interactive_user():
     """True/False nếu gọi được WTSQueryUserToken (agent SYSTEM). None nếu không xác định."""
@@ -138,7 +125,7 @@ def _session_has_interactive_user():
         return None
     now = time.time()
     cache = getattr(_session_has_interactive_user, "_c", (0.0, None))
-    if now - cache[0] < 0.2:
+    if now - cache[0] < 0.25:
         return cache[1]
     val = None
     try:
@@ -163,21 +150,8 @@ def _session_has_interactive_user():
 def _explorer_running():
     if sys.platform != "win32":
         return False
-    now = time.time()
-    cache = getattr(_explorer_running, "_c", (0.0, False))
-    if now - cache[0] < 0.08:
-        return cache[1]
-    found = False
-    try:
-        import psutil
-        for p in psutil.process_iter(["name"]):
-            if str(p.info.get("name") or "").lower() == "explorer.exe":
-                found = True
-                break
-    except Exception:
-        found = False
-    _explorer_running._c = (now, found)
-    return found
+    from os_utils.windows_system import is_explorer_running
+    return is_explorer_running()
 
 def _input_desktop_name():
     try:
@@ -308,7 +282,7 @@ def _winlogon_secure_ui_hwnds():
     )
     now = time.time()
     cache = getattr(_winlogon_secure_ui_hwnds, "_c", (0.0, []))
-    if (not logoff) and now - cache[0] < 0.03:
+    if (not logoff) and now - cache[0] < 0.15:
         return cache[1]
     found = []
     seen = set()
@@ -500,7 +474,7 @@ def _bitblt_screen_rect_bgr(x, y, w, h):
             top_down = False
         if got == 0:
             return None
-        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        img = np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 4))
         if not top_down:
             img = np.flipud(img).copy()
         frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -690,31 +664,23 @@ def _should_capture_logon_ui():
     if uac_consent_running():
         return False
     _ensure_host_wts_phase_listener()
-    phase = _wts_phase()
     input_name = _input_desktop_name()
-    logged_in = _session_has_interactive_user()
-    explorer = _explorer_running()
-    secure_ui = _winlogon_has_logonui_windows()
-    logonui = _logonui_running() or secure_ui
-    saw = _user_desktop_was_shown()
-
     # Khi Input Desktop thực tế đang là Winlogon -> Màn hình người dùng (BSDR / Lock / Logon) đang ở Winlogon!
     if input_name == "winlogon":
         return True
 
+    explorer = _explorer_running()
+    phase = _wts_phase()
     if explorer:
-        if phase == "lock" and logonui:
+        if phase == "lock" and (_logonui_running() or _winlogon_has_logonui_windows()):
             return True
         return False
 
+    logged_in = _session_has_interactive_user()
     if logged_in is False:
         _user_desktop_was_shown(False)
         return True
-    if not explorer:
-        return True
-    if logonui:
-        return True
-    return False
+    return True
 
 def _pin_capture_to_winlogon_if_needed():
     """Sign-out/logon: input có thể còn Default trong khi UI đã ở Winlogon."""
@@ -789,12 +755,16 @@ def _frame_is_nearly_black(frame, max_mean=6.0):
             return True
         if getattr(frame, "ndim", 0) == 3 and frame.shape[2] >= 4:
             frame = frame[:, :, :3]
+        sample = frame[::8, ::8] if (frame.shape[0] >= 64 and frame.shape[1] >= 64) else frame
         # Nếu frame có điểm sáng rõ rệt (chữ Admin, icon, avatar, text trong dark theme flyout như Network flyout):
-        # np.max > 35 và có ít nhất 30 pixel sáng -> Đây là giao diện dark theme có nội dung, không phải màn hình đen rỗng!
-        if float(np.max(frame)) > 35.0:
-            if np.count_nonzero(frame > 30) > 30:
+        # np.max > 35 và có ít nhất điểm sáng -> Đây là giao diện dark theme có nội dung, không phải màn hình đen rỗng!
+        if float(np.max(sample)) > 35.0:
+            if np.count_nonzero(sample > 30) > (1 if sample is not frame else 30):
                 return False
-        return float(np.mean(frame)) < max_mean
+        elif float(np.max(frame[::2, ::2])) > 35.0:
+            if np.count_nonzero(frame[::2, ::2] > 30) > 8:
+                return False
+        return float(np.mean(sample)) < max_mean
     except Exception:
         return False
 
@@ -805,7 +775,8 @@ def _frame_is_nearly_white(frame, min_mean=235.0):
             return False
         if getattr(frame, "ndim", 0) == 3 and frame.shape[2] >= 4:
             frame = frame[:, :, :3]
-        return float(np.mean(frame)) > min_mean
+        sample = frame[::8, ::8] if (frame.shape[0] >= 64 and frame.shape[1] >= 64) else frame
+        return float(np.mean(sample)) > min_mean
     except Exception:
         return False
 
@@ -1602,7 +1573,7 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
             top_down = False
         if got == 0:
             raise RuntimeError("GDI GetDIBits failed")
-        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        img = np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 4))
         if not top_down:
             img = np.flipud(img).copy()
         frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -1616,7 +1587,7 @@ def grab_gdi_primary_bgr(use_screen_dc=False):
                     if gdi32.BitBlt(memdc, 0, 0, w, h, hdc_screen, 0, 0, 0x00CC0020):
                         got2 = gdi32.GetDIBits(memdc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
                         if got2 != 0:
-                            img2 = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+                            img2 = np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 4))
                             if not top_down:
                                 img2 = np.flipud(img2).copy()
                             frame2 = cv2.cvtColor(img2, cv2.COLOR_BGRA2BGR)
@@ -1783,7 +1754,7 @@ def _bitblt_hwnd_bgr(hwnd, w, h):
             top_down = False
         if got == 0:
             return None
-        img = np.frombuffer(bytes(buf), dtype=np.uint8).reshape((h, w, 4))
+        img = np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 4))
         if not top_down:
             img = np.flipud(img).copy()
         frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -3468,6 +3439,7 @@ class HostMixin:
                                     break
                                 _sync_lock_status()
                             want_logon = _should_capture_logon_ui()
+                            on_uac = False if want_logon else uac_consent_running()
                             thread_desk = get_desktop_name()
                             if want_logon:
                                 # PrintWindow ngay frame này. Không break DXGI trước — teardown
@@ -3488,7 +3460,7 @@ class HostMixin:
                                 client_state["force_update"] = True
                                 client_state.pop("prev_sent_img", None)
                                 break
-                            if not want_logon and not uac_consent_running():
+                            if not want_logon and not on_uac:
                                 inner_needs_switch, inner_is_blocked = check_desktop_change()
                                 if inner_is_blocked or inner_needs_switch:
                                     if inner_is_blocked:
@@ -3513,8 +3485,7 @@ class HostMixin:
 
                             mon_mode = client_state.get("monitor_mode", "both")
                             grabbed = False
-                            on_winlogon = _should_capture_logon_ui()
-                            on_uac = uac_consent_running()
+                            on_winlogon = want_logon
                             if on_uac:
                                 try:
                                     frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
@@ -3719,8 +3690,9 @@ class HostMixin:
                                     pass
 
                             if (
-                                not on_winlogon
-                                and (get_desktop_name() or "default") in ("default", "")
+                                not _user_desktop_was_shown()
+                                and not on_winlogon
+                                and (thread_desk or "default") in ("default", "")
                                 and _explorer_running()
                                 and not _logonui_running()
                                 and not _winlogon_has_logonui_windows()

@@ -1047,6 +1047,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             elif res == win32event.WAIT_OBJECT_0 + 1:
                 print("[Event] Received screen cover disable signal.")
                 self.after(0, self.disable_screen_cover_gui)
+            else:
+                time.sleep(0.5)
+                break
 
     def restore_event_listener_thread(self):
         if sys.platform != "win32":
@@ -1076,6 +1079,9 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             if rc == win32event.WAIT_OBJECT_0:
                 print("[Event] Received restore signal. Restoring window.")
                 self.after(0, self._restore_window)
+            else:
+                time.sleep(0.5)
+                break
         
     def change_theme(self):
         from gui.themes import change_app_theme

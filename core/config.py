@@ -11,6 +11,8 @@ else:
 is_agent_process = "--clipboard-agent" in sys.argv or (sys.argv and "clipboard_agent" in sys.argv[0])
 is_clipboard_agent = is_agent_process
 is_gui_agent = "--gui-agent" in sys.argv
+is_broker_process = "--broker" in sys.argv
+is_capture_worker_process = "--capture-worker" in sys.argv or "--headless" in sys.argv
 
 PORTS_TO_TRY = [12345, 12346, 12347, 12348, 12349]
 BOUND_PORT = 12345

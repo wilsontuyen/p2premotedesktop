@@ -533,11 +533,29 @@ def get_active_session_id(preferred_sid=None):
 
     return 0xFFFFFFFF
 
+_wts_proc_cache_lock = threading.Lock()
+_wts_proc_cache = (0.0, ())
+
+def _get_wts_processes_cached(max_age=0.4):
+    global _wts_proc_cache
+    now = time.time()
+    with _wts_proc_cache_lock:
+        if now - _wts_proc_cache[0] < max_age and _wts_proc_cache[1]:
+            return _wts_proc_cache[1]
+    try:
+        procs = tuple(win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE))
+        with _wts_proc_cache_lock:
+            _wts_proc_cache = (now, procs)
+        return procs
+    except Exception as e:
+        log(f"Lỗi WTSEnumerateProcesses: {e}")
+        return _wts_proc_cache[1]
+
 def is_logon_ui_running(session_id):
     try:
-        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        procs = _get_wts_processes_cached(0.4)
         for p in procs:
-            if p[0] == session_id and p[2].lower() == "logonui.exe":
+            if p[0] == session_id and (p[2] or "").lower() == "logonui.exe":
                 return True
     except Exception as e:
         log(f"Lỗi kiểm tra LogonUI: {e}")
@@ -570,9 +588,9 @@ def is_session_locked(session_id):
 
 def is_explorer_running_in_session(session_id):
     try:
-        procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
+        procs = _get_wts_processes_cached(0.4)
         for p in procs:
-            if p[0] == session_id and p[2].lower() == "explorer.exe":
+            if p[0] == session_id and (p[2] or "").lower() == "explorer.exe":
                 return True
     except Exception:
         pass
@@ -1497,69 +1515,47 @@ def system_crash_monitor_thread(stop_event=None):
                     _intentionally_stopped_pids.pop(p, None)
 
             # 2. Quét phát hiện các tiến trình mới của ứng dụng (bao gồm cả GUI và Viewer do người dùng mở)
-            if psutil is not None:
-                for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                    try:
-                        pid = proc.info.get("pid")
-                        if not pid or pid == my_pid:
-                            continue
-                        with _crash_watch_lock:
-                            if pid in _tracked_procs:
-                                continue
-                        name_l = (proc.info.get("name") or "").lower()
-                        cmd_list = proc.info.get("cmdline") or []
-                        cmd_str = " ".join(str(x) for x in cmd_list)
-                        is_our_proc = False
-                        if name_l in target_exes:
-                            is_our_proc = True
-                        elif name_l in ("python.exe", "pythonw.exe") and "app.py" in cmd_str.lower():
-                            is_our_proc = True
-
-                        if not is_our_proc:
-                            continue
-
-                        h_proc = _open_process_watch_handle(pid)
-                        if not h_proc:
-                            continue
-                        role, log_fname = _classify_process_role(name_l, cmd_str)
-                        with _crash_watch_lock:
-                            _tracked_procs[pid] = {
-                                "h_proc": h_proc,
-                                "role": role,
-                                "log_file": log_fname,
-                                "cmdline": cmd_str,
-                                "session_id": _get_pid_session_id(pid),
-                                "desktop": "",
-                                "start_ts": now_ts,
-                                "exe_name": proc.info.get("name") or name_l,
-                            }
-                    except Exception:
+            # Dùng WTSEnumerateProcesses siêu nhanh (<1ms) để lọc tên tiến trình trước, chỉ gọi psutil.Process(pid).cmdline()
+            # khi phát hiện PID mới thuộc target_exes (tránh đọc PEB cmdline của toàn bộ 200+ tiến trình hệ thống mất ~2.8s).
+            try:
+                procs = _get_wts_processes_cached(0.4)
+                for p in procs:
+                    sid, pid, raw_name = p[0], p[1], (p[2] or "")
+                    if not pid or pid == my_pid:
                         continue
-            else:
-                try:
-                    procs = win32ts.WTSEnumerateProcesses(win32ts.WTS_CURRENT_SERVER_HANDLE)
-                    for p in procs:
-                        sid, pid, p_name = p[0], p[1], (p[2] or "").lower()
-                        if not pid or pid == my_pid or p_name not in target_exes:
+                    name_l = raw_name.lower()
+                    if name_l not in target_exes and name_l not in ("python.exe", "pythonw.exe"):
+                        continue
+                    with _crash_watch_lock:
+                        if pid in _tracked_procs:
                             continue
-                        with _crash_watch_lock:
-                            if pid in _tracked_procs:
-                                continue
-                        h_proc = _open_process_watch_handle(pid)
-                        if h_proc:
-                            with _crash_watch_lock:
-                                _tracked_procs[pid] = {
-                                    "h_proc": h_proc,
-                                    "role": f"AppProcess (Session {sid})",
-                                    "log_file": "gui.log",
-                                    "cmdline": p_name,
-                                    "session_id": sid,
-                                    "desktop": "",
-                                    "start_ts": now_ts,
-                                    "exe_name": p_name,
-                                }
-                except Exception:
-                    pass
+                    cmd_str = raw_name
+                    if psutil is not None:
+                        try:
+                            cmd_list = psutil.Process(pid).cmdline() or []
+                            if cmd_list:
+                                cmd_str = " ".join(str(x) for x in cmd_list)
+                        except Exception:
+                            pass
+                    if name_l in ("python.exe", "pythonw.exe") and "app.py" not in cmd_str.lower():
+                        continue
+                    h_proc = _open_process_watch_handle(pid)
+                    if not h_proc:
+                        continue
+                    role, log_fname = _classify_process_role(name_l, cmd_str)
+                    with _crash_watch_lock:
+                        _tracked_procs[pid] = {
+                            "h_proc": h_proc,
+                            "role": role,
+                            "log_file": log_fname,
+                            "cmdline": cmd_str,
+                            "session_id": sid if sid is not None else _get_pid_session_id(pid),
+                            "desktop": "",
+                            "start_ts": now_ts,
+                            "exe_name": raw_name or name_l,
+                        }
+            except Exception:
+                pass
 
             # 3. Kiểm tra trạng thái các tiến trình đang theo dõi qua Kernel Handle đã giữ
             dead_entries = []

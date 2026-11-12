@@ -2179,14 +2179,20 @@ def run_clipboard_agent_mode():
 
     def _agent_explorer_path_cacher():
         nonlocal _agent_cached_explorer_path
+        from filecopyclient import _get_foreground_explorer_state
+        last_fg_state = None
         while True:
             try:
-                found = query_explorer_folder_path(allow_open_clipboard=True)
-                if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
-                    _agent_cached_explorer_path = found
+                fg_state = _get_foreground_explorer_state()
+                if fg_state is not None or not _agent_cached_explorer_path:
+                    if fg_state != last_fg_state or not _agent_cached_explorer_path:
+                        last_fg_state = fg_state
+                        found = query_explorer_folder_path(allow_open_clipboard=True)
+                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
+                            _agent_cached_explorer_path = found
             except Exception:
                 pass
-            time.sleep(0.35)
+            time.sleep(1.0)
 
     threading.Thread(target=_agent_explorer_path_cacher, daemon=True, name="AgentExplorerPath").start()
 

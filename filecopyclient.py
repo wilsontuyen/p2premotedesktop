@@ -870,22 +870,71 @@ def _is_desktop_shell_hwnd(hwnd):
     return False
 
 
+_shell_com_tls = threading.local()
+_IS_SYSTEM_PROC_CACHE = None
+
+
+def _is_system_or_headless_proc():
+    global _IS_SYSTEM_PROC_CACHE
+    if _IS_SYSTEM_PROC_CACHE is not None:
+        return _IS_SYSTEM_PROC_CACHE
+    if "--broker" in sys.argv or "--capture-worker" in sys.argv or "--headless" in sys.argv:
+        _IS_SYSTEM_PROC_CACHE = True
+        return True
+    try:
+        un = (os.environ.get("USERNAME") or "").strip().lower()
+        if un in ("system", "local service", "network service") or un.endswith("$"):
+            _IS_SYSTEM_PROC_CACHE = True
+            return True
+    except Exception:
+        pass
+    _IS_SYSTEM_PROC_CACHE = False
+    return False
+
+
+def _get_thread_shell_app():
+    """Lấy đối tượng COM Shell.Application (khởi tạo CoInitialize theo từng thread, bỏ qua trên tiến trình SYSTEM)."""
+    if _is_system_or_headless_proc():
+        return None
+    try:
+        if not getattr(_shell_com_tls, "coinit", False):
+            pythoncom = __import__("pythoncom")
+            try:
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
+            _shell_com_tls.coinit = True
+        import win32com.client
+        return win32com.client.Dispatch("Shell.Application")
+    except Exception:
+        return None
+
+
+def _get_foreground_explorer_state():
+    """Trả về (root_hwnd, cls, title) nếu cửa sổ Foreground hiện tại là Explorer hoặc Desktop, ngược lại trả về None."""
+    import win32gui
+    try:
+        hwnd_fg = win32gui.GetForegroundWindow()
+        if not hwnd_fg:
+            return None
+        root = ctypes.windll.user32.GetAncestor(hwnd_fg, 2) or hwnd_fg
+        cls = win32gui.GetClassName(root)
+        if cls in ("CabinetWClass", "ExploreWClass"):
+            title = (win32gui.GetWindowText(root) or "").strip()
+            return (int(root), cls, title)
+        if _is_desktop_shell_hwnd(hwnd_fg):
+            return (int(root), "Desktop", "")
+    except Exception:
+        pass
+    return None
+
+
 def query_explorer_folder_path(allow_open_clipboard=False):
     """Thư mục Explorer/Desktop đang focus — ưu tiên cửa sổ Explorer đang mở thay vì trả nhầm về Desktop."""
     import win32gui
     import win32process
 
-    shell = None
-    try:
-        pythoncom = __import__("pythoncom")
-        try:
-            pythoncom.CoInitialize()
-        except Exception:
-            pass
-        import win32com.client
-        shell = win32com.client.Dispatch("Shell.Application")
-    except Exception:
-        shell = None
+    shell = _get_thread_shell_app()
 
     def related_hwnds(h):
         if not h:
@@ -3000,10 +3049,17 @@ class FileCopyClientMixin:
         clip_trace(f"[unlock_paste_dest] was_dest={was}")
 
     def _explorer_path_cacher_loop(self):
-        """Cache path Explorer. Khi đang Paste/frozen: chỉ cập nhật last-good, KHÔNG đụng dest paste."""
+        """Cache path Explorer khi chuyển cửa sổ Explorer. Khi đang Paste/frozen: chỉ cập nhật last-good, KHÔNG đụng dest paste."""
+        last_fg_state = None
         while True:
-            time.sleep(0.3)
+            time.sleep(1.2)
             try:
+                if (
+                    not getattr(self, "active_sockets", None)
+                    and not getattr(self, "pending_remote_files", None)
+                    and not getattr(self, "pygame_hwnd", None)
+                ):
+                    continue
                 frozen = bool(
                     getattr(self, "_paste_dest_frozen", False)
                     or getattr(self, "transfer_in_progress", False)
@@ -3013,9 +3069,13 @@ class FileCopyClientMixin:
                     and time.time() - float(getattr(self, "_last_clip_event_at", 0) or 0) < 1.0
                 ):
                     continue
+                fg_state = _get_foreground_explorer_state()
+                if fg_state is None and getattr(self, "cached_explorer_path", None):
+                    continue
+                if fg_state is not None and fg_state == last_fg_state and getattr(self, "cached_explorer_path", None):
+                    continue
+                last_fg_state = fg_state
                 found_path = query_explorer_folder_path(allow_open_clipboard=False)
-                if not found_path and not frozen:
-                    found_path = query_explorer_folder_path(allow_open_clipboard=True)
                 if not found_path or not os.path.isdir(found_path):
                     continue
                 if _is_transfer_staging_dir(found_path):
