@@ -316,7 +316,7 @@ class ClipboardEventListener:
                                 self.manager._lmb_hit_context_menu = True
                                 self.manager._lmb_menu_item_kind = "paste"
                                 self.manager.note_paste_gesture()
-                                self.manager.snapshot_paste_dest("menu_paste")
+                                self.manager.snapshot_paste_dest("menu_paste", sync=True)
                                 dest = (
                                     getattr(self.manager, "_paste_dest_snapshot", None)
                                     or getattr(self.manager, "cached_explorer_path", None)
@@ -466,7 +466,7 @@ class ClipboardEventListener:
                                     pass
                             self.manager.last_ctrl_v_time = time.time()
                             self.manager.note_paste_gesture()
-                            self.manager.snapshot_paste_dest("ctrl_v")
+                            self.manager.snapshot_paste_dest("ctrl_v", sync=True)
                             dest = (
                                 getattr(self.manager, "_paste_dest_snapshot", None)
                                 or getattr(self.manager, "cached_explorer_path", None)
@@ -521,7 +521,7 @@ class ClipboardEventListener:
                                     pass
                             self.manager.last_ctrl_v_time = time.time()
                             self.manager.note_paste_gesture()
-                            self.manager.snapshot_paste_dest("shift_ins")
+                            self.manager.snapshot_paste_dest("shift_ins", sync=True)
                             dest = (
                                 getattr(self.manager, "_paste_dest_snapshot", None)
                                 or getattr(self.manager, "cached_explorer_path", None)

@@ -700,10 +700,182 @@ def _notify_explorer_paths_changed(paths):
         log_debug(f"[_notify_explorer_paths_changed] {e}")
 
 
+def _parse_explorer_address_text(raw_text):
+    """Phân tích chuỗi từ thanh địa chỉ / breadcrumb của Windows Explorer thành đường dẫn thư mục thực."""
+    if not raw_text:
+        return None
+    import re
+    txt = str(raw_text).strip()
+    if not txt:
+        return None
+
+    candidates = [txt]
+    # Loại bỏ tiền tố nhãn thanh địa chỉ đa ngôn ngữ (vd: "Address: C:\Temp", "Địa chỉ: C:\Temp")
+    if not re.match(r"^[A-Za-z]:[\\/]", txt) and not txt.startswith("\\\\"):
+        if ": " in txt:
+            after_colon = txt.split(": ", 1)[1].strip()
+            if after_colon:
+                candidates.insert(0, after_colon)
+
+    for cand in candidates:
+        if (re.match(r"^[A-Za-z]:[\\/]", cand) or cand.startswith("\\\\")) and os.path.isdir(cand):
+            if not _is_transfer_staging_dir(cand):
+                return os.path.normpath(cand)
+        if re.match(r"^[A-Za-z]:$", cand) and os.path.isdir(cand + "\\"):
+            return cand + "\\"
+
+    # Phân tích breadcrumb kiểu "This PC > HDD (C:) > Temp" hoặc "Máy tính này ▸ (D:) ▸ Folder"
+    for cand in candidates:
+        if any(sep in cand for sep in (">", "▸", "›", "»", "→")):
+            parts = [p.strip() for p in re.split(r"[>▸›»→]+", cand) if p.strip()]
+            for i, part in enumerate(parts):
+                m = re.search(r"\(([A-Za-z]:)\)|^([A-Za-z]:)\\?$", part)
+                if m:
+                    drive = (m.group(1) or m.group(2)) + "\\"
+                    sub = os.path.join(drive, *parts[i + 1:]) if i + 1 < len(parts) else drive
+                    if os.path.isdir(sub) and not _is_transfer_staging_dir(sub):
+                        return os.path.normpath(sub)
+            # Thử ghép với thư mục người dùng nếu bắt đầu bằng Desktop/Documents/Downloads/...
+            user_dir = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+            if user_dir and os.path.isdir(user_dir):
+                for i, part in enumerate(parts):
+                    known_base = os.path.join(user_dir, part)
+                    if os.path.isdir(known_base):
+                        sub = os.path.join(known_base, *parts[i + 1:]) if i + 1 < len(parts) else known_base
+                        if os.path.isdir(sub) and not _is_transfer_staging_dir(sub):
+                            return os.path.normpath(sub)
+    return None
+
+
+def _extract_explorer_path_win32(hwnd_root):
+    """Fallback đọc trực tiếp đường dẫn từ cây cửa sổ con Win32 của Explorer (không phụ thuộc COM/UAC)."""
+    if not hwnd_root:
+        return None
+    import re
+    import win32gui
+    try:
+        root = ctypes.windll.user32.GetAncestor(hwnd_root, 2) or hwnd_root
+    except Exception:
+        root = hwnd_root
+
+    try:
+        cls_root = win32gui.GetClassName(root)
+    except Exception:
+        return None
+    if cls_root not in ("CabinetWClass", "ExploreWClass"):
+        return None
+
+    # Trên Windows 11 có nhiều tab (ShellTabWindowClass), ưu tiên tab đang hiển thị (visible) đầu tiên
+    active_tab_hwnd = None
+    try:
+        def _find_tab_cb(ch, _):
+            nonlocal active_tab_hwnd
+            try:
+                if active_tab_hwnd is None and win32gui.IsWindowVisible(ch):
+                    c_cls = win32gui.GetClassName(ch)
+                    if c_cls in ("ShellTabWindowClass", "TabWindowClass"):
+                        active_tab_hwnd = ch
+            except Exception:
+                pass
+            return True
+        win32gui.EnumChildWindows(root, _find_tab_cb, None)
+    except Exception:
+        pass
+
+    scopes = [active_tab_hwnd, root] if active_tab_hwnd else [root]
+    detected_drives = []
+
+    for scope in scopes:
+        if not scope:
+            continue
+        children = []
+        try:
+            win32gui.EnumChildWindows(
+                scope,
+                lambda ch, _: children.append((ch, _hwnd_class_name(ch), win32gui.GetWindowText(ch))),
+                None,
+            )
+        except Exception:
+            continue
+
+        # Ưu tiên Edit / ToolbarWindow32 (thanh địa chỉ / breadcrumb)
+        for _ch, cls, txt in children:
+            if not txt:
+                continue
+            if cls in ("ToolbarWindow32", "Edit", "ComboBox", "Breadcrumb Parent", "Address Band Root"):
+                parsed = _parse_explorer_address_text(txt)
+                if parsed:
+                    return parsed
+            for m in re.finditer(r"\(([A-Za-z]:)\)", txt):
+                drv = m.group(1) + "\\"
+                if drv not in detected_drives:
+                    detected_drives.append(drv)
+
+        for _ch, _cls, txt in children:
+            if not txt:
+                continue
+            parsed = _parse_explorer_address_text(txt)
+            if parsed:
+                return parsed
+
+    # Kiểm tra tiêu đề cửa sổ Explorer (vd: "C:\Temp", "Temp - File Explorer", "HDD (C:)")
+    for h_title in ([active_tab_hwnd, root] if active_tab_hwnd else [root]):
+        if not h_title:
+            continue
+        try:
+            title = (win32gui.GetWindowText(h_title) or "").strip()
+        except Exception:
+            title = ""
+        if not title:
+            continue
+        for suffix in (" - File Explorer", " - Windows Explorer", " - Trình khám phá tệp"):
+            if title.endswith(suffix):
+                title = title[:-len(suffix)].strip()
+        parsed = _parse_explorer_address_text(title)
+        if parsed:
+            return parsed
+        for drv in detected_drives:
+            cand = os.path.join(drv, title)
+            if os.path.isdir(cand) and not _is_transfer_staging_dir(cand):
+                return os.path.normpath(cand)
+    return None
+
+
+def _is_desktop_shell_hwnd(hwnd):
+    """Kiểm tra chặt chẽ xem HWND có thực sự là bề mặt Desktop (Progman / WorkerW chứa SHELLDLL_DefView) hay không."""
+    if not hwnd:
+        return False
+    import win32gui
+    try:
+        cls = win32gui.GetClassName(hwnd)
+    except Exception:
+        return False
+    if cls == "Progman":
+        return True
+    try:
+        root = ctypes.windll.user32.GetAncestor(hwnd, 2) or hwnd
+        root_cls = win32gui.GetClassName(root)
+    except Exception:
+        root = hwnd
+        root_cls = cls
+    if root_cls == "Progman":
+        return True
+    if root_cls == "WorkerW":
+        try:
+            def_view = win32gui.FindWindowEx(root, 0, "SHELLDLL_DefView", None)
+            if def_view:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def query_explorer_folder_path(allow_open_clipboard=False):
-    """Thư mục Explorer/Desktop đang focus — gọi từ background thread (không gọi trong WM_RENDERFORMAT)."""
+    """Thư mục Explorer/Desktop đang focus — ưu tiên cửa sổ Explorer đang mở thay vì trả nhầm về Desktop."""
     import win32gui
     import win32process
+
+    shell = None
     try:
         pythoncom = __import__("pythoncom")
         try:
@@ -713,7 +885,7 @@ def query_explorer_folder_path(allow_open_clipboard=False):
         import win32com.client
         shell = win32com.client.Dispatch("Shell.Application")
     except Exception:
-        return None
+        shell = None
 
     def related_hwnds(h):
         if not h:
@@ -727,108 +899,167 @@ def query_explorer_folder_path(allow_open_clipboard=False):
             if owner and owner not in res:
                 res.append(owner)
             parent = ctypes.windll.user32.GetParent(h)
-            if parent and parent not in res:
+            if parent and parent != win32gui.GetDesktopWindow() and parent not in res:
                 res.append(parent)
         except Exception:
             pass
         return res
 
-    hwnds_to_check = []
+    explorer_windows = []
+    if shell is not None:
+        try:
+            for window in shell.Windows():
+                try:
+                    w_hwnd = int(window.HWND)
+                    doc = window.Document
+                    if not doc:
+                        continue
+                    path = ""
+                    try:
+                        path = doc.Folder.Self.Path
+                    except Exception:
+                        pass
+                    loc_name = ""
+                    try:
+                        loc_name = str(getattr(window, "LocationName", "") or "")
+                    except Exception:
+                        pass
+                    if path and os.path.isdir(path) and not _is_transfer_staging_dir(path):
+                        explorer_windows.append((w_hwnd, path, loc_name))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _match_explorer_hwnd(h):
+        if not h:
+            return None
+        try:
+            root = ctypes.windll.user32.GetAncestor(h, 2) or h
+        except Exception:
+            root = h
+        for cand_h in (h, root):
+            if not cand_h:
+                continue
+            matches = [(p, loc) for (w_hwnd, p, loc) in explorer_windows if w_hwnd == cand_h]
+            if matches:
+                if len(matches) == 1:
+                    return matches[0][0]
+                # Nhiều tab trên cùng 1 cửa sổ CabinetWClass (Windows 11):
+                win32_path = _extract_explorer_path_win32(cand_h)
+                if win32_path and os.path.isdir(win32_path):
+                    return win32_path
+                try:
+                    title = (win32gui.GetWindowText(cand_h) or "").strip()
+                except Exception:
+                    title = ""
+                if title:
+                    for p, loc in matches:
+                        base = os.path.basename(p.rstrip("\\/")) or p
+                        if (loc and (title == loc or title.startswith(loc + " -"))) or (
+                            base and (title == base or title.startswith(base + " -"))
+                        ):
+                            return p
+                return matches[0][0]
+            try:
+                cls = win32gui.GetClassName(cand_h)
+                if cls in ("CabinetWClass", "ExploreWClass"):
+                    win32_path = _extract_explorer_path_win32(cand_h)
+                    if win32_path and os.path.isdir(win32_path):
+                        return win32_path
+            except Exception:
+                pass
+        return None
+
+    desktop_path = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
+
+    # 1. Ưu tiên cao nhất: Cửa sổ đang active (Foreground Window)
+    hwnd_fg = None
     try:
         hwnd_fg = win32gui.GetForegroundWindow()
-        if hwnd_fg:
-            hwnds_to_check.extend(related_hwnds(hwnd_fg))
+    except Exception:
+        hwnd_fg = None
+
+    if hwnd_fg:
+        for h in related_hwnds(hwnd_fg):
+            p = _match_explorer_hwnd(h)
+            if p:
+                return p
+        if (
+            not _hwnd_is_context_menu(hwnd_fg)
+            and not _hwnd_looks_like_popup_menu(hwnd_fg)
+            and _is_desktop_shell_hwnd(hwnd_fg)
+        ):
+            return desktop_path
+
+    # 2. Ưu tiên thứ hai: Tọa độ vừa click chuột phải (_GLOBAL_RMB_POS) nếu mới RMB (< 10 giây)
+    # Giúp xử lý chuẩn khi menu chuột phải mở từ cửa sổ Explorer (vd: C:\Temp) nhưng tràn ra ngoài đè lên Desktop
+    try:
+        if _GLOBAL_RMB_POS and (time.time() - float(_GLOBAL_RMB_TIME or 0.0)) < 10.0:
+            pt_rmb = wintypes.POINT(int(_GLOBAL_RMB_POS[0]), int(_GLOBAL_RMB_POS[1]))
+            hwnd_rmb = ctypes.windll.user32.WindowFromPoint(pt_rmb)
+            if hwnd_rmb and not _is_taskbar_or_taskmgr_hwnd(hwnd_rmb):
+                for h in related_hwnds(hwnd_rmb):
+                    p = _match_explorer_hwnd(h)
+                    if p:
+                        return p
+                if (
+                    not _hwnd_is_context_menu(hwnd_rmb)
+                    and not _hwnd_looks_like_popup_menu(hwnd_rmb)
+                    and _is_desktop_shell_hwnd(hwnd_rmb)
+                ):
+                    return desktop_path
     except Exception:
         pass
+
+    # 3. Ưu tiên thứ ba: Cửa sổ dưới con trỏ chuột hiện tại (nếu là cửa sổ Explorer)
+    hwnd_mouse = None
     try:
         pt = wintypes.POINT()
         if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
             hwnd_mouse = ctypes.windll.user32.WindowFromPoint(pt)
-            if hwnd_mouse:
-                hwnds_to_check.extend(related_hwnds(hwnd_mouse))
     except Exception:
-        pass
+        hwnd_mouse = None
 
-    seen = set()
-    ordered = []
-    for h in hwnds_to_check:
-        if h and h not in seen:
-            seen.add(h)
-            ordered.append(h)
+    if hwnd_mouse and not _is_taskbar_or_taskmgr_hwnd(hwnd_mouse):
+        for h in related_hwnds(hwnd_mouse):
+            p = _match_explorer_hwnd(h)
+            if p:
+                return p
 
-    # Kiểm tra Desktop trước khi kiểm tra hwnd_clip vì Desktop chỉ đọc HWND class, không đụng COM/clipboard.
-    for hwnd in ordered:
+    # 4. Duyệt theo thứ tự Z-order từ trên xuống (EnumWindows) để lấy cửa sổ Explorer đang mở trên cùng
+    top_result = []
+
+    def enum_cb(hwnd, _lparam):
         try:
-            class_name = win32gui.GetClassName(hwnd)
-            if hwnd == win32gui.GetDesktopWindow() or class_name in ("Progman", "WorkerW"):
-                return os.path.join(os.path.expanduser("~"), "Desktop")
+            if not win32gui.IsWindowVisible(hwnd) or ctypes.windll.user32.IsIconic(hwnd):
+                return True
+            cls = win32gui.GetClassName(hwnd)
+            if cls in ("CabinetWClass", "ExploreWClass"):
+                p = _match_explorer_hwnd(hwnd)
+                if p:
+                    top_result.append(p)
+                    return False
+            elif _is_desktop_shell_hwnd(hwnd):
+                top_result.append(desktop_path)
+                return False
         except Exception:
             pass
+        return True
 
     try:
-        hwnd_clip = ctypes.windll.user32.GetOpenClipboardWindow()
-        if hwnd_clip and not allow_open_clipboard:
-            # Explorer đang Copy/Paste — không enumerate Shell (chuột xoay / mất clipboard).
-            return None
+        win32gui.EnumWindows(enum_cb, 0)
     except Exception:
         pass
-
-    explorer_windows = []
-    try:
-        for window in shell.Windows():
-            try:
-                w_hwnd = int(window.HWND)
-                doc = window.Document
-                if not doc:
-                    continue
-                path = ""
-                try:
-                    path = doc.Folder.Self.Path
-                except Exception:
-                    pass
-                if path:
-                    explorer_windows.append((w_hwnd, path))
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    for hwnd in ordered:
-        for w_hwnd, path in explorer_windows:
-            if hwnd == w_hwnd:
-                return path
-
-    for hwnd in ordered:
-        try:
-            _tid, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if psutil.Process(pid).name().lower() != "explorer.exe":
-                continue
-            class_name = win32gui.GetClassName(hwnd)
-            if class_name in ("CabinetWClass", "ExploreWClass"):
-                for w_hwnd, path in explorer_windows:
-                    if w_hwnd == hwnd:
-                        return path
-        except Exception:
-            pass
+    if top_result:
+        return top_result[0]
 
     if explorer_windows:
-        if len(explorer_windows) == 1:
-            return explorer_windows[0][1]
-        top_explorer_path = []
+        return explorer_windows[0][1]
 
-        def enum_cb(hwnd, _lparam):
-            for w_hwnd, path in explorer_windows:
-                if hwnd == w_hwnd:
-                    top_explorer_path.append(path)
-                    return False
-            return True
+    if hwnd_mouse and _is_desktop_shell_hwnd(hwnd_mouse):
+        return desktop_path
 
-        try:
-            win32gui.EnumWindows(enum_cb, 0)
-        except Exception:
-            pass
-        if top_explorer_path:
-            return top_explorer_path[0]
     return None
 
 
@@ -2709,15 +2940,9 @@ class FileCopyClientMixin:
                     clip_trace("[snapshot_paste_dest] skip rmb on taskbar/taskmgr")
                     return
             frozen = bool(getattr(self, "_paste_dest_frozen", False))
-            # Ưu tiên path đang cache (không COM) — RMB lúc clipboard mở hay fail COM.
             instant = getattr(self, "_last_good_explorer_path", None) or getattr(self, "cached_explorer_path", None)
-            if instant and os.path.isdir(instant) and not _is_transfer_staging_dir(instant):
-                self._paste_dest_snapshot = instant
-                clip_trace(f"[snapshot_paste_dest] instant cache reason={why} path={instant} frozen={frozen}")
             try:
-                found = query_explorer_folder_path(allow_open_clipboard=False)
-                if not found:
-                    found = query_explorer_folder_path(allow_open_clipboard=True)
+                found = query_explorer_folder_path(allow_open_clipboard=True)
                 if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
                     self._paste_dest_snapshot = found
                     self._last_good_explorer_path = found
@@ -2726,12 +2951,15 @@ class FileCopyClientMixin:
                     log_debug(f"[snapshot_paste_dest] {why}: {found}")
                     clip_trace(f"[snapshot_paste_dest] OK reason={why} path={found} frozen={frozen}")
                     print(f"[Clipboard] Chốt thư mục Paste ({why}): {found}")
-                elif instant:
+                elif instant and os.path.isdir(instant) and not _is_transfer_staging_dir(instant):
+                    self._paste_dest_snapshot = instant
                     clip_trace(f"[snapshot_paste_dest] COM miss, keep cache reason={why} path={instant}")
                     print(f"[Clipboard] Chốt thư mục Paste ({why}, cache): {instant}")
                 else:
                     clip_trace(f"[snapshot_paste_dest] FAIL reason={why} no path")
             except Exception as e:
+                if instant and os.path.isdir(instant) and not _is_transfer_staging_dir(instant):
+                    self._paste_dest_snapshot = instant
                 log_debug(f"[snapshot_paste_dest] {why}: {e}")
                 clip_trace(f"[snapshot_paste_dest] ERR reason={why}: {e}")
 

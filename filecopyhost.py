@@ -2181,14 +2181,8 @@ def run_clipboard_agent_mode():
         nonlocal _agent_cached_explorer_path
         while True:
             try:
-                try:
-                    if ctypes.windll.user32.GetOpenClipboardWindow():
-                        time.sleep(0.35)
-                        continue
-                except Exception:
-                    pass
-                found = query_explorer_folder_path()
-                if found:
+                found = query_explorer_folder_path(allow_open_clipboard=True)
+                if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
                     _agent_cached_explorer_path = found
             except Exception:
                 pass
@@ -2880,24 +2874,28 @@ def run_clipboard_agent_mode():
             )
 
             try:
-                # Chốt dest Explorer ngay lúc Paste (tránh cache cũ / staging).
-                if dest_override and os.path.isdir(dest_override) and not _is_transfer_staging_dir(dest_override):
+                # Luôn truy vấn trực tiếp cửa sổ Explorer đang mở tại thời điểm Paste (tránh dùng nhầm cache cũ = Desktop).
+                live_found = None
+                try:
+                    live_found = query_explorer_folder_path(allow_open_clipboard=True)
+                except Exception:
+                    live_found = None
+
+                if live_found and os.path.isdir(live_found) and not _is_transfer_staging_dir(live_found):
+                    _agent_cached_explorer_path = live_found
+                    paste_dest = live_found
+                elif dest_override and os.path.isdir(dest_override) and not _is_transfer_staging_dir(dest_override):
                     _agent_cached_explorer_path = dest_override
+                    paste_dest = dest_override
                 else:
-                    try:
-                        found = query_explorer_folder_path(allow_open_clipboard=False)
-                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
-                            _agent_cached_explorer_path = found
-                    except Exception:
-                        pass
-                paste_dest = _agent_cached_explorer_path
+                    paste_dest = _agent_cached_explorer_path
+
                 if not paste_dest or not os.path.isdir(paste_dest) or _is_transfer_staging_dir(paste_dest):
                     desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
                     if os.path.isdir(desktop):
                         paste_dest = desktop
                     else:
                         paste_dest = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
-                    _agent_cached_explorer_path = paste_dest
                 info = {
                     "display_name": _pending_info.get("display_name", "Files"),
                     "item_kind": _pending_info.get("item_kind") or "file",
@@ -3491,6 +3489,7 @@ def run_clipboard_agent_mode():
                     threading.Thread(
                         target=_agent_trigger_paste,
                         args=("menu_paste",),
+                        kwargs={"dest_override": _agent_cached_explorer_path},
                         daemon=True,
                         name="AgentMenuPasteTrigger",
                     ).start()
@@ -3522,7 +3521,7 @@ def run_clipboard_agent_mode():
                 except Exception:
                     pass
                 try:
-                    p = query_explorer_folder_path(allow_open_clipboard=False)
+                    p = query_explorer_folder_path(allow_open_clipboard=True)
                     if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
                         _agent_cached_explorer_path = p
                 except Exception:

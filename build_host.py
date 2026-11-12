@@ -241,6 +241,7 @@ def main():
             f'--nofollow-import-to={nofollow} '
             f'--include-module=cv2 --include-module=numpy --include-module=psutil '
             f'--include-module=ntsecuritycon --include-module=dxcam --include-module=comtypes '
+            f'--include-module=win32com.client --include-module=pythoncom '
             f'--include-module=gui.host_ui --include-module=host_build_flag '
             f'--no-deployment-flag=excluded-module-usage '
             f'--windows-company-name="{company_name}" --windows-product-name="{product_name}" '
