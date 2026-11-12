@@ -637,27 +637,32 @@ class NetworkMixin:
         dialog.configure(bg=self.bg_color)
         dialog.transient(self)  # Gắn transient vào cửa sổ chính để không tạo thêm icon riêng trên Taskbar (giống Danh sách máy tính đã lưu)
 
-        w, h = 680, 540
+        w = 672
+        h = 560
         parent_x = self.winfo_x()
         parent_y = self.winfo_y()
         parent_w = self.winfo_width()
         parent_h = self.winfo_height()
 
-        # Căn giữa theo chiều ngang cửa sổ chính
-        x = max(10, parent_x + (parent_w - w) // 2)
-        
-        # Căn dọc: Khi app chính ở sát đỉnh màn hình, đặt dialog thẳng hàng với mép trên hoặc thấp hơn
-        # Tuyệt đối không để y < parent_y và không nhảy lên khỏi mép trên màn hình
-        y = max(parent_y + 15, 35)
+        # Căn giữa theo cả chiều ngang và chiều dọc giống dialog Danh sách máy tính đã lưu
+        x = parent_x + (parent_w - w) // 2
+        y = parent_y + (parent_h - h) // 2
         try:
+            screen_w = self.winfo_screenwidth()
             screen_h = self.winfo_screenheight()
+            if x + w > screen_w:
+                x = max(10, screen_w - w - 20)
             if y + h > screen_h - 40:
                 y = max(35, screen_h - h - 40)
+            if x < 10:
+                x = 10
+            if y < 35:
+                y = 35
         except Exception:
             pass
 
         dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.minsize(640, 480)
+        dialog.minsize(600, 500)
         dialog.deiconify()
         dialog.lift()
         dialog.focus_force()
@@ -677,27 +682,62 @@ class NetworkMixin:
                 pass
             return os.path.join(data_dir, "custom_ip_range.json")
 
-        def load_saved_custom_ip(default_s, default_e):
+        def _read_lan_dialog_json():
             fpath = get_custom_ip_file()
             if os.path.exists(fpath):
                 try:
                     with open(fpath, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        s = data.get("start_ip", "").strip()
-                        e = data.get("end_ip", "").strip()
-                        if s and e:
-                            return s, e
+                        if isinstance(data, dict):
+                            return data
                 except Exception:
                     pass
+            return {}
+
+        def _write_lan_dialog_json(updates):
+            fpath = get_custom_ip_file()
+            try:
+                data = _read_lan_dialog_json()
+                data.update(updates)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Custom IP] Save error: {e}")
+
+        def load_saved_custom_ip(default_s, default_e):
+            data = _read_lan_dialog_json()
+            s = str(data.get("start_ip", "") or "").strip()
+            e = str(data.get("end_ip", "") or "").strip()
+            if s and e:
+                return s, e
             return default_s, default_e
 
         def save_saved_custom_ip(s_ip, e_ip):
-            fpath = get_custom_ip_file()
-            try:
-                with open(fpath, "w", encoding="utf-8") as f:
-                    json.dump({"start_ip": s_ip.strip(), "end_ip": e_ip.strip()}, f, indent=2)
-            except Exception as e:
-                print(f"[Custom IP] Save error: {e}")
+            _write_lan_dialog_json({"start_ip": s_ip.strip(), "end_ip": e_ip.strip()})
+
+        def load_lan_dialog_prefs():
+            data = _read_lan_dialog_json()
+            if "collapsed_groups" in data and isinstance(data["collapsed_groups"], list):
+                self.lan_collapsed_groups = {
+                    str(g).strip().upper()
+                    for g in data["collapsed_groups"]
+                    if str(g).strip().upper() in ("LAN", "VPN")
+                }
+            elif not hasattr(self, "lan_collapsed_groups"):
+                self.lan_collapsed_groups = set()
+            if "hide_offline" in data:
+                self._lan_hide_offline = bool(data["hide_offline"])
+            if "filter_named" in data:
+                self._lan_filter_named = bool(data["filter_named"])
+
+        def save_lan_dialog_prefs():
+            _write_lan_dialog_json({
+                "collapsed_groups": sorted(list(getattr(self, "lan_collapsed_groups", set()))),
+                "hide_offline": bool(getattr(self, "_lan_hide_offline", False)),
+                "filter_named": bool(getattr(self, "_lan_filter_named", True)),
+            })
+
+        load_lan_dialog_prefs()
 
         # Giá trị dải IP mặc định (ưu tiên dải đã lưu lần trước -> dải IP giao diện mạng phụ/VPN -> dải LAN hiện tại)
         saved_s, saved_e = load_saved_custom_ip("", "")
@@ -1438,6 +1478,7 @@ class NetworkMixin:
             new_val = not filter_named_var.get()
             filter_named_var.set(new_val)
             self._lan_filter_named = new_val
+            save_lan_dialog_prefs()
             _update_filter_btn_ui()
             refresh_list()
 
@@ -1466,6 +1507,7 @@ class NetworkMixin:
             new_val = not hide_offline_var.get()
             hide_offline_var.set(new_val)
             self._lan_hide_offline = new_val
+            save_lan_dialog_prefs()
             _update_hide_offline_btn_ui()
             if reorder_lan_list_ref[0] is not None:
                 reorder_lan_list_ref[0]()
@@ -1615,9 +1657,10 @@ class NetworkMixin:
                     else:
                         self.lan_collapsed_groups.add(g)
                         just_expanded = False
+                    save_lan_dialog_prefs()
                     reorder_lan_list()
                     if just_expanded and rescan_group_ref[0] is not None:
-                        rescan_group_ref[0](g, reset_dots=True)
+                        rescan_group_ref[0](g, reset_dots=False)
 
                 hdr_lbl.bind("<Button-1>", _toggle_lan_group)
                 group_headers[grp_name] = hdr_lbl
@@ -2110,20 +2153,10 @@ class NetworkMixin:
                     return
 
                 prev_online = ui_item.get("peer_online")
+                status_changed = (prev_online != is_on)
                 ui_item["peer_online"] = is_on
 
-                # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
-                d = ui_item.get("dot")
-                if d and d.winfo_exists():
-                    d.config(fg="#2ECC71" if is_on else "#FF4D4D")
-
-                try:
-                    from gui.components import apply_row_online_state
-                    apply_row_online_state(ui_item.get("row"), is_on, self.card_color, (self.text_white, self.text_gray))
-                except Exception:
-                    pass
-
-                # 2. Cập nhật tooltip (gộp an toàn qua merge_peers để không bao giờ mất saved_password hay tên máy verified)
+                # Kiểm tra và gộp thông tin mới (nếu có) trước để xác định xem nhóm có thay đổi không
                 inf = ui_item.get("info", {})
                 group_changed = False
                 if u_data:
@@ -2144,10 +2177,27 @@ class NetworkMixin:
                                 b_w.config(text="LAN", bg="#145A32", fg="#D4EFDF")
                         group_changed = True
 
+                # CHỈ cập nhật giao diện dòng và làm mới/sắp xếp lại danh sách khi trạng thái Online/Offline
+                # hoặc nhóm mạng của máy thực sự thay đổi (không làm mới định kỳ khi trạng thái giữ nguyên)
+                if not status_changed and not group_changed:
+                    return
+
+                # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
+                d = ui_item.get("dot")
+                new_dot_fg = "#2ECC71" if is_on else "#FF4D4D"
+                if d and d.winfo_exists() and d.cget("fg") != new_dot_fg:
+                    d.config(fg=new_dot_fg)
+
+                try:
+                    from gui.components import apply_row_online_state
+                    apply_row_online_state(ui_item.get("row"), is_on, self.card_color, (self.text_white, self.text_gray))
+                except Exception:
+                    pass
+
                 # Đồng bộ trạng thái sang Danh sách máy tính đã lưu (nếu máy có mặt ở cả 2 danh sách)
                 try:
                     c_id_sync = ''.join(ch for ch in str(inf.get("hwid") or inf.get("saved_id") or h_id) if ch.isdigit())
-                    if len(c_id_sync) == 12 and hasattr(self, "update_saved_computer_status") and (is_on is True or prev_online != is_on):
+                    if len(c_id_sync) == 12 and hasattr(self, "update_saved_computer_status"):
                         self.update_saved_computer_status(c_id_sync, bool(is_on))
                 except Exception:
                     pass
@@ -2184,13 +2234,14 @@ class NetworkMixin:
                 if m_ctx and sync_fn and m_ctx.winfo_exists():
                     sync_fn(m_ctx, inf, is_on)
 
-                # 5. Sắp xếp lại danh sách trong mỗi nhóm để đưa máy Online lên trên
-                if prev_online != is_on or group_changed:
-                    schedule_reorder_lan()
+                # 5. Sắp xếp lại danh sách trong mỗi nhóm khi có máy thay đổi trạng thái Online / Offline
+                schedule_reorder_lan()
 
             def _probe_all_peers_bg(peers_to_check, gen):
                 from concurrent.futures import ThreadPoolExecutor
                 from utils.vpn_discovery import probe_peer_direct
+
+                any_changed = [False]
 
                 def _check_one(item_entry):
                     h, inf = item_entry
@@ -2200,15 +2251,21 @@ class NetworkMixin:
                     # Chỉ chấp nhận cập nhật nếu u_data thực sự là cùng 1 máy tính với bản ghi h (tránh ghi đè khi DHCP đổi IP)
                     if is_on and u_data and not are_same_machine(h, inf, u_data.get("hwid"), u_data):
                         is_on, u_data = False, None
-                    scan_state.setdefault("online_status", {})[h] = is_on
+                    st_dict = scan_state.setdefault("online_status", {})
+                    prev_st = st_dict.get(h)
+                    ui_prev = row_ui_map.get(h, {}).get("peer_online")
+                    st_dict[h] = is_on
                     if is_on and u_data:
                         with self.lan_peers_lock:
                             if h in self.lan_peers:
                                 merged = merge_peers(u_data, self.lan_peers[h])
                                 merged["hwid"] = self.lan_peers[h].get("hwid") or h
                                 self.lan_peers[h] = merged
-                    if dialog.winfo_exists() and scan_state.get("probe_gen") == gen:
-                        dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
+                    # Chỉ đẩy cập nhật lên giao diện khi trạng thái thực sự thay đổi (Online <-> Offline hoặc từ chưa rõ sang xác định)
+                    if prev_st != is_on or ui_prev != is_on:
+                        any_changed[0] = True
+                        if dialog.winfo_exists() and scan_state.get("probe_gen") == gen:
+                            dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
 
                 def _worker():
                     try:
@@ -2217,17 +2274,27 @@ class NetworkMixin:
                             return
                         with ThreadPoolExecutor(max_workers=min(25, max(1, len(items)))) as executor:
                             list(executor.map(_check_one, items))
-                        self.save_lan_peers()
+                        if any_changed[0]:
+                            self.save_lan_peers()
                     finally:
                         if scan_state.get("probe_gen") == gen:
                             scan_state["is_probing"] = False
                             if dialog.winfo_exists():
-                                dialog.after(0, lambda: schedule_reorder_lan(20) if dialog.winfo_exists() else None)
+                                def _on_probe_done():
+                                    if not dialog.winfo_exists():
+                                        return
+                                    # Chỉ cập nhật nhãn thông báo trống nếu đang bật Ẩn máy Offline và không có máy nào Online;
+                                    # không gọi reorder_lan_list() khi không có máy nào thay đổi trạng thái
+                                    if empty_offline_lbl.winfo_exists() and empty_offline_lbl.winfo_ismapped():
+                                        empty_offline_lbl.config(
+                                            text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
+                                        )
+                                dialog.after(0, _on_probe_done)
 
                 threading.Thread(target=_worker, daemon=True).start()
 
-            def _rescan_group_peers(target_group=None, reset_dots=True):
-                """Quét lại trạng thái Online / Offline cho nhóm vừa bung (LAN hoặc VPN) và cập nhật vào danh sách."""
+            def _rescan_group_peers(target_group=None, reset_dots=False):
+                """Quét lại trạng thái Online / Offline cho nhóm (LAN hoặc VPN) và chỉ cập nhật danh sách khi có máy đổi trạng thái."""
                 if not dialog.winfo_exists() or scan_state.get("is_scanning", False):
                     return
                 target_peers = {}
