@@ -956,13 +956,13 @@ def setup_windows_ui(self):
         self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
         self.update_fixed_password_indicator()
 
-        # Button to Copy both ID & Password at once
-        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password)
-        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
-
-        # Nút gọi Danh sách máy tính đã lưu
+        # Nút gọi Danh sách máy tính đã lưu (căn sát đáy để ngang hàng với nút LAN & VPN bên phải)
         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_saved_computers_dialog)
-        saved_list_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 10))
+        saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 15))
+
+        # Button to Copy both ID & Password at once (đưa sát lên gần dòng chữ trạng thái mật khẩu cố định)
+        copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, pady=3, command=self.copy_id_and_password)
+        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(2, 0))
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
@@ -975,14 +975,14 @@ def setup_windows_ui(self):
         lbl_p_id = tk.Label(right_panel, text=_("Nhập ID đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_id.pack(anchor=tk.W, padx=20)
         
-        self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_id.pack(pady=(5, 10), padx=20, fill=tk.X)
+        self.entry_p_id = tk.Entry(right_panel, textvariable=self.partner_id_var, font=(APP_FONT_NAME, 16), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+        self.entry_p_id.pack(pady=(5, 12), padx=20, fill=tk.X)
         
         lbl_p_pass = tk.Label(right_panel, text=_("Nhập Mật khẩu đối tác:"), font=(APP_FONT_NAME, 9), fg=self.text_gray, bg=self.card_color)
         lbl_p_pass.pack(anchor=tk.W, padx=20)
         
-        self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
-        self.entry_p_pass.pack(pady=(5, 35), padx=20, fill=tk.X)
+        self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 16), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
+        self.entry_p_pass.pack(pady=(5, 6), padx=20, fill=tk.X)
         
         # Tự động điền mật khẩu ngay khi gõ xong hoặc rời khỏi ô nhập ID đối tác
         def on_p_id_check_autofill(event=None):
@@ -1005,6 +1005,10 @@ def setup_windows_ui(self):
         self.entry_p_pass.bind("<Return>", lambda event: self.click_connect())
         self.entry_p_pass.bind("<KP_Enter>", lambda event: self.click_connect())
         
+        # Button to Paste both ID & Password at once
+        paste_all_btn = create_flat_button(right_panel, text=E(_("📋 Dán cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, pady=3, command=self.paste_id_and_password)
+        paste_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 6))
+
         # Container to hold CONNECT & ADD (+) buttons
         btn_container = tk.Frame(right_panel, bg=self.card_color)
         btn_container.pack(padx=20, fill=tk.X)
@@ -1017,9 +1021,9 @@ def setup_windows_ui(self):
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
 
-        # LAN / VPN Computers button - Danh sách & dò tìm máy trong mạng nội bộ và VPN
+        # LAN / VPN Computers button - Danh sách & dò tìm máy trong mạng nội bộ và VPN (căn sát đáy để ngang hàng với nút Danh sách máy tính bên trái)
         lan_btn = create_flat_button(right_panel, text=E(_("📡 Máy tính mạng LAN & VPN")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)
-        lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
+        lan_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 15))
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)

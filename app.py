@@ -1559,6 +1559,81 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.update_status(_("Đã sao chép cả ID & Mật khẩu!"), is_success=True)
 
 
+    def paste_id_and_password(self):
+        text = ""
+        try:
+            text = self.clipboard_get()
+        except Exception:
+            text = ""
+        if not text:
+            import sys
+            if sys.platform == 'win32':
+                try:
+                    import win32clipboard
+                    win32clipboard.OpenClipboard()
+                    try:
+                        if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                            text = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                    finally:
+                        win32clipboard.CloseClipboard()
+                except Exception:
+                    pass
+        if not text:
+            self.update_status(_("Bộ nhớ tạm trống!"), is_error=True)
+            return
+
+        import re
+        t = text.strip()
+        p_id = None
+        p_pass = None
+
+        # Pattern 1: Explicit labels 'ID: ...' and 'mật khẩu: ...'
+        m = re.search(r'(?:ID|id|Id)\s*[:=]\s*([0-9\s]{9,24}?)(?:[,;\n\-|]|\s{2,}|\s+)\s*(?:mật\s*khẩu|mat\s*khau|password|pass|mk)\s*[:=]\s*([^\s,;\n]+)', t, re.IGNORECASE)
+        if m:
+            c_id = re.sub(r'\D', '', m.group(1))
+            if len(c_id) in (9, 10, 11, 12):
+                p_id = c_id
+                p_pass = m.group(2).strip()
+
+        # Pattern 2: Independent search for ID and Password
+        if not p_id:
+            m_id = re.search(r'(?:ID|id|Id)\s*[:=]?\s*([0-9\s]{9,24})', t, re.IGNORECASE)
+            m_pass = re.search(r'(?:mật\s*khẩu|mat\s*khau|password|pass|mk)\s*[:=]?\s*([^\s,;\n]+)', t, re.IGNORECASE)
+            if m_id:
+                c_id = re.sub(r'\D', '', m_id.group(1))
+                if len(c_id) in (9, 10, 11, 12):
+                    p_id = c_id
+                    p_pass = m_pass.group(1).strip() if m_pass else None
+
+        # Pattern 3: Standard 3-3-3 or 3-3-3-3 spaced groups, optionally followed by password
+        if not p_id:
+            m_spaced = re.search(r'\b(\d{3}\s+\d{3}\s+\d{3}(?:\s+\d{3})?)\b(?:\s*[,;\n\-:]\s*|\s+)(?:(?:mật\s*khẩu|mat\s*khau|password|pass|mk)\s*[:=]?\s*)?([^\s,;\n]+)?', t, re.IGNORECASE)
+            if m_spaced:
+                c_id = re.sub(r'\D', '', m_spaced.group(1))
+                if len(c_id) in (9, 10, 11, 12):
+                    p_id = c_id
+                    p_pass = m_spaced.group(2).strip() if m_spaced.group(2) else None
+
+        # Pattern 4: Multiline where first line is ID and second is password
+        if not p_id:
+            lines = [l.strip() for l in t.splitlines() if l.strip()]
+            if len(lines) >= 2:
+                c_id = re.sub(r'\D', '', lines[0])
+                if len(c_id) in (9, 10, 11, 12):
+                    p_id = c_id
+                    p_pass = lines[1].split(':')[-1].strip()
+
+        if p_id:
+            self.partner_id_var.set(p_id)
+            if p_pass:
+                self.partner_pass_var.set(p_pass)
+                self.update_status(_("Đã dán cả ID & Mật khẩu!"), is_success=True)
+            else:
+                self.update_status(_("Đã dán ID đối tác!"), is_success=True)
+        else:
+            self.update_status(_("Không tìm thấy ID & Mật khẩu hợp lệ trong bộ nhớ tạm!"), is_error=True)
+
+
     def copy_to_clipboard(self, text):
         import sys
         if sys.platform == 'darwin':
