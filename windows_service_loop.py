@@ -271,7 +271,7 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                 si = STARTUPINFOW()
                 si.cb = ctypes.sizeof(STARTUPINFOW)
                 si.lpDesktop = desktop
-                if environment is not None:
+                if (creation_flags & win32process.CREATE_NO_WINDOW) or environment is not None:
                     si.dwFlags = win32process.STARTF_USESHOWWINDOW
                     si.wShowWindow = win32con.SW_HIDE
                 
@@ -280,6 +280,13 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                 # bi deadlock/timeout 120s-180s (2-3 phut) moi spawn xong process!
                 dw_logon_flags = 0
                 cmd_line_buf = ctypes.create_unicode_buffer(cmd_line) if cmd_line else None
+                
+                # CreateProcessWithTokenW tren Windows 7 khong chap nhan CREATE_NO_WINDOW (0x08000000)
+                # hoac NORMAL_PRIORITY_CLASS (0x00000020) trong dwCreationFlags (gay ERROR_INVALID_PARAMETER 87).
+                # Viec an cua so da duoc xu ly qua si.dwFlags = STARTF_USESHOWWINDOW va si.wShowWindow = SW_HIDE.
+                token_creation_flags = creation_flags & ~(
+                    win32process.CREATE_NO_WINDOW | win32process.NORMAL_PRIORITY_CLASS
+                )
                 
                 # Convert environment block to LPVOID
                 env_ptr = None
@@ -295,7 +302,7 @@ def create_process_robust(h_token, exe_path, cmd_line, desktop, creation_flags, 
                     dw_logon_flags,
                     exe_path,
                     cmd_line_buf,
-                    creation_flags,
+                    token_creation_flags,
                     None,
                     cwd,
                     ctypes.byref(si),
@@ -565,26 +572,44 @@ def is_session_locked(session_id):
     """
     Kiểm tra chính xác xem session có đang bị khóa màn hình (Lock Screen) hay không.
     Sử dụng WTSQuerySessionInformationW với WTSSessionInfoEx (25).
-    SessionFlags: 0 = WTS_SESSIONSTATE_LOCK, 1 = WTS_SESSIONSTATE_UNLOCK.
+    Lưu ý quan trọng (Microsoft documented bug trên Windows 7 / Server 2008 R2 - NT 6.1):
+    - Từ Windows 8 / Server 2012 trở lên (NT >= 6.2):
+      SessionFlags: 0 = WTS_SESSIONSTATE_LOCK, 1 = WTS_SESSIONSTATE_UNLOCK.
+    - Riêng trên Windows 7 / Server 2008 R2 (NT 6.1):
+      Giá trị SessionFlags bị ĐẢO NGƯỢC bởi OS: 0 = UNLOCKED, 1 = LOCKED!
     """
     try:
         import ctypes
         from ctypes import wintypes
+        v = sys.getwindowsversion()
+        is_win7_or_2008r2 = (v.major == 6 and v.minor == 1)
         buf = ctypes.c_void_p()
         bytes_ret = wintypes.DWORD()
         if ctypes.windll.wtsapi32.WTSQuerySessionInformationW(0, session_id, 25, ctypes.byref(buf), ctypes.byref(bytes_ret)):
             try:
                 flags = ctypes.c_long.from_address(buf.value + 16).value
-                if flags == 0:  # WTS_SESSIONSTATE_LOCK
-                    return True
-                elif flags == 1:  # WTS_SESSIONSTATE_UNLOCK
-                    return False
+                if is_win7_or_2008r2:
+                    # Trên Windows 7 (6.1): 0 = UNLOCK, 1 = LOCK.
+                    # Kết hợp kiểm tra LogonUI.exe để đảm bảo chính xác tuyệt đối trên mọi bản vá Win 7.
+                    if flags == 0:
+                        return is_logon_ui_running(session_id)
+                    elif flags == 1:
+                        if not is_logon_ui_running(session_id) and is_explorer_running_in_session(session_id):
+                            return False
+                        return True
+                else:
+                    if flags == 0:  # WTS_SESSIONSTATE_LOCK
+                        return True
+                    elif flags == 1:  # WTS_SESSIONSTATE_UNLOCK
+                        return False
             finally:
                 ctypes.windll.wtsapi32.WTSFreeMemory(buf)
     except Exception:
         pass
-    # Fallback: chỉ coi là lock khi có LogonUI mà KHÔNG có explorer
-    return is_logon_ui_running(session_id) and (not is_explorer_running_in_session(session_id))
+    # Fallback: coi là lock khi có LogonUI đang chạy trong session
+    if is_logon_ui_running(session_id):
+        return True
+    return not is_explorer_running_in_session(session_id)
 
 def is_explorer_running_in_session(session_id):
     try:

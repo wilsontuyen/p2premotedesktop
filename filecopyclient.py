@@ -747,6 +747,41 @@ def _parse_explorer_address_text(raw_text):
     return None
 
 
+_KNOWN_FOLDER_CSIDL = {
+    "documents": 0x0005, "my documents": 0x0005, "tài liệu": 0x0005,
+    "music": 0x000D, "nhạc": 0x000D,
+    "pictures": 0x0027, "hình ảnh": 0x0027,
+    "videos": 0x000E, "video": 0x000E,
+    "desktop": 0x0000, "màn hình nền": 0x0000,
+}
+
+
+def _known_folder_by_name(name):
+    """Thư viện (Libraries) / thư mục đặc biệt không có đường dẫn đĩa -> đường dẫn thật (Documents, Downloads...)."""
+    try:
+        n = str(name or "").strip().lower()
+        for suffix in (" library", " - file explorer", " - windows explorer"):
+            if n.endswith(suffix):
+                n = n[:-len(suffix)].strip()
+        if not n:
+            return None
+        if n in ("downloads", "tải xuống"):
+            home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+            p = os.path.join(home, "Downloads")
+            return p if os.path.isdir(p) else None
+        csidl = _KNOWN_FOLDER_CSIDL.get(n)
+        if csidl is None:
+            return None
+        buf = ctypes.create_unicode_buffer(520)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf) == 0:
+            p = buf.value
+            if p and os.path.isdir(p) and not _is_transfer_staging_dir(p):
+                return os.path.normpath(p)
+    except Exception:
+        pass
+    return None
+
+
 def _extract_explorer_path_win32(hwnd_root):
     """Fallback đọc trực tiếp đường dẫn từ cây cửa sổ con Win32 của Explorer (không phụ thuộc COM/UAC)."""
     if not hwnd_root:
@@ -838,6 +873,9 @@ def _extract_explorer_path_win32(hwnd_root):
             cand = os.path.join(drv, title)
             if os.path.isdir(cand) and not _is_transfer_staging_dir(cand):
                 return os.path.normpath(cand)
+        kf = _known_folder_by_name(title)
+        if kf:
+            return kf
     return None
 
 
@@ -871,6 +909,7 @@ def _is_desktop_shell_hwnd(hwnd):
 
 
 _shell_com_tls = threading.local()
+_LAST_QUERY_DIAG = ""
 _IS_SYSTEM_PROC_CACHE = None
 
 
@@ -935,6 +974,8 @@ def query_explorer_folder_path(allow_open_clipboard=False):
     import win32process
 
     shell = _get_thread_shell_app()
+    global _LAST_QUERY_DIAG
+    _LAST_QUERY_DIAG = f"shell={'ok' if shell is not None else 'NONE'}"
 
     def related_hwnds(h):
         if not h:
@@ -973,12 +1014,20 @@ def query_explorer_folder_path(allow_open_clipboard=False):
                         loc_name = str(getattr(window, "LocationName", "") or "")
                     except Exception:
                         pass
+                    if not (path and os.path.isdir(path)):
+                        # Library (Documents/Music...) trả về ::{GUID} hoặc .library-ms
+                        for cand_name in (loc_name, str(getattr(window, "LocationURL", "") or "")):
+                            kf = _known_folder_by_name(cand_name)
+                            if kf:
+                                path = kf
+                                break
                     if path and os.path.isdir(path) and not _is_transfer_staging_dir(path):
                         explorer_windows.append((w_hwnd, path, loc_name))
                 except Exception:
                     continue
         except Exception:
             pass
+    _LAST_QUERY_DIAG += f" com_windows={[(w, p) for (w, p, _l) in explorer_windows]}"
 
     def _match_explorer_hwnd(h):
         if not h:
@@ -2017,9 +2066,25 @@ def _cursor_in_explorer_command_bar():
 
 _DUMMY_HDROP_PATH = r"C:\RemoteDesktop_Paste_Trigger.tmp"
 _PROBE_STUB_NAME = ".__rd_clipboard_probe__"
+_PROBE_STUB_MAGIC = b"__RD_CLIP_PROBE_STUB__\x00\x00"
 _PROBE_STUB_DIR = os.path.join(
     os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopPasteProbe"
 )
+
+
+def _is_probe_stub_file(path):
+    """Kiểm tra file có phải là stub 24-byte do chương trình tạo để bật nút Paste không."""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        if _is_probe_stub_name(path):
+            return True
+        if os.path.getsize(path) == len(_PROBE_STUB_MAGIC):
+            with open(path, "rb") as fp:
+                return fp.read(len(_PROBE_STUB_MAGIC)) == _PROBE_STUB_MAGIC
+    except Exception:
+        pass
+    return False
 
 def _clear_win_attrs(path):
     """Bỏ HIDDEN|SYSTEM|READONLY trước khi xóa (staging .rdxfer_* từng bị gắn ẩn)."""
@@ -2113,7 +2178,7 @@ def _is_paste_placeholder(path, expected=None):
         parent = os.path.dirname(path)
         if parent and _is_transfer_staging_dir(parent):
             return True
-        if _is_probe_stub_name(path):
+        if _is_probe_stub_name(path) or _is_probe_stub_file(path):
             return True
         if expected is not None:
             try:
@@ -2276,9 +2341,9 @@ def _probe_stub_paths(pending_files=None):
                 continue
             p = os.path.join(_PROBE_STUB_DIR, fname)
             try:
-                if not os.path.exists(p) or os.path.getsize(p) == 0:
+                if not os.path.exists(p) or os.path.getsize(p) != len(_PROBE_STUB_MAGIC):
                     with open(p, "wb") as fp:
-                        fp.write(b"\x00")
+                        fp.write(_PROBE_STUB_MAGIC)
                 _clear_win_attrs(p)
                 stubs.append(p)
             except Exception:
@@ -2325,8 +2390,9 @@ def _scrub_probe_from_dest(dest_dir):
     except Exception:
         names = [_PROBE_STUB_NAME]
     for name in names:
-        if _is_probe_stub_name(name):
-            _retry_remove_path(os.path.join(dest_dir, name), retries=8)
+        full_p = os.path.join(dest_dir, name)
+        if _is_probe_stub_name(name) or _is_probe_stub_file(full_p):
+            _retry_remove_path(full_p, retries=8)
 
 
 def _schedule_scrub_probe(dest_dir):
@@ -2936,6 +3002,7 @@ class FileCopyClientMixin:
         finally:
             user32.CloseClipboard()
         mark_own_clipboard_write()
+        self._clip_seq_at_pending = get_clipboard_sequence_number()
         self._hdrop_materialized = False
         self.dummy_h_active = False
         try:
@@ -4270,7 +4337,7 @@ class FileCopyClientMixin:
             else:
                 self._clip_offer_in = max(int(getattr(self, "_clip_offer_in", 0) or 0), oid)
             q = self._clip_offer_q
-            last_fp = getattr(self, "_clip_offer_fp", None)
+            last_fp = getattr(self, "_clip_enqueued_fp", None) or getattr(self, "_clip_offer_fp", None)
             fp = _file_offer_fp(snap)
             applied = int(getattr(self, "_clip_offer_applied", 0) or 0)
             if oid and oid <= applied and fp == last_fp:
@@ -4280,7 +4347,7 @@ class FileCopyClientMixin:
                 oid = applied + 1
                 self._clip_offer_in = oid
                 print(f"[Clipboard] Offer id cũ nhưng file mới — nhận copy mới oid={oid}")
-            self._clip_offer_fp = fp
+            self._clip_enqueued_fp = fp
             q.append({"offer_id": oid, "files": snap})
             while len(q) > 24:
                 q.pop(0)
@@ -4364,6 +4431,14 @@ class FileCopyClientMixin:
             "offer_id": oid,
         }
 
+        if self._is_headless_host_process():
+            # Đừng đổi target_save_dir / clear done khi đang tải paste khác.
+            if not getattr(self, "_xfer_jobs", None):
+                self.target_save_dir = HEADLESS_TRANSFER_DIR
+                self.batch_paths = []
+                self.transfer_done_event.clear()
+            self._send_to_pipe("PENDING", json.dumps(msg_dict))
+
         # Luôn ghi Shared Pending Offer vào thư mục toàn cục (cho cả Client lẫn Host)
         try:
             from filecopyhost import write_shared_pending_offer
@@ -4379,7 +4454,7 @@ class FileCopyClientMixin:
             if ag_h:
                 self._agent_hwnd = ag_h
                 ctypes.windll.user32.PostMessageW(
-                    ctypes.c_void_p(ag_h), 0x0400 + 201, 0, 0
+                    ctypes.c_void_p(ag_h), 0x0400 + 201, 1, 0
                 )
         except Exception:
             pass
@@ -4394,16 +4469,10 @@ class FileCopyClientMixin:
             return
 
         if self._is_headless_host_process():
-            # Đừng đổi target_save_dir / clear done khi đang tải paste khác.
-            if not getattr(self, "_xfer_jobs", None):
-                self.target_save_dir = HEADLESS_TRANSFER_DIR
-                self.batch_paths = []
-                self.transfer_done_event.clear()
             log_overwrite_conflict(
                 f"HOST_HEADLESS SEND PENDING offer={oid} display={display_name!r} "
                 f"size={total_size} n={len(files)} names={names} → agent pipe & shared file (agent_h={bool(ag_h)})"
             )
-            self._send_to_pipe("PENDING", json.dumps(msg_dict))
             if ag_h:
                 return
             log_overwrite_conflict(

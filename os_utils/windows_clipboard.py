@@ -303,6 +303,8 @@ class ClipboardEventListener:
                                     pass
                             else:
                                 is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
+                                if not is_client and not callable(getattr(self.manager, "_agent_paste_callback", None)):
+                                    continue
                                 if not getattr(self.manager, "pending_remote_files", None):
                                     try:
                                         from filecopyhost import read_shared_pending_offer
@@ -1868,20 +1870,6 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                         except Exception:
                             pass
         
-        # Copy file trên Explorer máy client: đọc lại clipboard sau khi Explorer xong SetClipboard.
-        self._last_clip_event_at = time.time()
-        if clipboard_has_file_formats():
-            self._schedule_copied_files_sync()
-            if getattr(self, "pygame_hwnd", None) and not force_sync:
-                return
-        if getattr(self, 'pygame_hwnd', None) and not force_sync:
-            user32 = ctypes.windll.user32
-            user32.GetForegroundWindow.restype = ctypes.c_void_p
-            fg_hwnd = user32.GetForegroundWindow()
-            if fg_hwnd != self.pygame_hwnd:
-                log_debug("[on_clipboard_changed] Ngoài viewer: đồng bộ file copy, giữ text/ảnh máy thật.")
-                return
-        
         # Tránh tự kích hoạt vòng lặp khi chính ứng dụng thiết lập delayed rendering
         try:
             user32 = ctypes.windll.user32
@@ -1899,6 +1887,20 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 return
         except Exception as e:
             log_debug(f"[on_clipboard_changed] Lỗi kiểm tra GetClassName/GetClipboardOwner: {e}")
+
+        # Copy file trên Explorer máy client: đọc lại clipboard sau khi Explorer xong SetClipboard.
+        self._last_clip_event_at = time.time()
+        if clipboard_has_file_formats():
+            self._schedule_copied_files_sync()
+            if getattr(self, "pygame_hwnd", None) and not force_sync:
+                return
+        if getattr(self, 'pygame_hwnd', None) and not force_sync:
+            user32 = ctypes.windll.user32
+            user32.GetForegroundWindow.restype = ctypes.c_void_p
+            fg_hwnd = user32.GetForegroundWindow()
+            if fg_hwnd != self.pygame_hwnd:
+                log_debug("[on_clipboard_changed] Ngoài viewer: đồng bộ file copy, giữ text/ảnh máy thật.")
+                return
 
         with self.lock:
             if hasattr(self, '_clipboard_timer') and self._clipboard_timer:
@@ -2512,7 +2514,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                     return
 
                 if transfer.get("handle") is not None:
-                    if chunk_offset is not None:
+                    if chunk_offset is not None and start != written:
                         try:
                             transfer["handle"].seek(start)
                         except Exception:

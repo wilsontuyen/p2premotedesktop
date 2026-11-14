@@ -3099,7 +3099,7 @@ class HostMixin:
                 t_receiver.start()
                 
                 # Khởi chạy luồng đồng bộ Clipboard File cho Host
-                if clipboard_sync_manager and not _is_legacy_windows_host():
+                if clipboard_sync_manager:
                     clipboard_sync_manager.add_socket(conn)
                 
                 try:
@@ -3935,6 +3935,12 @@ class HostMixin:
                                 continue
                             if on_winlogon:
                                 sleep_time = min(float(sleep_time), 1.0 / 12.0)
+                            try:
+                                # Đang nhận file: nhường CPU/GIL cho luồng ghi file (Win7 GDI+JPEG rất tốn CPU).
+                                if _legacy_host and clipboard_sync_manager and getattr(clipboard_sync_manager, "incoming_transfers", None):
+                                    sleep_time = max(float(sleep_time), 0.25)
+                            except Exception:
+                                pass
                             time.sleep(sleep_time)
                         except mss.exception.ScreenShotError as e:
                             print(f"[Host] Screen capture error (re-initializing): {e}")
