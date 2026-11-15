@@ -1664,6 +1664,47 @@ def _classify_context_menu_item(name):
     return "unknown"
 
 
+def _uia_menu_text_at_point(pt):
+    """Đọc tên nút/mục menu XAML trên Windows 11 qua IUIAutomation (an toàn trong polling thread)."""
+    if not pt or not _is_windows_11():
+        return ""
+    try:
+        import comtypes
+        import comtypes.client
+        st = getattr(_uia_menu_text_at_point, "_tls", None)
+        if st is None:
+            st = threading.local()
+            _uia_menu_text_at_point._tls = st
+        uia = getattr(st, "uia", None)
+        if uia is None:
+            try:
+                comtypes.CoInitialize()
+            except Exception:
+                pass
+            mod = comtypes.client.GetModule("UIAutomationCore.dll")
+            uia = comtypes.client.CreateObject(
+                "{ff48dba4-60ef-4201-aa87-54103eef594e}",
+                interface=mod.IUIAutomation,
+            )
+            st.uia = uia
+        p = wintypes.POINT(int(pt.x), int(pt.y)) if hasattr(pt, "x") else wintypes.POINT(int(pt[0]), int(pt[1]))
+        el = uia.ElementFromPoint(p)
+        if not el:
+            return ""
+        name = (getattr(el, "CurrentName", "") or "").strip()
+        if not name:
+            try:
+                walker = uia.ControlViewWalker
+                parent = walker.GetParentElement(el)
+                if parent:
+                    name = (getattr(parent, "CurrentName", "") or "").strip()
+            except Exception:
+                pass
+        return name
+    except Exception:
+        return ""
+
+
 def _capture_menu_item_at_cursor(rmb_pos=None):
     """Phân loại mục lúc click."""
     user32 = ctypes.windll.user32
@@ -1678,6 +1719,8 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
     if not root:
         root = _find_visible_popup_menu_containing_point(pt)
     text = _win32_menu_text_at_point(pt)
+    if (not text) and _is_windows_11() and (root or _context_menu_open()):
+        text = _uia_menu_text_at_point(pt)
     kind = _classify_context_menu_item(text)
     if kind in ("paste", "not_paste"):
         try:
@@ -1855,9 +1898,7 @@ def _is_recent_rmb_paste_click_unified(
     # Windows 11 XAML
     k = (menu_item_kind or "").strip().lower()
     if k == "not_paste":
-        # Nếu có tên rõ ràng của mục khác (View, Sort, Refresh, Properties, New...) mới loại bỏ
-        if menu_item_name and menu_item_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
-            return False
+        return False
     now = time.time()
     last_l = float(last_lbutton or 0)
     last_r = float(last_rbutton or 0)
@@ -2417,7 +2458,7 @@ def _offer_empty_hdrop():
 
 def _offer_probe_hdrop(pending_files=None):
     """Cung cấp HDROP chứa stub file để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
-    stub_files = _probe_stub_paths(pending_files)
+    stub_files = _probe_stub_paths(None)
     h = create_hdrop_data(stub_files)
     if h:
         res = fn_SetClipboardData(15, h)
@@ -2824,6 +2865,12 @@ class FileCopyClientMixin:
         if had:
             print(f"[Clipboard] Nhả offer host→client ({reason}).")
             clip_trace(f"[release_remote_offer] {reason}")
+        if had or getattr(self, "pygame_hwnd", None):
+            try:
+                from filecopyhost import write_shared_pending_offer
+                write_shared_pending_offer({})
+            except Exception:
+                pass
 
     def _offer_empty_and_rearm(self, delay_s=0.2, offer=True, rearm=False):
         """Trong WM_RENDERFORMAT: SetClipboardData HDROP rỗng.
@@ -2979,9 +3026,10 @@ class FileCopyClientMixin:
             except Exception as e_ex:
                 log_debug(f"[_execute_setup_delayed_rendering] setup_clipboard_exclusions loi: {e_ex}")
             
-            # Cung cấp ngay stub HDROP mang đúng tên file thật để Windows Explorer (kể cả Win 11 XAML)
-            # nhận diện đối tượng file và bật sáng đèn icon/menu Paste 100% ngay tức thì.
-            stub_files = _probe_stub_paths(self.pending_remote_files)
+            # Cung cấp stub HDROP trung tính (RemoteDesktop_Paste_Trigger.tmp) để Windows Explorer
+            # nhận diện có file và bật sáng đèn icon/menu Paste, nhưng không trùng tên file thật
+            # (tránh Windows tự bật hộp thoại Replace or Skip Files song song với app).
+            stub_files = _probe_stub_paths(None)
             h = create_hdrop_data(stub_files) if stub_files else None
             if h:
                 res = fn_SetClipboardData(15, h)
@@ -3553,7 +3601,9 @@ class FileCopyClientMixin:
                     and _cursor_in_explorer_command_bar()
                     and (time.time() - (last_r or 0)) > 0.2
                 ):
-                    gesture_ok = True
+                    cmd_txt = _uia_menu_text_at_point(_cursor_point())
+                    if _classify_context_menu_item(cmd_txt) != "not_paste":
+                        gesture_ok = True
             except Exception:
                 pass
         if not gesture_ok:
@@ -3721,6 +3771,26 @@ class FileCopyClientMixin:
                     self.ignore_destroy_clipboard = True
                     try:
                         res0 = fn_SetClipboardData(15, empty_now)
+                        if not res0:
+                            # Ngoài WM_RENDERFORMAT (ctrl_v / menu_paste / shift_ins): phải mở clipboard
+                            # để thay thế stub HDROP bằng HDROP rỗng, tránh Explorer tự paste từ RemoteDesktopPasteProbe.
+                            user32 = ctypes.windll.user32
+                            hwnd_cb = getattr(getattr(self, "listener", None), "hwnd", None) or 0
+                            opened = False
+                            for _attempt in range(6):
+                                try:
+                                    if user32.OpenClipboard(ctypes.c_void_p(hwnd_cb) if hwnd_cb else None):
+                                        opened = True
+                                        break
+                                except Exception:
+                                    pass
+                                time.sleep(0.005)
+                            if opened:
+                                try:
+                                    user32.EmptyClipboard()
+                                    res0 = fn_SetClipboardData(15, empty_now)
+                                finally:
+                                    user32.CloseClipboard()
                         if not res0:
                             fn_GlobalFree(empty_now)
                         log_debug(f"[execute_client_paste] Unblock Explorer empty HDROP res={res0} dest={dest_dir}")

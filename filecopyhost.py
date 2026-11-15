@@ -2580,7 +2580,7 @@ def run_clipboard_agent_mode():
             try:
                 user32.EmptyClipboard()
                 setup_clipboard_exclusions()
-                stub_files = _probe_stub_paths(_pending_info.get("files"))
+                stub_files = _probe_stub_paths(None)
                 h = create_hdrop_data(stub_files) if stub_files else None
                 if h:
                     res = fn_SetClipboardData(CF_HDROP, h)
@@ -2992,17 +2992,35 @@ def run_clipboard_agent_mode():
                 agent_print(f"[ClipboardAgent] Paste dest={paste_dest!r} files={len(info.get('files') or [])}")
 
                 # Trả HDROP rỗng NGAY — không chờ 100% trong GetData.
-                if source == "render_format":
-                    empty_hdrop = create_hdrop_data([])
-                    if empty_hdrop:
-                        _ignore_destroy = True
-                        try:
+                empty_hdrop = create_hdrop_data([])
+                if empty_hdrop:
+                    _ignore_destroy = True
+                    try:
+                        res = 0
+                        if source == "render_format":
                             res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
-                            if not res:
-                                fn_GlobalFree(empty_hdrop)
-                            agent_print(f"[ClipboardAgent] Unblock Explorer, tai file o nen. res={res}")
-                        finally:
-                            _ignore_destroy = False
+                        else:
+                            hwnd_cb = _agent_hwnd or 0
+                            opened = False
+                            for _attempt in range(6):
+                                try:
+                                    if user32.OpenClipboard(ctypes.c_void_p(hwnd_cb) if hwnd_cb else None):
+                                        opened = True
+                                        break
+                                except Exception:
+                                    pass
+                                time.sleep(0.005)
+                            if opened:
+                                try:
+                                    user32.EmptyClipboard()
+                                    res = fn_SetClipboardData(CF_HDROP, empty_hdrop)
+                                finally:
+                                    user32.CloseClipboard()
+                        if not res:
+                            fn_GlobalFree(empty_hdrop)
+                        agent_print(f"[ClipboardAgent] Unblock Explorer, tai file o nen. source={source} res={res}")
+                    finally:
+                        _ignore_destroy = False
 
                 _schedule_scrub_probe(paste_dest)
 

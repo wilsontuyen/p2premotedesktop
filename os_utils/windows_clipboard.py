@@ -225,11 +225,7 @@ class ClipboardEventListener:
                                 self.manager._lmb_hit_context_menu = True
                                 kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 self.manager._lmb_menu_item_kind = kind
-                                is_explicit_not_paste = (
-                                    kind == "not_paste"
-                                    and name
-                                    and name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "")
-                                )
+                                is_explicit_not_paste = (kind == "not_paste")
                                 if _menu_item_counts_as_paste(kind) or (
                                     not is_explicit_not_paste
                                     and 0.12 < age_r < 8.0
@@ -278,18 +274,12 @@ class ClipboardEventListener:
                                             clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
                                         except Exception:
                                             pass
-                                    elif chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+                                    elif chk_kind == "not_paste":
                                         self.manager._lmb_hit_context_menu = False
                                         self.manager._lmb_menu_item_kind = "not_paste"
                                     else:
-                                        paste_from_menu = True
-                                        self.manager._lmb_hit_context_menu = True
-                                        self.manager._lmb_menu_item_kind = "paste"
-                                        try:
-                                            from utils.logger import clip_trace
-                                            clip_trace(f"[LMB menu] Win11 RMB vicinity paste gesture (near_rmb={near_rmb}, menu_open={menu_open})")
-                                        except Exception:
-                                            pass
+                                        self.manager._lmb_hit_context_menu = False
+                                        self.manager._lmb_menu_item_kind = chk_kind or "unknown"
                                 else:
                                     self.manager._lmb_hit_context_menu = False
                                     self.manager._lmb_menu_item_kind = "unknown"
