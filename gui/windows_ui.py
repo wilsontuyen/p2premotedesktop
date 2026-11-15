@@ -959,9 +959,13 @@ def setup_windows_ui(self):
         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, pady=3, command=self.copy_id_and_password)
         copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 0))
 
-        # Nhãn hiển thị trạng thái mật khẩu cố định (căn giữa khoảng trống giữa 2 nút)
-        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
-        self.fixed_pass_indicator.pack(side=tk.TOP, expand=True, anchor=tk.W, padx=20, pady=0)
+        # Nhãn hiển thị trạng thái mật khẩu cố định (ngang hàng theo chiều dọc với nút KẾT NỐI bên phải)
+        fixed_pass_frame = tk.Frame(left_panel, bg=self.card_color)
+        fixed_pass_frame.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(6, 0))
+        fixed_pass_frame.pack_propagate(False)
+
+        self.fixed_pass_indicator = tk.Label(fixed_pass_frame, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color, anchor=tk.W)
+        self.fixed_pass_indicator.place(relx=0.0, rely=0.5, anchor=tk.W)
         self.update_fixed_password_indicator()
         
         # RIGHT PANEL: Control Remote Computer
@@ -1020,6 +1024,10 @@ def setup_windows_ui(self):
         self.add_partner_btn = create_flat_button(btn_container, text=E("➕"), font=EMOJI_FONT_LARGE, fg=self.text_white, bg="#007ACC", activebackground="#005A9E", pady=2, width=4, command=self.add_current_partner_to_saved)
         self.add_partner_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ToolTip(self.add_partner_btn, _("Thêm máy tính"))
+
+        # Đồng bộ chiều cao khung nhãn mật khẩu cố định bên trái bằng đúng chiều cao nút KẾT NỐI bên phải
+        fixed_pass_frame.config(height=btn_container.winfo_reqheight())
+        btn_container.bind("<Configure>", lambda e: fixed_pass_frame.config(height=e.height) if e.height > 1 else None)
 
         # LAN / VPN Computers button - Danh sách & dò tìm máy trong mạng nội bộ và VPN (căn sát đáy để ngang hàng với nút Danh sách máy tính bên trái)
         lan_btn = create_flat_button(right_panel, text=E(_("📡 Máy tính mạng LAN & VPN")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_lan_computers_dialog)

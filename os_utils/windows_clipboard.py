@@ -222,14 +222,10 @@ class ClipboardEventListener:
                             last_r = float(getattr(self.manager, "last_rbutton_time", 0) or 0)
                             age_r = now - last_r
                             if hit_menu:
-                                self.manager._lmb_hit_context_menu = True
                                 kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 self.manager._lmb_menu_item_kind = kind
-                                is_explicit_not_paste = (kind == "not_paste")
-                                if _menu_item_counts_as_paste(kind) or (
-                                    not is_explicit_not_paste
-                                    and 0.12 < age_r < 8.0
-                                ):
+                                self.manager._lmb_hit_context_menu = _menu_item_counts_as_paste(kind)
+                                if _menu_item_counts_as_paste(kind):
                                     paste_from_menu = True
                                     try:
                                         from utils.logger import clip_trace

@@ -1338,6 +1338,7 @@ def _win32_menu_text_at_point(pt):
             return ""
         MN_GETHMENU = 0x01E1
         MF_BYPOSITION = 0x0400
+        user32.SendMessageW.restype = ctypes.c_void_p
         hmenu = user32.SendMessageW(ctypes.c_void_p(hwnd_menu), MN_GETHMENU, 0, 0)
         if not hmenu:
             return ""
@@ -1347,8 +1348,10 @@ def _win32_menu_text_at_point(pt):
         idx = user32.MenuItemFromPoint(hwnd_menu, hmenu, pt)
         if idx < 0:
             return ""
+        user32.GetMenuStringW.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.LPWSTR, ctypes.c_int, wintypes.UINT]
+        user32.GetMenuStringW.restype = ctypes.c_int
         buf = ctypes.create_unicode_buffer(512)
-        user32.GetMenuStringW(ctypes.c_void_p(hmenu), idx, buf, 512, MF_BYPOSITION)
+        user32.GetMenuStringW(hmenu, idx, buf, 512, MF_BYPOSITION)
         return (buf.value or "").strip()
     except Exception:
         return ""
@@ -1356,33 +1359,45 @@ def _win32_menu_text_at_point(pt):
 
 def _xaml_click_is_show_more_strip(pt, menu_hwnd):
     """Win11 compact menu: Show more nằm dải đáy; Paste là icon/mục phía trên."""
-    if not pt or not menu_hwnd:
+    if not pt:
         return False
-    if _hwnd_class_name(menu_hwnd) == "#32768":
-        return False
+    px = int(pt.x) if hasattr(pt, "x") else int(pt[0])
+    py = int(pt.y) if hasattr(pt, "y") else int(pt[1])
     user32 = ctypes.windll.user32
-
-    class RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", ctypes.c_long), ("top", ctypes.c_long),
-            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
-        ]
-
-    rc = RECT()
-    if not user32.GetWindowRect(ctypes.c_void_p(menu_hwnd), ctypes.byref(rc)):
-        return False
-    if not (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom):
-        return False
     dpi = 96
-    try:
-        dpi = int(user32.GetDpiForWindow(ctypes.c_void_p(menu_hwnd)) or 96)
-    except Exception:
-        dpi = 96
-    band = int(40 * dpi / 96.0)
-    height = int(rc.bottom - rc.top)
-    if height < 140:
-        return False
-    return pt.y >= rc.bottom - band
+    if menu_hwnd:
+        if _hwnd_class_name(menu_hwnd) == "#32768":
+            return False
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+            ]
+
+        rc = RECT()
+        if not user32.GetWindowRect(ctypes.c_void_p(menu_hwnd), ctypes.byref(rc)):
+            return False
+        if not (rc.left <= px <= rc.right and rc.top <= py <= rc.bottom):
+            return False
+        try:
+            dpi = int(user32.GetDpiForWindow(ctypes.c_void_p(menu_hwnd)) or 96)
+        except Exception:
+            dpi = 96
+        band = int(64 * dpi / 96.0)
+        height = int(rc.bottom - rc.top)
+        if height < 140:
+            return False
+        return py >= rc.bottom - band
+
+    # Nếu menu vừa đóng mất HWND (root = None), kiểm tra theo cached rect
+    for rc in (_get_cached_menu_rects() or []):
+        rc_left, rc_top, rc_right, rc_bottom = rc[:4]
+        if rc_left <= px <= rc_right and rc_top <= py <= rc_bottom:
+            height = int(rc_bottom - rc_top)
+            if height >= 140 and py >= rc_bottom - 64:
+                return True
+    return False
 
 
 def _find_visible_popup_menu_containing_point(pt):
@@ -1510,7 +1525,7 @@ def _evaluate_win11_paste_geometry(px, py, rc):
     # Click ra khoảng trống thì thanh lệnh chỉ có nút Paste.
     # Bất chấp tọa độ X (trái/phải), cứ nằm trong dải 60px đỉnh/đáy là Paste!
     ICON_BAR_HEIGHT = 60
-    if offset_top <= ICON_BAR_HEIGHT or offset_bottom <= ICON_BAR_HEIGHT:
+    if offset_top <= ICON_BAR_HEIGHT:
         return "paste"
 
     # =====================================================================
@@ -1642,6 +1657,13 @@ _NOT_PASTE_MENU_TOKENS = (
     "edit", "chỉnh sửa", "open with", "mở bằng", "mo bang",
     # Scan
     "scan", "quét",
+    # Manage / This PC / Network Drive / Pin / Show more options (Win10 & Win11)
+    "manage", "quản lý", "quan ly", "verwalten", "gérer", "gestisci",
+    "administrar", "управление", "관리", "管理",
+    "map network drive", "disconnect network drive",
+    "pin to quick access", "pin to start", "unpin from quick access",
+    "open in new window", "open in terminal",
+    "show more options", "hiển thị thêm tùy chọn",
 )
 
 
@@ -1665,8 +1687,8 @@ def _classify_context_menu_item(name):
 
 
 def _uia_menu_text_at_point(pt):
-    """Đọc tên nút/mục menu XAML trên Windows 11 qua IUIAutomation (an toàn trong polling thread)."""
-    if not pt or not _is_windows_11():
+    """Đọc tên nút/mục menu qua IUIAutomation (an toàn trong polling thread)."""
+    if not pt:
         return ""
     try:
         import comtypes
@@ -1719,9 +1741,11 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
     if not root:
         root = _find_visible_popup_menu_containing_point(pt)
     text = _win32_menu_text_at_point(pt)
-    if (not text) and _is_windows_11() and (root or _context_menu_open()):
+    if (not text) and (root or _context_menu_open()):
         text = _uia_menu_text_at_point(pt)
     kind = _classify_context_menu_item(text)
+    if kind == "unknown" and text and len(text.strip()) < 100:
+        kind = "not_paste"
     if kind in ("paste", "not_paste"):
         try:
             log_debug(f"[menu-item] name={text!r} kind={kind}")
@@ -1731,6 +1755,13 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
 
     px = int(pt.x) if hasattr(pt, "x") else int(pt[0])
     py = int(pt.y) if hasattr(pt, "y") else int(pt[1])
+
+    if _xaml_click_is_show_more_strip(pt, root):
+        try:
+            log_debug("[menu-item] name='[show-more-strip]' kind=not_paste")
+        except Exception:
+            pass
+        return "not_paste", text or "[show-more-strip]"
 
     if _is_windows_11():
         geo_kind = "unknown"
@@ -1851,7 +1882,7 @@ def _win10_rmb_paste_click(
     """
     if _is_windows_11():
         return False
-    if (menu_item_kind or "").strip().lower() == "not_paste":
+    if not _menu_item_counts_as_paste(menu_item_kind):
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -1896,8 +1927,7 @@ def _is_recent_rmb_paste_click_unified(
             menu_visible=menu_visible,
         )
     # Windows 11 XAML
-    k = (menu_item_kind or "").strip().lower()
-    if k == "not_paste":
+    if not _menu_item_counts_as_paste(menu_item_kind):
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -2645,7 +2675,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     if rmb_down:
         log_debug("[check_is_menu_query] MENU: RMB dang giu")
         return "MENU"
-    if lmb_on_menu and menu_item_kind == "not_paste":
+    if menu_item_kind == "not_paste":
         log_debug("[check_is_menu_query] MENU: click khong phai Paste (Show more / muc khac)")
         return "MENU"
 
@@ -2686,7 +2716,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         lmb_menu_paste_now = bool(
             lmb_down
             and lmb_on_menu
-            and menu_item_kind != "not_paste"
+            and _menu_item_counts_as_paste(menu_item_kind)
             and time_since_rbutton > 0.12
             and time_since_lbutton < 2.0
         ) or _win10_rmb_paste_click(
@@ -3542,6 +3572,12 @@ class FileCopyClientMixin:
                 lmb = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
             except Exception:
                 lmb = False
+            if (not kind) and (lmb or _context_menu_open()):
+                try:
+                    kind, _name = _capture_menu_item_at_cursor(rmb_pos=getattr(self, "_rmb_cursor_pos", None))
+                    self._lmb_menu_item_kind = kind
+                except Exception:
+                    pass
             age_r = (time.time() - last_r) if last_r else 999.0
             age_l = (time.time() - (last_l or 0)) if last_l else 999.0
             lmb_after_rmb = bool(
@@ -3550,7 +3586,7 @@ class FileCopyClientMixin:
                 and last_l > last_r
                 and 0.12 < age_r < 8.0
                 and age_l < 3.0
-                and kind != "not_paste"
+                and _menu_item_counts_as_paste(kind)
                 and (
                     bool(getattr(self, "_lmb_hit_context_menu", False))
                     or kind == "paste"
