@@ -273,14 +273,14 @@ def setup_mac_ui(self):
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(refresh_btn, _("Đổi mật khẩu"))
 
-        # Nhãn hiển thị trạng thái mật khẩu cố định
-        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
-        self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
-        self.update_fixed_password_indicator()
-
         # Button to Copy both ID & Password at once
         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, command=self.copy_id_and_password, pady=3)
-        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 5))
+        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(6, 0))
+
+        # Nhãn hiển thị trạng thái mật khẩu cố định (nằm dưới nút Sao chép cả ID & Mật khẩu)
+        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
+        self.fixed_pass_indicator.pack(side=tk.TOP, anchor=tk.W, padx=20, pady=(4, 4))
+        self.update_fixed_password_indicator()
 
         # Nút gọi Danh sách máy tính đã lưu
         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", command=self.show_saved_computers_dialog, pady=7)

@@ -938,7 +938,7 @@ def setup_windows_ui(self):
         
         pass_frame = tk.Frame(left_panel, bg=self.card_color)
         self._pass_frame = pass_frame
-        pass_frame.pack(fill=tk.X, padx=20, pady=(5, 5))
+        pass_frame.pack(fill=tk.X, padx=20, pady=(5, 6))
         
         self.my_pass_label = tk.Label(pass_frame, text=self.my_password, font=(APP_FONT_NAME, 16, "bold"), fg=self.text_white, bg=self.entry_bg, bd=0)
         self.my_pass_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -951,18 +951,18 @@ def setup_windows_ui(self):
         refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
         ToolTip(refresh_btn, _("Đổi mật khẩu"))
 
-        # Nhãn hiển thị trạng thái mật khẩu cố định
-        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
-        self.fixed_pass_indicator.pack(anchor=tk.W, padx=20, pady=0)
-        self.update_fixed_password_indicator()
-
         # Nút gọi Danh sách máy tính đã lưu (căn sát đáy để ngang hàng với nút LAN & VPN bên phải)
         saved_list_btn = create_flat_button(left_panel, text=E(_("📁 Danh sách máy tính đã lưu")), font=EMOJI_FONT_BOLD, fg="#FFFFFF", bg="#5B2C8E", activebackground="#7B3FA8", pady=3, command=self.show_saved_computers_dialog)
         saved_list_btn.pack(side=tk.BOTTOM, padx=20, fill=tk.X, pady=(0, 15))
 
-        # Button to Copy both ID & Password at once (đưa sát lên gần dòng chữ trạng thái mật khẩu cố định)
+        # Button to Copy both ID & Password at once
         copy_all_btn = create_flat_button(left_panel, text=E(_("📋 Sao chép cả ID & Mật khẩu")), font=EMOJI_FONT_BOLD, fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, pady=3, command=self.copy_id_and_password)
-        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(2, 0))
+        copy_all_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(0, 0))
+
+        # Nhãn hiển thị trạng thái mật khẩu cố định (căn giữa khoảng trống giữa 2 nút)
+        self.fixed_pass_indicator = tk.Label(left_panel, text="", font=(APP_FONT_NAME, 8, "italic"), fg="#2ECC71", bg=self.card_color)
+        self.fixed_pass_indicator.pack(side=tk.TOP, expand=True, anchor=tk.W, padx=20, pady=0)
+        self.update_fixed_password_indicator()
         
         # RIGHT PANEL: Control Remote Computer
         right_panel = tk.Frame(container, bg=self.card_color, bd=0, relief=tk.FLAT)
