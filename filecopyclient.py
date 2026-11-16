@@ -127,6 +127,39 @@ def _pump_messages_except_clipboard_render():
 
 HEADLESS_TRANSFER_DIR = r"C:\Users\Public\Downloads\RemoteDesktopTransfers"
 
+
+def grant_everyone_full_control(path):
+    """Cấp quyền Full Control cho Everyone + Authenticated Users trên file/thư mục staging IPC.
+    Đảm bảo user thường (Medium IL, không có quyền administrator) đọc, ghi, chuyển và xóa được
+    các file/thư mục tạm do tiến trình SYSTEM/Admin tạo ra.
+    TUYỆT ĐỐI KHÔNG set Mandatory Integrity Label Low (S:(ML;...;LW)) vì sẽ biến file .exe thành
+    Low Integrity process, khiến Windows chặn không cho ghi vào %TEMP% (Error 5: Access is denied)
+    và kích hoạt SmartScreen!
+    """
+    if sys.platform != "win32" or not path or not os.path.exists(path):
+        return
+    try:
+        import win32security
+        # Everyone (WD) + Anonymous (AN) + Authenticated Users (AU)
+        # OICI = ObjectInherit + ContainerInherit, GA = Generic All (Full Control)
+        # Chỉ can thiệp DACL, tuyệt đối không can thiệp LABEL_SECURITY_INFORMATION / SACL
+        sddl = "D:(A;OICI;GA;;;WD)(A;OICI;GA;;;AN)(A;OICI;GA;;;AU)"
+        sd = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
+            sddl, win32security.SDDL_REVISION_1
+        )
+        flags = win32security.DACL_SECURITY_INFORMATION
+        win32security.SetFileSecurity(str(path), flags, sd)
+    except Exception:
+        try:
+            import win32security
+            sd_simple = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
+                "D:(A;OICI;GA;;;WD)", win32security.SDDL_REVISION_1
+            )
+            win32security.SetFileSecurity(str(path), win32security.DACL_SECURITY_INFORMATION, sd_simple)
+        except Exception:
+            pass
+
+
 def _incoming_key(xfer_id, filename):
     return (xfer_id, filename) if xfer_id is not None else filename
 
@@ -136,11 +169,18 @@ def _xfer_staging_dir(base_dir, xfer_id):
         return base_dir
     if xfer_id is None:
         return base_dir
-    return os.path.join(base_dir, f".rdxfer_{xfer_id}")
+    stg = os.path.join(base_dir, f".rdxfer_{xfer_id}")
+    try:
+        if not os.path.isdir(stg):
+            os.makedirs(stg, exist_ok=True)
+            grant_everyone_full_control(stg)
+    except Exception:
+        pass
+    return stg
 
 
 def _hide_win_path(path):
-    """Ẩn thư mục tạm trên Windows (dấu chấm không ẩn Explorer)."""
+    """Ẩn thư mục tạm trên Windows (dấu chấm không ẩn Explorer). Chỉ dùng HIDDEN, không dùng SYSTEM để tránh chặn user thường."""
     if sys.platform != "win32" or not path:
         return
     try:
@@ -152,9 +192,34 @@ def _hide_win_path(path):
         attrs = GetFileAttributesW(str(path))
         if attrs == 0xFFFFFFFF:
             return
-        SetFileAttributesW(str(path), int(attrs) | 0x02 | 0x04)  # HIDDEN | SYSTEM
+        SetFileAttributesW(str(path), (int(attrs) & ~0x04) | 0x02)  # FILE_ATTRIBUTE_HIDDEN (0x02), bỏ SYSTEM (0x04)
     except Exception:
         pass
+
+
+def _clear_win_attrs(path):
+    """Bỏ HIDDEN|SYSTEM|READONLY trước khi xóa hoặc di chuyển (chuyển về FILE_ATTRIBUTE_NORMAL = 0x80)."""
+    if sys.platform != "win32" or not path:
+        return
+    try:
+        GetFileAttributesW = ctypes.windll.kernel32.GetFileAttributesW
+        SetFileAttributesW = ctypes.windll.kernel32.SetFileAttributesW
+        GetFileAttributesW.argtypes = [wintypes.LPCWSTR]
+        GetFileAttributesW.restype = wintypes.DWORD
+        SetFileAttributesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+        attrs = GetFileAttributesW(str(path))
+        if attrs != 0xFFFFFFFF:
+            clean = int(attrs) & ~(0x01 | 0x02 | 0x04)  # Bỏ READONLY (0x01), HIDDEN (0x02), SYSTEM (0x04)
+            if clean == 0:
+                clean = 0x80  # FILE_ATTRIBUTE_NORMAL
+            SetFileAttributesW(str(path), clean)
+    except Exception:
+        pass
+
+
+def _unhide_win_path(path):
+    """Bỏ cờ HIDDEN|SYSTEM|READONLY trên file/thư mục (chuyển về FILE_ATTRIBUTE_NORMAL)."""
+    _clear_win_attrs(path)
 
 
 def _staging_has_pending_files(path):
@@ -371,6 +436,10 @@ def _copy_file_with_progress(src, dst, on_progress=None, should_stop=None):
             pass
         completed = True
         try:
+            grant_everyone_full_control(dst)
+        except Exception:
+            pass
+        try:
             os.remove(src)
         except Exception:
             threading.Thread(target=_retry_remove_path, args=(src,), daemon=True).start()
@@ -472,44 +541,87 @@ def _relocate_transfer_files_unlocked(src_paths, dest_dir, on_progress=None, sho
                     all_in_dest = False
                     continue
                 if os.path.isdir(dest_path) and not os.path.islink(dest_path):
+                    _clear_win_attrs(dest_path)
                     shutil.rmtree(dest_path, ignore_errors=True)
                 else:
+                    _clear_win_attrs(dest_path)
                     os.remove(dest_path)
-            if os.path.isdir(src_abs) or _same_volume(src_abs, dest_path):
-                shutil.move(src_abs, dest_path)
-                if on_progress:
-                    on_progress(_path_byte_size(dest_path))
+
+            _unhide_win_path(src_abs)
+            _unhide_win_path(os.path.dirname(src_abs))
+
+            move_ok = False
+            # 1. Thử rename / replace trực tiếp trên cùng phân vùng (nguyên tử và cực nhanh)
+            if not os.path.isdir(src_abs):
+                try:
+                    os.replace(src_abs, dest_path)
+                    move_ok = True
+                    try:
+                        grant_everyone_full_control(dest_path)
+                    except Exception:
+                        pass
+                    if on_progress:
+                        on_progress(_path_byte_size(dest_path))
+                except Exception as e_replace:
+                    log_debug(f"[relocate] os.replace failed ({src_abs} -> {dest_path}): {e_replace}")
+
+            # 2. Thử shutil.move (hỗ trợ chuyển phân vùng và thư mục)
+            if not move_ok:
+                try:
+                    shutil.move(src_abs, dest_path)
+                    move_ok = True
+                    try:
+                        grant_everyone_full_control(dest_path)
+                    except Exception:
+                        pass
+                    if on_progress:
+                        on_progress(_path_byte_size(dest_path))
+                except Exception as e_sm:
+                    log_debug(f"[relocate] shutil.move failed ({src_abs} -> {dest_path}): {e_sm}")
+
+            # 3. Nếu là thư mục hoặc shutil.move thất bại (khác ổ đĩa hoặc bị chặn quyền xóa file tạm do SYSTEM sở hữu)
+            if not move_ok:
+                if should_stop and should_stop():
+                    raise InterruptedError("cancel")
+                if os.path.isdir(src_abs):
+                    shutil.copytree(src_abs, dest_path, dirs_exist_ok=True)
+                    try:
+                        shutil.rmtree(src_abs, ignore_errors=True)
+                    except Exception:
+                        pass
+                    if on_progress:
+                        on_progress(_path_byte_size(dest_path))
+                    move_ok = True
+                else:
+                    _copy_file_with_progress(src_abs, dest_path, on_progress, should_stop=should_stop)
+                    move_ok = True
+
+            if move_ok and os.path.exists(dest_path):
+                moved.append(os.path.abspath(dest_path))
             else:
-                _copy_file_with_progress(src_abs, dest_path, on_progress, should_stop=should_stop)
-            moved.append(os.path.abspath(dest_path))
+                moved.append(src_abs)
+                all_in_dest = False
         except InterruptedError:
             _retry_remove_path(dest_path)
             all_in_dest = False
             break
         except Exception as e:
-            log_debug(f"[relocate_transfer_files] move failed {src_abs} -> {dest_path}: {e}")
-            try:
-                if should_stop and should_stop():
-                    raise InterruptedError("cancel")
-                if os.path.exists(dest_path) and not _is_transfer_junk_at_dest(dest_path) and dest_key not in allow_replace:
-                    raise RuntimeError("dest exists, no replace")
-                if os.path.isdir(src_abs):
-                    shutil.copytree(src_abs, dest_path)
-                    shutil.rmtree(src_abs, ignore_errors=True)
-                    if on_progress:
-                        on_progress(_path_byte_size(dest_path))
-                else:
-                    _copy_file_with_progress(src_abs, dest_path, on_progress, should_stop=should_stop)
-                moved.append(os.path.abspath(dest_path))
-            except InterruptedError:
-                _retry_remove_path(dest_path)
-                all_in_dest = False
-                break
-            except Exception as e2:
-                log_debug(f"[relocate_transfer_files] copy fallback failed: {e2}")
-                _retry_remove_path(dest_path)
-                moved.append(src_abs)
-                all_in_dest = False
+            log_debug(f"[relocate_transfer_files] relocate error {src_abs} -> {dest_path}: {e}")
+            # Nếu file đích đã tồn tại và kích thước khớp, coi như đã copy thành công (chỉ xóa file nguồn tạm thất bại do quyền)
+            if os.path.exists(dest_path) and os.path.isfile(dest_path) and os.path.isfile(src_abs):
+                try:
+                    if os.path.getsize(dest_path) == os.path.getsize(src_abs):
+                        moved.append(os.path.abspath(dest_path))
+                        try:
+                            os.remove(src_abs)
+                        except Exception:
+                            pass
+                        continue
+                except Exception:
+                    pass
+            _retry_remove_path(dest_path)
+            moved.append(src_abs)
+            all_in_dest = False
     if moved and all_in_dest:
         for p in moved:
             if os.path.normcase(os.path.dirname(os.path.abspath(p))) != dest_abs:
@@ -579,18 +691,28 @@ def _promote_completed_xfer_file(staging_path, dest_dir, rel_name, replace_keys=
         except Exception:
             _retry_remove_path(dest_path)
     try:
+        _unhide_win_path(staging_path)
         os.replace(staging_path, dest_path)
+        try:
+            grant_everyone_full_control(dest_path)
+        except Exception:
+            pass
         try:
             log_overwrite_conflict(f"PROMOTE ok → {dest_path}")
         except Exception:
             pass
+        return os.path.abspath(dest_path)
     except OSError:
-        shutil.move(staging_path, dest_path)
         try:
-            log_overwrite_conflict(f"PROMOTE move → {dest_path}")
-        except Exception:
-            pass
-    return os.path.abspath(dest_path)
+            _copy_file_with_progress(staging_path, dest_path)
+            try:
+                log_overwrite_conflict(f"PROMOTE copy → {dest_path}")
+            except Exception:
+                pass
+            return os.path.abspath(dest_path)
+        except Exception as e_cp:
+            log_debug(f"[promote] copy fallback failed {staging_path} -> {dest_path}: {e_cp}")
+            return staging_path
 
 
 def _collect_actual_file_sizes(paths):
@@ -1343,6 +1465,9 @@ def _win32_menu_text_at_point(pt):
         if not hmenu:
             return ""
 
+        user32.GetMenuItemCount.restype = ctypes.c_int
+        count = user32.GetMenuItemCount(ctypes.c_void_p(hmenu))
+
         user32.MenuItemFromPoint.argtypes = [wintypes.HWND, wintypes.HMENU, wintypes.POINT]
         user32.MenuItemFromPoint.restype = ctypes.c_int
         idx = user32.MenuItemFromPoint(hwnd_menu, hmenu, pt)
@@ -1352,7 +1477,44 @@ def _win32_menu_text_at_point(pt):
         user32.GetMenuStringW.restype = ctypes.c_int
         buf = ctypes.create_unicode_buffer(512)
         user32.GetMenuStringW(hmenu, idx, buf, 512, MF_BYPOSITION)
-        return (buf.value or "").strip()
+        txt = (buf.value or "").strip()
+        if txt:
+            return txt
+
+        # Xử lý owner-drawn menu (GetMenuStringW trả về rỗng trong Explorer):
+        user32.GetMenuItemID.argtypes = [wintypes.HMENU, ctypes.c_int]
+        user32.GetMenuItemID.restype = wintypes.UINT
+        cmd_id = user32.GetMenuItemID(ctypes.c_void_p(hmenu), idx)
+        if cmd_id in (0x7013, 0x001C, 28691, 28):
+            return "Properties"
+
+        if count > 1 and idx >= count - 1:
+            return "Properties"
+
+        has_paste = False
+        paste_idx = -1
+        for i in range(count):
+            cid = user32.GetMenuItemID(ctypes.c_void_p(hmenu), i)
+            if cid in (0x701A, 0x701B, 28702, 28698, 28700):
+                has_paste = True
+                paste_idx = i
+                break
+            user32.GetMenuStringW(hmenu, i, buf, 512, MF_BYPOSITION)
+            itxt = (buf.value or "").lower()
+            if any(tok in itxt for tok in _PASTE_MENU_TOKENS):
+                has_paste = True
+                paste_idx = i
+                break
+        if not has_paste:
+            return "not_paste"
+
+        if paste_idx >= 0 and idx == paste_idx:
+            return "Paste"
+        if cmd_id in (0x701A, 0x701B, 28702, 28698, 28700):
+            return "Paste"
+        if paste_idx >= 0 and idx != paste_idx and idx >= 0:
+            return "not_paste"
+        return "Paste"
     except Exception:
         return ""
 
@@ -1527,31 +1689,44 @@ def _evaluate_win11_paste_geometry(px, py, rc):
     offset_top = py - top
     offset_bottom = bottom - py
 
-    # =====================================================================
-    # 1. ICON PASTE TRÊN CÙNG HOẶC DƯỚI CÙNG (COMMAND BAR)
-    # =====================================================================
-    # Click ra khoảng trống thì thanh lệnh chỉ có nút Paste.
-    # Bất chấp tọa độ X (trái/phải), cứ nằm trong dải 60px đỉnh/đáy là Paste!
-    ICON_BAR_HEIGHT = 60
     pos = _GLOBAL_RMB_POS
     opened_upwards = bool(pos and abs(pos[1] - bottom) < abs(pos[1] - top))
-    if opened_upwards:
-        if offset_bottom <= ICON_BAR_HEIGHT:
-            return "paste"
-    else:
-        if offset_top <= ICON_BAR_HEIGHT:
-            return "paste"
 
     # =====================================================================
-    # 2. TEXT PASTE DỌC
+    # 1. VÙNG PROPERTIES / SHOW MORE (Đáy khi mở xuống, Đỉnh khi mở lên)
+    # Tuyệt đối KHÔNG PHẢI là Paste!
+    # =====================================================================
+    if not opened_upwards:
+        if offset_bottom <= 55 or frac_y >= 0.80:
+            return "not_paste"
+    else:
+        if offset_top <= 55 or frac_y <= 0.20:
+            return "not_paste"
+
+    # =====================================================================
+    # 2. ICON PASTE (COMMAND BAR: Đỉnh khi mở xuống, Đáy khi mở lên)
+    # =====================================================================
+    ICON_BAR_HEIGHT = 55
+    if not opened_upwards:
+        if offset_top <= ICON_BAR_HEIGHT:
+            if 10 <= (px - left) <= 140:
+                return "paste"
+            return "not_paste"
+    else:
+        if offset_bottom <= ICON_BAR_HEIGHT:
+            if 10 <= (px - left) <= 140:
+                return "paste"
+            return "not_paste"
+
+    # =====================================================================
+    # 3. TEXT PASTE DỌC
     # =====================================================================
     # Trạng thái Paste hiện dưới dạng chữ ở giữa menu (dưới Refresh, trên New)
-    # Mở rộng dải nhận diện 0.18 - 0.65 để thích ứng nhiều shell extensions khác nhau
-    if 0.18 <= frac_y <= 0.65:
+    if 0.18 <= frac_y <= 0.75:
         return "paste"
 
     # =====================================================================
-    # 3. CÁC VÙNG KHÁC TRÊN MENU XAML: trả về unknown để cho phép RMB fallback
+    # 4. CÁC VÙNG KHÁC TRÊN MENU XAML: trả về unknown
     # =====================================================================
     return "unknown"
 
@@ -1734,6 +1909,10 @@ def _uia_menu_text_at_point(pt):
                 parent = walker.GetParentElement(el)
                 if parent:
                     name = (getattr(parent, "CurrentName", "") or "").strip()
+                if not name:
+                    child = walker.GetFirstChildElement(el)
+                    if child:
+                        name = (getattr(child, "CurrentName", "") or "").strip()
             except Exception:
                 pass
         return name
@@ -2147,11 +2326,12 @@ def _cursor_in_explorer_command_bar():
     return (rc.left <= pt.x <= rc.right) and (rc.top <= pt.y <= rc.top + bar_h)
 
 
-_DUMMY_HDROP_PATH = r"C:\RemoteDesktop_Paste_Trigger.tmp"
+import tempfile
+_DUMMY_HDROP_PATH = os.path.join(tempfile.gettempdir(), "RemoteDesktop_Paste_Trigger.tmp")
 _PROBE_STUB_NAME = ".__rd_clipboard_probe__"
 _PROBE_STUB_MAGIC = b"__RD_CLIP_PROBE_STUB__\x00\x00"
 _PROBE_STUB_DIR = os.path.join(
-    os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopPasteProbe"
+    tempfile.gettempdir(), "RemoteDesktopPasteProbe"
 )
 
 
@@ -2168,17 +2348,6 @@ def _is_probe_stub_file(path):
     except Exception:
         pass
     return False
-
-def _clear_win_attrs(path):
-    """Bỏ HIDDEN|SYSTEM|READONLY trước khi xóa (staging .rdxfer_* từng bị gắn ẩn)."""
-    if sys.platform != "win32" or not path:
-        return
-    try:
-        SetFileAttributesW = ctypes.windll.kernel32.SetFileAttributesW
-        SetFileAttributesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
-        SetFileAttributesW(str(path), 0x80)  # FILE_ATTRIBUTE_NORMAL
-    except Exception:
-        pass
 
 
 def _retry_remove_path(path, retries=8):
@@ -2500,7 +2669,7 @@ def _offer_empty_hdrop():
 
 def _offer_probe_hdrop(pending_files=None):
     """Cung cấp HDROP chứa stub file để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
-    stub_files = _probe_stub_paths(None)
+    stub_files = _probe_stub_paths(pending_files)
     h = create_hdrop_data(stub_files)
     if h:
         res = fn_SetClipboardData(15, h)
@@ -3009,12 +3178,6 @@ class FileCopyClientMixin:
             return
         if clipboard_has_file_formats():
             return
-        try:
-            u32 = ctypes.windll.user32
-            if (u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1)) and not clipboard_has_file_formats():
-                return
-        except Exception:
-            pass
         try:
             if self._user_clipboard_wins():
                 return
@@ -3753,8 +3916,16 @@ class FileCopyClientMixin:
         try:
             u32 = ctypes.windll.user32
             has_text = bool(u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1))
-            if (getattr(self, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats():
+            if getattr(self, "_clipboard_mode", None) == "text" or (has_text and self._user_clipboard_wins()):
                 log_debug(f"[execute_client_paste] Bỏ qua ({reason}): Clipboard đang ở chế độ text, không phải file.")
+                self.pending_remote_files = []
+                self._reoffer_files = None
+                self._allow_delayed = False
+                try:
+                    from filecopyhost import clear_shared_pending_offer
+                    clear_shared_pending_offer()
+                except Exception:
+                    pass
                 return
         except Exception:
             pass

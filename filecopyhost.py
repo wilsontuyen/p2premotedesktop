@@ -42,6 +42,7 @@ from gui.components import ClassicCopyDialog
 # Shared file helpers (host -> client module is the home for path/staging/menu)
 from filecopyclient import (
     HEADLESS_TRANSFER_DIR,
+    grant_everyone_full_control,
     _CLIPBOARD_PROBE_PROCS,
     _CONTEXT_MENU_CLASSES,
     _CONTEXT_MENU_HIT_CLASSES,
@@ -202,6 +203,7 @@ def get_global_shared_dir():
     for d in candidates:
         try:
             os.makedirs(d, exist_ok=True)
+            grant_everyone_full_control(d)
             test_f = os.path.join(d, ".perm_test")
             with open(test_f, "w", encoding="utf-8") as tf:
                 tf.write("ok")
@@ -242,12 +244,15 @@ def write_shared_pending_offer(msg_dict):
         for dirpath in dirs_to_write:
             try:
                 os.makedirs(dirpath, exist_ok=True)
+                grant_everyone_full_control(dirpath)
                 fpath = os.path.join(dirpath, "pending_remote_offer.json")
                 tmp_fd, tmp_path = tempfile.mkstemp(dir=dirpath, suffix=".tmp")
                 with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                     json.dump(msg_dict, f, ensure_ascii=False)
+                grant_everyone_full_control(tmp_path)
                 try:
                     os.replace(tmp_path, fpath)
+                    grant_everyone_full_control(fpath)
                 except Exception:
                     if os.path.exists(fpath):
                         try:
@@ -255,6 +260,7 @@ def write_shared_pending_offer(msg_dict):
                         except Exception:
                             pass
                     shutil.move(tmp_path, fpath)
+                    grant_everyone_full_control(fpath)
                 written_any = True
             except Exception:
                 pass
@@ -276,6 +282,48 @@ def write_shared_pending_offer(msg_dict):
         except Exception:
             pass
         return False
+
+
+def clear_shared_pending_offer():
+    """Xóa bỏ hoàn toàn offer file đang chờ trên tất cả các thư mục IPC / shared."""
+    try:
+        dirs_to_clear = [get_global_shared_dir()]
+        try:
+            from utils.logger import get_logs_dir, app_dir
+            ld = get_logs_dir()
+            if ld not in dirs_to_clear:
+                dirs_to_clear.append(ld)
+            ad_logs = os.path.join(app_dir, "Logs")
+            if ad_logs not in dirs_to_clear:
+                dirs_to_clear.append(ad_logs)
+            pub = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "EasyRemoteDesktop", "IPC")
+            if pub not in dirs_to_clear:
+                dirs_to_clear.append(pub)
+            pd = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Easy Remote Desktop", "IPC")
+            if pd not in dirs_to_clear:
+                dirs_to_clear.append(pd)
+        except Exception:
+            pass
+        for d in dirs_to_clear:
+            fpath = os.path.join(d, "pending_remote_offer.json")
+            try:
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+            except Exception:
+                try:
+                    with open(fpath, "w", encoding="utf-8") as f:
+                        f.write("{}")
+                except Exception:
+                    pass
+        try:
+            h_evt = _open_or_create_user_signalable_event(r"Global\AntigravityP2P_PendingOffer_Event")
+            if h_evt:
+                win32event.SetEvent(h_evt)
+                win32event.CloseHandle(h_evt)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def read_shared_pending_offer(max_age_s=86400.0):
@@ -338,9 +386,11 @@ def write_shared_agent_hwnd(hwnd):
     for d in dirs_to_write:
         try:
             os.makedirs(d, exist_ok=True)
+            grant_everyone_full_control(d)
             fpath = os.path.join(d, "shared_agent_hwnd.txt")
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(str(int(hwnd)))
+            grant_everyone_full_control(fpath)
         except Exception:
             pass
 
@@ -397,9 +447,11 @@ def write_shared_paste_request(payload):
         for d in dirs_to_write:
             try:
                 os.makedirs(d, exist_ok=True)
+                grant_everyone_full_control(d)
                 fpath = os.path.join(d, f"paste_req_{tok}.json")
                 with open(fpath, "w", encoding="utf-8") as f:
                     json.dump(payload, f, ensure_ascii=False)
+                grant_everyone_full_control(fpath)
             except Exception:
                 pass
         try:
@@ -1910,9 +1962,7 @@ def run_clipboard_agent_mode():
         # Windows 11 XAML
         k = (menu_item_kind or "").strip().lower()
         if k == "not_paste":
-            # Nếu có tên rõ ràng của mục khác (View, Sort, Refresh, Properties, New...) mới loại bỏ
-            if menu_item_name and menu_item_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
-                return False
+            return False
         now = time.time()
         last_l = float(last_lbutton or 0)
         last_r = float(last_rbutton or 0)
@@ -1970,35 +2020,20 @@ def run_clipboard_agent_mode():
                 )
             except Exception:
                 pass
-            if kind == "not_paste" and name and name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+            if kind == "not_paste":
+                _agent_lmb_hit_context_menu = False
+                _agent_lmb_menu_item_kind = "not_paste"
                 return False
             if _menu_item_counts_as_paste(kind):
                 _note_paste_gesture()
                 return True
-            # Win11 XAML: click trên menu sau RMB (0.12 < age_r < 8.0) -> là Paste!
-            if _is_windows_11() and 0.12 < age_r < 8.0:
+            if 0.12 < age_r < 8.0:
                 _agent_lmb_menu_item_kind = "paste"
                 _note_paste_gesture()
-                agent_print(f"[ClipboardAgent] LMB Win11 XAML menu -> paste name={name!r}")
-                try:
-                    log_overwrite_conflict(
-                        f"AGENT LMB win11 xaml menu -> paste kind={kind!r} name={name!r} age_r={age_r:.2f}"
-                    )
-                except Exception:
-                    pass
+                agent_print(f"[ClipboardAgent] LMB in menu unknown (not not_paste) → paste name={name!r}")
                 return True
-            # Win10: đứng trên #32768 sau RMB nhưng không đọc được chữ → vẫn là RMP.
-            if (not _is_windows_11()) and 0.12 < age_r < 8.0:
-                _agent_lmb_menu_item_kind = kind or "paste"
-                _note_paste_gesture()
-                agent_print(f"[ClipboardAgent] LMB Win10 #32768 unknown → paste name={name!r}")
-                try:
-                    log_overwrite_conflict(
-                        f"AGENT LMB win10 classic menu → paste kind={kind!r} name={name!r} age_r={age_r:.2f}"
-                    )
-                except Exception:
-                    pass
-                return True
+            _agent_lmb_hit_context_menu = False
+            _agent_lmb_menu_item_kind = kind or ""
             return False
         rpos = _agent_rmb_cursor_pos
         near_rmb = bool(
@@ -2028,7 +2063,7 @@ def run_clipboard_agent_mode():
 
         chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
         _agent_lmb_menu_item_name = chk_name
-        if chk_kind == "not_paste" and chk_name and chk_name not in ("[xaml-not-paste]", "[xaml-pos-not_paste]", "[show-more-strip]", ""):
+        if chk_kind == "not_paste":
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = "not_paste"
             return False
@@ -2060,6 +2095,7 @@ def run_clipboard_agent_mode():
             and near_rmb
             and not _agent_rmb_is_taskbar
             and (menu_open or menu_just_closed)
+            and chk_kind != "not_paste"
         ):
             profile = "win11" if _is_windows_11() else "win10"
             _agent_lmb_hit_context_menu = True
@@ -2123,10 +2159,11 @@ def run_clipboard_agent_mode():
                 _csm.pending_remote_files = []
                 _csm._reoffer_files = None
                 _csm._allow_delayed = False
+                _csm._clipboard_mode = "text"
         except Exception:
             pass
         try:
-            write_shared_pending_offer({})
+            clear_shared_pending_offer()
         except Exception:
             pass
         if was_holding:
@@ -2249,6 +2286,7 @@ def run_clipboard_agent_mode():
                             _agent_context_menu_seen_at = time.time()
                     except Exception:
                         pass
+                    _check_and_trigger_probe_paste("poll_probe_watchdog")
                 if user32.GetAsyncKeyState(0x01) & 0x8000:
                     now = time.time()
                     on_self = _cursor_over_current_process()
@@ -2256,9 +2294,12 @@ def run_clipboard_agent_mode():
                     if not _agent_lmb_held:
                         _register_lmb_down()
                         if not on_self:
+                            _check_and_trigger_probe_paste("lmb_down_probe")
                             _has_txt_lmb = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                            if not (_has_txt_lmb and not clipboard_has_file_formats()):
+                            if not (_has_txt_lmb and _agent_user_clipboard_wins()):
                                 is_paste = _agent_lmb_is_context_paste(on_self)
+                            else:
+                                _yield_clipboard_to_user("lmb_text_present")
                     else:
                         _agent_last_lbutton_time = now
                     _agent_lmb_held = True
@@ -2274,7 +2315,7 @@ def run_clipboard_agent_mode():
                                 name="AgentMenuPasteTrigger",
                             ).start()
                     _has_txt_rearm = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not clipboard_has_file_formats() and not _has_txt_rearm:
+                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not _has_txt_rearm:
                         if not is_paste:
                             _agent_dummy_h_active = False
                             ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -2309,31 +2350,31 @@ def run_clipboard_agent_mode():
 
                 if user32.GetAsyncKeyState(0x0D) & 0x8000: # Enter
                     _has_txt_k = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                    if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not (_has_txt_k and not clipboard_has_file_formats()):
+                    if not _has_txt_k and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 if user32.GetAsyncKeyState(0x1B) & 0x8000: # Esc
                     _has_txt_k = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                    if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not (_has_txt_k and not clipboard_has_file_formats()):
+                    if not _has_txt_k and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
                         ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
                 if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
                     has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                     is_exp = _is_explorer_clipboard_client()
-                    if not _agent_ctrl_v_held:
-                        if is_exp and not has_text:
+                    if has_text:
+                        _yield_clipboard_to_user("loop_ctrl_v_has_text")
+                    elif not _agent_ctrl_v_held:
+                        if is_exp and _pending_info and _agent_allow_delayed and not _agent_user_clipboard_wins():
                             _agent_last_ctrl_v_time = time.time()
                             _agent_suppress_render_until = 0.0
                             _note_paste_gesture()
-                            if _pending_info:
-                                _agent_allow_delayed = True
-                                threading.Thread(
-                                    target=_agent_trigger_paste,
-                                    args=("ctrl_v",),
-                                    kwargs={"dest_override": _agent_cached_explorer_path},
-                                    daemon=True,
-                                    name="AgentCtrlVPasteTrigger",
-                                ).start()
+                            threading.Thread(
+                                target=_agent_trigger_paste,
+                                args=("ctrl_v",),
+                                kwargs={"dest_override": _agent_cached_explorer_path},
+                                daemon=True,
+                                name="AgentCtrlVPasteTrigger",
+                            ).start()
                     _agent_ctrl_v_held = True
                     if not has_text and is_exp and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
@@ -2343,20 +2384,20 @@ def run_clipboard_agent_mode():
                 if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
                     has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                     is_exp = _is_explorer_clipboard_client()
-                    if not _agent_shift_ins_held:
-                        if is_exp and not has_text:
+                    if has_text:
+                        _yield_clipboard_to_user("loop_shift_ins_has_text")
+                    elif not _agent_shift_ins_held:
+                        if is_exp and _pending_info and _agent_allow_delayed and not _agent_user_clipboard_wins():
                             _agent_last_ctrl_v_time = time.time()
                             _agent_suppress_render_until = 0.0
                             _note_paste_gesture()
-                            if _pending_info:
-                                _agent_allow_delayed = True
-                                threading.Thread(
-                                    target=_agent_trigger_paste,
-                                    args=("shift_ins",),
-                                    kwargs={"dest_override": _agent_cached_explorer_path},
-                                    daemon=True,
-                                    name="AgentShiftInsPasteTrigger",
-                                ).start()
+                            threading.Thread(
+                                target=_agent_trigger_paste,
+                                args=("shift_ins",),
+                                kwargs={"dest_override": _agent_cached_explorer_path},
+                                daemon=True,
+                                name="AgentShiftInsPasteTrigger",
+                            ).start()
                     _agent_shift_ins_held = True
                     if not has_text and is_exp and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
                         _agent_dummy_h_active = False
@@ -2370,7 +2411,7 @@ def run_clipboard_agent_mode():
                         def _on_ctrl_c_delay():
                             try:
                                 u32_c = ctypes.windll.user32
-                                if (u32_c.IsClipboardFormatAvailable(13) or u32_c.IsClipboardFormatAvailable(1)) and not clipboard_has_file_formats():
+                                if u32_c.IsClipboardFormatAvailable(13) or u32_c.IsClipboardFormatAvailable(1):
                                     _yield_clipboard_to_user("local_ctrl_c_text")
                                     return
                             except Exception:
@@ -2559,14 +2600,6 @@ def run_clipboard_agent_mode():
         force = _agent_force_delayed_setup
         _agent_force_delayed_setup = False
         if not force:
-            try:
-                u32_chk = ctypes.windll.user32
-                if (u32_chk.IsClipboardFormatAvailable(13) or u32_chk.IsClipboardFormatAvailable(1)) and not clipboard_has_file_formats():
-                    _yield_clipboard_to_user("delayed_abort_text_present")
-                    return
-            except Exception:
-                pass
-        if not force:
             if not _agent_allow_delayed:
                 agent_print("[ClipboardAgent] Bo setup delayed — clipboard dang thuoc user.")
                 return
@@ -2575,22 +2608,6 @@ def run_clipboard_agent_mode():
                 return
         else:
             _agent_allow_delayed = True
-        if not _pending_info:
-            info = read_shared_pending_offer()
-            if info:
-                _pending_info.clear()
-                _pending_info.update(info)
-                flist = _pending_info.get("files") or []
-                try:
-                    from os_utils.windows_clipboard import clipboard_sync_manager
-                    if clipboard_sync_manager:
-                        clipboard_sync_manager.pending_remote_files = list(flist)
-                        clipboard_sync_manager._reoffer_files = list(flist)
-                        clipboard_sync_manager._allow_delayed = True
-                        clipboard_sync_manager._force_delayed_setup = True
-                except Exception:
-                    pass
-                agent_print(f"[ClipboardAgent] Nạp _pending_info từ shared file: {len(flist)} files.")
         if not _pending_info:
             agent_print("[ClipboardAgent] Không có pending_info, bỏ qua setup delayed rendering.")
             return
@@ -2675,6 +2692,19 @@ def run_clipboard_agent_mode():
             while job.get("allow") and not job["conflict_event"].is_set():
                 job["conflict_event"].wait(0.2)
             dest_dir = job.get("dest") or dest_dir
+            _desk = os.path.normcase(os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop"))
+            if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir) or os.path.normcase(dest_dir) == _desk:
+                if _agent_cached_explorer_path and os.path.isdir(_agent_cached_explorer_path) and not _is_transfer_staging_dir(_agent_cached_explorer_path) and os.path.normcase(_agent_cached_explorer_path) != _desk:
+                    dest_dir = _agent_cached_explorer_path
+                    job["dest"] = dest_dir
+                else:
+                    try:
+                        found = query_explorer_folder_path(allow_open_clipboard=True)
+                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found) and os.path.normcase(found) != _desk:
+                            dest_dir = found
+                            job["dest"] = dest_dir
+                    except Exception:
+                        pass
             log_overwrite_conflict(
                 f"AgentPasteFinish conflict_wait_end paste_id={pid} allow={job.get('allow')} "
                 f"choice={job.get('conflict_choice')!r} conflict_set={job['conflict_event'].is_set()} dest={dest_dir!r}"
@@ -2759,6 +2789,72 @@ def run_clipboard_agent_mode():
                                 should_stop=lambda: not job.get("allow"),
                                 replace_keys=replace_keys,
                             )
+                        # DIRECT MOVE FALLBACK: Đảm bảo chuyển 100% các file đã tải về vào thư mục đích (dest_dir)
+                        moved_direct = []
+                        import shutil
+                        d_abs = os.path.normcase(os.path.abspath(dest_dir))
+                        for p in to_move:
+                            if not p or not os.path.exists(p):
+                                continue
+                            try:
+                                if os.path.normcase(os.path.dirname(os.path.abspath(p))) == d_abs:
+                                    moved_direct.append(os.path.abspath(p))
+                                    continue
+                            except Exception:
+                                pass
+                            base = os.path.basename(str(p).rstrip("\\/"))
+                            if not base:
+                                moved_direct.append(p)
+                                continue
+                            dst = os.path.join(dest_dir, base)
+                            if os.path.exists(dst):
+                                try:
+                                    _clear_win_attrs(dst)
+                                    if os.path.isdir(dst) and not os.path.islink(dst):
+                                        shutil.rmtree(dst, ignore_errors=True)
+                                    else:
+                                        os.remove(dst)
+                                except Exception:
+                                    _retry_remove_path(dst)
+                            _unhide_win_path(p)
+                            _clear_win_attrs(p)
+                            mv_ok = False
+                            try:
+                                os.replace(p, dst)
+                                mv_ok = True
+                            except Exception:
+                                try:
+                                    shutil.move(p, dst)
+                                    mv_ok = True
+                                except Exception:
+                                    try:
+                                        if os.path.isdir(p):
+                                            shutil.copytree(p, dst, dirs_exist_ok=True)
+                                            try: shutil.rmtree(p, ignore_errors=True)
+                                            except Exception: pass
+                                            mv_ok = True
+                                        else:
+                                            shutil.copy2(p, dst)
+                                            try: os.remove(p)
+                                            except Exception: pass
+                                            mv_ok = True
+                                    except Exception as e_mv:
+                                        agent_print(f"[ClipboardAgent] Direct move fail {p} -> {dst}: {e_mv}")
+                            if mv_ok and os.path.exists(dst):
+                                try:
+                                    grant_everyone_full_control(dst)
+                                    _unhide_win_path(dst)
+                                except Exception:
+                                    pass
+                                moved_direct.append(os.path.abspath(dst))
+                                agent_print(f"[ClipboardAgent] DIRECT MOVE thanh cong: {p} -> {dst}")
+                            else:
+                                moved_direct.append(p)
+                        to_move = moved_direct
+                        moved_all = all(
+                            os.path.normcase(os.path.dirname(os.path.abspath(p))) == d_abs
+                            for p in to_move
+                        ) if (dest_dir and to_move) else False
                         agent_print(f"[ClipboardAgent] Paste dest={dest_dir} moved_all={moved_all} n={len(to_move)}")
                         if not job.get("allow"):
                             _agent_cleanup_partial(to_move)
@@ -3117,6 +3213,40 @@ def run_clipboard_agent_mode():
                 gui_queue.put(("cancel", paste_id))
                 return False
 
+    def _check_and_trigger_probe_paste(source="probe_detect"):
+        nonlocal _agent_cached_explorer_path
+        if not _pending_info or not _agent_allow_delayed:
+            return False
+        candidates = []
+        if _agent_cached_explorer_path:
+            candidates.append(_agent_cached_explorer_path)
+        try:
+            live = query_explorer_folder_path(allow_open_clipboard=False)
+            if live and live not in candidates:
+                candidates.append(live)
+        except Exception:
+            pass
+        for c in candidates:
+            if c and os.path.isdir(c) and not _is_transfer_staging_dir(c):
+                probe_path = os.path.join(c, "RemoteDesktop_Paste_Trigger.tmp")
+                if os.path.exists(probe_path):
+                    agent_print(f"[ClipboardAgent] PHÁT HIỆN RemoteDesktop_Paste_Trigger.tmp tại {c}! Xóa stub và kích hoạt paste.")
+                    try:
+                        _schedule_scrub_probe(c)
+                        _retry_remove_path(probe_path, retries=8)
+                    except Exception:
+                        pass
+                    _note_paste_gesture()
+                    threading.Thread(
+                        target=_agent_trigger_paste,
+                        args=(source,),
+                        kwargs={"dest_override": c},
+                        daemon=True,
+                        name="AgentProbeDetectedPasteTrigger",
+                    ).start()
+                    return True
+        return False
+
     def _agent_wndproc(hwnd, msg, wparam, lparam):
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
         nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active, _agent_cached_explorer_path, _agent_suppress_render_until, _agent_expect_repaste_until, _agent_paste_id, _agent_accept_files, _agent_allow_xfer, _agent_xfer_cancel_at, _agent_download_active, _agent_conflict_choice, _agent_conflict_skip, _agent_allow_delayed, _agent_paste_gesture_id, _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_force_delayed_setup, _agent_last_paste_start
@@ -3125,32 +3255,27 @@ def run_clipboard_agent_mode():
         if msg == WM_USER_SETUP_DELAYED:
             if wparam == 1:
                 _agent_force_delayed_setup = True
-            if not _agent_force_delayed_setup:
-                try:
-                    u32_chk = ctypes.windll.user32
-                    if (u32_chk.IsClipboardFormatAvailable(13) or u32_chk.IsClipboardFormatAvailable(1)) and not clipboard_has_file_formats():
-                        _yield_clipboard_to_user("setup_msg_text_present")
-                        return 0
-                except Exception:
-                    pass
             if not _pending_info:
-                info = read_shared_pending_offer()
-                if info and isinstance(info, dict):
-                    _pending_info.clear()
-                    _pending_info.update(info)
-                    flist = _pending_info.get("files") or []
-                    _agent_clip_seq_at_pending = get_clipboard_sequence_number()
-                    _agent_allow_delayed = True
-                    _agent_force_delayed_setup = True
-                    try:
-                        from os_utils.windows_clipboard import clipboard_sync_manager
-                        if clipboard_sync_manager:
-                            clipboard_sync_manager.pending_remote_files = list(flist)
-                            clipboard_sync_manager._reoffer_files = list(flist)
-                            clipboard_sync_manager._allow_delayed = True
-                            clipboard_sync_manager._force_delayed_setup = True
-                    except Exception:
-                        pass
+                if wparam == 1:
+                    info = read_shared_pending_offer()
+                    if info and isinstance(info, dict):
+                        _pending_info.clear()
+                        _pending_info.update(info)
+                        flist = _pending_info.get("files") or []
+                        _agent_clip_seq_at_pending = get_clipboard_sequence_number()
+                        _agent_allow_delayed = True
+                        _agent_force_delayed_setup = True
+                        try:
+                            from os_utils.windows_clipboard import clipboard_sync_manager
+                            if clipboard_sync_manager:
+                                clipboard_sync_manager.pending_remote_files = list(flist)
+                                clipboard_sync_manager._reoffer_files = list(flist)
+                                clipboard_sync_manager._allow_delayed = True
+                                clipboard_sync_manager._force_delayed_setup = True
+                        except Exception:
+                            pass
+                else:
+                    return 0
             if not _agent_force_delayed_setup and _agent_user_clipboard_wins():
                 _yield_clipboard_to_user("setup skipped")
                 return 0
@@ -3183,16 +3308,6 @@ def run_clipboard_agent_mode():
                 return 0
             if is_own_clipboard_write():
                 return 0
-            try:
-                u32_upd = ctypes.windll.user32
-                if (
-                    (u32_upd.IsClipboardFormatAvailable(13) or u32_upd.IsClipboardFormatAvailable(1))
-                    and not clipboard_has_file_formats()
-                    and not _clipboard_owned_by_sync_window()
-                ):
-                    _yield_clipboard_to_user("wndproc_local_text")
-            except Exception:
-                pass
             if should_preserve_user_clipboard(hwnd):
                 _yield_clipboard_to_user("local clipboard")
 
@@ -3631,31 +3746,30 @@ def run_clipboard_agent_mode():
         def _stamp_ctrl_v():
             nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active, _agent_allow_delayed, _agent_suppress_render_until
             try:
+                if not _is_explorer_clipboard_client():
+                    return
                 u32_v = ctypes.windll.user32
                 has_text = bool(u32_v.IsClipboardFormatAvailable(13) or u32_v.IsClipboardFormatAvailable(1))
-                if has_text and not clipboard_has_file_formats():
-                    return
-                if not _is_explorer_clipboard_client():
+                if has_text:
+                    _yield_clipboard_to_user("stamp_ctrl_v_has_text")
                     return
             except Exception:
                 pass
+            if not _pending_info or not _agent_allow_delayed:
+                return
+            if _agent_user_clipboard_wins():
+                _yield_clipboard_to_user("stamp_ctrl_v_user_wins")
+                return
             _agent_last_ctrl_v_time = time.time()
             _agent_suppress_render_until = 0.0
             _note_paste_gesture()
-            if _pending_info:
-                _agent_allow_delayed = True
-                threading.Thread(
-                    target=_agent_trigger_paste,
-                    args=("ctrl_v",),
-                    kwargs={"dest_override": _agent_cached_explorer_path},
-                    daemon=True,
-                    name="AgentHookCtrlVPasteTrigger",
-                ).start()
-            if _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
-                _agent_dummy_h_active = False
-                ctypes.windll.user32.PostMessageW(
-                    ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0
-                )
+            threading.Thread(
+                target=_agent_trigger_paste,
+                args=("ctrl_v",),
+                kwargs={"dest_override": _agent_cached_explorer_path},
+                daemon=True,
+                name="AgentHookCtrlVPasteTrigger",
+            ).start()
 
         def _stamp_lbutton():
             nonlocal _agent_last_lbutton_time, _agent_dummy_h_active, _agent_lmb_hit_context_menu
@@ -3664,11 +3778,19 @@ def run_clipboard_agent_mode():
             on_self = _cursor_over_current_process()
             is_paste = False
             if not on_self:
+                def _check_delayed_probe():
+                    for _d in (0.05, 0.15, 0.35, 0.65, 1.0):
+                        time.sleep(_d)
+                        if _check_and_trigger_probe_paste("lmb_probe_watchdog"):
+                            break
+                threading.Thread(target=_check_delayed_probe, daemon=True, name="ProbeWatchdog").start()
                 try:
                     u32_l = ctypes.windll.user32
                     has_text_l = bool(u32_l.IsClipboardFormatAvailable(13) or u32_l.IsClipboardFormatAvailable(1))
-                    if not (has_text_l and not clipboard_has_file_formats()):
+                    if not has_text_l:
                         is_paste = _agent_lmb_is_context_paste(on_self)
+                    else:
+                        _yield_clipboard_to_user("stamp_lmb_has_text")
                 except Exception:
                     is_paste = _agent_lmb_is_context_paste(on_self)
             if is_paste:
@@ -3953,9 +4075,10 @@ def run_clipboard_agent_mode():
                             _csm.pending_remote_files = []
                             _csm._reoffer_files = None
                             _csm._allow_delayed = False
+                            _csm._clipboard_mode = "text"
                     except Exception:
                         pass
-                    write_shared_pending_offer({})
+                    clear_shared_pending_offer()
                     set_clipboard_text(val, owner_hwnd=_agent_hwnd)
                 elif action == "files":
                     agent_print("[ClipboardAgent] Bỏ qua action files (không dán HDROP im lặng).")
@@ -4026,7 +4149,7 @@ def run_clipboard_agent_mode():
                     if _agent_allow_delayed and _agent_hwnd:
                         ctypes.windll.user32.PostMessageW(
                             ctypes.c_void_p(_agent_hwnd),
-                            WM_USER_SETUP_DELAYED, 0, 0
+                            WM_USER_SETUP_DELAYED, 1, 0
                         )
                     elif not _agent_hwnd:
                         agent_print("[ClipboardAgent] HWND chưa sẵn sàng, lên lịch thử lại setup.")
@@ -4034,7 +4157,7 @@ def run_clipboard_agent_mode():
                             if _agent_hwnd and _agent_allow_delayed:
                                 ctypes.windll.user32.PostMessageW(
                                     ctypes.c_void_p(_agent_hwnd),
-                                    WM_USER_SETUP_DELAYED, 0, 0
+                                    WM_USER_SETUP_DELAYED, 1, 0
                                 )
                         root.after(100, _retry_setup)
                 elif action == "pipe_cancel":

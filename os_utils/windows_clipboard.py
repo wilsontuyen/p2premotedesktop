@@ -57,6 +57,7 @@ from clipboardtext import ClipboardTextMixin
 from filecopyclient import (
     FileCopyClientMixin,
     HEADLESS_TRANSFER_DIR,
+    grant_everyone_full_control,
     _cleanup_stale_transfers,
     _pump_messages_except_clipboard_render,
     _incoming_key,
@@ -232,7 +233,7 @@ class ClipboardEventListener:
                                     and 0.12 < age_r < 8.0
                                 ):
                                     has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                                    is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
+                                    is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
                                     if not is_text_mode:
                                         paste_from_menu = True
                                     try:
@@ -276,7 +277,7 @@ class ClipboardEventListener:
                                         for rc in (_get_cached_menu_rects() or [])
                                     )
                                     has_text_m = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                                    is_text_m = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text_m) and not clipboard_has_file_formats()
+                                    is_text_m = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or (has_text_m and self.manager._user_clipboard_wins()))
                                     if (chk_kind == "paste" or (in_cached_menu and chk_kind != "not_paste")) and not is_text_m:
                                         paste_from_menu = True
                                         try:
@@ -384,7 +385,7 @@ class ClipboardEventListener:
                             pend = getattr(self.manager, "pending_remote_files", None) or []
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                             has_text_rmb = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                            if not pend and not (has_text_rmb and not clipboard_has_file_formats()):
+                            if not pend and getattr(self.manager, "_clipboard_mode", None) != "text" and not (has_text_rmb and self.manager._user_clipboard_wins()):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -452,7 +453,16 @@ class ClipboardEventListener:
                     if not getattr(self.manager, "_ctrl_v_held", False):
                         on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                        is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
+                        is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
+                        if is_text_mode:
+                            self.manager.pending_remote_files = []
+                            self.manager._reoffer_files = None
+                            self.manager._allow_delayed = False
+                            try:
+                                from filecopyhost import clear_shared_pending_offer
+                                clear_shared_pending_offer()
+                            except Exception:
+                                pass
                         is_exp = _is_explorer_clipboard_client()
                         if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
@@ -508,7 +518,16 @@ class ClipboardEventListener:
                     if not getattr(self.manager, "_shift_ins_held", False):
                         on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                        is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
+                        is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
+                        if is_text_mode:
+                            self.manager.pending_remote_files = []
+                            self.manager._reoffer_files = None
+                            self.manager._allow_delayed = False
+                            try:
+                                from filecopyhost import clear_shared_pending_offer
+                                clear_shared_pending_offer()
+                            except Exception:
+                                pass
                         is_exp = _is_explorer_clipboard_client()
                         if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
@@ -2370,7 +2389,9 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             if xid is not None:
                 self._recv_xfer_id = xid
             try:
-                os.makedirs(job.get("save_dir") or HEADLESS_TRANSFER_DIR, exist_ok=True)
+                stg_root = job.get("save_dir") or HEADLESS_TRANSFER_DIR
+                os.makedirs(stg_root, exist_ok=True)
+                grant_everyone_full_control(stg_root)
             except Exception:
                 pass
             log_file_transfer(display_name, total_size)
@@ -2455,8 +2476,10 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 dirname = os.path.dirname(target_path)
                 if dirname:
                     os.makedirs(dirname, exist_ok=True)
+                    grant_everyone_full_control(dirname)
                     stg = save_dir if os.path.basename(save_dir).startswith(".rdxfer_") else dirname
                     if os.path.basename(stg).startswith(".rdxfer_"):
+                        grant_everyone_full_control(stg)
                         _hide_win_path(stg)
                 old = self.incoming_transfers.pop(key, None)
                 if old and old.get("handle"):
@@ -2467,6 +2490,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 exists = os.path.exists(target_path)
                 mode = "r+b" if (resume_from > 0 and exists) else "wb"
                 fh = open(target_path, mode, buffering=1024 * 1024)
+                grant_everyone_full_control(target_path)
                 dest_now = self._paste_dest_for_job(job)
                 self._ensure_dest_tree(dest_now, filename)
                 written = 0
@@ -2634,7 +2658,7 @@ def _bind_clipboard_mixin_globals():
             "create_hdrop_data", "fn_SetClipboardData", "fn_GlobalFree", "clear_local_clipboard",
             "get_clipboard_sequence_number", "mark_own_clipboard_write", "is_own_clipboard_write",
             "should_preserve_user_clipboard", "clipboard_has_file_formats", "ENABLE_CLIPBOARD_SYNC",
-            "set_clipboard_dword_format", "setup_clipboard_exclusions",
+            "set_clipboard_dword_format", "setup_clipboard_exclusions", "grant_everyone_full_control",
             "_", "app_dir", "CLIPBOARD_PKT_TYPES",
             "WM_CLIPBOARDUPDATE", "HWND_MESSAGE", "_WM_RENDERFORMAT", "_WM_RENDERALLFORMATS",
             "WPARAM_64", "LPARAM_64", "LRESULT_64", "WNDPROCTYPE", "WNDCLASSEX",

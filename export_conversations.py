@@ -8,7 +8,7 @@ brain_dirs = [
     r"C:\Users\Tuyen\.gemini\antigravity-ide\brain",
     r"C:\Users\Tuyen\.gemini\antigravity\brain",
 ]
-output_dir = r"D:\Data\AI Code\remote_desktop\conversations"
+output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conversations")
 
 os.makedirs(output_dir, exist_ok=True)
 

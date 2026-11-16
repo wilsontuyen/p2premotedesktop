@@ -909,6 +909,28 @@ def spawn_clipboard_agent(session_id):
     return None
 
 
+def find_running_clipboard_agent(session_id):
+    try:
+        import psutil
+        procs = _get_wts_processes_cached(1.0)
+        target_exes = {"remotedesktopp2p.exe", "remotedesktophost.exe"}
+        for p in procs:
+            sid, pid, raw_name = p[0], p[1], (p[2] or "").lower()
+            if sid != session_id or not pid:
+                continue
+            if raw_name in target_exes or raw_name in ("python.exe", "pythonw.exe"):
+                try:
+                    cmd_list = psutil.Process(pid).cmdline() or []
+                    cmd_str = " ".join(str(x) for x in cmd_list)
+                    if "--clipboard-agent" in cmd_str:
+                        return pid
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
 def trigger_sas_system():
     try:
         import winreg
@@ -2034,7 +2056,13 @@ def main(stop_event=None):
                                 break
                             
                 if not clipboard_agent_running:
-                    log(f"Không tìm thấy Mutex của Clipboard Agent cho session {active_session_id}. Đang khởi chạy.")
+                    existing_cb_pid = find_running_clipboard_agent(active_session_id)
+                    if existing_cb_pid:
+                        clipboard_agent_pid = existing_cb_pid
+                        clipboard_agent_running = True
+
+                if not clipboard_agent_running:
+                    log(f"Không tìm thấy Mutex hoặc tiến trình của Clipboard Agent cho session {active_session_id}. Đang khởi chạy.")
                     pid = spawn_clipboard_agent(active_session_id)
                     if pid:
                         clipboard_agent_pid = pid

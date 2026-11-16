@@ -146,6 +146,14 @@ class ClipboardTextMixin:
                     self.active_sockets.remove(s)
         if sent:
             self.last_sent_text = text
+            self._clipboard_mode = "text"
+            self.pending_remote_files = []
+            self._reoffer_files = None
+            try:
+                from filecopyhost import clear_shared_pending_offer
+                clear_shared_pending_offer()
+            except Exception:
+                pass
             if seq:
                 self._last_sent_clip_seq = seq
         return sent
@@ -175,6 +183,11 @@ class ClipboardTextMixin:
             self.pending_remote_files = []
             self._reoffer_files = None
             self.dummy_h_active = False
+        try:
+            from filecopyhost import clear_shared_pending_offer
+            clear_shared_pending_offer()
+        except Exception:
+            pass
         hwnd = getattr(self.listener, "hwnd", None) if self.listener else None
         if hwnd:
             self._pending_set_text = text
