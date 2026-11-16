@@ -224,9 +224,15 @@ class ClipboardEventListener:
                             if hit_menu:
                                 kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 self.manager._lmb_menu_item_kind = kind
-                                self.manager._lmb_hit_context_menu = _menu_item_counts_as_paste(kind)
-                                if _menu_item_counts_as_paste(kind):
-                                    paste_from_menu = True
+                                is_explicit_not_paste = (kind == "not_paste")
+                                self.manager._lmb_hit_context_menu = not is_explicit_not_paste
+                                if _menu_item_counts_as_paste(kind) or (
+                                    not is_explicit_not_paste
+                                    and 0.12 < age_r < 8.0
+                                ):
+                                    has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                                    if not (has_text and not clipboard_has_file_formats()):
+                                        paste_from_menu = True
                                     try:
                                         from utils.logger import clip_trace
                                         clip_trace(
@@ -369,7 +375,8 @@ class ClipboardEventListener:
                                 self.manager.snapshot_paste_dest("rmb", sync=True)
                             pend = getattr(self.manager, "pending_remote_files", None) or []
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
-                            if not pend:
+                            has_text_rmb = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                            if not pend and not (has_text_rmb and not clipboard_has_file_formats()):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -1846,15 +1853,14 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             # sẽ tắt delayed ngay lúc files_copied_meta (host→client) vừa tới.
             if self._user_clipboard_wins():
                 self._allow_delayed = False
-                # Viewer: clipboard local (file) thay offer remote → nhả để copy client→host.
-                if getattr(self, "pygame_hwnd", None) and clipboard_has_file_formats():
-                    if self.pending_remote_files or getattr(self, "_reoffer_files", None):
-                        try:
-                            from utils.clipboard_api import _clipboard_owned_by_sync_window
-                            if not _clipboard_owned_by_sync_window():
-                                self._release_remote_file_offer("on_clipboard_changed")
-                        except Exception:
-                            pass
+                # User copy local (text / file / ảnh) → nhả offer remote để không dán nhầm file cũ.
+                if self.pending_remote_files or getattr(self, "_reoffer_files", None):
+                    try:
+                        from utils.clipboard_api import _clipboard_owned_by_sync_window
+                        if not _clipboard_owned_by_sync_window():
+                            self._release_remote_file_offer("on_clipboard_changed")
+                    except Exception:
+                        pass
         
         # Tránh tự kích hoạt vòng lặp khi chính ứng dụng thiết lập delayed rendering
         try:
@@ -1880,12 +1886,22 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             self._schedule_copied_files_sync()
             if getattr(self, "pygame_hwnd", None) and not force_sync:
                 return
+        else:
+            # Đã chuyển sang copy text/ảnh → hủy timer sync file cũ nếu còn chờ.
+            self._clip_sync_gen = getattr(self, "_clip_sync_gen", 0) + 1
+            old_sync_t = getattr(self, "_clip_sync_timer", None)
+            if old_sync_t is not None:
+                try:
+                    old_sync_t.cancel()
+                except Exception:
+                    pass
         if getattr(self, 'pygame_hwnd', None) and not force_sync:
             user32 = ctypes.windll.user32
             user32.GetForegroundWindow.restype = ctypes.c_void_p
             fg_hwnd = user32.GetForegroundWindow()
-            if fg_hwnd != self.pygame_hwnd:
-                log_debug("[on_clipboard_changed] Ngoài viewer: đồng bộ file copy, giữ text/ảnh máy thật.")
+            has_txt_now = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+            if fg_hwnd != self.pygame_hwnd and not has_txt_now:
+                log_debug("[on_clipboard_changed] Ngoài viewer: đồng bộ file/text, bỏ qua ảnh máy thật.")
                 return
 
         with self.lock:
@@ -2026,6 +2042,9 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                         except Exception:
                             pass
                     self._clip_offer_id = int(getattr(self, "_clip_offer_id", 0) or 0) + 1
+                    self.last_sent_text = None
+                    self._last_received_text = None
+                    self._last_sent_clip_seq = 0
                     names = [m.get("name") or os.path.basename(m.get("path") or "") for m in metadata]
                     if self.active_sockets:
                         print(f"[Clipboard] Gửi files_copied_meta offer={self._clip_offer_id}: {names}")

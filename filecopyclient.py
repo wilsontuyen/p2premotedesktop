@@ -1388,15 +1388,23 @@ def _xaml_click_is_show_more_strip(pt, menu_hwnd):
         height = int(rc.bottom - rc.top)
         if height < 140:
             return False
+        pos = _GLOBAL_RMB_POS
+        if pos and abs(pos[1] - rc.bottom) < abs(pos[1] - rc.top):
+            return py <= rc.top + band
         return py >= rc.bottom - band
 
     # Nếu menu vừa đóng mất HWND (root = None), kiểm tra theo cached rect
+    pos = _GLOBAL_RMB_POS
     for rc in (_get_cached_menu_rects() or []):
         rc_left, rc_top, rc_right, rc_bottom = rc[:4]
         if rc_left <= px <= rc_right and rc_top <= py <= rc_bottom:
             height = int(rc_bottom - rc_top)
-            if height >= 140 and py >= rc_bottom - 64:
-                return True
+            if height >= 140:
+                if pos and abs(pos[1] - rc_bottom) < abs(pos[1] - rc_top):
+                    if py <= rc_top + 64:
+                        return True
+                elif py >= rc_bottom - 64:
+                    return True
     return False
 
 
@@ -1525,8 +1533,14 @@ def _evaluate_win11_paste_geometry(px, py, rc):
     # Click ra khoảng trống thì thanh lệnh chỉ có nút Paste.
     # Bất chấp tọa độ X (trái/phải), cứ nằm trong dải 60px đỉnh/đáy là Paste!
     ICON_BAR_HEIGHT = 60
-    if offset_top <= ICON_BAR_HEIGHT:
-        return "paste"
+    pos = _GLOBAL_RMB_POS
+    opened_upwards = bool(pos and abs(pos[1] - bottom) < abs(pos[1] - top))
+    if opened_upwards:
+        if offset_bottom <= ICON_BAR_HEIGHT:
+            return "paste"
+    else:
+        if offset_top <= ICON_BAR_HEIGHT:
+            return "paste"
 
     # =====================================================================
     # 2. TEXT PASTE DỌC
@@ -1744,8 +1758,6 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
     if (not text) and (root or _context_menu_open()):
         text = _uia_menu_text_at_point(pt)
     kind = _classify_context_menu_item(text)
-    if kind == "unknown" and text and len(text.strip()) < 100:
-        kind = "not_paste"
     if kind in ("paste", "not_paste"):
         try:
             log_debug(f"[menu-item] name={text!r} kind={kind}")
@@ -1882,7 +1894,7 @@ def _win10_rmb_paste_click(
     """
     if _is_windows_11():
         return False
-    if not _menu_item_counts_as_paste(menu_item_kind):
+    if (menu_item_kind or "").strip().lower() == "not_paste":
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -1927,7 +1939,7 @@ def _is_recent_rmb_paste_click_unified(
             menu_visible=menu_visible,
         )
     # Windows 11 XAML
-    if not _menu_item_counts_as_paste(menu_item_kind):
+    if (menu_item_kind or "").strip().lower() == "not_paste":
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -2716,7 +2728,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         lmb_menu_paste_now = bool(
             lmb_down
             and lmb_on_menu
-            and _menu_item_counts_as_paste(menu_item_kind)
+            and menu_item_kind != "not_paste"
             and time_since_rbutton > 0.12
             and time_since_lbutton < 2.0
         ) or _win10_rmb_paste_click(
@@ -2829,6 +2841,10 @@ class FileCopyClientMixin:
             log_debug("[setup_delayed_rendering] Bỏ qua — headless host (Clipboard Agent giữ delayed CF_HDROP).")
             return
         log_debug(f"[setup_delayed_rendering] Bắt đầu. self.listener={self.listener}")
+        if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+            self._force_delayed_setup = False
+            self._allow_delayed = False
+            return
         force = getattr(self, "_force_delayed_setup", False)
         if not force:
             if self._user_clipboard_wins():
@@ -2895,12 +2911,11 @@ class FileCopyClientMixin:
         if had:
             print(f"[Clipboard] Nhả offer host→client ({reason}).")
             clip_trace(f"[release_remote_offer] {reason}")
-        if had or getattr(self, "pygame_hwnd", None):
-            try:
-                from filecopyhost import write_shared_pending_offer
-                write_shared_pending_offer({})
-            except Exception:
-                pass
+        try:
+            from filecopyhost import write_shared_pending_offer
+            write_shared_pending_offer({})
+        except Exception:
+            pass
 
     def _offer_empty_and_rearm(self, delay_s=0.2, offer=True, rearm=False):
         """Trong WM_RENDERFORMAT: SetClipboardData HDROP rỗng.
@@ -2995,6 +3010,12 @@ class FileCopyClientMixin:
         if clipboard_has_file_formats():
             return
         try:
+            u32 = ctypes.windll.user32
+            if (u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1)) and not clipboard_has_file_formats():
+                return
+        except Exception:
+            pass
+        try:
             if self._user_clipboard_wins():
                 return
         except Exception:
@@ -3012,6 +3033,10 @@ class FileCopyClientMixin:
             return
         if not self.listener or not self.listener.hwnd:
             log_debug("[_execute_setup_delayed_rendering] Lỗi: hwnd chưa sẵn sàng.")
+            return
+        if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+            self._force_delayed_setup = False
+            self._allow_delayed = False
             return
         force = getattr(self, "_force_delayed_setup", False)
         if not force:
@@ -3094,10 +3119,8 @@ class FileCopyClientMixin:
             return
         self._allow_delayed = False
         print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
-        # Viewer còn mở + còn offer host→client: user copy local → nhả offer ngay.
-        if self._is_client_viewer() and (
-            self.pending_remote_files or getattr(self, "_reoffer_files", None)
-        ):
+        # Còn offer host→client nhưng user copy local → nhả offer ngay để tránh lẫn text/file.
+        if self.pending_remote_files or getattr(self, "_reoffer_files", None):
             try:
                 from utils.clipboard_api import _clipboard_owned_by_sync_window
                 if not _clipboard_owned_by_sync_window():
@@ -3586,7 +3609,7 @@ class FileCopyClientMixin:
                 and last_l > last_r
                 and 0.12 < age_r < 8.0
                 and age_l < 3.0
-                and _menu_item_counts_as_paste(kind)
+                and kind != "not_paste"
                 and (
                     bool(getattr(self, "_lmb_hit_context_menu", False))
                     or kind == "paste"
@@ -3727,6 +3750,14 @@ class FileCopyClientMixin:
 
     def execute_client_paste(self, dest_dir=None, reason="gesture"):
         """Kích hoạt tải file từ Host về Client khi có hành động Paste (Ctrl+V hoặc click Paste menu)."""
+        try:
+            u32 = ctypes.windll.user32
+            has_text = bool(u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1))
+            if has_text and not clipboard_has_file_formats():
+                log_debug(f"[execute_client_paste] Bỏ qua ({reason}): Clipboard đang chứa text, không phải file.")
+                return
+        except Exception:
+            pass
         now = time.time()
         last_start = getattr(self, "_last_client_paste_start_time", 0.0) or 0.0
         if now - last_start < 0.6:
@@ -3832,6 +3863,7 @@ class FileCopyClientMixin:
                         log_debug(f"[execute_client_paste] Unblock Explorer empty HDROP res={res0} dest={dest_dir}")
                     finally:
                         self.ignore_destroy_clipboard = False
+                    _schedule_scrub_probe(dest_dir)
             except Exception:
                 pass
 
@@ -4497,6 +4529,9 @@ class FileCopyClientMixin:
             self._clip_offer_fp = fp
         self.pending_remote_files = files
         self._reoffer_files = list(files)
+        self.last_sent_text = None
+        self._last_received_text = None
+        self._last_sent_clip_seq = 0
         # Copy mới từ host → xóa cache paste local của offer cũ.
         if fp != last_fp:
             self._repaste_local_by_name = {}

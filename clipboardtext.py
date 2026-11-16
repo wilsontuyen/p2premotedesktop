@@ -66,7 +66,14 @@ class ClipboardTextMixin:
                 if not self.active_sockets:
                     last_seq = 0
                     continue
-                if getattr(self, "dummy_h_active", False):
+                from utils.clipboard_api import (
+                    _clipboard_owned_by_sync_window,
+                    clipboard_has_file_formats,
+                    get_clipboard_files,
+                )
+                if getattr(self, "dummy_h_active", False) and (
+                    clipboard_has_file_formats() or _clipboard_owned_by_sync_window()
+                ):
                     continue
                 if getattr(self, "is_rendering", False) or self.transfer_in_progress:
                     continue
@@ -77,7 +84,6 @@ class ClipboardTextMixin:
                     continue
                 if seq == getattr(self, "_last_sent_clip_seq", 0):
                     continue
-                from utils.clipboard_api import clipboard_has_file_formats, get_clipboard_files
                 if clipboard_has_file_formats():
                     files = get_clipboard_files(retries=1)
                     if files:
@@ -147,12 +153,26 @@ class ClipboardTextMixin:
         """Ghi CF_UNICODETEXT trên thread của clipboard listener."""
         if not text:
             return
-        if text == getattr(self, "last_sent_text", None) or text == getattr(self, "_last_received_text", None):
+        had_file_offer = bool(
+            getattr(self, "pending_remote_files", None)
+            or getattr(self, "_reoffer_files", None)
+        )
+        if text == getattr(self, "last_sent_text", None) or (
+            text == getattr(self, "_last_received_text", None) and not had_file_offer
+        ):
             return
         self._last_received_text = text
-        self.pending_remote_files = []
-        self._reoffer_files = None
-        self.dummy_h_active = False
+        if hasattr(self, "_release_remote_file_offer"):
+            try:
+                self._release_remote_file_offer("remote_text")
+            except Exception:
+                self.pending_remote_files = []
+                self._reoffer_files = None
+                self.dummy_h_active = False
+        else:
+            self.pending_remote_files = []
+            self._reoffer_files = None
+            self.dummy_h_active = False
         hwnd = getattr(self.listener, "hwnd", None) if self.listener else None
         if hwnd:
             self._pending_set_text = text
@@ -205,6 +225,11 @@ class ClipboardTextMixin:
         print("[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
         self.last_received_text = text
         if self.app and getattr(self.app, "is_headless", False):
+            if hasattr(self, "_release_remote_file_offer"):
+                try:
+                    self._release_remote_file_offer("remote_text_headless")
+                except Exception:
+                    pass
             threading.Thread(target=self._send_to_pipe, args=("TEXT", text), daemon=True).start()
             log_debug("[handle_clipboard_text_packet] HEADLESS: gửi text qua Named Pipe cho Clipboard Agent.")
         else:
