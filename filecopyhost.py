@@ -3239,7 +3239,8 @@ def run_clipboard_agent_mode():
                     except Exception as e:
                         agent_print(f"Failed to send COPIED_TEXT: {e}")
 
-            t = threading.Timer(0.35, _send_clipboard)
+            _clip_delay = 0.35 if clipboard_has_file_formats() else 0.06
+            t = threading.Timer(_clip_delay, _send_clipboard)
             t.daemon = True
             _agent_send_clip_timer = t
             t.start()
@@ -3629,6 +3630,15 @@ def run_clipboard_agent_mode():
 
         def _stamp_ctrl_v():
             nonlocal _agent_last_ctrl_v_time, _agent_dummy_h_active, _agent_allow_delayed, _agent_suppress_render_until
+            try:
+                u32_v = ctypes.windll.user32
+                has_text = bool(u32_v.IsClipboardFormatAvailable(13) or u32_v.IsClipboardFormatAvailable(1))
+                if has_text and not clipboard_has_file_formats():
+                    return
+                if not _is_explorer_clipboard_client():
+                    return
+            except Exception:
+                pass
             _agent_last_ctrl_v_time = time.time()
             _agent_suppress_render_until = 0.0
             _note_paste_gesture()
@@ -3654,7 +3664,13 @@ def run_clipboard_agent_mode():
             on_self = _cursor_over_current_process()
             is_paste = False
             if not on_self:
-                is_paste = _agent_lmb_is_context_paste(on_self)
+                try:
+                    u32_l = ctypes.windll.user32
+                    has_text_l = bool(u32_l.IsClipboardFormatAvailable(13) or u32_l.IsClipboardFormatAvailable(1))
+                    if not (has_text_l and not clipboard_has_file_formats()):
+                        is_paste = _agent_lmb_is_context_paste(on_self)
+                except Exception:
+                    is_paste = _agent_lmb_is_context_paste(on_self)
             if is_paste:
                 now_trig = time.time()
                 if now_trig - _agent_last_menu_paste_trigger_time >= 0.8:
@@ -3918,7 +3934,7 @@ def run_clipboard_agent_mode():
     def poll_gui_queue():
         nonlocal active_dialog, _agent_meta_arrival_time, _agent_allow_xfer, _agent_suppress_render_until
         nonlocal _agent_conflict_choice, _agent_conflict_skip, _agent_allow_delayed, _agent_clip_seq_at_pending, _agent_paste_coalesce_until, _agent_force_delayed_setup, _agent_pending_offer_id
-        nonlocal _agent_repaste_local_by_name, _agent_expect_repaste_until, _in_poll_gui_queue, _active_conflict_job
+        nonlocal _agent_repaste_local_by_name, _agent_expect_repaste_until, _in_poll_gui_queue, _active_conflict_job, _agent_setup_tries
         if _in_poll_gui_queue:
             return
         _in_poll_gui_queue = True

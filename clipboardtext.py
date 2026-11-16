@@ -105,6 +105,7 @@ class ClipboardTextMixin:
         current_text = get_clipboard_text(owner_hwnd)
         if not current_text:
             return False
+        self._clipboard_mode = "text"
         self.pending_remote_files = []
         self._reoffer_files = None
         self._allow_delayed = False
@@ -161,6 +162,7 @@ class ClipboardTextMixin:
             text == getattr(self, "_last_received_text", None) and not had_file_offer
         ):
             return
+        self._clipboard_mode = "text"
         self._last_received_text = text
         if hasattr(self, "_release_remote_file_offer"):
             try:
@@ -223,6 +225,7 @@ class ClipboardTextMixin:
         else:
             log_debug(f"[handle_clipboard_text_packet] Nhận clipboard_text: {str(text)[:100]}...")
         print("[Clipboard] Đã nhận được text clipboard từ remote. Đang cập nhật...")
+        self._clipboard_mode = "text"
         self.last_received_text = text
         if self.app and getattr(self.app, "is_headless", False):
             if hasattr(self, "_release_remote_file_offer"):

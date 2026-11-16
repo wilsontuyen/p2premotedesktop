@@ -87,6 +87,7 @@ from filecopyclient import (
     _classify_context_menu_item,
     _capture_menu_item_at_cursor,
     _update_cached_menu_rects,
+    _get_cached_menu_rects,
     set_global_rmb_pos,
     _is_windows_11,
     _shell_menu_profile,
@@ -231,7 +232,8 @@ class ClipboardEventListener:
                                     and 0.12 < age_r < 8.0
                                 ):
                                     has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                                    if not (has_text and not clipboard_has_file_formats()):
+                                    is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
+                                    if not is_text_mode:
                                         paste_from_menu = True
                                     try:
                                         from utils.logger import clip_trace
@@ -269,11 +271,17 @@ class ClipboardEventListener:
                                 if 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
                                     # Win11 XAML: chỉ hit test khi vừa RMB và nằm trong vùng menu
                                     chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=rpos)
-                                    if chk_kind == "paste":
+                                    in_cached_menu = any(
+                                        rc[0] <= cx <= rc[2] and rc[1] <= cy <= rc[3]
+                                        for rc in (_get_cached_menu_rects() or [])
+                                    )
+                                    has_text_m = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                                    is_text_m = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text_m) and not clipboard_has_file_formats()
+                                    if (chk_kind == "paste" or (in_cached_menu and chk_kind != "not_paste")) and not is_text_m:
                                         paste_from_menu = True
                                         try:
                                             from utils.logger import clip_trace
-                                            clip_trace("[LMB menu] Win11 exact 'paste' hit -> paste gesture")
+                                            clip_trace(f"[LMB menu] hit_menu=False paste hit (kind={chk_kind!r}, cached={in_cached_menu}) -> paste gesture")
                                         except Exception:
                                             pass
                                     elif chk_kind == "not_paste":
@@ -444,8 +452,9 @@ class ClipboardEventListener:
                     if not getattr(self.manager, "_ctrl_v_held", False):
                         on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
                         is_exp = _is_explorer_clipboard_client()
-                        if (not on_self_k) and is_exp and not has_text:
+                        if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                             if not is_client and not getattr(self.manager, "pending_remote_files", None):
                                 try:
@@ -499,8 +508,9 @@ class ClipboardEventListener:
                     if not getattr(self.manager, "_shift_ins_held", False):
                         on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                        is_text_mode = (getattr(self.manager, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats()
                         is_exp = _is_explorer_clipboard_client()
-                        if (not on_self_k) and is_exp and not has_text:
+                        if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                             if not is_client and not getattr(self.manager, "pending_remote_files", None):
                                 try:
@@ -1883,10 +1893,13 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         # Copy file trên Explorer máy client: đọc lại clipboard sau khi Explorer xong SetClipboard.
         self._last_clip_event_at = time.time()
         if clipboard_has_file_formats():
+            self._clipboard_mode = "file"
             self._schedule_copied_files_sync()
             if getattr(self, "pygame_hwnd", None) and not force_sync:
                 return
         else:
+            if bool(ctypes.windll.user32.IsClipboardFormatAvailable(13) or ctypes.windll.user32.IsClipboardFormatAvailable(1)):
+                self._clipboard_mode = "text"
             # Đã chuyển sang copy text/ảnh → hủy timer sync file cũ nếu còn chờ.
             self._clip_sync_gen = getattr(self, "_clip_sync_gen", 0) + 1
             old_sync_t = getattr(self, "_clip_sync_timer", None)

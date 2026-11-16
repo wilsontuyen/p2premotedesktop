@@ -3753,8 +3753,8 @@ class FileCopyClientMixin:
         try:
             u32 = ctypes.windll.user32
             has_text = bool(u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1))
-            if has_text and not clipboard_has_file_formats():
-                log_debug(f"[execute_client_paste] Bỏ qua ({reason}): Clipboard đang chứa text, không phải file.")
+            if (getattr(self, "_clipboard_mode", None) == "text" or has_text) and not clipboard_has_file_formats():
+                log_debug(f"[execute_client_paste] Bỏ qua ({reason}): Clipboard đang ở chế độ text, không phải file.")
                 return
         except Exception:
             pass
@@ -4527,6 +4527,7 @@ class FileCopyClientMixin:
                 return
             self._clip_offer_applied = max(applied, oid)
             self._clip_offer_fp = fp
+        self._clipboard_mode = "file"
         self.pending_remote_files = files
         self._reoffer_files = list(files)
         self.last_sent_text = None
