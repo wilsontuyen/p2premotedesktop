@@ -226,12 +226,8 @@ class ClipboardEventListener:
                             if hit_menu:
                                 kind, name = _capture_menu_item_at_cursor(rmb_pos=getattr(self.manager, "_rmb_cursor_pos", None))
                                 self.manager._lmb_menu_item_kind = kind
-                                is_explicit_not_paste = (kind == "not_paste")
-                                self.manager._lmb_hit_context_menu = not is_explicit_not_paste
-                                if _menu_item_counts_as_paste(kind) or (
-                                    not is_explicit_not_paste
-                                    and 0.12 < age_r < 8.0
-                                ):
+                                self.manager._lmb_hit_context_menu = _menu_item_counts_as_paste(kind)
+                                if _menu_item_counts_as_paste(kind) and 0.12 < age_r < 8.0:
                                     has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                                     is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
                                     if not is_text_mode:
@@ -272,17 +268,13 @@ class ClipboardEventListener:
                                 if 0.12 < age_r < 8.0 and not recent_dbl and (menu_open or near_rmb) and not getattr(self.manager, "_rmb_is_taskbar", False):
                                     # Win11 XAML: chỉ hit test khi vừa RMB và nằm trong vùng menu
                                     chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=rpos)
-                                    in_cached_menu = any(
-                                        rc[0] <= cx <= rc[2] and rc[1] <= cy <= rc[3]
-                                        for rc in (_get_cached_menu_rects() or [])
-                                    )
                                     has_text_m = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                                     is_text_m = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or (has_text_m and self.manager._user_clipboard_wins()))
-                                    if (chk_kind == "paste" or (in_cached_menu and chk_kind != "not_paste")) and not is_text_m:
+                                    if _menu_item_counts_as_paste(chk_kind) and not is_text_m:
                                         paste_from_menu = True
                                         try:
                                             from utils.logger import clip_trace
-                                            clip_trace(f"[LMB menu] hit_menu=False paste hit (kind={chk_kind!r}, cached={in_cached_menu}) -> paste gesture")
+                                            clip_trace(f"[LMB menu] hit_menu=False paste hit (kind={chk_kind!r}, name={chk_name!r}) -> paste gesture")
                                         except Exception:
                                             pass
                                     elif chk_kind == "not_paste":
@@ -294,6 +286,20 @@ class ClipboardEventListener:
                                 else:
                                     self.manager._lmb_hit_context_menu = False
                                     self.manager._lmb_menu_item_kind = "unknown"
+                                if (not paste_from_menu) and _is_windows_11() and not recent_dbl and _cursor_in_explorer_command_bar():
+                                    chk_kind, chk_name = _capture_menu_item_at_cursor(rmb_pos=rpos)
+                                    has_text_m = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
+                                    is_text_m = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or (has_text_m and self.manager._user_clipboard_wins()))
+                                    if _menu_item_counts_as_paste(chk_kind) and not is_text_m:
+                                        paste_from_menu = True
+                                        try:
+                                            from utils.logger import clip_trace
+                                            clip_trace(f"[LMB cmdbar] paste hit (kind={chk_kind!r}, name={chk_name!r}) -> paste gesture")
+                                        except Exception:
+                                            pass
+                                    elif chk_kind == "not_paste":
+                                        self.manager._lmb_hit_context_menu = False
+                                        self.manager._lmb_menu_item_kind = "not_paste"
 
                         if paste_from_menu:
                             if getattr(self.manager, "_conflict_ui_active", False):
@@ -348,6 +354,21 @@ class ClipboardEventListener:
                                     self.manager._ensure_delayed_for_gesture()
                                 except Exception:
                                     pass
+                        if (not on_self) and (not paste_from_menu):
+                            if (
+                                (getattr(self.manager, "pending_remote_files", None) or getattr(self.manager, "_reoffer_files", None))
+                                and getattr(self.manager, "_allow_delayed", True)
+                                and not getattr(self.manager, "_conflict_ui_active", False)
+                            ):
+                                def _watch_client_probe(mgr=self.manager):
+                                    for _d in (0.05, 0.15, 0.35, 0.65, 1.0):
+                                        time.sleep(_d)
+                                        try:
+                                            if mgr.check_and_trigger_client_probe_paste("lmb_probe_watchdog"):
+                                                break
+                                        except Exception:
+                                            break
+                                threading.Thread(target=_watch_client_probe, daemon=True, name="ClientProbeWatchdog").start()
                     self.manager._lmb_held = True
                     # Không EmptyClipboard / rearm delayed khi LMB thường — gây vòng BACKGROUND.
             else:

@@ -23,6 +23,7 @@ from core.i18n import _
 from network.socket_utils import send_msg, is_lan_socket, tune_socket_for_lan_bulk
 from utils.logger import log_debug, log_activity, log_file_transfer, log_overwrite_conflict
 from utils.clipboard_api import (
+    clipboard_has_file_formats,
     create_hdrop_data,
     fn_SetClipboardData,
     fn_GlobalFree,
@@ -1960,8 +1961,7 @@ def run_clipboard_agent_mode():
                 menu_visible=menu_visible,
             )
         # Windows 11 XAML
-        k = (menu_item_kind or "").strip().lower()
-        if k == "not_paste":
+        if not _menu_item_counts_as_paste(menu_item_kind):
             return False
         now = time.time()
         last_l = float(last_lbutton or 0)
@@ -2012,7 +2012,7 @@ def run_clipboard_agent_mode():
             kind, name = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
             _agent_lmb_menu_item_kind = kind
             _agent_lmb_menu_item_name = name
-            _agent_lmb_hit_context_menu = True
+            _agent_lmb_hit_context_menu = _menu_item_counts_as_paste(kind)
             agent_print(f"[ClipboardAgent] LMB menu item name={name!r} kind={kind}")
             try:
                 log_overwrite_conflict(
@@ -2020,17 +2020,8 @@ def run_clipboard_agent_mode():
                 )
             except Exception:
                 pass
-            if kind == "not_paste":
-                _agent_lmb_hit_context_menu = False
-                _agent_lmb_menu_item_kind = "not_paste"
-                return False
             if _menu_item_counts_as_paste(kind):
                 _note_paste_gesture()
-                return True
-            if 0.12 < age_r < 8.0:
-                _agent_lmb_menu_item_kind = "paste"
-                _note_paste_gesture()
-                agent_print(f"[ClipboardAgent] LMB in menu unknown (not not_paste) → paste name={name!r}")
                 return True
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = kind or ""
@@ -2056,6 +2047,15 @@ def run_clipboard_agent_mode():
             and not menu_open
         )
         if not (0.12 < age_r < 8.0 and not recent_dbl and (menu_open or menu_just_closed or near_rmb)):
+            if _is_windows_11() and pend and not recent_dbl and _cursor_in_explorer_command_bar():
+                cmd_kind, cmd_name = _capture_menu_item_at_cursor(rmb_pos=_agent_rmb_cursor_pos)
+                _agent_lmb_menu_item_name = cmd_name
+                if _menu_item_counts_as_paste(cmd_kind):
+                    _agent_lmb_hit_context_menu = True
+                    _agent_lmb_menu_item_kind = "paste"
+                    _note_paste_gesture()
+                    agent_print("[ClipboardAgent] LMB Win11 command bar paste button clicked")
+                    return True
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = ""
             _agent_lmb_menu_item_name = ""
@@ -2095,7 +2095,7 @@ def run_clipboard_agent_mode():
             and near_rmb
             and not _agent_rmb_is_taskbar
             and (menu_open or menu_just_closed)
-            and chk_kind != "not_paste"
+            and _menu_item_counts_as_paste(chk_kind)
         ):
             profile = "win11" if _is_windows_11() else "win10"
             _agent_lmb_hit_context_menu = True
@@ -2114,14 +2114,20 @@ def run_clipboard_agent_mode():
                 pass
             return True
         # Win11: Nút Paste trên thanh lệnh (Command Bar) trong Explorer
-        if _is_windows_11() and pend and not recent_dbl and _cursor_in_explorer_command_bar():
+        if (
+            _is_windows_11()
+            and pend
+            and not recent_dbl
+            and _cursor_in_explorer_command_bar()
+            and _menu_item_counts_as_paste(chk_kind)
+        ):
             _agent_lmb_hit_context_menu = True
             _agent_lmb_menu_item_kind = "paste"
             _note_paste_gesture()
             agent_print("[ClipboardAgent] LMB Win11 command bar paste button clicked")
             return True
         _agent_lmb_hit_context_menu = False
-        _agent_lmb_menu_item_kind = ""
+        _agent_lmb_menu_item_kind = chk_kind or ""
         return False
 
     def _paths_are_probe_or_xfer(files):
@@ -2315,7 +2321,7 @@ def run_clipboard_agent_mode():
                                 name="AgentMenuPasteTrigger",
                             ).start()
                     _has_txt_rearm = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not _has_txt_rearm:
+                    if (not on_self) and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not _has_txt_rearm and not clipboard_has_file_formats():
                         if not is_paste:
                             _agent_dummy_h_active = False
                             ctypes.windll.user32.PostMessageW(ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0)
@@ -3226,6 +3232,12 @@ def run_clipboard_agent_mode():
                 candidates.append(live)
         except Exception:
             pass
+        try:
+            desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
+            if desktop and os.path.isdir(desktop) and desktop not in candidates:
+                candidates.append(desktop)
+        except Exception:
+            pass
         for c in candidates:
             if c and os.path.isdir(c) and not _is_transfer_staging_dir(c):
                 probe_path = os.path.join(c, "RemoteDesktop_Paste_Trigger.tmp")
@@ -3384,7 +3396,7 @@ def run_clipboard_agent_mode():
             recent_paste_click = (
                 (
                     _agent_paste_gesture_id > _agent_consumed_gesture_id
-                    and (_agent_lmb_menu_item_kind or "") != "not_paste"
+                    and _menu_item_counts_as_paste(_agent_lmb_menu_item_kind)
                     and (time.time() - (_agent_last_lbutton_time or 0)) < 3.0
                     and (_agent_last_lbutton_time or 0) > (_agent_last_rbutton_time or 0)
                     and (time.time() - (_agent_last_rbutton_time or 0)) > 0.12
@@ -3401,7 +3413,11 @@ def run_clipboard_agent_mode():
             )
             # Win11 Command Bar paste button
             if _is_windows_11() and not recent_paste_click:
-                if _cursor_in_explorer_command_bar() and (time.time() - (_agent_last_lbutton_time or 0)) < 2.0:
+                if (
+                    _cursor_in_explorer_command_bar()
+                    and (time.time() - (_agent_last_lbutton_time or 0)) < 2.0
+                    and _menu_item_counts_as_paste(_agent_lmb_menu_item_kind)
+                ):
                     recent_paste_click = True
             is_user_paste = recent_ctrl or recent_paste_click
 
@@ -3804,7 +3820,7 @@ def run_clipboard_agent_mode():
                         daemon=True,
                         name="AgentMenuPasteTrigger",
                     ).start()
-            if not is_paste and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd:
+            if not is_paste and _agent_dummy_h_active and _agent_allow_delayed and _agent_hwnd and not clipboard_has_file_formats():
                 _agent_dummy_h_active = False
                 ctypes.windll.user32.PostMessageW(
                     ctypes.c_void_p(_agent_hwnd), WM_USER_SETUP_DELAYED, 0, 0

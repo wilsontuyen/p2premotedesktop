@@ -1485,36 +1485,30 @@ def _win32_menu_text_at_point(pt):
         user32.GetMenuItemID.argtypes = [wintypes.HMENU, ctypes.c_int]
         user32.GetMenuItemID.restype = wintypes.UINT
         cmd_id = user32.GetMenuItemID(ctypes.c_void_p(hmenu), idx)
-        if cmd_id in (0x7013, 0x001C, 28691, 28):
+        if cmd_id in (0x7013, 0x001C, 28691, 28, 0x701B, 0x701C, 0x701E, 28699, 28700, 28702):
             return "Properties"
+
+        if cmd_id == 0x701A:
+            return "Paste"
 
         if count > 1 and idx >= count - 1:
             return "Properties"
 
-        has_paste = False
         paste_idx = -1
         for i in range(count):
             cid = user32.GetMenuItemID(ctypes.c_void_p(hmenu), i)
-            if cid in (0x701A, 0x701B, 28702, 28698, 28700):
-                has_paste = True
+            if cid == 0x701A:
                 paste_idx = i
                 break
             user32.GetMenuStringW(hmenu, i, buf, 512, MF_BYPOSITION)
-            itxt = (buf.value or "").lower()
-            if any(tok in itxt for tok in _PASTE_MENU_TOKENS):
-                has_paste = True
+            itxt = (buf.value or "").strip()
+            if itxt and _classify_context_menu_item(itxt) == "paste":
                 paste_idx = i
                 break
-        if not has_paste:
-            return "not_paste"
 
-        if paste_idx >= 0 and idx == paste_idx:
-            return "Paste"
-        if cmd_id in (0x701A, 0x701B, 28702, 28698, 28700):
-            return "Paste"
-        if paste_idx >= 0 and idx != paste_idx and idx >= 0:
-            return "not_paste"
-        return "Paste"
+        if paste_idx >= 0:
+            return "Paste" if idx == paste_idx else "not_paste"
+        return ""
     except Exception:
         return ""
 
@@ -1671,7 +1665,7 @@ def _get_cached_menu_rects():
 def _evaluate_win11_paste_geometry(px, py, rc):
     """
     Đánh giá tọa độ click Win11 (Dành riêng cho click vùng trống).
-    Bắt Icon Paste ở đỉnh/đáy và Text Paste ở giữa.
+    Chỉ loại trừ dải Properties / Show more; không phán "paste" theo hình học mù.
     """
     if hasattr(rc, "top"):
         top, bottom, left, right = rc.top, rc.bottom, rc.left, rc.right
@@ -1703,31 +1697,6 @@ def _evaluate_win11_paste_geometry(px, py, rc):
         if offset_top <= 55 or frac_y <= 0.20:
             return "not_paste"
 
-    # =====================================================================
-    # 2. ICON PASTE (COMMAND BAR: Đỉnh khi mở xuống, Đáy khi mở lên)
-    # =====================================================================
-    ICON_BAR_HEIGHT = 55
-    if not opened_upwards:
-        if offset_top <= ICON_BAR_HEIGHT:
-            if 10 <= (px - left) <= 140:
-                return "paste"
-            return "not_paste"
-    else:
-        if offset_bottom <= ICON_BAR_HEIGHT:
-            if 10 <= (px - left) <= 140:
-                return "paste"
-            return "not_paste"
-
-    # =====================================================================
-    # 3. TEXT PASTE DỌC
-    # =====================================================================
-    # Trạng thái Paste hiện dưới dạng chữ ở giữa menu (dưới Refresh, trên New)
-    if 0.18 <= frac_y <= 0.75:
-        return "paste"
-
-    # =====================================================================
-    # 4. CÁC VÙNG KHÁC TRÊN MENU XAML: trả về unknown
-    # =====================================================================
     return "unknown"
 
 
@@ -1856,13 +1825,36 @@ _NOT_PASTE_MENU_TOKENS = (
 )
 
 
+_UIA_GENERIC_NAMES = frozenset((
+    "",
+    "desktopwindowxamlsource",
+    "xamlexplorerhostislandwindow",
+    "microsoft.ui.content.popupwindowsitebridge",
+    "microsoft.ui.content.desktopchildsitebridge",
+    "windows.ui.composition.desktopwindowcontentbridge",
+    "contextmenu",
+    "popup",
+    "menu",
+    "appbar",
+    "commandbar",
+    "scrollviewer",
+))
+
+
 def _classify_context_menu_item(name):
     """'paste' | 'not_paste' | 'unknown'."""
     raw = (name or "").replace("&", "").replace("…", "").replace("...", "")
     n = " ".join(raw.strip().lower().split())
     if not n:
         return "unknown"
+    if n == "not_paste":
+        return "not_paste"
     compact = n.replace(" ", "").replace("+", "")
+    if any(
+        tok in n or tok.replace(" ", "") in compact
+        for tok in ("paste shortcut", "pasteshortcut", "dán lối tắt", "dan loi tat", "paste link")
+    ):
+        return "not_paste"
     if "ctrlv" in compact:
         return "paste"
     first = n.split("\t", 1)[0].strip()
@@ -1902,20 +1894,40 @@ def _uia_menu_text_at_point(pt):
         el = uia.ElementFromPoint(p)
         if not el:
             return ""
-        name = (getattr(el, "CurrentName", "") or "").strip()
-        if not name:
+        walker = uia.ControlViewWalker
+        cur = el
+        for _ in range(6):
+            if not cur:
+                break
+            ccls = (getattr(cur, "CurrentClassName", "") or "").strip()
+            if ccls in ("CabinetWClass", "ExploreWClass", "Progman", "WorkerW", "#32769"):
+                break
+            cname = (getattr(cur, "CurrentName", "") or "").strip()
+            if cname and cname.lower() not in _UIA_GENERIC_NAMES:
+                return cname
+            caid = (getattr(cur, "CurrentAutomationId", "") or "").strip()
+            if (
+                caid
+                and caid.lower() not in _UIA_GENERIC_NAMES
+                and _classify_context_menu_item(caid) in ("paste", "not_paste")
+            ):
+                return caid
             try:
-                walker = uia.ControlViewWalker
-                parent = walker.GetParentElement(el)
-                if parent:
-                    name = (getattr(parent, "CurrentName", "") or "").strip()
-                if not name:
-                    child = walker.GetFirstChildElement(el)
-                    if child:
-                        name = (getattr(child, "CurrentName", "") or "").strip()
+                cur = walker.GetParentElement(cur)
             except Exception:
-                pass
-        return name
+                break
+        try:
+            child = walker.GetFirstChildElement(el)
+            for _ in range(5):
+                if not child:
+                    break
+                cname = (getattr(child, "CurrentName", "") or "").strip()
+                if cname and cname.lower() not in _UIA_GENERIC_NAMES:
+                    return cname
+                child = walker.GetNextSiblingElement(child)
+        except Exception:
+            pass
+        return ""
     except Exception:
         return ""
 
@@ -1934,9 +1946,11 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
     if not root:
         root = _find_visible_popup_menu_containing_point(pt)
     text = _win32_menu_text_at_point(pt)
-    if (not text) and (root or _context_menu_open()):
+    if (not text) and (root or _context_menu_open() or _cursor_in_explorer_command_bar()):
         text = _uia_menu_text_at_point(pt)
     kind = _classify_context_menu_item(text)
+    if kind == "unknown" and text and len(text.strip()) < 100 and text.strip().lower() not in _UIA_GENERIC_NAMES:
+        kind = "not_paste"
     if kind in ("paste", "not_paste"):
         try:
             log_debug(f"[menu-item] name={text!r} kind={kind}")
@@ -1975,39 +1989,8 @@ def _capture_menu_item_at_cursor(rmb_pos=None):
                             pass
                         break
 
-        # 3. Trạng thái 3 (Tối hậu): Mất Handle VÀ Cache rỗng -> Dùng mỏ neo RMB
-        if geo_kind == "unknown" and not root:
-            pos = rmb_pos or _GLOBAL_RMB_POS
-            rmb_t = float(_GLOBAL_RMB_TIME or 0.0)
-            # Chỉ xét mỏ neo RMB nếu RMB diễn ra gần đây (< 8.0 giây)
-            if pos and (time.time() - rmb_t) < 8.0:
-                rx, ry = pos[0], pos[1]
-                dx = px - rx
-                dy = py - ry
-
-                # CHỐT AN TOÀN 3 LỚP:
-                # Lớp 1: Clipboard phải có File (nếu không có, click gì cũng là False)
-                # Lớp 2: dy nằm trong 50px (Khít thanh Icon, View bị đẩy xuống >50 nên sẽ thoát)
-                # Lớp 3: dx nằm trong nửa trái của menu (-10 đến 150) để bắt trúng Icon Paste
-                if _has_file_in_clipboard() and -10 <= dx <= 150 and abs(dy) <= 50:
-                    geo_kind = "paste"
-                    try:
-                        from utils.logger import clip_trace
-                        clip_trace(f"[Win11 Fallback] RMB Anchor exact hit: dx={dx}, dy={dy} -> PASTE")
-                    except Exception:
-                        pass
-                # Nếu không trúng anchor và không có root -> giữ geo_kind = "unknown", KHÔNG phán not_paste
-
-        # Áp dụng kết quả hình học
-        if geo_kind == "paste":
-            kind = "paste"
-            text = text or "[xaml-pos-paste]"
-            try:
-                log_debug(f"[menu-item] by-position -> paste")
-            except Exception:
-                pass
-            return kind, text
-        elif geo_kind == "not_paste" and (root or _get_cached_menu_rects()):
+        # Áp dụng kết quả hình học (chỉ not_paste cho vùng Properties/Show more)
+        if geo_kind == "not_paste" and (root or _get_cached_menu_rects()):
             kind = "not_paste"
             text = text or "[xaml-pos-not_paste]"
             try:
@@ -2073,7 +2056,7 @@ def _win10_rmb_paste_click(
     """
     if _is_windows_11():
         return False
-    if (menu_item_kind or "").strip().lower() == "not_paste":
+    if not _menu_item_counts_as_paste(menu_item_kind):
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -2118,7 +2101,7 @@ def _is_recent_rmb_paste_click_unified(
             menu_visible=menu_visible,
         )
     # Windows 11 XAML
-    if (menu_item_kind or "").strip().lower() == "not_paste":
+    if not _menu_item_counts_as_paste(menu_item_kind):
         return False
     now = time.time()
     last_l = float(last_lbutton or 0)
@@ -2669,7 +2652,7 @@ def _offer_empty_hdrop():
 
 def _offer_probe_hdrop(pending_files=None):
     """Cung cấp HDROP chứa stub file để Windows Explorer nhận biết có file và bật tùy chọn Paste trong menu chuột phải."""
-    stub_files = _probe_stub_paths(pending_files)
+    stub_files = _probe_stub_paths(None)
     h = create_hdrop_data(stub_files)
     if h:
         res = fn_SetClipboardData(15, h)
@@ -2897,7 +2880,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
         lmb_menu_paste_now = bool(
             lmb_down
             and lmb_on_menu
-            and menu_item_kind != "not_paste"
+            and _menu_item_counts_as_paste(menu_item_kind)
             and time_since_rbutton > 0.12
             and time_since_lbutton < 2.0
         ) or _win10_rmb_paste_click(
@@ -2907,6 +2890,7 @@ def check_is_menu_query(last_lbutton, last_rbutton, meta_arrival_time, last_ctrl
     cmd_bar_paste = bool(
         (not lmb_on_menu)
         and win11 and lmb_down and _cursor_in_explorer_command_bar()
+        and _menu_item_counts_as_paste(menu_item_kind)
         and time_since_rbutton > 0.2
         and not recent_dblclick
     )
@@ -3772,7 +3756,7 @@ class FileCopyClientMixin:
                 and last_l > last_r
                 and 0.12 < age_r < 8.0
                 and age_l < 3.0
-                and kind != "not_paste"
+                and _menu_item_counts_as_paste(kind)
                 and (
                     bool(getattr(self, "_lmb_hit_context_menu", False))
                     or kind == "paste"
@@ -3824,7 +3808,7 @@ class FileCopyClientMixin:
                     and (time.time() - (last_r or 0)) > 0.2
                 ):
                     cmd_txt = _uia_menu_text_at_point(_cursor_point())
-                    if _classify_context_menu_item(cmd_txt) != "not_paste":
+                    if _classify_context_menu_item(cmd_txt) == "paste":
                         gesture_ok = True
             except Exception:
                 pass
@@ -3910,6 +3894,71 @@ class FileCopyClientMixin:
             
         dest_dir = self.get_active_explorer_path()
         return self.execute_client_paste(dest_dir, reason="render_format")
+
+    def check_and_trigger_client_probe_paste(self, source="probe_detect"):
+        """Fallback: nếu Explorer dán stub RemoteDesktop_Paste_Trigger.tmp vào thư mục đích,
+        xóa stub ngay và kích hoạt tải/paste file thật từ Host."""
+        is_client = bool(getattr(self, "pygame_hwnd", None) or getattr(self, "is_client", False))
+        cb = getattr(self, "_agent_paste_callback", None)
+        if not is_client and not callable(cb):
+            return False
+        if not (self.pending_remote_files or getattr(self, "_reoffer_files", None)):
+            return False
+        if not getattr(self, "_allow_delayed", True):
+            return False
+        try:
+            u32 = ctypes.windll.user32
+            has_text = bool(u32.IsClipboardFormatAvailable(13) or u32.IsClipboardFormatAvailable(1))
+            if getattr(self, "_clipboard_mode", None) == "text" or (has_text and self._user_clipboard_wins()):
+                return False
+        except Exception:
+            pass
+        candidates = []
+        for attr in ("_paste_dest_snapshot", "cached_explorer_path", "_last_good_explorer_path"):
+            p = getattr(self, attr, None)
+            if p and p not in candidates:
+                candidates.append(p)
+        try:
+            live = query_explorer_folder_path(allow_open_clipboard=False)
+            if live and live not in candidates:
+                candidates.append(live)
+        except Exception:
+            pass
+        try:
+            desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
+            if desktop and os.path.isdir(desktop) and desktop not in candidates:
+                candidates.append(desktop)
+        except Exception:
+            pass
+        for c in candidates:
+            if c and os.path.isdir(c) and not _is_transfer_staging_dir(c):
+                probe_path = os.path.join(c, "RemoteDesktop_Paste_Trigger.tmp")
+                if os.path.exists(probe_path):
+                    log_debug(f"[check_and_trigger_client_probe_paste] Phát hiện {probe_path} — xóa stub và kích hoạt paste ({source}).")
+                    clip_trace(f"[probe_detect] hit {probe_path} source={source}")
+                    try:
+                        _schedule_scrub_probe(c)
+                        _retry_remove_path(probe_path, retries=8)
+                    except Exception:
+                        pass
+                    self.note_paste_gesture()
+                    if is_client:
+                        threading.Thread(
+                            target=self.execute_client_paste,
+                            args=(c,),
+                            kwargs={"reason": source},
+                            daemon=True,
+                            name="ClientProbePasteTrigger",
+                        ).start()
+                    elif callable(cb):
+                        threading.Thread(
+                            target=cb,
+                            args=(source, c),
+                            daemon=True,
+                            name="AgentBridgeProbePasteTrigger",
+                        ).start()
+                    return True
+        return False
 
     def execute_client_paste(self, dest_dir=None, reason="gesture"):
         """Kích hoạt tải file từ Host về Client khi có hành động Paste (Ctrl+V hoặc click Paste menu)."""
