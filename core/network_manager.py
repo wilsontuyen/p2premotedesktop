@@ -32,7 +32,7 @@ from utils.vpn_discovery import (
     detect_vpn_interfaces, scan_vpn_network, scan_custom_range, probe_single_host, match_saved_computer,
     hash_password_md5, get_last_seen_epoch, format_last_seen_str,
     deduplicate_lan_peers, are_same_machine, merge_peers, get_all_local_ipv4,
-    parse_ip_range_input, connect_tcp_any_route
+    parse_ip_range_input, connect_tcp_any_route, is_in_physical_lan_subnet
 )
 from utils.logger import log_debug
 
@@ -551,6 +551,7 @@ class NetworkMixin:
                     "port": int(beacon.get("port", 12345)),
                     "hwid": clean_peer_hwid if len(clean_peer_hwid) == 12 else peer_hwid,
                     "macs": beacon.get("macs", ""),
+                    "network_type": "LAN" if is_in_physical_lan_subnet(addr[0]) else "VPN",
                     "last_seen": time.time(),
                     "source_ip": addr[0],
                 }
@@ -563,14 +564,23 @@ class NetworkMixin:
                             matched_k = k
                             break
                     old_ip = None
+                    old_net = None
+                    old_src = None
                     if matched_k:
                         old_info = self.lan_peers[matched_k]
                         old_ip = old_info.get("local_ip")
+                        old_net = old_info.get("network_type")
+                        old_src = old_info.get("source_ip")
                         peer_info = merge_peers(peer_info, old_info)
                         if matched_k != peer_key:
                             self.lan_peers.pop(matched_k, None)
                     is_new = matched_k is None
-                    should_save = is_new or (old_ip != peer_info.get("local_ip"))
+                    should_save = (
+                        is_new
+                        or (old_ip != peer_info.get("local_ip"))
+                        or (old_net != peer_info.get("network_type"))
+                        or (old_src != peer_info.get("source_ip"))
+                    )
                     self.lan_peers[peer_key] = peer_info
                     
                 if should_save:
@@ -805,28 +815,61 @@ class NetworkMixin:
 
         # Scrollable list frame
         list_outer = tk.Frame(dialog, bg=self.entry_bg, bd=1, relief=tk.SUNKEN)
-        list_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 8))
+        list_outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20, pady=(0, 8))
 
         canvas = tk.Canvas(list_outer, bg=self.entry_bg, highlightthickness=0)
         scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL, command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
-        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         active_frame_box = [scroll_frame]
-        
+
         canvas_win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_win_id, width=e.width))
+
+        def _sync_canvas_layout(target_frame=None, reset_top=False):
+            if not dialog.winfo_exists():
+                return
+            tf = target_frame or active_frame_box[0]
+            if not tf or not tf.winfo_exists():
+                return
+            try:
+                tf.update_idletasks()
+                req_h = tf.winfo_reqheight()
+                canv_w = max(1, canvas.winfo_width())
+                canv_h = max(1, canvas.winfo_height())
+                canvas.coords(canvas_win_id, 0, 0)
+                canvas.configure(scrollregion=(0, 0, canv_w, max(req_h, canv_h)))
+                if req_h <= canv_h or reset_top:
+                    canvas.yview_moveto(0.0)
+            except Exception:
+                pass
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_win_id, width=event.width)
+            tf = active_frame_box[0]
+            if tf and tf.winfo_exists():
+                req_h = tf.winfo_reqheight()
+                canvas.coords(canvas_win_id, 0, 0)
+                canvas.configure(scrollregion=(0, 0, max(1, event.width), max(req_h, event.height)))
+                if req_h <= event.height:
+                    canvas.yview_moveto(0.0)
+
+        scroll_frame.bind("<Configure>", lambda e, f=scroll_frame: _sync_canvas_layout(f, reset_top=False))
+        canvas.bind("<Configure>", _on_canvas_configure)
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         def _on_mousewheel(event):
+            tf = active_frame_box[0]
+            if tf and tf.winfo_exists() and tf.winfo_reqheight() <= canvas.winfo_height():
+                canvas.coords(canvas_win_id, 0, 0)
+                canvas.yview_moveto(0.0)
+                return
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Status label
+        # Status label (sẽ được pack neo dưới đáy trước list_outer cùng btn_frame)
         status_label = tk.Label(dialog, text="", font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
-        status_label.pack(pady=(0, 4))
 
         # Quản lý luồng quét & trạng thái trực tuyến
         scan_state = {
@@ -834,6 +877,7 @@ class NetworkMixin:
             "cancel_event": threading.Event(),
             "online_status": {},  # hwid -> bool (True=Online, False=Offline, None=Checking)
             "probe_gen": 0,
+            "probe_cancel_event": threading.Event(),
         }
 
         def _persist_peer_password(target_hwid, peer_info, new_pw, new_mac=None):
@@ -1385,6 +1429,12 @@ class NetworkMixin:
             last_start_prefix[0] = _extract_ip_prefix(s_ip)
             save_saved_custom_ip(s_ip, e_ip)
 
+            # Ngắt ngay mọi luồng quét ngầm đang chạy dở để không chồng gói SYN lên RRAS khi quét dải IP
+            scan_state["probe_gen"] = scan_state.get("probe_gen", 0) + 1
+            scan_state["is_probing"] = False
+            if scan_state.get("probe_cancel_event") is not None:
+                scan_state["probe_cancel_event"].set()
+
             scan_state["is_scanning"] = True
             scan_state["cancel_event"].clear()
             progress_label.config(fg="#56CCF2")
@@ -1511,6 +1561,7 @@ class NetworkMixin:
             _update_hide_offline_btn_ui()
             if reorder_lan_list_ref[0] is not None:
                 reorder_lan_list_ref[0]()
+                _sync_canvas_layout(reset_top=True)
             else:
                 refresh_list()
 
@@ -1556,13 +1607,17 @@ class NetworkMixin:
             old_scroll_frame = active_frame_box[0]
 
             def _finish_swap():
-                new_scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+                new_scroll_frame.bind("<Configure>", lambda e, f=new_scroll_frame: _sync_canvas_layout(f, reset_top=False))
                 canvas.itemconfig(canvas_win_id, window=new_scroll_frame)
                 active_frame_box[0] = new_scroll_frame
                 if old_scroll_frame and old_scroll_frame.winfo_exists():
                     old_scroll_frame.destroy()
+                _sync_canvas_layout(new_scroll_frame, reset_top=False)
                 try:
-                    canvas.yview_moveto(cur_scroll[0])
+                    if new_scroll_frame.winfo_reqheight() > canvas.winfo_height():
+                        canvas.yview_moveto(cur_scroll[0])
+                    else:
+                        canvas.yview_moveto(0.0)
                 except Exception:
                     pass
 
@@ -1599,21 +1654,17 @@ class NetworkMixin:
 
             def _resolve_peer_group(h_key, h_info):
                 primary_ip_check = str(h_info.get('source_ip') or '').strip() or str(h_info.get('local_ip') or '').split(',')[0].strip()
-                is_physical_lan = is_in_physical_lan_subnet(primary_ip_check)
-                net_type = str(h_info.get("network_type") or "LAN").strip()
-                nt_lower = net_type.lower()
-                if nt_lower != "lan":
-                    if "custom" in nt_lower and is_physical_lan:
-                        normalized_net = "LAN"
-                    else:
-                        normalized_net = "VPN"
-                    if h_info.get("network_type") != normalized_net:
-                        h_info["network_type"] = normalized_net
-                        with self.lan_peers_lock:
-                            if h_key in self.lan_peers:
-                                self.lan_peers[h_key]["network_type"] = normalized_net
-                    return normalized_net
-                return "LAN"
+                if primary_ip_check:
+                    normalized_net = "LAN" if is_in_physical_lan_subnet(primary_ip_check) else "VPN"
+                else:
+                    net_type = str(h_info.get("network_type") or "LAN").strip()
+                    normalized_net = "LAN" if net_type.lower() == "lan" else "VPN"
+                if h_info.get("network_type") != normalized_net:
+                    h_info["network_type"] = normalized_net
+                    with self.lan_peers_lock:
+                        if h_key in self.lan_peers:
+                            self.lan_peers[h_key]["network_type"] = normalized_net
+                return normalized_net
 
             def _get_peer_online_state(h_key, h_info):
                 online_state = scan_state.get("online_status", {})
@@ -2117,7 +2168,7 @@ class NetworkMixin:
                             )
                         empty_offline_lbl.pack(pady=24, padx=20)
 
-                    canvas.configure(scrollregion=canvas.bbox("all"))
+                    _sync_canvas_layout(new_scroll_frame, reset_top=False)
                 except Exception:
                     pass
 
@@ -2239,15 +2290,44 @@ class NetworkMixin:
 
             def _probe_all_peers_bg(peers_to_check, gen):
                 from concurrent.futures import ThreadPoolExecutor
-                from utils.vpn_discovery import probe_peer_direct
+                from utils.vpn_discovery import probe_peer_direct, get_last_seen_epoch
+
+                old_cancel = scan_state.get("probe_cancel_event")
+                if old_cancel is not None:
+                    old_cancel.set()
+                probe_cancel = threading.Event()
+                scan_state["probe_cancel_event"] = probe_cancel
 
                 any_changed = [False]
+                _bg_pacer_lock = threading.Lock()
+                next_bg_slot = [time.monotonic()]
 
                 def _check_one(item_entry):
                     h, inf = item_entry
-                    if not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
                         return
-                    is_on, u_data = probe_peer_direct(inf, timeout=0.85)
+
+                    with self.lan_peers_lock:
+                        if h in self.lan_peers and isinstance(self.lan_peers[h], dict):
+                            inf = dict(self.lan_peers[h])
+
+                    # Bộ điều nhịp lệch pha: tránh 15 luồng quét ngầm cùng bắn SYN vào RRAS tại 1 mili-giây
+                    is_vpn_peer = _resolve_peer_group(h, inf) == "VPN"
+                    gap = 0.08 if is_vpn_peer else 0.015
+                    with _bg_pacer_lock:
+                        now_m = time.monotonic()
+                        slot_m = max(now_m, next_bg_slot[0])
+                        next_bg_slot[0] = slot_m + gap
+                    wait_sec = slot_m - now_m
+                    if wait_sec > 0:
+                        if probe_cancel.wait(wait_sec):
+                            return
+                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                        return
+
+                    is_on, u_data = probe_peer_direct(inf, timeout=0.85, cancel_event=probe_cancel)
+                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                        return
                     # Chỉ chấp nhận cập nhật nếu u_data thực sự là cùng 1 máy tính với bản ghi h (tránh ghi đè khi DHCP đổi IP)
                     if is_on and u_data and not are_same_machine(h, inf, u_data.get("hwid"), u_data):
                         is_on, u_data = False, None
@@ -2255,26 +2335,47 @@ class NetworkMixin:
                     prev_st = st_dict.get(h)
                     ui_prev = row_ui_map.get(h, {}).get("peer_online")
                     st_dict[h] = is_on
+                    group_or_ip_changed = False
+                    ui_grp = row_ui_map.get(h, {}).get("comp_group")
+                    merged_copy = None
                     if is_on and u_data:
                         with self.lan_peers_lock:
                             if h in self.lan_peers:
+                                old_net = self.lan_peers[h].get("network_type")
+                                old_src = self.lan_peers[h].get("source_ip")
                                 merged = merge_peers(u_data, self.lan_peers[h])
                                 merged["hwid"] = self.lan_peers[h].get("hwid") or h
                                 self.lan_peers[h] = merged
-                    # Chỉ đẩy cập nhật lên giao diện khi trạng thái thực sự thay đổi (Online <-> Offline hoặc từ chưa rõ sang xác định)
-                    if prev_st != is_on or ui_prev != is_on:
+                                merged_copy = dict(merged)
+                                group_or_ip_changed = (old_net != merged.get("network_type")) or (old_src != merged.get("source_ip"))
+                    if merged_copy is not None:
+                        if ui_grp is not None and ui_grp != _resolve_peer_group(h, merged_copy):
+                            group_or_ip_changed = True
+                    elif ui_grp is not None and ui_grp != _resolve_peer_group(h, inf):
+                        u_data = dict(inf)
+                        group_or_ip_changed = True
+                    # Chỉ đẩy cập nhật lên giao diện khi trạng thái thực sự thay đổi (Online <-> Offline, từ chưa rõ sang xác định, hoặc đổi nhóm/IP)
+                    if prev_st != is_on or ui_prev != is_on or group_or_ip_changed:
                         any_changed[0] = True
                         if dialog.winfo_exists() and scan_state.get("probe_gen") == gen:
                             dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
 
                 def _worker():
                     try:
+                        online_map = scan_state.get("online_status", {})
                         items = list(peers_to_check.items())
                         if not items:
                             return
-                        with ThreadPoolExecutor(max_workers=min(25, max(1, len(items)))) as executor:
+                        # Ưu tiên kiểm tra các máy đang Online và có last_seen mới nhất trước
+                        items.sort(
+                            key=lambda kv: (
+                                0 if online_map.get(kv[0]) is True else 1,
+                                -get_last_seen_epoch(kv[1].get("last_seen", 0)),
+                            )
+                        )
+                        with ThreadPoolExecutor(max_workers=min(15, max(1, len(items)))) as executor:
                             list(executor.map(_check_one, items))
-                        if any_changed[0]:
+                        if any_changed[0] and not probe_cancel.is_set():
                             self.save_lan_peers()
                     finally:
                         if scan_state.get("probe_gen") == gen:
@@ -2307,16 +2408,6 @@ class NetworkMixin:
                             d = ui_it.get("dot")
                             if d and d.winfo_exists():
                                 d.config(fg="#8A8A9A")
-                        # Tái sử dụng luồng quét trạng thái như bên "Danh sách máy tính đã lưu" nếu máy có HWID 12 số
-                        try:
-                            c_id = ''.join(ch for ch in str(inf.get("hwid") or inf.get("saved_id") or h_id) if ch.isdigit())
-                            if len(c_id) == 12 and hasattr(self, "_start_saved_status_probe"):
-                                threading.Thread(
-                                    target=lambda cid=c_id: self._start_saved_status_probe(cid, force=True),
-                                    daemon=True
-                                ).start()
-                        except Exception:
-                            pass
 
                 if target_group in (None, "LAN"):
                     def _send_beacon_bg():
@@ -2414,9 +2505,6 @@ class NetworkMixin:
             # 2. Làm mới danh sách đúng 1 lần duy nhất (kiểm tra trạng thái online/offline của tất cả máy)
             schedule_refresh(30)
 
-        self._lan_refresh_list_func = refresh_list
-        refresh_list()
-
         def _auto_probe_expanded_groups():
             if not dialog.winfo_exists():
                 return
@@ -2435,14 +2523,15 @@ class NetworkMixin:
             except Exception:
                 pass
             if dialog.winfo_exists():
-                auto_probe_timer[0] = dialog.after(5000, _auto_probe_expanded_groups)
-
-        auto_probe_timer[0] = dialog.after(5000, _auto_probe_expanded_groups)
+                auto_probe_timer[0] = dialog.after(8000, _auto_probe_expanded_groups)
 
         def on_dialog_close():
             self._lan_refresh_list_func = None
             scan_state["cancel_event"].set()
             scan_state["probe_gen"] = scan_state.get("probe_gen", 0) + 1
+            scan_state["is_probing"] = False
+            if scan_state.get("probe_cancel_event") is not None:
+                scan_state["probe_cancel_event"].set()
             if refresh_timer[0] is not None:
                 try:
                     dialog.after_cancel(refresh_timer[0])
@@ -2469,9 +2558,10 @@ class NetworkMixin:
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
         dialog.bind("<Escape>", lambda e: on_dialog_close())
 
-        # Bottom buttons
+        # Bottom buttons (neo cố định ở đáy trước list_outer để dialog thu gọn/mở rộng không bị đè)
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
-        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+        btn_frame.pack(side=tk.BOTTOM, before=list_outer, fill=tk.X, padx=20, pady=(0, 15))
+        status_label.pack(side=tk.BOTTOM, before=list_outer, pady=(0, 4))
 
         # Nút "Làm mới" với màu chữ trắng sáng (#FFFFFF) nổi bật trên nền xanh (#007ACC)
         btn_refresh = tk.Button(
@@ -2576,6 +2666,10 @@ class NetworkMixin:
         )
         btn_close.pack(side=tk.RIGHT)
         RowTooltip(btn_close, _("Đóng cửa sổ máy tính mạng LAN & VPN"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+
+        self._lan_refresh_list_func = refresh_list
+        refresh_list()
+        auto_probe_timer[0] = dialog.after(8000, _auto_probe_expanded_groups)
 
     def _focus_existing_viewer(self, *candidate_ids):
         """Nếu đã có cửa sổ Viewer đang mở tới một trong các ID cho trước thì không mở thêm:

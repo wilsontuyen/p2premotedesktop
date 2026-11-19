@@ -8,6 +8,7 @@ ZeroTier, Hamachi, Radmin VPN, WireGuard, OpenVPN và Custom Subnet).
 import os
 import sys
 import socket
+import errno
 import subprocess
 import re
 import time
@@ -376,6 +377,8 @@ def get_rdp_name(ip, timeout=0.8):
 def get_mac_from_arp(ip):
     """Lấy địa chỉ MAC từ bảng ARP của hệ điều hành nếu NetBIOS bị chặn hoặc trên LAN."""
     if not ip or ip.startswith('127.') or ip.startswith('169.254.'):
+        return ""
+    if not is_in_physical_lan_subnet(ip):
         return ""
     try:
         startupinfo = None
@@ -869,13 +872,22 @@ def merge_peers(p_winner, p_loser):
         if not res.get("saved_id") and p_loser.get("saved_id"):
             res["saved_id"] = p_loser["saved_id"]
 
-    # 6. Network type (chuẩn hóa chung thành LAN hoặc VPN, không phân biệt giao thức VPN cụ thể)
-    w_net = str(res.get("network_type") or "").strip()
-    l_net = str(p_loser.get("network_type") or "").strip()
-    if (not w_net or w_net.upper() == "LAN") and l_net and l_net.upper() != "LAN":
-        res["network_type"] = "VPN"
-    elif w_net and w_net.upper() != "LAN":
-        res["network_type"] = "VPN"
+    # 6. Network type (lấy theo kết nối thực tế mới nhất của p_winner, không khóa cứng VPN một chiều)
+    w_src = str(p_winner.get("source_ip") or "").strip() or str(p_winner.get("local_ip") or "").split(",")[0].strip()
+    w_net = str(p_winner.get("network_type") or "").strip()
+    if w_src and is_in_physical_lan_subnet(w_src) and w_net.upper() != "VPN":
+        res["network_type"] = "LAN"
+    elif w_net:
+        res["network_type"] = "LAN" if w_net.upper() == "LAN" else "VPN"
+    elif w_src:
+        res["network_type"] = "LAN" if is_in_physical_lan_subnet(w_src) else "VPN"
+    else:
+        l_net = str(p_loser.get("network_type") or "").strip()
+        if l_net:
+            res["network_type"] = "LAN" if l_net.upper() == "LAN" else "VPN"
+        else:
+            l_src = str(p_loser.get("source_ip") or "").strip() or str(p_loser.get("local_ip") or "").split(",")[0].strip()
+            res["network_type"] = "LAN" if (l_src and is_in_physical_lan_subnet(l_src)) else "VPN"
 
     return res
 
@@ -1148,51 +1160,135 @@ def _get_alternate_route_candidates(target_ip):
     return candidates, best_is_tunnel
 
 
-def connect_tcp_any_route(ip, port, timeout=1.05):
+def _resolve_direct_vpn_interface(target_ip):
     """
-    Kết nối TCP đa tuyến (Happy-Eyeballs) tới (ip, port) hoàn toàn không phân biệt kiểu kết nối VPN:
-    1. Khởi tạo kết nối theo định tuyến mặc định của hệ điều hành ngay lập tức (0ms).
-       Nếu kết nối thành công nhanh trong 120ms đầu (99% trường hợp LAN / VPN thông thường), trả về ngay mà không mở thêm socket phụ.
-    2. Nếu quá 120ms chưa hoàn tất hoặc bị từ chối sớm trên tuyến mặc định, tự động kích hoạt song song (non-blocking select)
-       qua tất cả các giao diện đường hầm / mạng phụ hợp lệ bằng IP_UNICAST_IF trong cùng khung thời gian timeout.
-       Tuyến nào bắt tay TCP thành công trước sẽ thắng ngay lập tức và đóng các socket còn lại.
-    Trả về: (connected_socket, used_vpn_tunnel_bool) hoặc (None, False)
+    Xác định interface index (if_idx) của card VPN đích khi target_ip thuộc nhánh VPN
+    (không thuộc subnet LAN vật lý cục bộ), giúp bind IP_UNICAST_IF thẳng vào card VPN ngay từ 0ms
+    thay vì bắn song song Happy-Eyeballs qua cả Default Gateway Internet.
+    """
+    if os.name != 'nt' or not target_ip:
+        return None
+    if is_in_physical_lan_subnet(target_ip):
+        return None
+
+    all_ifs = _query_windows_ipv4_interfaces()
+    if not all_ifs:
+        return None
+
+    try:
+        ip_obj = ipaddress.IPv4Address(target_ip)
+    except Exception:
+        return None
+
+    # 1. Card mạng / tunnel có subnet chứa trực tiếp target_ip
+    for item in all_ifs:
+        if item.get("is_hypervisor"):
+            continue
+        net_obj = item.get("network")
+        if net_obj is not None and ip_obj in net_obj:
+            return item["if_idx"]
+
+    # 2. Card tunnel (VD: PPP /32 của Windows Server RRAS) có cùng prefix /24 với target_ip
+    target_prefix = target_ip.rsplit('.', 1)[0]
+    for item in all_ifs:
+        if item.get("is_tunnel") and not item.get("is_hypervisor"):
+            if str(item.get("ip") or "").rsplit('.', 1)[0] == target_prefix:
+                return item["if_idx"]
+
+    # 3. Nếu tuyến tốt nhất theo bảng định tuyến Windows (GetBestInterface) là card tunnel
+    best_if = _get_best_if_index_win(target_ip)
+    if best_if:
+        for item in all_ifs:
+            if item["if_idx"] == best_if and item.get("is_tunnel") and not item.get("is_hypervisor"):
+                return best_if
+
+    # 4. Nếu hệ thống chỉ có duy nhất 1 card tunnel đang hoạt động
+    active_tunnels = [item for item in all_ifs if item.get("is_tunnel") and not item.get("is_hypervisor")]
+    if len(active_tunnels) == 1:
+        return active_tunnels[0]["if_idx"]
+
+    return None
+
+
+def _connect_single_socket_nb(ip, port, timeout, if_idx=None, is_tun=False, cancel_event=None):
+    """Mở duy nhất 1 socket TCP non-blocking (tùy chọn gắn IP_UNICAST_IF) và trả về (sock, is_tun, reason)."""
+    sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    deadline = time.monotonic() + max(0.25, float(timeout))
+    try:
+        sk.setblocking(False)
+        if if_idx is not None:
+            # IPPROTO_IP = 0, IP_UNICAST_IF = 31 (network byte order)
+            sk.setsockopt(socket.IPPROTO_IP, 31, struct.pack('!I', int(if_idx)))
+        rc = sk.connect_ex((ip, int(port)))
+        if rc == 0:
+            sk.setblocking(True)
+            sk.settimeout(timeout)
+            return sk, is_tun, "ok"
+        if rc in (10061, errno.ECONNREFUSED):
+            sk.close()
+            return None, is_tun, "refused"
+        if rc not in (10035, 10036, 115, errno.EWOULDBLOCK, errno.EINPROGRESS):
+            sk.close()
+            return None, is_tun, "error"
+
+        while True:
+            if cancel_event and cancel_event.is_set():
+                sk.close()
+                return None, is_tun, "error"
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                sk.close()
+                return None, is_tun, "timeout"
+            _, wlist, xlist = select.select([], [sk], [sk], min(rem, 0.25))
+            if not wlist and not xlist:
+                continue
+            err = sk.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if err == 0 and sk in wlist:
+                sk.setblocking(True)
+                sk.settimeout(timeout)
+                return sk, is_tun, "ok"
+            sk.close()
+            if err in (10061, errno.ECONNREFUSED):
+                return None, is_tun, "refused"
+            if err in (10060, errno.ETIMEDOUT):
+                return None, is_tun, "timeout"
+            return None, is_tun, "error"
+    except Exception:
+        try:
+            sk.close()
+        except Exception:
+            pass
+        return None, is_tun, "error"
+
+
+def _connect_tcp_once(ip, port, timeout=1.05, prefer_vpn_only=False, cancel_event=None):
+    """
+    Thực hiện 1 lượt kết nối TCP tới (ip, port) và trả về (sock, used_tunnel_bool, err_reason).
+    - Nếu là nhánh VPN và xác định được card VPN đích -> bind thẳng IP_UNICAST_IF (chỉ 1 socket duy nhất).
+    - Ngược lại dùng Happy-Eyeballs đa tuyến.
     """
     if not ip:
-        return None, False
+        return None, False, "error"
 
     if os.name != 'nt':
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        try:
-            s.connect((ip, port))
-            return s, False
-        except Exception:
-            try:
-                s.close()
-            except Exception:
-                pass
-            return None, False
+        return _connect_single_socket_nb(ip, port, timeout, if_idx=None, is_tun=False, cancel_event=cancel_event)
+
+    if prefer_vpn_only or not is_in_physical_lan_subnet(ip):
+        vpn_if_idx = _resolve_direct_vpn_interface(ip)
+        if vpn_if_idx is not None:
+            return _connect_single_socket_nb(ip, port, timeout, if_idx=vpn_if_idx, is_tun=True, cancel_event=cancel_event)
 
     alt_candidates, best_is_tunnel = _get_alternate_route_candidates(ip)
 
-    # Nếu không có giao diện thay thế nào khác -> dùng connect chuẩn gọn nhẹ
+    # Nếu không có giao diện thay thế nào khác -> dùng 1 socket chuẩn gọn nhẹ
     if not alt_candidates:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        try:
-            s.connect((ip, port))
-            return s, best_is_tunnel
-        except Exception:
-            try:
-                s.close()
-            except Exception:
-                pass
-            return None, False
+        return _connect_single_socket_nb(ip, port, timeout, if_idx=None, is_tun=best_is_tunnel, cancel_event=cancel_event)
 
     # Non-blocking Staggered Happy-Eyeballs trên tuyến mặc định + các giao diện thay thế
     active = {}  # sock -> is_tunnel_bool
     deadline = time.monotonic() + max(0.25, float(timeout))
+    saw_refused = False
+    saw_timeout = False
 
     def _close_all(except_sock=None):
         for sk in list(active.keys()):
@@ -1204,6 +1300,7 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
         active.clear()
 
     def _start_nb_socket(if_idx=None, is_tun=False):
+        nonlocal saw_refused
         sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sk.setblocking(False)
@@ -1215,8 +1312,10 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
                 sk.setblocking(True)
                 sk.settimeout(timeout)
                 return sk  # Kết nối tức thì
+            if rc in (10061, errno.ECONNREFUSED):
+                saw_refused = True
             # WSAEWOULDBLOCK=10035, EINPROGRESS=10036/115
-            if rc in (10035, 10036, 115):
+            elif rc in (10035, 10036, 115, errno.EWOULDBLOCK, errno.EINPROGRESS):
                 active[sk] = is_tun
                 return None
         except Exception:
@@ -1231,7 +1330,7 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
         # Bước 1: Thử tuyến mặc định của OS trước trong tối đa 120ms
         imm = _start_nb_socket(if_idx=None, is_tun=best_is_tunnel)
         if imm is not None:
-            return imm, best_is_tunnel
+            return imm, best_is_tunnel, "ok"
 
         if active:
             head_start = min(0.12, max(0.02, deadline - time.monotonic()))
@@ -1243,9 +1342,17 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
                     _close_all(except_sock=sk)
                     sk.setblocking(True)
                     sk.settimeout(timeout)
-                    return sk, won_tun
+                    return sk, won_tun, "ok"
             for sk in set(wlist + xlist):
                 if sk in active:
+                    try:
+                        err = sk.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                        if err in (10061, errno.ECONNREFUSED):
+                            saw_refused = True
+                        elif err in (10060, errno.ETIMEDOUT):
+                            saw_timeout = True
+                    except Exception:
+                        pass
                     active.pop(sk, None)
                     try:
                         sk.close()
@@ -1254,14 +1361,19 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
 
         # Bước 2: Mở song song trên các giao diện đường hầm / mạng thay thế trong phần thời gian còn lại
         for if_idx, _if_ip, is_tun in alt_candidates:
+            if cancel_event and cancel_event.is_set():
+                return None, False, "error"
             imm_alt = _start_nb_socket(if_idx=if_idx, is_tun=is_tun)
             if imm_alt is not None:
                 _close_all(except_sock=imm_alt)
-                return imm_alt, is_tun
+                return imm_alt, is_tun, "ok"
 
         while active:
+            if cancel_event and cancel_event.is_set():
+                return None, False, "error"
             rem = deadline - time.monotonic()
             if rem <= 0:
+                saw_timeout = True
                 break
             sk_list = list(active.keys())
             _, wlist, xlist = select.select([], sk_list, sk_list, min(rem, 0.25))
@@ -1271,9 +1383,17 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
                     _close_all(except_sock=sk)
                     sk.setblocking(True)
                     sk.settimeout(timeout)
-                    return sk, won_tun
+                    return sk, won_tun, "ok"
             for sk in set(wlist + xlist):
                 if sk in active:
+                    try:
+                        err = sk.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                        if err in (10061, errno.ECONNREFUSED):
+                            saw_refused = True
+                        elif err in (10060, errno.ETIMEDOUT):
+                            saw_timeout = True
+                    except Exception:
+                        pass
                     active.pop(sk, None)
                     try:
                         sk.close()
@@ -1282,7 +1402,41 @@ def connect_tcp_any_route(ip, port, timeout=1.05):
     finally:
         _close_all()
 
-    return None, False
+    if saw_refused:
+        return None, False, "refused"
+    if saw_timeout or time.monotonic() >= deadline:
+        return None, False, "timeout"
+    return None, False, "error"
+
+
+def connect_tcp_any_route(ip, port, timeout=1.05, prefer_vpn_only=False, retries=0, retry_delay=0.2, cancel_event=None, return_reason=False):
+    """
+    Kết nối TCP tới (ip, port) hoàn toàn không phân biệt kiểu kết nối VPN:
+    - Với nhánh VPN đã xác định được interface: bind IP_UNICAST_IF thẳng vào card VPN.
+    - Hỗ trợ retry khi gặp TimeoutError (không retry khi ConnectionRefused) để đánh thức đường hầm/NAT.
+    Trả về: (connected_socket, used_vpn_tunnel_bool) hoặc nếu return_reason=True thì (sock, used_tunnel, reason).
+    """
+    s, used_tun, reason = _connect_tcp_once(
+        ip, port, timeout=timeout, prefer_vpn_only=prefer_vpn_only, cancel_event=cancel_event
+    )
+    attempts_left = max(0, int(retries or 0))
+    while s is None and attempts_left > 0 and reason == "timeout":
+        if cancel_event and cancel_event.is_set():
+            break
+        if retry_delay and retry_delay > 0:
+            if cancel_event:
+                if cancel_event.wait(retry_delay):
+                    break
+            else:
+                time.sleep(retry_delay)
+        attempts_left -= 1
+        s, used_tun, reason = _connect_tcp_once(
+            ip, port, timeout=timeout, prefer_vpn_only=prefer_vpn_only, cancel_event=cancel_event
+        )
+
+    if return_reason:
+        return s, used_tun, reason
+    return s, used_tun
 
 
 def parse_ip_range_input(start_raw, end_raw=""):
@@ -1370,19 +1524,19 @@ def parse_ip_range_input(start_raw, end_raw=""):
 
 
 def normalize_network_label(label, ip="", forced_tunnel=False):
-    """Chuẩn hóa nhãn mạng thành 'LAN' hoặc 'VPN' (không phân biệt loại giao thức VPN cụ thể)."""
+    """Chuẩn hóa nhãn mạng thành 'LAN' hoặc 'VPN' dựa theo đường hầm hoặc subnet thực tế của IP."""
     if forced_tunnel:
         return "VPN"
+    if ip:
+        return "LAN" if is_in_physical_lan_subnet(ip) else "VPN"
     lbl = str(label or "").strip()
-    if not lbl:
-        return "LAN" if (ip and is_in_physical_lan_subnet(ip)) else "VPN"
     low = lbl.lower()
     if low == "lan":
         return "LAN"
     return "VPN"
 
 
-def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, recv_timeout=2.5, known_peer=None):
+def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, recv_timeout=2.5, known_peer=None, retries=None, retry_delay=0.2, cancel_event=None, return_err_reason=False):
     """
     Thăm dò một địa chỉ IP xem có đang chạy EasyRemoteDesktop không:
     - Gửi gói tin probe với APP_KEY (không phân biệt loại kết nối VPN IKEv2 / PPTP / L2TP...).
@@ -1393,16 +1547,28 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
       và không bao giờ ghi đè mất dữ liệu cũ.
     """
     if not ip or ip.startswith('127.'):
-        return None
+        return (None, "error") if return_err_reason else None
     try:
         if ip in get_all_local_ipv4():
-            return None
+            return (None, "error") if return_err_reason else None
     except Exception:
         pass
 
-    s, used_tunnel = connect_tcp_any_route(ip, port, timeout=timeout)
+    is_vpn = (str(vpn_type_label or "").upper() != "LAN") or (not is_in_physical_lan_subnet(ip))
+    eff_retries = (1 if is_vpn else 0) if retries is None else max(0, int(retries))
+
+    s, used_tunnel, conn_reason = connect_tcp_any_route(
+        ip,
+        port,
+        timeout=timeout,
+        prefer_vpn_only=is_vpn,
+        retries=eff_retries,
+        retry_delay=retry_delay,
+        cancel_event=cancel_event,
+        return_reason=True,
+    )
     if not s:
-        return None
+        return (None, conn_reason) if return_err_reason else None
 
     net_label = normalize_network_label(vpn_type_label, ip=ip, forced_tunnel=used_tunnel)
     try:
@@ -1460,6 +1626,9 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                     if known_has_real_name:
                         comp_name = known_name
                         is_verified = known_verified or True
+                    elif net_label == "VPN":
+                        comp_name = f"PC-{ip.split('.')[-1]}"
+                        is_verified = False
                     else:
                         r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
                         comp_name = r_name
@@ -1468,8 +1637,8 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                             nb_mac = r_mac
                         if not os_name:
                             os_name = r_os
-                # Host cũ / broker chưa nạp xong MAC trả về macs rỗng -> thử bảng ARP (cùng LAN) để nút WOL hoạt động
-                if not nb_mac:
+                # Host cũ / broker chưa nạp xong MAC trả về macs rỗng -> thử bảng ARP (chỉ khi cùng LAN vật lý) để nút WOL hoạt động
+                if not nb_mac and net_label != "VPN":
                     nb_mac = get_mac_from_arp(ip)
 
                 if len(clean_pong_hwid) == 12:
@@ -1521,30 +1690,42 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                 }
                 if known_peer:
                     res_dict = merge_peers(res_dict, known_peer)
-                return res_dict
+                return (res_dict, "ok") if return_err_reason else res_dict
 
             # Bản cũ hoặc phản hồi mật khẩu sai (xác nhận 100% đang chạy app)
             if data.get("status") == "error":
-                r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
-                if known_peer and r_ver and not _known_matches_peer("", r_name, r_ver):
-                    known_peer = None
-                    known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
-                    known_verified = known_has_real_name = False
-
-                if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
-                    comp_name = r_name
-                    nb_mac = r_mac or known_mac
-                    os_name = r_os or known_os
-                    is_verified = True
-                elif known_has_real_name:
-                    comp_name = known_name
-                    nb_mac = known_mac or r_mac
-                    os_name = known_os or r_os
-                    is_verified = known_verified or True
+                if net_label == "VPN":
+                    if known_has_real_name:
+                        comp_name = known_name
+                        nb_mac = known_mac
+                        os_name = known_os
+                        is_verified = known_verified or True
+                    else:
+                        comp_name = f"Unknown-{ip.split('.')[-1]}"
+                        nb_mac = known_mac
+                        os_name = known_os
+                        is_verified = False
                 else:
-                    comp_name, nb_mac, os_name, is_verified = r_name, (r_mac or known_mac), (r_os or known_os), r_ver
-                if not nb_mac:
-                    nb_mac = get_mac_from_arp(ip)
+                    r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
+                    if known_peer and r_ver and not _known_matches_peer("", r_name, r_ver):
+                        known_peer = None
+                        known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
+                        known_verified = known_has_real_name = False
+
+                    if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
+                        comp_name = r_name
+                        nb_mac = r_mac or known_mac
+                        os_name = r_os or known_os
+                        is_verified = True
+                    elif known_has_real_name:
+                        comp_name = known_name
+                        nb_mac = known_mac or r_mac
+                        os_name = known_os or r_os
+                        is_verified = known_verified or True
+                    else:
+                        comp_name, nb_mac, os_name, is_verified = r_name, (r_mac or known_mac), (r_os or known_os), r_ver
+                    if not nb_mac:
+                        nb_mac = get_mac_from_arp(ip)
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có (chỉ lấy ID khi khớp chính xác)
                 matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
@@ -1585,7 +1766,7 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                 }
                 if known_peer:
                     res_dict = merge_peers(res_dict, known_peer)
-                return res_dict
+                return (res_dict, "ok") if return_err_reason else res_dict
     except Exception:
         pass
     finally:
@@ -1593,54 +1774,120 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
             s.close()
         except Exception:
             pass
-    return None
+    return (None, "error") if return_err_reason else None
 
 
-def probe_peer_direct(peer_info, timeout=0.85):
+def probe_peer_direct(peer_info, timeout=0.85, cancel_event=None):
     """
     Thăm dò trực tiếp trạng thái Online của một máy tính trong mạng LAN / VPN qua TCP:
-    - Thử kết nối tới source_ip và các IP trong local_ip trên cổng port (mặc định BOUND_PORT).
+    - Thử kết nối tới source_ip và các IP hợp lệ trong local_ip trên cổng port (mặc định BOUND_PORT).
+    - Loại bỏ IP loopback, link-local (169.254.x.x), VirtualBox (192.168.56.1) và IP máy cục bộ.
+    - Với nhánh VPN: ưu tiên source_ip thực tế; chỉ giữ các IP phụ cùng prefix /24 với source_ip
+      (tránh thử các IP LAN nội bộ không định tuyến được qua VPN) và chỉ retry trên IP chính.
     - Kiểm tra danh tính máy phản hồi khớp với peer_info (nếu IP cũ đã bị DHCP cấp cho máy khác thì bỏ qua IP đó,
       trả về Offline chứ TUYỆT ĐỐI không ghi đè hay làm mất peer_info).
     
     Trả về: (is_online: bool, updated_info: dict hoặc None)
     """
+    raw_net = str(peer_info.get("network_type") or "").strip()
+    vpn_label = "LAN" if (not raw_net or raw_net.upper() == "LAN") else "VPN"
+
+    try:
+        my_ips = get_all_local_ipv4()
+    except Exception:
+        my_ips = set()
+
+    def _is_valid_target_ip(ip_str):
+        if not ip_str or ip_str.startswith("127.") or ip_str.startswith("169.254.") or ip_str == "192.168.56.1":
+            return False
+        if ip_str in my_ips:
+            return False
+        return True
+
     candidate_ips = []
     # 1. Thử source_ip trước vì đây là IP thực tế mà máy này đã gửi tin tới ta gần nhất
     src_ip = str(peer_info.get("source_ip") or "").strip()
-    if src_ip and not src_ip.startswith("127."):
+    if _is_valid_target_ip(src_ip):
         candidate_ips.append(src_ip)
 
-    # 2. Thử các IP trong local_ip
+    src_prefix = src_ip.rsplit(".", 1)[0] if (vpn_label == "VPN" and src_ip in candidate_ips and src_ip.count(".") == 3) else ""
+
+    # 2. Thử các IP trong local_ip (luôn giữ lại IP thuộc subnet LAN vật lý; với VPN chỉ giữ thêm IP cùng /24 với source_ip)
     for raw in [peer_info.get("local_ip", "")]:
         for part in str(raw).split(","):
             ip = part.strip()
-            if ip and ip not in candidate_ips and not ip.startswith("127."):
-                candidate_ips.append(ip)
+            if not _is_valid_target_ip(ip) or ip in candidate_ips:
+                continue
+            if src_prefix and not is_in_physical_lan_subnet(ip) and ip.rsplit(".", 1)[0] != src_prefix:
+                continue
+            candidate_ips.append(ip)
 
     if not candidate_ips:
         return False, None
 
+    # Ưu tiên thử các IP nằm trong subnet LAN vật lý trước (chỉ vài ms) để máy ngắt VPN tự chuyển về nhóm LAN ngay
+    lan_candidates = [ip for ip in candidate_ips if is_in_physical_lan_subnet(ip)]
+    other_candidates = [ip for ip in candidate_ips if ip not in lan_candidates]
+    candidate_ips = lan_candidates + other_candidates
+    first_vpn_ip = other_candidates[0] if other_candidates else None
+
     port = int(peer_info.get("port") or BOUND_PORT)
-    raw_net = str(peer_info.get("network_type") or "").strip()
-    vpn_label = "LAN" if (not raw_net or raw_net.upper() == "LAN") else "VPN"
     peer_hwid = peer_info.get("hwid") or peer_info.get("saved_id") or ""
 
-    for ip in candidate_ips:
-        res = probe_single_host(ip, port=port, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
+    def _probe_candidate(ip, target_port):
+        if cancel_event and cancel_event.is_set():
+            return None, "error"
+        ip_net_label = "LAN" if is_in_physical_lan_subnet(ip) else "VPN"
+        is_vpn_ip = (ip_net_label == "VPN")
+        if is_vpn_ip:
+            is_primary_vpn = (ip == first_vpn_ip)
+            eff_timeout = max(float(timeout or 0.85), 1.5) if is_primary_vpn else 0.9
+            eff_recv = 1.5
+            eff_retries = 1 if is_primary_vpn else 0
+        else:
+            eff_timeout = timeout
+            eff_recv = max(float(timeout or 0.85), 1.5)
+            eff_retries = 0
+        res, err_reason = probe_single_host(
+            ip,
+            port=target_port,
+            vpn_type_label=ip_net_label,
+            timeout=eff_timeout,
+            recv_timeout=eff_recv,
+            known_peer=peer_info,
+            retries=eff_retries,
+            retry_delay=0.2,
+            cancel_event=cancel_event,
+            return_err_reason=True,
+        )
         if res and are_same_machine(peer_hwid, peer_info, res.get("hwid"), res):
+            return res, "ok"
+        return None, err_reason
+
+    timed_out_ips = set()
+    for ip in candidate_ips:
+        if cancel_event and cancel_event.is_set():
+            return False, None
+        res, err_reason = _probe_candidate(ip, port)
+        if res:
             return True, res
+        if err_reason == "timeout":
+            timed_out_ips.add(ip)
 
     if port != 12345:
         for ip in candidate_ips:
-            res = probe_single_host(ip, port=12345, vpn_type_label=vpn_label, timeout=timeout, recv_timeout=max(timeout, 1.5), known_peer=peer_info)
-            if res and are_same_machine(peer_hwid, peer_info, res.get("hwid"), res):
+            if cancel_event and cancel_event.is_set():
+                return False, None
+            if ip in timed_out_ips:
+                continue
+            res, _err_reason = _probe_candidate(ip, 12345)
+            if res:
                 return True, res
 
     return False, None
 
 
-def scan_vpn_network(vpn_info, ports=None, max_workers=75, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
+def scan_vpn_network(vpn_info, ports=None, max_workers=18, progress_callback=None, cancel_event=None, peer_found_callback=None, known_peers=None):
     """
     Quét toàn bộ dải IP của một mạng VPN (ủy quyền sang scan_custom_range theo dải IP, không phân biệt loại VPN).
     """
@@ -1693,38 +1940,110 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_cal
     if (e_int - s_int) > 1024:
         e_int = s_int + 1024
 
+    is_vpn_range = not (is_in_physical_lan_subnet(norm_start) and is_in_physical_lan_subnet(norm_end))
+    if is_vpn_range:
+        effective_workers = min(int(max_workers or 18), 20)
+        conn_timeout = 1.5
+        probe_recv_timeout = 1.5
+        conn_retries = 1
+    else:
+        effective_workers = int(max_workers or 75)
+        conn_timeout = 1.05
+        probe_recv_timeout = 2.5
+        conn_retries = 0
+
+    known_by_ip = {}
+    if known_peers and isinstance(known_peers, dict):
+        for p_info in known_peers.values():
+            p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
+            for p_ip in p_ips:
+                if p_ip not in known_by_ip:
+                    known_by_ip[p_ip] = p_info
+
     my_ips = get_all_local_ipv4()
-    ips_to_scan = []
+    priority_ips = []
+    other_ips = []
     for cur in range(s_int, e_int + 1):
         ip_str = f"{(cur >> 24) & 255}.{(cur >> 16) & 255}.{(cur >> 8) & 255}.{cur & 255}"
         if ip_str not in my_ips:
-            ips_to_scan.append(ip_str)
+            if ip_str in known_by_ip:
+                priority_ips.append(ip_str)
+            else:
+                other_ips.append(ip_str)
+    ips_to_scan = priority_ips + other_ips
 
     total = len(ips_to_scan)
     current = 0
     found_peers = []
     _lock = threading.Lock()
+    pacer_interval = 0.15 if is_vpn_range else 0.014
+    _pacer_lock = threading.Lock()
+    next_slot_time = [time.monotonic()]
 
     def _worker(target_ip):
         nonlocal current
         if cancel_event and cancel_event.is_set():
             return None
-        res = None
-        kp = None
-        if known_peers and isinstance(known_peers, dict):
-            for p_info in known_peers.values():
-                p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
-                if target_ip in p_ips:
-                    kp = p_info
-                    break
 
-        vpn_lbl = "LAN" if is_in_physical_lan_subnet(target_ip) else "VPN"
+        # Bộ điều nhịp lệch pha: rải đều thời điểm xuất phát của các worker theo pacer_interval
+        with _pacer_lock:
+            now_m = time.monotonic()
+            slot_m = max(now_m, next_slot_time[0])
+            next_slot_time[0] = slot_m + pacer_interval
+        wait_sec = slot_m - now_m
+        if wait_sec > 0:
+            if cancel_event:
+                if cancel_event.wait(wait_sec):
+                    return None
+            else:
+                time.sleep(wait_sec)
+            if cancel_event and cancel_event.is_set():
+                return None
+
+        with _lock:
+            current += 1
+            cur_idx = current
+        if progress_callback:
+            try:
+                progress_callback(cur_idx, total, target_ip)
+            except Exception:
+                pass
+
+        res = None
+        kp = known_by_ip.get(target_ip)
+
+        is_lan_ip = is_in_physical_lan_subnet(target_ip)
+        vpn_lbl = "LAN" if is_lan_ip else "VPN"
+        is_vpn_ip = not is_lan_ip
+        ip_conn_timeout = 1.5 if is_vpn_ip else conn_timeout
+        ip_recv_timeout = 1.5 if is_vpn_ip else probe_recv_timeout
+        ip_retries = 1 if is_vpn_ip else conn_retries
+
         for port in ports:
             if cancel_event and cancel_event.is_set():
                 break
-            res = probe_single_host(target_ip, port=port, vpn_type_label=vpn_lbl, timeout=1.05, recv_timeout=2.5, known_peer=kp)
+            res, err_reason = probe_single_host(
+                target_ip,
+                port=port,
+                vpn_type_label=vpn_lbl,
+                timeout=ip_conn_timeout,
+                recv_timeout=ip_recv_timeout,
+                known_peer=kp,
+                retries=ip_retries,
+                retry_delay=0.2,
+                cancel_event=cancel_event,
+                return_err_reason=True,
+            )
             if res:
                 break
+            if is_vpn_ip and port == 12345 and err_reason == "timeout":
+                kp_port = None
+                try:
+                    kp_port = int(kp.get("port")) if kp and kp.get("port") else None
+                except Exception:
+                    kp_port = None
+                if kp_port != 12346:
+                    break
 
         if res:
             my_clean = ""
@@ -1747,7 +2066,6 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_cal
 
         should_notify = False
         with _lock:
-            current += 1
             if res:
                 res_key = (res.get("hwid"), res.get("source_ip"))
                 if not any((p.get("hwid"), p.get("source_ip")) == res_key for p in found_peers):
@@ -1760,14 +2078,21 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_cal
             except Exception:
                 pass
 
-        if progress_callback:
-            try:
-                progress_callback(current, total, target_ip)
-            except Exception:
-                pass
         return res
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        list(executor.map(_worker, ips_to_scan))
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        if cancel_event is not None:
+            futures = []
+            for ip_str in ips_to_scan:
+                if cancel_event.is_set():
+                    break
+                futures.append(executor.submit(_worker, ip_str))
+            for fut in futures:
+                try:
+                    fut.result()
+                except Exception:
+                    pass
+        else:
+            list(executor.map(_worker, ips_to_scan))
 
     return found_peers
