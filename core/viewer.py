@@ -1084,10 +1084,9 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     import queue
     import json
     try:
-        from utils.logger import get_log_filepath, ensure_utf8_bom, install_crash_handlers
+        from utils.logger import get_log_filepath, ensure_utf8_bom, install_crash_handlers, open_timestamped_log
         v_log = get_log_filepath("viewer.log")
-        ensure_utf8_bom(v_log)
-        sys.stdout = open(v_log, "a", encoding="utf-8-sig", buffering=1)
+        sys.stdout = open_timestamped_log(v_log)
         sys.stderr = sys.stdout
         install_crash_handlers("Viewer")
         print(f"\n--- Viewer started at {time.strftime('%Y-%m-%d %H:%M:%S')} (PID: {os.getpid()}, Partner: {partner_id}, Host: {computer_name}) ---")
@@ -1576,7 +1575,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             try:
                 # Check if domain was already queried and reason passed in handshake (or check local log)
                 with open("domain_debug.log", "a", encoding="utf-8-sig") as df:
-                    df.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
+                    df.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
             except:
                 pass
                 

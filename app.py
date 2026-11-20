@@ -7,11 +7,10 @@ else:
 import traceback
 import os
 try:
-    from utils.logger import get_log_filepath, migrate_legacy_logs, ensure_utf8_bom, install_crash_handlers
+    from utils.logger import get_log_filepath, migrate_legacy_logs, ensure_utf8_bom, install_crash_handlers, open_timestamped_log
     migrate_legacy_logs()
     crash_log_path = get_log_filepath("early_crash.log")
-    ensure_utf8_bom(crash_log_path)
-    _f = open(crash_log_path, "a", encoding="utf-8-sig", buffering=1)
+    _f = open_timestamped_log(crash_log_path)
     sys.stderr = _f
     sys.stdout = _f
     _early_role = (
@@ -459,11 +458,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.withdraw()
             
         try:
-            from utils.logger import ensure_utf8_bom, get_log_filepath, install_tkinter_exception_hook
+            from utils.logger import ensure_utf8_bom, get_log_filepath, install_tkinter_exception_hook, open_timestamped_log
             log_filename = "agent.log" if self.is_headless else "gui.log"
             log_path = get_log_filepath(log_filename)
-            ensure_utf8_bom(log_path)
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            sys.stdout = open_timestamped_log(log_path)
             sys.stderr = sys.stdout
         except Exception:
             pass
@@ -3590,10 +3588,9 @@ if __name__ == '__main__':
         
         # Redirect stdout/stderr cho clipboard agent mode
         try:
-            from utils.logger import ensure_utf8_bom, get_log_filepath
+            from utils.logger import ensure_utf8_bom, get_log_filepath, open_timestamped_log
             log_path = get_log_filepath("clipboard_agent.log")
-            ensure_utf8_bom(log_path)
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            sys.stdout = open_timestamped_log(log_path)
             sys.stderr = sys.stdout
         except:
             pass
@@ -3614,10 +3611,9 @@ if __name__ == '__main__':
     # --- Chế độ Broker (Session 0, không Tk): giữ kết nối viewer, proxy tới worker ---
     if "--broker" in sys.argv:
         try:
-            from utils.logger import ensure_utf8_bom, get_log_filepath
+            from utils.logger import ensure_utf8_bom, get_log_filepath, open_timestamped_log
             log_path = get_log_filepath("broker.log")
-            ensure_utf8_bom(log_path)
-            sys.stdout = open(log_path, "a", encoding="utf-8-sig", buffering=1)
+            sys.stdout = open_timestamped_log(log_path)
             sys.stderr = sys.stdout
         except Exception:
             pass
@@ -3786,10 +3782,10 @@ if __name__ == '__main__':
                         try:
                             send_msg(conn, pkt, socket_passwords[conn])
                             with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
-                                f.write(f"  -> Sent host_shutdown to {conn.getpeername() if hasattr(conn, 'getpeername') else conn}\n")
+                                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]   -> Sent host_shutdown to {conn.getpeername() if hasattr(conn, 'getpeername') else conn}\n")
                         except Exception as e:
                             with open("/tmp/p2p_shutdown.log", "a", encoding="utf-8-sig") as f:
-                                f.write(f"  -> Failed to send to {conn}: {e}\n")
+                                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]   -> Failed to send to {conn}: {e}\n")
                 except: pass
                 time.sleep(1)
                 sys.exit(0)

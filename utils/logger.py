@@ -102,6 +102,66 @@ def safe_write_log_line(filepath, line, fallback_filename=None):
     return False
 
 
+class TimestampedStream:
+    """
+    Bọc một file stream: tự động chèn mốc thời gian [YYYY-MM-DD HH:MM:SS] vào đầu mỗi dòng mới
+    (kể cả print(), traceback, stderr) để mọi log tuân thủ quy tắc có thời gian.
+    Dòng đã tự bắt đầu bằng '[YYYY-MM-DD HH:MM:SS' hoặc 'YYYY-MM-DD HH:MM:SS' thì không chèn lặp.
+    """
+    def __init__(self, stream):
+        self._stream = stream
+        self._at_line_start = True
+
+    @staticmethod
+    def _has_ts(text):
+        t = text[1:] if text.startswith("[") else text
+        return len(t) >= 19 and t[:4].isdigit() and t[4] == "-" and t[10] == " " and t[13] == ":"
+
+    def write(self, message):
+        if not message:
+            return 0
+        if not isinstance(message, str):
+            message = str(message)
+        out = []
+        for part in message.splitlines(True):
+            if self._at_line_start and part.strip("\r\n") and not self._has_ts(part):
+                out.append(time.strftime("[%Y-%m-%d %H:%M:%S] "))
+            out.append(part)
+            self._at_line_start = part.endswith("\n")
+        try:
+            self._stream.write("".join(out))
+        except Exception:
+            pass
+        return len(message)
+
+    def flush(self):
+        try:
+            self._stream.flush()
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            self._stream.close()
+        except Exception:
+            pass
+
+    def isatty(self):
+        return False
+
+    def fileno(self):
+        return self._stream.fileno()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def open_timestamped_log(filepath):
+    """Mở file log (append, UTF-8 BOM, line-buffered) với mốc thời gian tự động mỗi dòng."""
+    ensure_utf8_bom(filepath)
+    return TimestampedStream(open(filepath, "a", encoding="utf-8-sig", buffering=1))
+
+
 def migrate_legacy_logs():
     """
     Tự động di chuyển các file log nằm rải rác ở thư mục gốc app_dir hoặc TEMP cũ
