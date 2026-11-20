@@ -3064,11 +3064,12 @@ class FileCopyClientMixin:
         if had:
             print(f"[Clipboard] Nhả offer host→client ({reason}).")
             clip_trace(f"[release_remote_offer] {reason}")
-        try:
-            from filecopyhost import write_shared_pending_offer
-            write_shared_pending_offer({})
-        except Exception:
-            pass
+        if not self._is_client_viewer():
+            try:
+                from filecopyhost import clear_shared_pending_offer
+                clear_shared_pending_offer()
+            except Exception:
+                pass
 
     def _offer_empty_and_rearm(self, delay_s=0.2, offer=True, rearm=False):
         """Trong WM_RENDERFORMAT: SetClipboardData HDROP rỗng.
@@ -3261,19 +3262,27 @@ class FileCopyClientMixin:
             pass
 
     def lost_ownership(self):
-        if getattr(self, 'ignore_destroy_clipboard', False):
-            log_debug("[lost_ownership] Bỏ qua WM_DESTROYCLIPBOARD vì tự thực hiện EmptyClipboard.")
+        if (
+            getattr(self, "ignore_destroy_clipboard", False)
+            or getattr(self, "is_rendering", False)
+            or getattr(self, "transfer_in_progress", False)
+        ):
+            log_debug("[lost_ownership] Bỏ qua WM_DESTROYCLIPBOARD trong lúc app đang thao tác clipboard/truyền file.")
             return
+        my_hwnd = getattr(getattr(self, "listener", None), "hwnd", None)
+        try:
+            user32 = ctypes.windll.user32
+            user32.GetClipboardOwner.restype = wintypes.HWND
+            owner = user32.GetClipboardOwner()
+            if my_hwnd and owner and int(owner) == int(my_hwnd):
+                return
+        except Exception:
+            pass
         self._allow_delayed = False
         print("[Clipboard] Đã mất quyền sở hữu clipboard (người dùng copy dữ liệu khác).")
         # Còn offer host→client nhưng user copy local → nhả offer ngay để tránh lẫn text/file.
         if self.pending_remote_files or getattr(self, "_reoffer_files", None):
-            try:
-                from utils.clipboard_api import _clipboard_owned_by_sync_window
-                if not _clipboard_owned_by_sync_window():
-                    self._release_remote_file_offer("lost_ownership")
-            except Exception:
-                self._release_remote_file_offer("lost_ownership")
+            self._release_remote_file_offer("lost_ownership")
 
     def get_active_explorer_path(self):
         """Chỉ dùng path đã chốt / last-good — không hỏi COM trong WM_RENDERFORMAT."""
@@ -3641,7 +3650,7 @@ class FileCopyClientMixin:
             if reoff:
                 self.pending_remote_files = list(reoff)
                 pending = self.pending_remote_files
-            else:
+            elif not self._is_client_viewer():
                 try:
                     from filecopyhost import read_shared_pending_offer
                     so = read_shared_pending_offer()
@@ -3985,7 +3994,7 @@ class FileCopyClientMixin:
             return
 
         pending = self.pending_remote_files or getattr(self, "_reoffer_files", None) or []
-        if not pending:
+        if not pending and not self._is_client_viewer():
             try:
                 from filecopyhost import read_shared_pending_offer
                 so = read_shared_pending_offer()
@@ -4078,6 +4087,12 @@ class FileCopyClientMixin:
                                     res0 = fn_SetClipboardData(15, empty_now)
                                 finally:
                                     user32.CloseClipboard()
+                                if res0:
+                                    mark_own_clipboard_write()
+                                    self._clip_seq_at_pending = get_clipboard_sequence_number()
+                        else:
+                            mark_own_clipboard_write()
+                            self._clip_seq_at_pending = get_clipboard_sequence_number()
                         if not res0:
                             fn_GlobalFree(empty_now)
                         log_debug(f"[execute_client_paste] Unblock Explorer empty HDROP res={res0} dest={dest_dir}")
@@ -4793,6 +4808,26 @@ class FileCopyClientMixin:
             "offer_id": oid,
         }
 
+        if self._is_client_viewer():
+            self._agent_hwnd = None
+            try:
+                from filecopyhost import clear_shared_pending_offer, read_shared_agent_hwnd
+                clear_shared_pending_offer()
+                ag_h = read_shared_agent_hwnd()
+                if ag_h:
+                    ctypes.windll.user32.PostMessageW(
+                        ctypes.c_void_p(ag_h), 0x0400 + 203, 0, 0
+                    )
+            except Exception:
+                pass
+            log_overwrite_conflict(
+                f"CLIENT_VIEWER apply offer={oid} n={len(files)} names={names} (direct delayed setup)"
+            )
+            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
+            self.target_save_dir = temp_dir
+            self.setup_delayed_rendering()
+            return
+
         if self._is_headless_host_process():
             # Đừng đổi target_save_dir / clear done khi đang tải paste khác.
             if not getattr(self, "_xfer_jobs", None):
@@ -4801,7 +4836,7 @@ class FileCopyClientMixin:
                 self.transfer_done_event.clear()
             self._send_to_pipe("PENDING", json.dumps(msg_dict))
 
-        # Luôn ghi Shared Pending Offer vào thư mục toàn cục (cho cả Client lẫn Host)
+        # Luôn ghi Shared Pending Offer vào thư mục toàn cục (cho Host / Agent)
         try:
             from filecopyhost import write_shared_pending_offer
             write_shared_pending_offer(msg_dict)
@@ -4820,15 +4855,6 @@ class FileCopyClientMixin:
                 )
         except Exception:
             pass
-
-        if self._is_client_viewer():
-            log_overwrite_conflict(
-                f"CLIENT_VIEWER apply offer={oid} n={len(files)} names={names} (direct delayed setup)"
-            )
-            temp_dir = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "RemoteDesktopTransfers")
-            self.target_save_dir = temp_dir
-            self.setup_delayed_rendering()
-            return
 
         if self._is_headless_host_process():
             log_overwrite_conflict(

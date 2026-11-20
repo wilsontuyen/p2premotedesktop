@@ -578,6 +578,32 @@ def _install_paste_ll_hooks(on_ctrl_v, on_lbutton, on_rbutton):
 class FileCopyHostMixin:
     """Mixin: gửi file / agent paste trên host."""
 
+    def _remember_copied_files_by_name(self, metadata):
+        if not hasattr(self, "_host_copied_files_by_name") or self._host_copied_files_by_name is None:
+            self._host_copied_files_by_name = {}
+        for m in metadata or []:
+            if isinstance(m, dict) and m.get("name") and m.get("path"):
+                name = str(m["name"])
+                norm = name.replace("\\", "/").lstrip("/")
+                base = os.path.basename(norm)
+                path = m["path"]
+                for k in (
+                    name, norm, base,
+                    os.path.normcase(name), os.path.normcase(norm), os.path.normcase(base),
+                ):
+                    if k:
+                        self._host_copied_files_by_name[k] = path
+
+    def _dispatch_request_pending_files(self, files_req, tok):
+        ok = self.request_pending_files(files_req, tok)
+        if not ok and self.app and getattr(self.app, "is_headless", False):
+            log_debug(
+                f"[_dispatch_request_pending_files] request_pending_files trả về False (live_sock=False) "
+                f"cho paste_id={tok} — gửi CANCEL về Agent."
+            )
+            self._send_progress_signal("CANCEL", str(tok) if tok else "")
+            self._close_transfer_pipe()
+
     def _shared_paste_request_watcher(self):
         import win32event, time
         h_evt = None
@@ -615,7 +641,7 @@ class FileCopyHostMixin:
                         self._send_cancelled = False
                         self._receive_cancelled = False
                         threading.Thread(
-                            target=self.request_pending_files,
+                            target=self._dispatch_request_pending_files,
                             args=(files_req, tok),
                             daemon=True,
                         ).start()
@@ -779,7 +805,7 @@ class FileCopyHostMixin:
                         self._send_cancelled = False
                         self._receive_cancelled = False
                         threading.Thread(
-                            target=self.request_pending_files,
+                            target=self._dispatch_request_pending_files,
                             args=(files_req, tok),
                             daemon=True,
                         ).start()
@@ -831,6 +857,8 @@ class FileCopyHostMixin:
                     else:
                         metadata = json.loads(raw)
                         offer_id = None
+                    if metadata:
+                        self._remember_copied_files_by_name(metadata)
                     if metadata and self.active_sockets:
                         self._clip_offer_id = int(getattr(self, "_clip_offer_id", 0) or 0) + 1
                         self.last_sent_text = None
@@ -1283,7 +1311,26 @@ class FileCopyHostMixin:
                     continue
                 if not filepath or not filename:
                     continue
-                
+
+                if not os.path.exists(filepath):
+                    name_map = getattr(self, "_host_copied_files_by_name", None) or {}
+                    norm_fn = str(filename).replace("\\", "/").lstrip("/")
+                    fallback_path = (
+                        name_map.get(filename)
+                        or name_map.get(norm_fn)
+                        or name_map.get(os.path.basename(norm_fn))
+                        or name_map.get(os.path.normcase(filename))
+                        or name_map.get(os.path.normcase(norm_fn))
+                        or name_map.get(os.path.normcase(os.path.basename(norm_fn)))
+                    )
+                    if fallback_path and os.path.exists(fallback_path):
+                        filepath = fallback_path
+                        if not file_size:
+                            try:
+                                file_size = os.path.getsize(filepath)
+                            except Exception:
+                                pass
+
                 log_debug(f"[_process_send_requests] Kiểm tra filepath: {filepath}")
                 if not os.path.exists(filepath):
                     log_debug(f"[_process_send_requests] File không tồn tại: {filepath}")
@@ -1834,6 +1881,7 @@ def run_clipboard_agent_mode():
     WM_DESTROYCLIPBOARD = 0x0307
     WM_USER_SETUP_DELAYED = 0x0400 + 201  # tin nhắn nội bộ để setup từ luồng khác
     WM_USER_UNBLOCK_PASTE = 0x0400 + 202  # Hủy giữa Paste: HDROP rỗng để Explorer không treo
+    WM_USER_YIELD_CLIPBOARD = 0x0400 + 203  # Nhả pending offer khi ClientViewer chiếm clipboard
 
     _agent_hwnd = None              # HWND cửa sổ ẩn của agent
     _pending_info = {}              # {'display_name': ..., 'total_size': ...}
@@ -2481,6 +2529,11 @@ def run_clipboard_agent_mode():
     def _write_request_files_pipe(files_to_request, dest_dir, paste_id):
         import win32file, json
         pipe_name = r"\\.\pipe\RemoteDesktopClipboardUpPipe"
+        payload = {
+            "files": files_to_request or [],
+            "dest_dir": dest_dir or "",
+            "paste_id": int(paste_id or 0),
+        }
         try:
             import win32pipe
             try:
@@ -2492,12 +2545,6 @@ def run_clipboard_agent_mode():
                 win32file.GENERIC_WRITE, 0, None,
                 win32file.OPEN_EXISTING, 0, None
             )
-            payload = {
-                "files": files_to_request or [],
-                "dest_dir": dest_dir or "",
-                "paste_id": int(paste_id or 0),
-            }
-            write_shared_paste_request(payload)
             msg = "REQUEST_FILES|" + json.dumps(payload)
             win32file.WriteFile(pipe_handle, msg.encode('utf-8'))
             win32file.CloseHandle(pipe_handle)
@@ -2505,11 +2552,7 @@ def run_clipboard_agent_mode():
         except Exception as e:
             agent_print(f"[ClipboardAgent] Lỗi gửi REQUEST_FILES qua Pipe: {e}")
             try:
-                write_shared_paste_request({
-                    "files": files_to_request or [],
-                    "dest_dir": dest_dir or "",
-                    "paste_id": int(paste_id or 0),
-                })
+                write_shared_paste_request(payload)
             except Exception:
                 pass
 
@@ -2698,15 +2741,14 @@ def run_clipboard_agent_mode():
             while job.get("allow") and not job["conflict_event"].is_set():
                 job["conflict_event"].wait(0.2)
             dest_dir = job.get("dest") or dest_dir
-            _desk = os.path.normcase(os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop"))
-            if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir) or os.path.normcase(dest_dir) == _desk:
-                if _agent_cached_explorer_path and os.path.isdir(_agent_cached_explorer_path) and not _is_transfer_staging_dir(_agent_cached_explorer_path) and os.path.normcase(_agent_cached_explorer_path) != _desk:
+            if not dest_dir or not os.path.isdir(dest_dir) or _is_transfer_staging_dir(dest_dir):
+                if _agent_cached_explorer_path and os.path.isdir(_agent_cached_explorer_path) and not _is_transfer_staging_dir(_agent_cached_explorer_path):
                     dest_dir = _agent_cached_explorer_path
                     job["dest"] = dest_dir
                 else:
                     try:
                         found = query_explorer_folder_path(allow_open_clipboard=True)
-                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found) and os.path.normcase(found) != _desk:
+                        if found and os.path.isdir(found) and not _is_transfer_staging_dir(found):
                             dest_dir = found
                             job["dest"] = dest_dir
                     except Exception:
@@ -3082,36 +3124,47 @@ def run_clipboard_agent_mode():
             )
 
             try:
-                # Luôn truy vấn trực tiếp cửa sổ Explorer đang mở tại thời điểm Paste (tránh dùng nhầm cache cũ = Desktop).
-                live_found = None
-                try:
-                    live_found = query_explorer_folder_path(allow_open_clipboard=True)
-                except Exception:
-                    live_found = None
-                try:
-                    import filecopyclient as _fcc
-                    agent_print(
-                        f"[ClipboardAgent] DEST live={live_found!r} override={dest_override!r} "
-                        f"cache={_agent_cached_explorer_path!r} diag={getattr(_fcc, '_LAST_QUERY_DIAG', '')}"
-                    )
-                except Exception:
-                    pass
-                _desk = os.path.normcase(os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop"))
-                # Live trả Desktop nhưng lúc RMB/Ctrl+V đã biết thư mục thật -> tin bản đã lưu.
-                if live_found and os.path.normcase(live_found) == _desk:
-                    for _alt in (dest_override, _agent_cached_explorer_path):
-                        if _alt and os.path.isdir(_alt) and os.path.normcase(_alt) != _desk and not _is_transfer_staging_dir(_alt):
-                            live_found = _alt
-                            break
-
-                if live_found and os.path.isdir(live_found) and not _is_transfer_staging_dir(live_found):
-                    _agent_cached_explorer_path = live_found
-                    paste_dest = live_found
-                elif dest_override and os.path.isdir(dest_override) and not _is_transfer_staging_dir(dest_override):
-                    _agent_cached_explorer_path = dest_override
+                probe_sources = ("probe_detect", "poll_probe_watchdog", "lmb_probe_watchdog", "lmb_down_probe")
+                if (
+                    source in probe_sources
+                    and dest_override
+                    and os.path.isdir(dest_override)
+                    and not _is_transfer_staging_dir(dest_override)
+                ):
                     paste_dest = dest_override
+                    _agent_cached_explorer_path = dest_override
+                    agent_print(f"[ClipboardAgent] DEST ưu tiên theo stub probe ({source}): {paste_dest!r}")
                 else:
-                    paste_dest = _agent_cached_explorer_path
+                    # Luôn truy vấn trực tiếp cửa sổ Explorer đang mở tại thời điểm Paste (tránh dùng nhầm cache cũ = Desktop).
+                    live_found = None
+                    try:
+                        live_found = query_explorer_folder_path(allow_open_clipboard=True)
+                    except Exception:
+                        live_found = None
+                    try:
+                        import filecopyclient as _fcc
+                        agent_print(
+                            f"[ClipboardAgent] DEST live={live_found!r} override={dest_override!r} "
+                            f"cache={_agent_cached_explorer_path!r} diag={getattr(_fcc, '_LAST_QUERY_DIAG', '')}"
+                        )
+                    except Exception:
+                        pass
+                    _desk = os.path.normcase(os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop"))
+                    # Live trả Desktop nhưng lúc RMB/Ctrl+V đã biết thư mục thật -> tin bản đã lưu.
+                    if live_found and os.path.normcase(live_found) == _desk:
+                        for _alt in (dest_override, _agent_cached_explorer_path):
+                            if _alt and os.path.isdir(_alt) and os.path.normcase(_alt) != _desk and not _is_transfer_staging_dir(_alt):
+                                live_found = _alt
+                                break
+
+                    if live_found and os.path.isdir(live_found) and not _is_transfer_staging_dir(live_found):
+                        _agent_cached_explorer_path = live_found
+                        paste_dest = live_found
+                    elif dest_override and os.path.isdir(dest_override) and not _is_transfer_staging_dir(dest_override):
+                        _agent_cached_explorer_path = dest_override
+                        paste_dest = dest_override
+                    else:
+                        paste_dest = _agent_cached_explorer_path
 
                 if not paste_dest or not os.path.isdir(paste_dest) or _is_transfer_staging_dir(paste_dest):
                     desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
@@ -3263,6 +3316,10 @@ def run_clipboard_agent_mode():
         """WndProc cho hidden window của agent. Xử lý WM_RENDERFORMAT (Paste xảy ra)."""
         nonlocal _is_rendering, _files_ready_paths, _files_ready_event, _ignore_destroy, _agent_last_lbutton_time, _agent_last_rbutton_time, _agent_meta_arrival_time, _agent_dummy_h_active, _agent_cached_explorer_path, _agent_suppress_render_until, _agent_expect_repaste_until, _agent_paste_id, _agent_accept_files, _agent_allow_xfer, _agent_xfer_cancel_at, _agent_download_active, _agent_conflict_choice, _agent_conflict_skip, _agent_allow_delayed, _agent_paste_gesture_id, _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_force_delayed_setup, _agent_last_paste_start
         nonlocal _agent_last_paste_finish_time, _agent_lmb_menu_item_name
+
+        if msg == WM_USER_YIELD_CLIPBOARD:
+            _yield_clipboard_to_user("client_viewer_offer")
+            return 0
 
         if msg == WM_USER_SETUP_DELAYED:
             if wparam == 1:
@@ -3749,7 +3806,7 @@ def run_clipboard_agent_mode():
             agent_print(f"[ClipboardAgent] AddClipboardFormatListener lỗi: {e}")
         try:
             MSGFLT_ALLOW = 1
-            for _m in (0x031D, WM_RENDERFORMAT, WM_RENDERALLFORMATS, WM_DESTROYCLIPBOARD, WM_USER_SETUP_DELAYED, WM_USER_UNBLOCK_PASTE):
+            for _m in (0x031D, WM_RENDERFORMAT, WM_RENDERALLFORMATS, WM_DESTROYCLIPBOARD, WM_USER_SETUP_DELAYED, WM_USER_UNBLOCK_PASTE, WM_USER_YIELD_CLIPBOARD):
                 try:
                     user32.ChangeWindowMessageFilterEx(ctypes.c_void_p(hwnd), _m, MSGFLT_ALLOW, None)
                 except Exception:
@@ -4887,6 +4944,8 @@ def run_clipboard_agent_mode():
                                 dlg.destroy()
                         except: pass
                     active_dialog = next(iter(active_dialogs.values()), None)
+                elif action == "yield_clip":
+                    _yield_clipboard_to_user(str(val or "shared_offer_cleared"))
                 elif action == "clear_clip":
                     try:
                         clear_local_clipboard(_agent_hwnd)
@@ -4908,6 +4967,7 @@ def run_clipboard_agent_mode():
         except Exception:
             pass
         last_applied_offer_id = None
+        had_shared_offer = False
         while True:
             try:
                 if h_evt:
@@ -4917,11 +4977,17 @@ def run_clipboard_agent_mode():
                     time.sleep(0.3)
                 info = read_shared_pending_offer()
                 if info and isinstance(info, dict):
+                    had_shared_offer = True
                     oid = info.get("offer_id")
                     if oid != last_applied_offer_id:
                         last_applied_offer_id = oid
                         gui_queue.put(("pending", info))
                         agent_print(f"[ClipboardAgent] Shared pending offer phát hiện từ file (offer={oid}).")
+                elif had_shared_offer:
+                    had_shared_offer = False
+                    last_applied_offer_id = None
+                    if _pending_info:
+                        gui_queue.put(("yield_clip", "shared_offer_cleared"))
             except Exception as e:
                 time.sleep(0.5)
 

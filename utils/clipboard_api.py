@@ -195,13 +195,15 @@ def is_own_clipboard_write():
 
 def should_preserve_user_clipboard(our_hwnd=None):
     """True khi clipboard đang chứa dữ liệu người dùng (file / ảnh / text) — không EmptyClipboard."""
-    if is_own_clipboard_write() or _clipboard_owned_by_sync_window():
+    if is_own_clipboard_write():
+        return False
+    if our_hwnd is None and _clipboard_owned_by_sync_window():
         return False
     try:
         user32 = ctypes.windll.user32
         user32.GetClipboardOwner.restype = wintypes.HWND
         owner = user32.GetClipboardOwner()
-        if our_hwnd and owner and int(owner) == int(our_hwnd):
+        if our_hwnd is not None and owner and int(owner) == int(our_hwnd):
             return False
         CF_BITMAP, CF_DIB, CF_DIBV5 = 2, 8, 17
         if any(

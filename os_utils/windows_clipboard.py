@@ -312,7 +312,11 @@ class ClipboardEventListener:
                                 is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                                 if not is_client and not callable(getattr(self.manager, "_agent_paste_callback", None)):
                                     continue
-                                if not getattr(self.manager, "pending_remote_files", None):
+                                if (
+                                    (not is_client)
+                                    and callable(getattr(self.manager, "_agent_paste_callback", None))
+                                    and not getattr(self.manager, "pending_remote_files", None)
+                                ):
                                     try:
                                         from filecopyhost import read_shared_pending_offer
                                         shared_offer = read_shared_pending_offer()
@@ -406,7 +410,13 @@ class ClipboardEventListener:
                             pend = getattr(self.manager, "pending_remote_files", None) or []
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
                             has_text_rmb = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
-                            if not pend and getattr(self.manager, "_clipboard_mode", None) != "text" and not (has_text_rmb and self.manager._user_clipboard_wins()):
+                            if (
+                                (not is_client)
+                                and callable(getattr(self.manager, "_agent_paste_callback", None))
+                                and not pend
+                                and getattr(self.manager, "_clipboard_mode", None) != "text"
+                                and not (has_text_rmb and self.manager._user_clipboard_wins())
+                            ):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -444,14 +454,26 @@ class ClipboardEventListener:
             # Poll nhanh hơn khi đang chờ Paste menu (Win11 race GetData).
             _sleep = 0.05
             try:
-                if self.manager and (
-                    (time.time() - float(getattr(self.manager, "last_rbutton_time", 0) or 0)) < 8.0
-                ):
-                    _sleep = 0.015
-                    try:
-                        _update_cached_menu_rects()
-                    except Exception:
-                        pass
+                if self.manager:
+                    now_poll = time.time()
+                    recent_rmb = (now_poll - float(getattr(self.manager, "last_rbutton_time", 0) or 0)) < 8.0
+                    recent_ctrl_v = (now_poll - float(getattr(self.manager, "last_ctrl_v_time", 0) or 0)) < 3.0
+                    if recent_rmb:
+                        _sleep = 0.015
+                        try:
+                            _update_cached_menu_rects()
+                        except Exception:
+                            pass
+                    if (
+                        (recent_rmb or recent_ctrl_v)
+                        and (getattr(self.manager, "pending_remote_files", None) or getattr(self.manager, "_reoffer_files", None))
+                        and getattr(self.manager, "_allow_delayed", True)
+                        and not getattr(self.manager, "_conflict_ui_active", False)
+                    ):
+                        try:
+                            self.manager.check_and_trigger_client_probe_paste("poll_probe_watchdog")
+                        except Exception:
+                            pass
             except Exception:
                 pass
             if user32.GetAsyncKeyState(0x0D) & 0x8000: # Enter
@@ -487,7 +509,11 @@ class ClipboardEventListener:
                         is_exp = _is_explorer_clipboard_client()
                         if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
-                            if not is_client and not getattr(self.manager, "pending_remote_files", None):
+                            if (
+                                (not is_client)
+                                and callable(getattr(self.manager, "_agent_paste_callback", None))
+                                and not getattr(self.manager, "pending_remote_files", None)
+                            ):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -552,7 +578,11 @@ class ClipboardEventListener:
                         is_exp = _is_explorer_clipboard_client()
                         if (not on_self_k) and is_exp and not is_text_mode:
                             is_client = bool(getattr(self.manager, "pygame_hwnd", None) or getattr(self.manager, "is_client", False))
-                            if not is_client and not getattr(self.manager, "pending_remote_files", None):
+                            if (
+                                (not is_client)
+                                and callable(getattr(self.manager, "_agent_paste_callback", None))
+                                and not getattr(self.manager, "pending_remote_files", None)
+                            ):
                                 try:
                                     from filecopyhost import read_shared_pending_offer
                                     shared_offer = read_shared_pending_offer()
@@ -2078,14 +2108,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                                 
                 if not metadata: return
                 if metadata:
-                    if not hasattr(self, "_host_copied_files_by_name"):
-                        self._host_copied_files_by_name = {}
-                    for m in metadata:
-                        if isinstance(m, dict) and m.get("name") and m.get("path"):
-                            self._host_copied_files_by_name[m["name"]] = m["path"]
-                            self._host_copied_files_by_name[os.path.basename(m["name"])] = m["path"]
-                            self._host_copied_files_by_name[os.path.normcase(m["name"])] = m["path"]
-                            self._host_copied_files_by_name[os.path.normcase(os.path.basename(m["name"]))] = m["path"]
+                    self._remember_copied_files_by_name(metadata)
                     # Client viewer: copy file local → nhả offer Paste host→client còn sót.
                     if getattr(self, "pygame_hwnd", None) and (
                         self.pending_remote_files or getattr(self, "_reoffer_files", None)
