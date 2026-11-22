@@ -142,6 +142,7 @@ client_switching_desktop_countdown = 0
 client_last_switching_desktop_time = 0
 client_host_resolution = None
 client_host_did_shutdown = False
+client_bsdr_active = False
 client_host_computer_name_override = None
 client_host_monitor_count = 1
 client_host_sent_monitor_info = False
@@ -705,6 +706,9 @@ def client_receiver_thread(sock, password):
             msg = recv_msg(sock, password)
             if not msg:
                 print("[Client] Server closed connection.")
+                if globals().get('client_bsdr_active', False):
+                    print("[Client] Host closed connection while BSDR was showing. Treating as host shutdown.")
+                    client_host_did_shutdown = True
                 # Linux/Ubuntu đứt đột ngột ≈ shutdown. Android không đóng viewer.
                 if _non_windows_close_is_shutdown():
                     print("[Client] Non-Windows host connection closed. Treating as host shutdown.")
@@ -794,6 +798,8 @@ def client_receiver_thread(sock, password):
                             client_is_domain = event.get("is_domain", False)
                         if "is_locked" in event:
                             client_is_locked = event.get("is_locked", False)
+                            if globals().get('client_bsdr_active', False):
+                                client_is_locked = False
                         reason = event.get("reason", "No reason provided")
                         try:
                             from utils.logger import get_log_filepath, safe_write_log_line
@@ -802,7 +808,17 @@ def client_receiver_thread(sock, password):
                         except:
                             pass
                         continue
+                    elif evt_type == "bsdr_state":
+                        # BSDR (Closing apps...) dang hien o Host: giu nguyen khung hinh, khong coi la login/restart.
+                        _b_act = bool(event.get("active"))
+                        globals()['client_bsdr_active'] = _b_act
+                        if _b_act:
+                            client_is_locked = False
+                            client_switching_desktop_countdown = 0
+                        continue
                     elif evt_type == "switching_desktop":
+                        if globals().get('client_bsdr_active', False):
+                            continue
                         client_last_switching_desktop_time = time.time()
                         desk = str(event.get("desktop") or "").lower()
                         if desk and desk not in ("default", "", "agprivacydesk"):
@@ -1566,6 +1582,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
             client_last_recv_time = time.time()
             client_running = True
             client_host_did_shutdown = False
+            globals()['client_bsdr_active'] = False
             client_is_domain = is_domain
             ping_limit = 90.0 if (is_android or str(os_release) in ("7", "Vista", "XP", "8", "8.1", "android")) else 25.0
             last_full_frame_req = time.time()
@@ -2729,10 +2746,15 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 effective_ping = ping_limit
                 if current_countdown > 0 or globals().get('client_is_locked', False):
                     effective_ping = max(ping_limit, 45.0)
+                if globals().get('client_bsdr_active', False):
+                    effective_ping = max(effective_ping, 45.0)
                 if client_host_did_shutdown:
                     effective_ping = min(effective_ping, 20.0)
                 if client_last_recv_time > 0 and time.time() - client_last_recv_time > effective_ping:
                     print("[Client] Connection ping timeout. Disconnecting.")
+                    if globals().get('client_bsdr_active', False):
+                        print("[Client] Lost connection while BSDR was showing. Treating as host shutdown.")
+                        client_host_did_shutdown = True
                     if _non_windows_close_is_shutdown():
                         print("[Client] Non-Windows host ping timeout. Treating as host shutdown.")
                         client_host_did_shutdown = True

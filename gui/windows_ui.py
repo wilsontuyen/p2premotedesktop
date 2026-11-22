@@ -441,7 +441,14 @@ class ProgressDialog(tk.Toplevel):
                               p.winfo_rooty() + p.winfo_height())
         else:
             # Clipboard: thuộc cửa sổ client nhưng kéo tự do trên desktop, không kẹt trong vùng remote.
-            bounds = self._virtual_screen_rect()
+            # Luôn nằm trên cùng nhưng giữ bên trong cửa sổ host/client (owner).
+            bounds = self._owner_window_screen_rect() or self._host_client_screen_rect()
+            if bounds:
+                l, t, r, b = bounds
+                if r <= 0 or b <= 0 or l < -500 or t < -500:
+                    bounds = None
+            if not bounds:
+                bounds = self._virtual_screen_rect()
         if bounds:
             left, top, right, bottom = bounds
             max_x = left if (right - left) <= my_w else right - my_w

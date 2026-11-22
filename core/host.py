@@ -658,12 +658,49 @@ def _host_wts_phase_listener():
     except Exception as e:
         print(f"[Host] WTS phase listener: {e}")
 
+def _bsdr_present():
+    """True khi man hinh BSDR (BlockedShutdownUX 'Closing apps...') dang hien tren desktop Winlogon.
+    Co giu them ~2s sau khi cua so bien mat (cua so BSDR co the bi tao lai) de khong nhay qua lai
+    giua cac man hinh. Ket qua duoc cache 0.15s."""
+    if sys.platform != "win32":
+        return False
+    now = time.time()
+    c = getattr(_bsdr_present, "_c", (0.0, False))
+    if now - c[0] < 0.15:
+        return c[1]
+    seen_now = False
+    h_wl = None
+    try:
+        attach_process_window_station("WinSta0")
+        h_wl = open_named_desktop_handle("Winlogon")
+        if h_wl and _desktop_name_from_handle(h_wl) == "winlogon":
+            for it in _enum_desktop_hwnds(h_wl, 100, 100):
+                if _is_bsdr_hwnd(it[0]):
+                    seen_now = True
+                    break
+    except Exception:
+        seen_now = False
+    finally:
+        if h_wl:
+            try:
+                ctypes.windll.user32.CloseDesktop(h_wl)
+            except Exception:
+                pass
+    if seen_now:
+        _bsdr_present._last_seen = now
+    active = seen_now or (now - float(getattr(_bsdr_present, "_last_seen", 0.0) or 0.0) < 2.0)
+    _bsdr_present._c = (now, active)
+    return active
+
 def _should_capture_logon_ui():
     """True khi màn hình người dùng thấy là logon / sign-out / khóa.
     UAC: DXGI Win11 trắng — dùng GDI riêng (grab_uac_dialog_bgr), không ghim Winlogon."""
     if uac_consent_running():
         return False
     _ensure_host_wts_phase_listener()
+    # BSDR dang hien: luon giu nguyen Winlogon (khong chuyen sang man hinh khac) de viewer thay dung trang thai.
+    if _bsdr_present():
+        return True
     input_name = _input_desktop_name()
     # Khi Input Desktop thực tế đang là Winlogon -> Màn hình người dùng (BSDR / Lock / Logon) đang ở Winlogon!
     if input_name == "winlogon":
@@ -3233,6 +3270,7 @@ class HostMixin:
         _last_switching_signal_time = 0
         _last_lock_sync = 0
         _last_sent_locked = None
+        _last_sent_bsdr = None
 
         def _host_cursor_watcher():
             last_sent_pos = None
@@ -3288,9 +3326,15 @@ class HostMixin:
         threading.Thread(target=_host_cursor_watcher, name="HostCursorWatcher", daemon=True).start()
 
         def _sync_lock_status():
-            nonlocal _last_lock_sync, _last_sent_locked
+            nonlocal _last_lock_sync, _last_sent_locked, _last_sent_bsdr
             try:
-                if uac_consent_running():
+                bsdr_now = bool(_bsdr_present())
+                if bsdr_now != _last_sent_bsdr:
+                    send_msg(conn, json.dumps({"type": "bsdr_state", "active": bsdr_now}).encode("utf-8"), password)
+                    _last_sent_bsdr = bsdr_now
+                if bsdr_now:
+                    locked_now = False
+                elif uac_consent_running():
                     locked_now = False
                 else:
                     locked_now = (
