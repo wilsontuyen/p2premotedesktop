@@ -5,7 +5,7 @@ import shutil
 import time
 import glob
 
-from build_and_deploy import compile_inno_installer, log, run_cmd, shorten_openblas_dll, try_authenticode_sign, verify_project_syntax
+from build_and_deploy import compile_inno_installer, enable_large_address_aware, log, run_cmd, shorten_openblas_dll, try_authenticode_sign, verify_project_syntax
 
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 output_dir = os.path.join(workspace_dir, "dist_nuitka_host")
@@ -153,6 +153,7 @@ def merge_host_service(app_dist_dir):
         except Exception as e:
             log(f"Warning: Failed to merge service file {item}: {e}")
     if os.path.exists(svc_dst):
+        enable_large_address_aware(svc_dst)
         try_authenticode_sign(svc_dst)
         log("Added RemoteDesktopHostService.exe")
         return True
@@ -268,6 +269,7 @@ def main():
         os.remove(new_exe)
     os.rename(old_exe, new_exe)
     log("Renamed app.exe to RemoteDesktopHost.exe")
+    enable_large_address_aware(new_exe)
     try_authenticode_sign(new_exe)
 
     if not merge_host_service(app_dist_dir):

@@ -13,12 +13,20 @@ try:
     _f = open_timestamped_log(crash_log_path)
     sys.stderr = _f
     sys.stdout = _f
+    _raw_cmdline = " ".join(str(a) for a in sys.argv)
+    if sys.platform == "win32":
+        try:
+            import ctypes as _ct_early
+            _ct_early.windll.kernel32.GetCommandLineW.restype = _ct_early.c_wchar_p
+            _raw_cmdline += " " + (_ct_early.windll.kernel32.GetCommandLineW() or "")
+        except Exception:
+            pass
     _early_role = (
-        "Broker" if "--broker" in sys.argv else
-        "ClipboardAgent" if "--clipboard-agent" in sys.argv else
-        "CaptureWorker" if "--capture-worker" in sys.argv else
-        "HeadlessAgent" if "--headless" in sys.argv else
-        "ViewerChild" if any("multiprocessing" in str(a) for a in sys.argv) else
+        "Broker" if "--broker" in _raw_cmdline else
+        "ClipboardAgent" if "--clipboard-agent" in _raw_cmdline else
+        "CaptureWorker" if "--capture-worker" in _raw_cmdline else
+        "HeadlessAgent" if "--headless" in _raw_cmdline else
+        "ViewerChild" if "multiprocessing" in _raw_cmdline else
         "GUI"
     )
     install_crash_handlers(_early_role)
@@ -359,6 +367,56 @@ from core.host import HostMixin, check_desktop_change
 from core.network_manager import NetworkMixin
 from pclist import SavedListMixin, get_computers_xml_path, get_app_data_dir, get_app_base_dir, _XML_FILE_LOCK, _atomic_write_xml
 
+_ACTIVE_UI_APP = None
+_ORIG_TK_MISC_AFTER = tk.Misc.after
+_ORIG_TK_MISC_AFTER_CANCEL = tk.Misc.after_cancel
+
+
+def _threadsafe_tk_misc_after(widget_self, ms, func=None, *args):
+    """Bọc thread-safe toàn cục cho mọi tk.Tk / tk.Toplevel / tk.Widget:
+    Ngăn luồng phụ gọi thẳng vào tcl86t.dll / _tkinter.pyd qua dialog.after() hay widget.after()."""
+    app = _ACTIVE_UI_APP
+    if app is not None:
+        main_th = getattr(app, "_main_thread", None)
+        if main_th is not None and threading.current_thread() is not main_th:
+            if func is None:
+                time.sleep(max(0.0, float(ms) / 1000.0))
+                return None
+            q = getattr(app, "_ui_call_queue", None)
+            if q is not None:
+                q.put((widget_self, ms, func, args))
+                return "bg_queued"
+    try:
+        return _ORIG_TK_MISC_AFTER(widget_self, ms, func, *args)
+    except Exception:
+        if func is not None and app is not None:
+            q = getattr(app, "_ui_call_queue", None)
+            if q is not None:
+                q.put((widget_self, ms, func, args))
+        return "bg_queued"
+
+
+def _threadsafe_tk_misc_after_cancel(widget_self, id):
+    if not id or id == "bg_queued":
+        return
+    app = _ACTIVE_UI_APP
+    if app is not None:
+        main_th = getattr(app, "_main_thread", None)
+        if main_th is not None and threading.current_thread() is not main_th:
+            q = getattr(app, "_ui_call_queue", None)
+            if q is not None:
+                q.put((widget_self, 0, lambda w=widget_self, i=id: _threadsafe_tk_misc_after_cancel(w, i), ()))
+                return
+    try:
+        _ORIG_TK_MISC_AFTER_CANCEL(widget_self, id)
+    except Exception:
+        pass
+
+
+tk.Misc.after = _threadsafe_tk_misc_after
+tk.Misc.after_cancel = _threadsafe_tk_misc_after_cancel
+
+
 class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def after(self, ms, func=None, *args):
         """
@@ -368,36 +426,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         'RuntimeError: main thread is not in main loop' hoặc sập C-level 0xC0000005 / 0xC0000409 Tcl_AsyncDelete).
         Thay vào đó, đẩy vào hàng đợi _ui_call_queue để luồng chính (Main Thread) thực thi an toàn.
         """
-        if func is None:
-            if getattr(self, "_main_thread", None) is threading.current_thread():
-                return super().after(ms)
-            time.sleep(max(0.0, float(ms) / 1000.0))
-            return None
-        if getattr(self, "_main_thread", None) is not None and threading.current_thread() is not self._main_thread:
-            q = getattr(self, "_ui_call_queue", None)
-            if q is not None:
-                q.put((ms, func, args))
-                return "bg_queued"
-        try:
-            return super().after(ms, func, *args)
-        except Exception:
-            q = getattr(self, "_ui_call_queue", None)
-            if q is not None:
-                q.put((ms, func, args))
-            return "bg_queued"
+        return _threadsafe_tk_misc_after(self, ms, func, *args)
 
     def after_cancel(self, id):
-        if not id or id == "bg_queued":
-            return
-        if getattr(self, "_main_thread", None) is not None and threading.current_thread() is not self._main_thread:
-            q = getattr(self, "_ui_call_queue", None)
-            if q is not None:
-                q.put((0, lambda i=id: self.after_cancel(i), ()))
-                return
-        try:
-            super().after_cancel(id)
-        except Exception:
-            pass
+        _threadsafe_tk_misc_after_cancel(self, id)
 
     def _drain_ui_call_queue(self):
         q = getattr(self, "_ui_call_queue", None)
@@ -405,15 +437,27 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             processed = 0
             while processed < 64:
                 try:
-                    ms, func, args = q.get_nowait()
+                    item = q.get_nowait()
                 except queue.Empty:
                     break
                 processed += 1
                 try:
+                    if len(item) == 4:
+                        target_w, ms, func, args = item
+                    else:
+                        target_w = self
+                        ms, func, args = item
+                    if target_w is not None and target_w is not self:
+                        try:
+                            if not target_w.winfo_exists():
+                                continue
+                        except Exception:
+                            continue
+                    sched_w = target_w if target_w is not None else self
                     if not ms or int(ms) <= 0:
                         func(*args)
                     else:
-                        super().after(int(ms), func, *args)
+                        _ORIG_TK_MISC_AFTER(sched_w, int(ms), func, *args)
                 except Exception as cb_err:
                     try:
                         from utils.logger import log_system_crash
@@ -426,16 +470,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     except Exception:
                         pass
         try:
-            super().after(20, self._drain_ui_call_queue)
+            _ORIG_TK_MISC_AFTER(self, 20, self._drain_ui_call_queue)
         except Exception:
             pass
 
     def __init__(self):
+        global _ACTIVE_UI_APP
         self._main_thread = threading.current_thread()
         self._ui_call_queue = queue.Queue()
+        _ACTIVE_UI_APP = self
         super().__init__()
         try:
-            super().after(20, self._drain_ui_call_queue)
+            _ORIG_TK_MISC_AFTER(self, 20, self._drain_ui_call_queue)
         except Exception:
             pass
         

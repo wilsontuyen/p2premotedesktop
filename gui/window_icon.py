@@ -7,6 +7,48 @@ from core.config import app_dir
 _patched = False
 _orig_toplevel_init = None
 _orig_tk_init = None
+_cached_hicons = {}
+_cached_photo_icons = {}
+
+
+def _get_shared_hicon(icon_path):
+    """Tải và cache HICON dùng chung (LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_SHARED) tránh rò rỉ GDI/USER handle."""
+    if not icon_path or sys.platform != "win32":
+        return 0
+    h = _cached_hicons.get(icon_path)
+    if h:
+        return h
+    try:
+        import ctypes
+        # 0x0010 = LR_LOADFROMFILE, 0x0040 = LR_DEFAULTSIZE, 0x8000 = LR_SHARED
+        h = ctypes.windll.user32.LoadImageW(0, icon_path, 1, 0, 0, 0x0010 | 0x0040 | 0x8000)
+        if not h:
+            h = ctypes.windll.user32.LoadImageW(0, icon_path, 1, 0, 0, 0x0010)
+        if h:
+            _cached_hicons[icon_path] = h
+            return h
+    except Exception:
+        pass
+    return 0
+
+
+def _get_cached_photo_icon(win, png):
+    if not png or not os.path.exists(png):
+        return None
+    interp_key = id(getattr(win, "tk", win))
+    cached = _cached_photo_icons.get((interp_key, png))
+    if cached is not None:
+        return cached
+    try:
+        img = tk.PhotoImage(master=win, file=png)
+    except Exception:
+        try:
+            from PIL import Image, ImageTk
+            img = ImageTk.PhotoImage(Image.open(png), master=win)
+        except Exception:
+            return None
+    _cached_photo_icons[(interp_key, png)] = img
+    return img
 
 
 def _icon_file():
@@ -42,25 +84,26 @@ def _set_default_icon(win):
         except Exception:
             pass
     if os.path.exists(png):
-        try:
-            img = tk.PhotoImage(file=png)
-        except Exception:
+        img = _get_cached_photo_icon(win, png)
+        if img is not None:
             try:
-                from PIL import Image, ImageTk
-                img = ImageTk.PhotoImage(Image.open(png))
+                win.iconphoto(True, img)
+                win._app_icon_img_default = img
             except Exception:
-                return
-        try:
-            win.iconphoto(True, img)
-            win._app_icon_img_default = img
-        except Exception:
-            pass
+                pass
 
 
 def set_dialog_app_icon(win):
     """Gắn icon app lên cửa sổ Tk (thay icon lông chim Tcl trên taskbar Win11)."""
     try:
         if not win.winfo_exists():
+            return
+        borderless = False
+        try:
+            borderless = bool(win.overrideredirect())
+        except Exception:
+            pass
+        if borderless:
             return
         _set_default_icon(win)
         mapped = False
@@ -72,30 +115,21 @@ def set_dialog_app_icon(win):
         if not mapped:
             return
         icon_path, png = _icon_file()
-        borderless = False
-        try:
-            borderless = bool(win.overrideredirect())
-        except Exception:
-            pass
-        if not borderless:
-            if sys.platform == "win32" and icon_path:
-                try:
-                    win.iconbitmap(icon_path)
-                except Exception:
-                    pass
-            elif os.path.exists(png):
-                try:
-                    img = tk.PhotoImage(file=png)
-                except Exception:
-                    from PIL import Image, ImageTk
-                    img = ImageTk.PhotoImage(Image.open(png))
+        if sys.platform == "win32" and icon_path:
+            try:
+                win.iconbitmap(icon_path)
+            except Exception:
+                pass
+        elif os.path.exists(png):
+            img = _get_cached_photo_icon(win, png)
+            if img is not None:
                 win.iconphoto(False, img)
                 win._app_icon_img = img
         if sys.platform == "win32" and icon_path:
             try:
                 import ctypes
                 hwnd = _toplevel_hwnd(win)
-                hicon = ctypes.windll.user32.LoadImageW(0, icon_path, 1, 0, 0, 0x0010)
+                hicon = _get_shared_hicon(icon_path)
                 if hicon:
                     ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon)
                     ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon)
@@ -149,7 +183,13 @@ def _apply_when_ready(win):
         if applied["done"]:
             return
         try:
-            if not win.winfo_exists() or not win.winfo_ismapped():
+            if not win.winfo_exists():
+                applied["done"] = True
+                return
+            if win.overrideredirect():
+                applied["done"] = True
+                return
+            if not win.winfo_ismapped():
                 return
         except Exception:
             return

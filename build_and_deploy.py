@@ -246,6 +246,7 @@ def main():
                 os.remove(new_exe)
             os.rename(old_exe, new_exe)
             log("Successfully renamed app.exe to RemoteDesktopP2P.exe")
+            enable_large_address_aware(new_exe)
             try_authenticode_sign(new_exe)
         except Exception as e:
             log(f"Failed to rename app.exe: {e}")
@@ -359,6 +360,7 @@ def merge_full_service(app_dist_dir):
                 shutil.copy2(s, d)
         except Exception as e:
             log(f"Warning: Failed to merge service file {item}: {e}")
+    enable_large_address_aware(svc_dst)
     try_authenticode_sign(svc_dst)
     log("Added RemoteDesktopService.exe")
     return True
@@ -439,6 +441,36 @@ def shorten_openblas_dll(app_dist_dir):
                 return
         os.rename(long_path, dest)
     log(f"Renamed {long_name} -> {short_name} (patched {patched} files).")
+
+def find_editbin():
+    import glob
+    patterns = [
+        r"C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\editbin.exe",
+        r"C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x86\editbin.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\editbin.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx86\x86\editbin.exe",
+    ]
+    for pat in patterns:
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[-1]
+    return shutil.which("editbin")
+
+
+def enable_large_address_aware(exe_path):
+    """Kích hoạt cờ /LARGEADDRESSAWARE cho file thực thi 32-bit bằng MSVC editbin.exe (mở rộng trần RAM ảo từ 2GB lên 4GB trên Windows 64-bit)."""
+    if not exe_path or not os.path.exists(exe_path):
+        return False
+    editbin = find_editbin()
+    if not editbin:
+        log(f"WARNING: Không tìm thấy editbin.exe để bật LARGEADDRESSAWARE cho {exe_path}")
+        return False
+    if run_cmd_args([editbin, "/NOLOGO", "/LARGEADDRESSAWARE", exe_path]):
+        log(f"Đã bật /LARGEADDRESSAWARE thành công cho: {exe_path}")
+        return True
+    log(f"WARNING: Không bật được /LARGEADDRESSAWARE cho {exe_path}")
+    return False
+
 
 def find_signtool():
     signtool = None

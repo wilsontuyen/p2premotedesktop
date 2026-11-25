@@ -436,8 +436,21 @@ class NetworkMixin:
                     self.save_saved_computers(comps)
         except Exception as e:
             print(f"[Network] Error updating saved_computers with host MAC: {e}")
+        def _refresh_mac_ui():
+            try:
+                fn = getattr(self, "_lan_refresh_list_func", None)
+                if callable(fn):
+                    fn()
+            except Exception:
+                pass
+            try:
+                rfn = getattr(self, "_reorder_saved_computers_func", None)
+                if callable(rfn):
+                    rfn()
+            except Exception:
+                pass
         try:
-            self.after(50, self.refresh_list)
+            self.after(50, _refresh_mac_ui)
         except Exception:
             pass
 
@@ -878,7 +891,13 @@ class NetworkMixin:
             "online_status": {},  # hwid -> bool (True=Online, False=Offline, None=Checking)
             "probe_gen": 0,
             "probe_cancel_event": threading.Event(),
+            "dialog_closed": threading.Event(),
         }
+        dialog.bind(
+            "<Destroy>",
+            lambda e: scan_state["dialog_closed"].set() if e.widget is dialog else None,
+            add="+",
+        )
 
         def _find_exact_saved_comp(comp_name, cand_hwid, cand_saved_id=None, comps_list=None):
             """Chỉ đối chiếu CHÍNH XÁC 100% theo ID 12 số hoặc tên máy (tuyệt đối không khớp mờ theo từ đơn làm lệch mật khẩu sang máy khác)."""
@@ -1494,14 +1513,15 @@ class NetworkMixin:
             )
 
             def _thread():
+                dlg_closed = scan_state["dialog_closed"]
                 try:
                     last_prog_time = [0.0]
                     def _prog(cur, tot, target_ip):
                         now = time.time()
                         if cur == tot or (now - last_prog_time[0] >= 0.08):
                             last_prog_time[0] = now
-                            if dialog.winfo_exists():
-                                dialog.after(0, lambda c=cur, t=tot, tip=target_ip: progress_label.config(
+                            if not dlg_closed.is_set():
+                                self.after(0, lambda c=cur, t=tot, tip=target_ip: progress_label.config(
                                     text=_("Đang quét {ip} ({c}/{t})...").format(ip=tip, c=c, t=t)
                                 ) if dialog.winfo_exists() else None)
 
@@ -1520,28 +1540,28 @@ class NetworkMixin:
 
                     was_cancelled = scan_state["cancel_event"].is_set()
                     self.save_lan_peers()
-                    if dialog.winfo_exists():
+                    if not dlg_closed.is_set():
                         found_cnt = len(found)
                         if was_cancelled:
                             msg_done = _("Đã dừng quét ({s} - {e}). Đã tìm thấy {count} máy.").format(s=s_ip, e=e_ip, count=found_cnt)
                         else:
                             msg_done = _("Quét hoàn tất ({s} - {e})! Tìm thấy {count} máy trực tuyến.").format(s=s_ip, e=e_ip, count=found_cnt)
-                        dialog.after(0, lambda m=msg_done: progress_label.config(text=m) if dialog.winfo_exists() else None)
-                        dialog.after(4500, lambda: progress_label.config(text="") if dialog.winfo_exists() and not scan_state["is_scanning"] else None)
+                        self.after(0, lambda m=msg_done: progress_label.config(text=m) if dialog.winfo_exists() else None)
+                        self.after(4500, lambda: progress_label.config(text="") if dialog.winfo_exists() and not scan_state["is_scanning"] else None)
                 except Exception as ex:
                     print(f"[VPN Scan] Error: {ex}")
                 finally:
                     scan_state["is_scanning"] = False
                     self.save_lan_peers()
-                    if dialog.winfo_exists():
-                        dialog.after(0, lambda: btn_vpn_scan.config(
+                    if not dlg_closed.is_set():
+                        self.after(0, lambda: btn_vpn_scan.config(
                             state=tk.NORMAL,
                             text=_("🔍 Quét dải IP"),
                             bg="#8E44AD",
                             activebackground="#9B59B6"
                         ) if dialog.winfo_exists() else None)
                         # Cập nhật lại toàn bộ danh sách máy đúng 1 lần duy nhất sau khi quét xong
-                        dialog.after(50, lambda: refresh_list() if dialog.winfo_exists() else None)
+                        self.after(50, lambda: refresh_list() if dialog.winfo_exists() else None)
 
             threading.Thread(target=_thread, daemon=True).start()
 
@@ -2345,6 +2365,7 @@ class NetworkMixin:
                     old_cancel.set()
                 probe_cancel = threading.Event()
                 scan_state["probe_cancel_event"] = probe_cancel
+                dlg_closed = scan_state["dialog_closed"]
 
                 any_changed = [False]
                 _bg_pacer_lock = threading.Lock()
@@ -2352,14 +2373,14 @@ class NetworkMixin:
 
                 def _check_one(item_entry):
                     h, inf = item_entry
-                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                    if probe_cancel.is_set() or dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
                         return
 
                     with self.lan_peers_lock:
                         if h in self.lan_peers and isinstance(self.lan_peers[h], dict):
                             inf = dict(self.lan_peers[h])
 
-                    # Bộ điều nhịp lệch pha: tránh 15 luồng quét ngầm cùng bắn SYN vào RRAS tại 1 mili-giây
+                    # Bộ điều nhịp lệch pha: tránh nhiều luồng quét ngầm cùng bắn SYN vào RRAS tại 1 mili-giây
                     is_vpn_peer = _resolve_peer_group(h, inf) == "VPN"
                     gap = 0.08 if is_vpn_peer else 0.015
                     with _bg_pacer_lock:
@@ -2370,11 +2391,11 @@ class NetworkMixin:
                     if wait_sec > 0:
                         if probe_cancel.wait(wait_sec):
                             return
-                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                    if probe_cancel.is_set() or dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
                         return
 
                     is_on, u_data = probe_peer_direct(inf, timeout=0.85, cancel_event=probe_cancel)
-                    if probe_cancel.is_set() or not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                    if probe_cancel.is_set() or dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
                         return
                     # Chỉ chấp nhận cập nhật nếu u_data thực sự là cùng 1 máy tính với bản ghi h (tránh ghi đè khi DHCP đổi IP)
                     if is_on and u_data and not are_same_machine(h, inf, u_data.get("hwid"), u_data):
@@ -2405,8 +2426,8 @@ class NetworkMixin:
                     # Chỉ đẩy cập nhật lên giao diện khi trạng thái thực sự thay đổi (Online <-> Offline, từ chưa rõ sang xác định, hoặc đổi nhóm/IP)
                     if prev_st != is_on or ui_prev != is_on or group_or_ip_changed:
                         any_changed[0] = True
-                        if dialog.winfo_exists() and scan_state.get("probe_gen") == gen:
-                            dialog.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
+                        if not dlg_closed.is_set() and scan_state.get("probe_gen") == gen:
+                            self.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
 
                 def _worker():
                     try:
@@ -2421,14 +2442,23 @@ class NetworkMixin:
                                 -get_last_seen_epoch(kv[1].get("last_seen", 0)),
                             )
                         )
-                        with ThreadPoolExecutor(max_workers=min(15, max(1, len(items)))) as executor:
-                            list(executor.map(_check_one, items))
+                        # Tái sử dụng 1 ThreadPool cố định cho quét LAN/VPN tránh tạo/hủy 15 thread mỗi 8s gây phân mảnh bộ nhớ ảo 32-bit
+                        pool = getattr(self, "_lan_probe_executor", None)
+                        if pool is None:
+                            pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="LANProbe")
+                            self._lan_probe_executor = pool
+                        futs = [pool.submit(_check_one, it) for it in items]
+                        for fut in futs:
+                            try:
+                                fut.result()
+                            except Exception:
+                                pass
                         if any_changed[0] and not probe_cancel.is_set():
                             self.save_lan_peers()
                     finally:
                         if scan_state.get("probe_gen") == gen:
                             scan_state["is_probing"] = False
-                            if dialog.winfo_exists():
+                            if not dlg_closed.is_set():
                                 def _on_probe_done():
                                     if not dialog.winfo_exists():
                                         return
@@ -2438,7 +2468,7 @@ class NetworkMixin:
                                         empty_offline_lbl.config(
                                             text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
                                         )
-                                dialog.after(0, _on_probe_done)
+                                self.after(0, _on_probe_done)
 
                 threading.Thread(target=_worker, daemon=True).start()
 
@@ -2574,6 +2604,7 @@ class NetworkMixin:
                 auto_probe_timer[0] = dialog.after(8000, _auto_probe_expanded_groups)
 
         def on_dialog_close():
+            scan_state["dialog_closed"].set()
             self._lan_refresh_list_func = None
             scan_state["cancel_event"].set()
             scan_state["probe_gen"] = scan_state.get("probe_gen", 0) + 1
@@ -4001,6 +4032,7 @@ class NetworkMixin:
                                 except:
                                     import time
                                     time.sleep(10.0)
+                                socket_passwords.pop(sock, None)
                                 try: sock.close()
                                 except: pass
                             import threading
@@ -4077,6 +4109,7 @@ class NetworkMixin:
                                 )
                             except Exception:
                                 pass
+                        self._cleanup_viewer_session(process, reconnect_queue=req_queue, cmd_queue=cmd_q)
                         alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
                         if not alive_viewers:
                             self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
@@ -4112,9 +4145,61 @@ class NetworkMixin:
             if sock:
                 force_close_socket(sock)
                 socket_passwords.pop(sock, None)
-            
+
+    def _cleanup_viewer_session(self, proc=None, sock=None, reconnect_queue=None, cmd_queue=None):
+        """Giải phóng triệt để Pipe/Queue, Handle tiến trình con, socket_passwords và danh sách active_viewers sau khi đóng Viewer."""
+        if sock is not None:
+            socket_passwords.pop(sock, None)
+            try:
+                sock.close()
+            except Exception:
+                pass
+        for q in (reconnect_queue, cmd_queue, getattr(proc, "_cmd_queue", None)):
+            if q is not None:
+                try:
+                    q.close()
+                except Exception:
+                    pass
+                try:
+                    q.cancel_join_thread()
+                except Exception:
+                    pass
+        try:
+            kept = []
+            dead_procs = []
+            for v in list(getattr(self, "active_viewers", [])):
+                vp = v.get("process")
+                if vp is None or vp is proc:
+                    continue
+                try:
+                    if vp.is_alive():
+                        kept.append(v)
+                    else:
+                        dead_procs.append(vp)
+                except Exception:
+                    continue
+            self.active_viewers = kept
+            for dp in dead_procs:
+                try:
+                    dp.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        if proc is not None:
+            try:
+                proc._cmd_queue = None
+            except Exception:
+                pass
+            try:
+                if not proc.is_alive():
+                    proc.close()
+            except Exception:
+                pass
+
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release="", monitor_count=None, monitors=None, net_info=None):
         if self._is_host_only_app() or run_client_viewer_loop is None:
+            socket_passwords.pop(sock, None)
             try:
                 sock.close()
             except Exception:
@@ -4132,7 +4217,8 @@ class NetworkMixin:
             p.start()
             p._cmd_queue = cmd_queue
             
-            # Track active viewer
+            # Track active viewer (dọn sẵn các tiến trình cũ đã kết thúc)
+            self._cleanup_viewer_session()
             self.active_viewers.append({
                 "process": p,
                 "computer_name": computer_name,
@@ -4141,18 +4227,22 @@ class NetworkMixin:
             })
             
             # Parent giữ socket đến khi viewer thoát — không close sớm (Win7 sẽ RST).
+            has_monitor = bool(partner_id and partner_pass and not getattr(p, '_monitor_started', False))
             def wait_and_close():
                 try:
                     p.join()
                 except:
                     pass
+                socket_passwords.pop(sock, None)
                 try:
                     sock.close()
                 except:
                     pass
+                if not has_monitor:
+                    self._cleanup_viewer_session(p, reconnect_queue=reconnect_queue, cmd_queue=cmd_queue)
             threading.Thread(target=wait_and_close, daemon=True).start()
             
-            if partner_id and partner_pass and not getattr(p, '_monitor_started', False):
+            if has_monitor:
                 p._monitor_started = True
                 c_queue = getattr(p, '_cmd_queue', None)
                 def monitor_reconnect(process, pid, ppass, req_queue, cmd_q=None):
@@ -4189,15 +4279,16 @@ class NetworkMixin:
                                 break
                         except Exception as e:
                             pass
-                    print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
-                    if process.exitcode not in (0, 99, None):
+                    exit_code = process.exitcode
+                    print(f"[Client Monitor] Pygame viewer process exited with code: {exit_code}")
+                    if exit_code not in (0, 99, None):
                         try:
                             from utils.logger import log_system_crash, read_log_tail
                             log_system_crash(
                                 title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {process.pid}, Đối tác: {pid})",
                                 role="ClientMonitor -> Viewer",
                                 pid=process.pid,
-                                exit_code=process.exitcode,
+                                exit_code=exit_code,
                                 details={"Partner ID": pid, "Computer Name": computer_name},
                                 extra_logs={
                                     "viewer.log": read_log_tail("viewer.log", max_lines=15),
@@ -4207,6 +4298,10 @@ class NetworkMixin:
                             )
                         except Exception:
                             pass
+                    self._cleanup_viewer_session(process, reconnect_queue=req_queue, cmd_queue=cmd_q)
+                    alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+                    if not alive_viewers:
+                        self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
                     
                 threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
             

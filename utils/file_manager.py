@@ -567,8 +567,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             except:
                                 pass
                             try:
-                                if dialog.winfo_exists():
-                                    dialog.after(0, lambda: _update_props_labels(lbl, dialog, total_size, file_count, folder_count))
+                                fm_event_queue.put({
+                                    "type": "run_ui",
+                                    "fn": lambda ts=total_size, fc=file_count, dc=folder_count: _update_props_labels(lbl, dialog, ts, fc, dc),
+                                })
                             except:
                                 pass
 
@@ -911,7 +913,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         if fn: fn(event)
                 except Exception:
                     pass
-                top.after(500, lambda: fm_event_queue.put({"type": "trigger_local_refresh"}))
+                fm_event_queue.put({"type": "run_ui", "delay_ms": 500, "fn": refresh_local})
 
         import queue
         fm_event_queue = queue.Queue()
@@ -922,6 +924,14 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     try:
                         if evt.get("type") == "trigger_local_refresh":
                             refresh_local()
+                        elif evt.get("type") == "run_ui":
+                            fn = evt.get("fn")
+                            delay_ms = int(evt.get("delay_ms") or 0)
+                            if callable(fn):
+                                if delay_ms > 0 and top.winfo_exists():
+                                    top.after(delay_ms, lambda f=fn: f() if top.winfo_exists() else None)
+                                else:
+                                    fn()
                         elif evt.get("type") == "upload_progress_update":
                             if active_upload_dialog:
                                 active_upload_dialog[0].update_progress(evt.get("received", 0))
@@ -1525,7 +1535,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
                     def delayed_refresh():
                         time.sleep(1)
-                        top.after(0, lambda: request_remote_dir(t_dir))
+                        fm_event_queue.put({"type": "run_ui", "fn": lambda td=t_dir: request_remote_dir(td)})
                     threading.Thread(target=delayed_refresh, daemon=True).start()
                 except Exception as e:
                     print(f"Upload error: {e}")
@@ -1651,11 +1661,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                             cm.active_batch = False
                             cm._allow_file_xfer = False
                             try:
-                                dlg.after(0, dlg.destroy)
+                                fm_event_queue.put({"type": "run_ui", "fn": lambda d=dlg: d.destroy() if d.winfo_exists() else None})
                             except Exception:
                                 pass
                             try:
-                                top.after(300, refresh_local)
+                                fm_event_queue.put({"type": "run_ui", "delay_ms": 300, "fn": refresh_local})
                             except Exception:
                                 pass
                         if orig_close_dialog:

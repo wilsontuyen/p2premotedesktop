@@ -1482,6 +1482,15 @@ def _record_unexpected_process_exit(pid, info, exit_code, intentional=False):
             log(f"[ProcessMonitor] Tiến trình {role} (PID {pid}) đã đóng bình thường (Exit={u_code}, Uptime={uptime_s:.1f}s).")
             return
 
+        # CaptureWorker thoát mã 0 trong giai đoạn khởi động sớm khi đã có tiến trình cùng desktop giữ mutex (single-instance guard)
+        if u_code == 0 and "CaptureWorker" in role and uptime_s < 15.0:
+            sid_chk = info.get("session_id", -1)
+            desk_raw = (info.get("desktop") or "default").lower()
+            desk_short = "winlogon" if "winlogon" in desk_raw else "default"
+            if sid_chk not in (-1, 0, 0xFFFFFFFF) and agent_mutex_present(sid_chk, desk_short):
+                log(f"[ProcessMonitor] Tiến trình {role} (PID {pid}) tự đóng bình thường do mutex {desk_short} đã có tiến trình khác đảm nhiệm (Uptime={uptime_s:.1f}s).")
+                return
+
         # Chờ ngắn 0.25s để Windows WER / faulthandler kịp ghi Event Log & native_fault.log
         time.sleep(0.25)
         evt_logs = _query_windows_event_log_crashes(target_pid=pid, max_scan=40)
@@ -1760,6 +1769,7 @@ def main(stop_event=None):
     t_crash.start()
 
     current_agent_pid = None
+    current_agent_desktop = None
     gui_agent_pid = None
     clipboard_agent_pid = None
     last_session_id = None
@@ -1811,6 +1821,7 @@ def main(stop_event=None):
                                 last_winlogon_spawn_ts = time.time()
                                 if pid:
                                     current_agent_pid = pid
+                                    current_agent_desktop = "winlogon"
                                     last_agent_spawn_ts = time.time()
                     else:
                         log(
@@ -1878,6 +1889,7 @@ def main(stop_event=None):
                         log(f"Dừng worker session cũ {last_session_id} PID {old_pid} để chuyển sang session {active_session_id}.")
                         terminate_process_with_pid(old_pid)
                     current_agent_pid = None
+                    current_agent_desktop = None
                     if winlogon_standby_pid and is_process_alive(winlogon_standby_pid):
                         terminate_process_with_pid(winlogon_standby_pid)
                         winlogon_standby_pid = None
@@ -1894,6 +1906,7 @@ def main(stop_event=None):
                     if current_agent_pid:
                         terminate_process_with_pid(current_agent_pid)
                         current_agent_pid = None
+                        current_agent_desktop = None
                     if gui_agent_pid:
                         terminate_process_with_pid(gui_agent_pid)
                         gui_agent_pid = None
@@ -1911,7 +1924,7 @@ def main(stop_event=None):
                         log(f"Default đã sẵn sàng. Tắt Winlogon standby PID {winlogon_standby_pid}.")
                         terminate_process_with_pid(winlogon_standby_pid)
                     winlogon_standby_pid = None
-                elif current_agent_pid and is_process_alive(current_agent_pid):
+                elif current_agent_pid and is_process_alive(current_agent_pid) and current_agent_desktop == "winlogon":
                     already_spawning_default = (
                         winlogon_standby_pid
                         and current_agent_pid != winlogon_standby_pid
@@ -1925,6 +1938,7 @@ def main(stop_event=None):
                         )
                         if pid:
                             current_agent_pid = pid
+                            current_agent_desktop = "default"
                             last_agent_spawn_ts = time.time()
             elif (not BROKER_MODE) and (not want_winlogon) and agent_mutex_present(active_session_id, "winlogon") and not agent_mutex_present(active_session_id, "default"):
                 # Da logon nhung agent van o Winlogon: spawn Default de broker handoff.
@@ -1935,6 +1949,7 @@ def main(stop_event=None):
                     while is_process_alive(current_agent_pid) and time.time() < wait_until:
                         time.sleep(0.05)
                     current_agent_pid = None
+                    current_agent_desktop = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
@@ -1946,6 +1961,7 @@ def main(stop_event=None):
                     while is_process_alive(current_agent_pid) and time.time() < wait_until:
                         time.sleep(0.05)
                     current_agent_pid = None
+                    current_agent_desktop = None
                 if clipboard_agent_pid:
                     terminate_process_with_pid(clipboard_agent_pid)
                     clipboard_agent_pid = None
@@ -1956,6 +1972,7 @@ def main(stop_event=None):
             if current_agent_pid and not is_process_alive(current_agent_pid):
                 log(f"Agent với PID {current_agent_pid} đã dừng hoạt động. Sẽ khởi chạy lại.")
                 current_agent_pid = None
+                current_agent_desktop = None
 
             if in_signing_out:
                 # Mutex Default van con luc logoff KHONG du — Signing Out o Winlogon.
@@ -1986,6 +2003,7 @@ def main(stop_event=None):
                     last_winlogon_spawn_ts = time.time()
                     if pid:
                         current_agent_pid = pid
+                        current_agent_desktop = "winlogon"
                         last_agent_spawn_ts = time.time()
             elif not agent_running:
                 other_desk = "winlogon" if target_desktop == "default" else "default"
@@ -2004,6 +2022,7 @@ def main(stop_event=None):
                     log(f"Agent PID {current_agent_pid} khởi động quá 8s mà mutex {target_desktop} chưa sẵn sàng. Kill và spawn lại.")
                     terminate_process_with_pid(current_agent_pid)
                     current_agent_pid = None
+                    current_agent_desktop = None
                     live = False
                 if live and (has_other or current_agent_pid == winlogon_standby_pid):
                     # Worker kia dang capture desktop khac — khong cho, spawn da xu ly o tren.
@@ -2028,6 +2047,7 @@ def main(stop_event=None):
                     )
                     if pid:
                         current_agent_pid = pid
+                        current_agent_desktop = "winlogon" if want_winlogon else "default"
                         last_agent_spawn_ts = time.time()
                         if want_winlogon:
                             last_winlogon_spawn_ts = time.time()
