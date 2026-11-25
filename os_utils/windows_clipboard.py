@@ -494,7 +494,8 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x11) & 0x8000) and (user32.GetAsyncKeyState(0x56) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_ctrl_v_held", False):
-                        on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
+                        # Phím tắt bàn phím đi tới cửa sổ foreground (Explorer), không phụ thuộc vị trí con trỏ chuột đang trỏ trên ProgressDialog/Viewer.
+                        on_self_k = _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
                         if is_text_mode:
@@ -563,7 +564,7 @@ class ClipboardEventListener:
             if (user32.GetAsyncKeyState(0x10) & 0x8000) and (user32.GetAsyncKeyState(0x2D) & 0x8000):
                 if self.manager:
                     if not getattr(self.manager, "_shift_ins_held", False):
-                        on_self_k = _cursor_over_current_process() or _is_current_process_foreground()
+                        on_self_k = _is_current_process_foreground()
                         has_text = bool(user32.IsClipboardFormatAvailable(13) or user32.IsClipboardFormatAvailable(1))
                         is_text_mode = bool(getattr(self.manager, "_clipboard_mode", None) == "text" or has_text)
                         if is_text_mode:
@@ -921,9 +922,11 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._send_job_q = queue.Queue()
         self._send_worker_started = False
         self._send_worker_boot_lock = threading.Lock()
-        self._send_run_lock = threading.Lock()  # FIFO: một lúc chỉ một batch gửi client→host
-        self._send_sem = threading.Semaphore(1)
+        self._send_run_lock = threading.Lock()
+        self._send_sem = threading.Semaphore(8)  # Cho phép nhiều luồng truyền file song song
         self._xfer_need_resync = False
+        self._xfer_need_resync_ids = set()
+        self._conflict_dialog_lock = threading.Lock()
         self._resume_waiters = {}
         self._xfer_sock_gen = 0
         if not is_capture_worker_process and not is_broker_process:
@@ -1053,9 +1056,27 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                                 owner_hwnd = None
                         except Exception:
                             owner_hwnd = None
-                    stack = len([d for d in dialogs.values() if d])
+                    used_stacks = {int(getattr(d, "stack_index", 0) or 0) for d in dialogs.values() if d}
+                    stack = next((i for i in range(32) if i not in used_stacks), len(used_stacks))
                     jid = job_id if job_id is not None else ("j%d" % (stack + 1))
-                    if dialogs.get(jid):
+                    # Chống nhân đôi dialog nếu đã có dialog cho cùng job_id hoặc cùng filename + total_size
+                    existing_dlg = dialogs.get(jid)
+                    if existing_dlg is None:
+                        for k, d in list(dialogs.items()):
+                            if d and getattr(d, "winfo_exists", lambda: False)():
+                                if getattr(d, "job_id", None) in (jid, str(jid)):
+                                    existing_dlg = d
+                                    break
+                                if getattr(d, "filename", "") == filename and getattr(d, "total_size", -1) == total_size:
+                                    existing_dlg = d
+                                    break
+                    if existing_dlg:
+                        try:
+                            existing_dlg.deiconify()
+                            existing_dlg.lift()
+                            dialogs[jid] = existing_dlg
+                        except Exception:
+                            pass
                         continue
                     dlg = ProgressDialog(
                         self.app, title_text, filename, total_size,
@@ -1274,6 +1295,8 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             except Exception: pass
             dlg = dialogs.get(str(job_id))
             if dlg: return dlg
+            # Khi đã chỉ định rõ job_id (đa luồng), tuyệt đối không fallback sang dialog của luồng khác!
+            return None
         if getattr(self, "active_dialog", None):
             return self.active_dialog
         if len(dialogs) == 1:
@@ -1294,14 +1317,18 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
         self._paste_gesture_inc_at = now
         self._paste_gesture_id = getattr(self, "_paste_gesture_id", 0) + 1
 
-    def _clear_paste_gesture_flags(self, suppress_s=1.0):
-        """Sau paste xong / Hủy: đừng để click Explorer bị nhận là Paste lần 2."""
+    def _clear_paste_gesture_flags(self, suppress_s=1.0, expected_gesture_id=None):
+        """Sau paste xong / Hủy: đừng để click Explorer bị nhận là Paste lần 2.
+        Nếu người dùng đã thực hiện cử chỉ Paste mới (gesture_id > expected_gesture_id), không xóa cờ của lần Paste mới."""
+        cur_gid = getattr(self, "_paste_gesture_id", 0)
+        if expected_gesture_id is not None and cur_gid > expected_gesture_id:
+            return
         self._lmb_hit_context_menu = False
         self._lmb_menu_item_kind = ""
         self._rmb_cursor_pos = None
         self._rmb_is_taskbar = False
         self._context_menu_seen_at = 0.0
-        self._consumed_paste_gesture_id = getattr(self, "_paste_gesture_id", 0)
+        self._consumed_paste_gesture_id = cur_gid
         if suppress_s > 0:
             self._suppress_render_until = max(
                 getattr(self, "_suppress_render_until", 0),
@@ -1637,6 +1664,30 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             except Exception:
                 pass
 
+    def _mark_xfer_need_resync(self, my_id=None):
+        self._xfer_need_resync = True
+        if my_id is not None:
+            with self.lock:
+                s = getattr(self, "_xfer_need_resync_ids", None)
+                if s is None:
+                    self._xfer_need_resync_ids = set()
+                    s = self._xfer_need_resync_ids
+                s.add(my_id)
+
+    def _consume_xfer_need_resync(self, my_id=None):
+        with self.lock:
+            s = getattr(self, "_xfer_need_resync_ids", None)
+            if my_id is not None and s is not None:
+                if my_id in s:
+                    s.discard(my_id)
+                    if not s:
+                        self._xfer_need_resync = False
+                    return True
+                return False
+            val = bool(getattr(self, "_xfer_need_resync", False))
+            self._xfer_need_resync = False
+            return val
+
     def _send_file_msg(self, sock, data_bytes, my_id):
         """Gửi gói file; nếu mạng đứt thì loại bỏ socket lỗi và chờ socket mới để gửi lại (chunk có offset nên an toàn)."""
         if not getattr(self, "_allow_file_xfer", False) or self._send_should_stop(my_id):
@@ -1657,7 +1708,7 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
             if live:
                 if send_msg(live, data_bytes):
                     if waiting or getattr(self, "_xfer_sock_gen", 0) != sock_gen:
-                        self._xfer_need_resync = True
+                        self._mark_xfer_need_resync(my_id)
                         if waiting:
                             print("[FileTransfer] Resume gui sau khi ket noi lai.")
                     return True
@@ -2018,16 +2069,12 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
 
     def _process_clipboard_change(self, provided_files=None, force=False):
         try:
-            time.sleep(0.02) # Chờ xíu để Windows thả file lock (giảm delay)
+            if provided_files is None:
+                time.sleep(0.01) # Chờ xíu để Windows thả file lock nếu chưa có provided_files
             
             owner_hwnd = getattr(self, 'cached_app_hwnd', None)
             if provided_files is not None:
                 current_files = provided_files
-            elif any(
-                (t or {}).get("handle")
-                for t in (getattr(self, "incoming_transfers", None) or {}).values()
-            ):
-                current_files = []
             elif getattr(self, "pygame_hwnd", None):
                 # Client: HDROP/CIDA chỉ đọc qua _schedule_copied_files_sync.
                 current_files = []
@@ -2402,9 +2449,9 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                 paste_dest = None
                 save_dir = getattr(self, "target_save_dir", None) or HEADLESS_TRANSFER_DIR
             else:
-                paste_dest = getattr(self, "_paste_dest_dir", None)
-                if paste_id:
-                    paste_dest = (getattr(self, "_xfer_dest_by_paste_id", None) or {}).get(paste_id) or paste_dest
+                paste_dest = (getattr(self, "_xfer_dest_by_paste_id", None) or {}).get(paste_id) if paste_id else None
+                if not paste_dest:
+                    paste_dest = getattr(self, "_paste_dest_dir", None)
                 if paste_dest and _is_transfer_staging_dir(paste_dest):
                     paste_dest = None
                 save_dir = paste_dest or getattr(self, "target_save_dir", None) or HEADLESS_TRANSFER_DIR
@@ -2633,10 +2680,12 @@ class ClipboardSyncManager(ClipboardTextMixin, FileCopyClientMixin, FileCopyHost
                             else:
                                 self._last_progress_time = now
                     current_time_ack = time.time()
-                    if not hasattr(self, '_last_upload_ack_time'):
-                        self._last_upload_ack_time = 0
-                    if (current_time_ack - self._last_upload_ack_time >= 0.2) or (total and rec >= total):
-                        self._last_upload_ack_time = current_time_ack
+                    last_ack = float(job.get("last_ack_at") or 0.0) if job is not None else float(getattr(self, "_last_upload_ack_time", 0.0) or 0.0)
+                    if (current_time_ack - last_ack >= 0.2) or (total and rec >= total):
+                        if job is not None:
+                            job["last_ack_at"] = current_time_ack
+                        else:
+                            self._last_upload_ack_time = current_time_ack
                         if getattr(self, 'sock', None):
                             try:
                                 send_msg(self.sock, json.dumps({"type": "upload_progress_ack", "received": rec, "xfer_id": xid}).encode('utf-8'))

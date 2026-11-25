@@ -769,8 +769,9 @@ class FileCopyHostMixin:
                         last_req_time = float(getattr(self, "_last_request_files_time", 0.0) or 0.0)
                         last_req_tok = getattr(self, "_last_request_files_tok", None)
                         last_req_files = getattr(self, "_last_request_files_list", None)
+                        # Chỉ chống lặp cho CÙNG paste_id (tok == last_req_tok); nếu người dùng Paste thêm luồng mới (tok mới) thì phải cho chạy song song ngay!
                         if (tok and tok == last_req_tok and (now - last_req_time) < 5.0) or (
-                            (now - last_req_time) < 10.0 and files_req == last_req_files
+                            (not tok) and (now - last_req_time) < 2.0 and files_req == last_req_files
                         ):
                             log_debug(
                                 f"[_handle_uppipe_client] Bo REQUEST_FILES trung lap tok={tok} (elapsed={now - last_req_time:.2f}s)."
@@ -811,9 +812,8 @@ class FileCopyHostMixin:
                         ).start()
                     else:
                         log_debug("[_handle_uppipe_client] Không có pending_remote_files để tải.")
-                        if self.app and getattr(self.app, 'is_headless', False):
-                            self._send_progress_signal("CANCEL", "")
-                            self._close_transfer_pipe()
+                        if self.app and getattr(self.app, 'is_headless', False) and paste_id is not None:
+                            self._send_progress_signal("CANCEL", str(paste_id))
                 else:
                     # Metadata file do Clipboard Agent gửi lên (copy file từ phía user)
                     if raw.startswith("COPIED_FILES|"):
@@ -1049,13 +1049,11 @@ class FileCopyHostMixin:
             if g != getattr(self, "_clip_sync_gen", 0):
                 return
             seq_before = get_clipboard_sequence_number()
-            # Client ưu tiên CIDA; nếu rỗng thì đọc HDROP (Win11 Explorer đôi khi thiếu Shell IDList).
-            files = get_clipboard_files(retries=1, allow_hdrop=not is_client)
-            if is_client and not files:
-                files = get_clipboard_files(retries=2, allow_hdrop=True)
+            # Đọc trực tiếp HDROP/CIDA ngay lập tức không trì hoãn (allow_hdrop=True)
+            files = get_clipboard_files(retries=2, allow_hdrop=True)
             seq_after = get_clipboard_sequence_number()
-            if seq_before and seq_after and seq_before != seq_after and tries < 4:
-                t = threading.Timer(0.12, lambda: _pass(g, tries + 1))
+            if seq_before and seq_after and seq_before != seq_after and tries < 3:
+                t = threading.Timer(0.04, lambda: _pass(g, tries + 1))
                 t.daemon = True
                 t.start()
                 self._clip_sync_timer = t
@@ -1070,8 +1068,8 @@ class FileCopyHostMixin:
                 # Trùng file + chưa đổi seq clipboard → không gửi lại (tránh offer 2,3,4 spam).
                 if last_fp and fp == last_fp and (not seq_after or seq_after == last_seq):
                     return
-                if last_fp and fp == last_fp and seq_after and seq_after != last_seq and tries < 4:
-                    t = threading.Timer(0.12, lambda: _pass(g, tries + 1))
+                if last_fp and fp == last_fp and seq_after and seq_after != last_seq and tries < 3:
+                    t = threading.Timer(0.04, lambda: _pass(g, tries + 1))
                     t.daemon = True
                     t.start()
                     self._clip_sync_timer = t
@@ -1087,7 +1085,7 @@ class FileCopyHostMixin:
                 self._process_clipboard_change(provided_files=files, force=True)
                 return
             if is_client and tries < 2:
-                t = threading.Timer(0.18, lambda: _pass(g, tries + 1))
+                t = threading.Timer(0.05, lambda: _pass(g, tries + 1))
                 t.daemon = True
                 t.start()
                 self._clip_sync_timer = t
@@ -1101,7 +1099,8 @@ class FileCopyHostMixin:
                 except Exception:
                     pass
 
-        t = threading.Timer(0.22, lambda: _pass(gen, 0))
+        # Thực thi đọc ngay lập tức (20ms) thay vì chờ 220ms để cập nhật sang Host lập tức
+        t = threading.Timer(0.02, lambda: _pass(gen, 0))
         t.daemon = True
         t.start()
         self._clip_sync_timer = t
@@ -1127,7 +1126,7 @@ class FileCopyHostMixin:
             threading.Thread(target=self._send_job_loop, daemon=True, name="ClipSendQ").start()
 
     def _enqueue_send_job(self, files, my_id, paste_id, peer_sock=None):
-        """Hàng đợi FIFO — paste trước gửi xong mới tới paste sau (không tranh băng thông)."""
+        """Đẩy yêu cầu gửi file vào bộ điều phối đa luồng — nhiều lệnh copy/paste chạy song song cùng lúc."""
         self._ensure_send_worker()
         files_list = list(files or [])
         try:
@@ -1140,23 +1139,25 @@ class FileCopyHostMixin:
                 self._peer_sock_by_paste = {}
                 ps_map = self._peer_sock_by_paste
             ps_map[tok] = peer_sock
-        send_dlg_id = tok or my_id
-        active_n = len(getattr(self, "_active_send_ids", None) or [])
-        # Đang có batch khác trên dây / trong hàng → dialog này chờ lượt.
-        waiting = self._send_job_q.qsize() > 0 or active_n > 1
-        # Không mở dialog tiến trình ở phía gửi (Client) — phía nhận (Host)
-        # đã có ClipboardAgent hiển thị dialog với Thư mục đích. Mở ở cả 2 phía sẽ làm xuất hiện 2 dialog cho 1 file.
         self._send_job_q.put({
             "files": files_list,
             "my_id": my_id,
             "paste_id": paste_id,
             "peer_sock": peer_sock,
         })
-        print(f"[FileTransfer] Xep hang gui FIFO paste_id={paste_id} xfer_id={my_id} (cho={self._send_job_q.qsize()})")
+        active_n = len(getattr(self, "_active_send_ids", None) or [])
+        print(f"[FileTransfer] Kich hoat luong gui song song paste_id={paste_id} xfer_id={my_id} (dang_chay={active_n})")
 
     def _cleanup_send_tracking(self, my_id, paste_id=None):
         try:
             getattr(self, "_active_send_ids", set()).discard(my_id)
+        except Exception:
+            pass
+        try:
+            with self.lock:
+                s_resync = getattr(self, "_xfer_need_resync_ids", None)
+                if s_resync is not None:
+                    s_resync.discard(my_id)
         except Exception:
             pass
         try:
@@ -1173,27 +1174,25 @@ class FileCopyHostMixin:
         except Exception:
             pass
 
-    def _send_job_loop(self):
-        """Một lúc chỉ gửi một batch — paste sau đợi paste trước xong."""
-        while True:
-            job = self._send_job_q.get()
-            if job is None:
-                break
-            paste_id = job.get("paste_id")
-            my_id = job.get("my_id")
-            try:
-                tok = int(paste_id or 0)
-            except Exception:
-                tok = 0
+    def _run_single_send_job(self, job):
+        """Worker chạy độc lập cho từng lệnh Paste — cho phép nhiều luồng truyền file đồng thời."""
+        sem = getattr(self, "_send_sem", None)
+        paste_id = job.get("paste_id")
+        my_id = job.get("my_id")
+        try:
+            tok = int(paste_id or 0)
+        except Exception:
+            tok = 0
+        try:
             cancelled = getattr(self, "_cancelled_paste_ids", None) or set()
             if tok and tok in cancelled:
-                print(f"[FileTransfer] Bo hang doi paste_id={tok} (da Huy).")
+                print(f"[FileTransfer] Bo luong gui paste_id={tok} (da Huy).")
                 self._cleanup_send_tracking(my_id, tok)
                 try:
                     self.close_dialog(job_id=tok or my_id, reason="bo hang doi da huy")
                 except Exception:
                     pass
-                continue
+                return
             req_sock = (getattr(self, "_peer_sock_by_paste", None) or {}).get(tok) or job.get("peer_sock")
             sock = self._live_xfer_sock(preferred_sock=req_sock)
             if not sock:
@@ -1208,23 +1207,44 @@ class FileCopyHostMixin:
                         break
                     time.sleep(0.25)
             if not sock:
-                print("[FileTransfer] Bo hang doi — khong co socket sau khi cho reconnect.")
+                print("[FileTransfer] Bo luong gui — khong co socket sau khi cho reconnect.")
                 self._cleanup_send_tracking(my_id, tok)
                 try:
                     self.close_dialog(job_id=tok or my_id, reason="khong co socket")
                 except Exception:
                     pass
-                continue
-            print(f"[FileTransfer] Bat dau gui FIFO paste_id={tok} xfer_id={my_id}")
+                return
+            print(f"[FileTransfer] Bat dau luong gui paste_id={tok} xfer_id={my_id}")
             try:
+                self.gui_queue.put(("status", (file_download_dialog_title(), tok or my_id)))
+            except Exception:
+                pass
+            self._process_send_requests(sock, job.get("files") or [], my_id, tok)
+        except Exception as e:
+            print(f"[FileTransfer] Loi luong gui paste_id={tok} xfer_id={my_id}: {e}")
+        finally:
+            if sem is not None:
                 try:
-                    self.gui_queue.put(("status", (file_download_dialog_title(), tok or my_id)))
+                    sem.release()
                 except Exception:
                     pass
-                with self._send_run_lock:
-                    self._process_send_requests(sock, job.get("files") or [], my_id, tok)
-            except Exception as e:
-                print(f"[FileTransfer] Loi hang doi gui: {e}")
+
+    def _send_job_loop(self):
+        """Bộ điều phối đa luồng: mỗi job được tách ra một thread riêng (tối đa _send_sem luồng song song)."""
+        while True:
+            job = self._send_job_q.get()
+            if job is None:
+                break
+            sem = getattr(self, "_send_sem", None)
+            if sem is not None:
+                sem.acquire()
+            my_id = job.get("my_id")
+            threading.Thread(
+                target=self._run_single_send_job,
+                args=(job,),
+                daemon=True,
+                name=f"ClipSendWorker_{my_id}",
+            ).start()
 
     def _process_send_requests(self, sock, files, my_id=None, paste_id=None):
         if my_id is None:
@@ -1243,6 +1263,7 @@ class FileCopyHostMixin:
         show_send_dlg = False
         send_dlg_id = my_id
         total_size = 0
+        display_name = _("Tệp tin")
         try:
             total_size = sum(f.get("size", 0) for f in files)
             item_kind, display_name = _copy_batch_kind_and_name(files, _("Tệp tin"))
@@ -1259,7 +1280,10 @@ class FileCopyHostMixin:
                 "item_kind": item_kind,
                 "paste_id": paste_id,
             }, my_id, paste_id)).encode('utf-8')
-            self._xfer_need_resync = False
+            if hasattr(self, "_consume_xfer_need_resync"):
+                self._consume_xfer_need_resync(my_id)
+            else:
+                self._xfer_need_resync = False
             # Phía gửi không mở dialog tiến trình (phía nhận đã mở dialog tại thư mục đích).
             send_dlg_id = int(paste_id or 0) or my_id
             show_send_dlg = False
@@ -1351,7 +1375,8 @@ class FileCopyHostMixin:
                     lan = is_lan_socket(live)
                     if lan:
                         tune_socket_for_lan_bulk(live)
-                    chunk_size = 256 * 1024 if lan else 64 * 1024
+                    parallel_n = len(getattr(self, "_active_send_ids", None) or ())
+                    chunk_size = (128 * 1024 if parallel_n > 1 else 256 * 1024) if lan else 64 * 1024
                     file_sent_bytes = 0
                     file_start_time = time.time()
                     
@@ -1361,8 +1386,14 @@ class FileCopyHostMixin:
                                 print("[FileTransfer] Huy — dung doc file phia client.")
                                 break
 
-                            if getattr(self, "_xfer_need_resync", False):
-                                self._xfer_need_resync = False
+                            need_resync = (
+                                self._consume_xfer_need_resync(my_id)
+                                if hasattr(self, "_consume_xfer_need_resync")
+                                else bool(getattr(self, "_xfer_need_resync", False))
+                            )
+                            if need_resync:
+                                if not hasattr(self, "_consume_xfer_need_resync"):
+                                    self._xfer_need_resync = False
                                 state = self._query_resume_state(my_id, paste_id, timeout=6.0)
                                 if not state.get("has_job"):
                                     print("[FileTransfer] May nhan mat job — gui lai batch_start.")
@@ -1413,6 +1444,9 @@ class FileCopyHostMixin:
                             
                             file_sent_bytes += len(chunk_data)
                             total_sent += len(chunk_data)
+                            if len(getattr(self, "_active_send_ids", None) or ()) > 1:
+                                # Nhường lock socket/GIL rất ngắn để tất cả các luồng tải file song song cùng nhích thanh tiến trình mượt mà
+                                time.sleep(0.001)
                             if show_send_dlg:
                                 now = time.time()
                                 if (now - last_dlg_at) >= 0.05 or total_sent >= total_size:
@@ -1445,7 +1479,10 @@ class FileCopyHostMixin:
                     break
                 if file_sent_bytes < int(file_size or 0):
                     print(f"[FileTransfer] {filename} chua du ({file_sent_bytes}/{file_size}) — khong gui file_end.")
-                    self._xfer_need_resync = True
+                    if hasattr(self, "_mark_xfer_need_resync"):
+                        self._mark_xfer_need_resync(my_id)
+                    else:
+                        self._xfer_need_resync = True
                     break
                 if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({
                     "type": "file_end", "name": filename
@@ -1459,7 +1496,7 @@ class FileCopyHostMixin:
                 if not self._send_should_stop(my_id):
                     if self._send_file_msg(sock, json.dumps(self._attach_xfer_id({"type": "batch_end"}, my_id, paste_id)).encode('utf-8'), my_id):
                         log_debug(f"[_process_send_requests] Đã gửi batch_end.")
-                    try: log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thành công"))
+                    try: log_activity(_("Truyền file: ") + str(display_name) + " - " + str(total_size) + _(" byte - Thành công"))
                     except: pass
                     if show_send_dlg:
                         try:
@@ -1493,7 +1530,7 @@ class FileCopyHostMixin:
             print(f"Error processing send request: {e}")
             log_debug(f"[_process_send_requests] Lỗi tổng quát:\n{tb}")
             try:
-                log_activity(_("Truyền file: ") + str(self.batch_display_name) + " - " + str(total_size) + _(" byte - Thất bại"))
+                log_activity(_("Truyền file: ") + str(display_name) + " - " + str(total_size) + _(" byte - Thất bại"))
             except: pass
             if show_send_dlg:
                 try:
@@ -1943,10 +1980,12 @@ def run_clipboard_agent_mode():
     _agent_context_menu_seen_at = 0.0
     _agent_lmb_dismiss_at = 0.0  # Thời điểm phát hiện click ra ngoài menu để đóng nó
 
-    def _clear_agent_paste_gesture_flags(suppress_s=1.0):
+    def _clear_agent_paste_gesture_flags(suppress_s=1.0, expected_gesture_id=None):
         nonlocal _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind, _agent_lmb_menu_item_name
         nonlocal _agent_rmb_cursor_pos, _agent_rmb_is_taskbar, _agent_context_menu_seen_at
         nonlocal _agent_consumed_gesture_id, _agent_suppress_render_until, _agent_lmb_dismiss_at
+        if expected_gesture_id is not None and _agent_paste_gesture_id > expected_gesture_id:
+            return
         _agent_lmb_hit_context_menu = False
         _agent_lmb_menu_item_kind = ""
         _agent_lmb_menu_item_name = ""
@@ -2359,7 +2398,7 @@ def run_clipboard_agent_mode():
                     _agent_lmb_held = True
                     if is_paste:
                         now_trig = time.time()
-                        if now_trig - _agent_last_menu_paste_trigger_time >= 0.8:
+                        if now_trig - _agent_last_menu_paste_trigger_time >= 0.4:
                             _agent_last_menu_paste_trigger_time = now_trig
                             threading.Thread(
                                 target=_agent_trigger_paste,
@@ -2594,11 +2633,9 @@ def run_clipboard_agent_mode():
             return False
 
     def _flush_agent_file_request():
-        """Một lúc chỉ một REQUEST_FILES trên dây — paste sau chờ paste trước xong."""
+        """Gửi ngay mọi REQUEST_FILES trong hàng đợi lên Host Service để chạy đa luồng song song."""
         while True:
             with _agent_req_lock:
-                if _agent_req_inflight[0]:
-                    return
                 try:
                     files, dest_dir, paste_id = _agent_req_q.get_nowait()
                 except queue.Empty:
@@ -2615,9 +2652,12 @@ def run_clipboard_agent_mode():
                 elif not _agent_allow_xfer:
                     agent_print("[ClipboardAgent] Bo REQUEST_FILES hang doi (allow_xfer=False).")
                     continue
-                _agent_req_inflight[0] = True
-            _write_request_files_pipe(files, dest_dir, paste_id)
-            return
+            threading.Thread(
+                target=_write_request_files_pipe,
+                args=(files, dest_dir, paste_id),
+                daemon=True,
+                name=f"AgentReqFiles_{pid}",
+            ).start()
 
     def _release_agent_file_request():
         with _agent_req_lock:
@@ -2625,7 +2665,7 @@ def run_clipboard_agent_mode():
         _flush_agent_file_request()
 
     def _send_request_files_to_host(files_to_request=None, dest_dir=None, paste_id=0):
-        """Xếp hàng REQUEST_FILES — không gửi paste sau khi paste trước còn trên dây."""
+        """Đẩy REQUEST_FILES song song — không khóa chờ phiên Paste trước hoàn tất."""
         try:
             pid = int(paste_id or 0)
         except Exception:
@@ -2639,7 +2679,7 @@ def run_clipboard_agent_mode():
             agent_print("[ClipboardAgent] Bo REQUEST_FILES (allow_xfer=False / da Huy).")
             return
         _agent_req_q.put((list(files_to_request or []), dest_dir or "", pid))
-        agent_print(f"[ClipboardAgent] Xep hang REQUEST_FILES paste_id={pid} (cho={_agent_req_q.qsize()})")
+        agent_print(f"[ClipboardAgent] Gui REQUEST_FILES song song paste_id={pid} (active_jobs={len(_agent_jobs)})")
         _flush_agent_file_request()
 
     def _execute_agent_delayed_rendering(hwnd):
@@ -2828,15 +2868,14 @@ def run_clipboard_agent_mode():
                         move_total = sum(_path_byte_size(p) for p in to_move)
                         need_copy = any(not _same_volume(p, dest_dir) for p in to_move)
                         replace_keys = set(job.get("replace_keys") or [])
-                        with _file_io_lock:
-                            if need_copy:
-                                gui_queue.put(("finalize_start", (move_total, pid)))
-                            to_move, moved_all = _relocate_transfer_files_unlocked(
-                                to_move, dest_dir,
-                                on_progress=lambda n, j=pid: gui_queue.put(("finalize_progress", (n, j))),
-                                should_stop=lambda: not job.get("allow"),
-                                replace_keys=replace_keys,
-                            )
+                        if need_copy:
+                            gui_queue.put(("finalize_start", (move_total, pid)))
+                        to_move, moved_all = _relocate_transfer_files_unlocked(
+                            to_move, dest_dir,
+                            on_progress=lambda n, j=pid: gui_queue.put(("finalize_progress", (n, j))),
+                            should_stop=lambda: not job.get("allow"),
+                            replace_keys=replace_keys,
+                        )
                         # DIRECT MOVE FALLBACK: Đảm bảo chuyển 100% các file đã tải về vào thư mục đích (dest_dir)
                         moved_direct = []
                         import shutil
@@ -2925,38 +2964,41 @@ def run_clipboard_agent_mode():
                         except Exception:
                             pass
                     threading.Thread(target=_bg_purge, daemon=True, name="AgentPurge").start()
-                    # Giữ PENDING + cache local để Paste tiếp thư mục khác (không cần copy lại trên client).
-                    keep_files = []
-                    for f in (
-                        (_pending_info.get("files") if _pending_info else None)
-                        or (info.get("files") if info else None)
-                        or meta_files
-                        or []
-                    ):
-                        keep_files.append(dict(f) if isinstance(f, dict) else f)
-                    if keep_files:
-                        if not _pending_info:
-                            _pending_info.update(info or {})
-                        _pending_info["files"] = keep_files
-                        _agent_expect_repaste_until = time.time() + 86400.0
-                        _agent_allow_delayed = True
-                        _agent_dummy_h_active = True
-                        local_map = dict(_agent_repaste_local_by_name or {})
-                        for p in (to_move or final_paths or []):
-                            if not p:
-                                continue
-                            try:
-                                if os.path.exists(p):
-                                    base = os.path.basename(str(p).rstrip("\\/"))
-                                    if base:
-                                        local_map[os.path.normcase(base)] = os.path.abspath(p)
-                            except Exception:
-                                pass
-                        _agent_repaste_local_by_name = local_map
-                        agent_print(
-                            f"[ClipboardAgent] Giữ clipboard offer n={len(keep_files)} "
-                            f"local_cache={len(local_map)} (repaste OK)."
-                        )
+                    # Giữ PENDING + cache local để Paste tiếp thư mục khác (không ghi đè nếu user đã copy file mới hơn trong lúc tải).
+                    job_oid = int(job.get("offer_id") or 0)
+                    still_same_offer = _agent_allow_delayed and (not job_oid or _agent_pending_offer_id <= job_oid)
+                    if still_same_offer:
+                        keep_files = []
+                        for f in (
+                            (_pending_info.get("files") if _pending_info else None)
+                            or (info.get("files") if info else None)
+                            or meta_files
+                            or []
+                        ):
+                            keep_files.append(dict(f) if isinstance(f, dict) else f)
+                        if keep_files:
+                            if not _pending_info:
+                                _pending_info.update(info or {})
+                            _pending_info["files"] = keep_files
+                            _agent_expect_repaste_until = time.time() + 86400.0
+                            _agent_allow_delayed = True
+                            _agent_dummy_h_active = True
+                            local_map = dict(_agent_repaste_local_by_name or {})
+                            for p in (to_move or final_paths or []):
+                                if not p:
+                                    continue
+                                try:
+                                    if os.path.exists(p):
+                                        base = os.path.basename(str(p).rstrip("\\/"))
+                                        if base:
+                                            local_map[os.path.normcase(base)] = os.path.abspath(p)
+                                except Exception:
+                                    pass
+                            _agent_repaste_local_by_name = local_map
+                            agent_print(
+                                f"[ClipboardAgent] Giữ clipboard offer n={len(keep_files)} "
+                                f"local_cache={len(local_map)} (repaste OK)."
+                            )
                     gui_queue.put(("end", pid))
                     agent_print("[ClipboardAgent] Da chuyen file xong (sau khi thoat RENDERFORMAT).")
             else:
@@ -2966,12 +3008,12 @@ def run_clipboard_agent_mode():
                     f"n_paths={len(job.get('paths') or [])}."
                 )
                 leftover = list(job.get("paths") or [])
-                _agent_cleanup_partial(leftover)
+                _agent_cleanup_partial(leftover, wipe_all_staging=False)
                 gui_queue.put(("cancel", pid))
                 _send_cancel_to_host(pid)
         except Exception as e:
             agent_print(f"[ClipboardAgent] Loi hoan tat paste nen: {e}")
-            _agent_cleanup_partial(list(job.get("paths") or []))
+            _agent_cleanup_partial(list(job.get("paths") or []), wipe_all_staging=False)
             gui_queue.put(("cancel", pid))
             try:
                 _send_cancel_to_host(pid)
@@ -2980,7 +3022,7 @@ def run_clipboard_agent_mode():
         finally:
             log_overwrite_conflict(f"AgentPasteFinish FINALLY pop paste_id={pid}")
             try:
-                _clear_agent_paste_gesture_flags(1.0)
+                _clear_agent_paste_gesture_flags(1.0, expected_gesture_id=job.get("gesture_id"))
                 _agent_last_paste_finish_time = time.time()
                 _agent_jobs.pop(pid, None)
                 if not _agent_jobs:
@@ -2992,21 +3034,22 @@ def run_clipboard_agent_mode():
                     _agent_allow_xfer = True
                     _agent_download_active = True
                 _release_agent_file_request()
-                if _pending_info:
+                if _pending_info and _agent_allow_delayed:
                     _agent_expect_repaste_until = max(_agent_expect_repaste_until, time.time() + 86400.0)
-                    _agent_allow_delayed = True
                     _agent_dummy_h_active = True
                     _agent_schedule_rearm(0.45)
                     agent_print("[ClipboardAgent] Rearm delayed CF_HDROP cho Paste lai.")
             except Exception as e_fin:
                 agent_print(f"[ClipboardAgent] Loi cleanup finally: {e_fin}")
 
+    _agent_last_paste_offer_id = 0
+
     def _agent_trigger_paste(source="render_format", dest_override=None):
         """Kích hoạt dán file (từ WM_RENDERFORMAT hoặc LMB context menu Paste)."""
         nonlocal _agent_download_active, _agent_expect_repaste_until, _agent_paste_id, _agent_paste_seq
         nonlocal _agent_consumed_gesture_id, _agent_paste_coalesce_until, _agent_last_paste_start
         nonlocal _agent_accept_files, _agent_allow_xfer, _agent_cached_explorer_path, _ignore_destroy
-        nonlocal _agent_allow_delayed, _agent_last_paste_finish_time
+        nonlocal _agent_allow_delayed, _agent_last_paste_finish_time, _agent_last_paste_offer_id
         nonlocal _agent_last_lbutton_time, _agent_last_ctrl_v_time, _agent_lmb_hit_context_menu, _agent_lmb_menu_item_kind
 
         with _agent_paste_trigger_lock:
@@ -3074,19 +3117,24 @@ def run_clipboard_agent_mode():
                             _ignore_destroy = False
                 return False
 
-            # Chặn trùng lặp:
-            # 1) Nếu có job đang chạy (living_jobs) -> không kích hoạt thêm job trùng
-            # 2) Cùng gesture đã tiêu thụ -> bỏ qua
-            # 3) Hoặc debounce nhanh trong 0.6s để tránh OLE gọi đúp cùng 1 lần paste
-            living_jobs = any(
-                j.get("allow") and not (j.get("event") and j["event"].is_set())
-                for j in _agent_jobs.values()
-            )
-            if living_jobs or same_gesture or time_since_last_paste < 0.6 or (same_gesture and time_since_last_finish < 0.5):
+            cur_offer_id = int(_pending_info.get("offer_id") or _agent_pending_offer_id or 0)
+            same_offer = (cur_offer_id == _agent_last_paste_offer_id)
+
+            # Kiểm tra xem có job nào cho cùng offer_id này đang trong quá trình tải hay không
+            running_same_offer = False
+            for j in list(_agent_jobs.values()):
+                if j and j.get("allow") and not j.get("event", threading.Event()).is_set():
+                    if cur_offer_id and j.get("offer_id") == cur_offer_id:
+                        running_same_offer = True
+                        break
+
+            # Cho phép chạy ĐA LUỒNG song song khi đang có job tải dở (file khác).
+            # Chặn gọi đúp của CÙNG 1 cử chỉ Paste (same_gesture) hoặc khi job của CÙNG offer đang chạy / gọi đúp trong 1.5s
+            if same_gesture or running_same_offer or (same_offer and time_since_last_paste < 1.5):
                 log_overwrite_conflict(
                     f"TRIGGER_PASTE IGNORE duplicate source={source} same_gesture={same_gesture} "
-                    f"living={living_jobs} elapsed_start={time_since_last_paste:.2f}s "
-                    f"elapsed_finish={time_since_last_finish:.2f}s"
+                    f"same_offer={same_offer} running_same={running_same_offer} "
+                    f"elapsed_start={time_since_last_paste:.2f}s elapsed_finish={time_since_last_finish:.2f}s"
                 )
                 if source == "render_format":
                     empty_hdrop = create_hdrop_data([])
@@ -3101,17 +3149,19 @@ def run_clipboard_agent_mode():
                 return False
 
             _agent_paste_seq += 1
+            _agent_last_paste_offer_id = cur_offer_id
             log_overwrite_conflict(
                 f"TRIGGER_PASTE source={source} launch paste_id={_agent_paste_seq} (active={len(_agent_jobs)})"
             )
-            _agent_expect_repaste_until = 0.0
+            _agent_expect_repaste_until = time.time() + 86400.0
             _agent_paste_id = _agent_paste_seq
             paste_id = _agent_paste_id
+            my_gesture_id = _agent_paste_gesture_id
             _agent_last_lbutton_time = 0.0
             _agent_last_ctrl_v_time = 0.0
             _agent_lmb_hit_context_menu = False
             _agent_lmb_menu_item_kind = ""
-            _agent_consumed_gesture_id = _agent_paste_gesture_id
+            _agent_consumed_gesture_id = my_gesture_id
             _agent_paste_coalesce_until = now + 0.35
             _agent_last_paste_start = now
             _agent_accept_files = True
@@ -3180,6 +3230,8 @@ def run_clipboard_agent_mode():
                 }
                 job = {
                     "paste_id": paste_id,
+                    "offer_id": cur_offer_id,
+                    "gesture_id": my_gesture_id,
                     "info": info,
                     "dest": paste_dest,
                     "event": threading.Event(),
@@ -3589,19 +3641,6 @@ def run_clipboard_agent_mode():
             same_gesture = _agent_paste_gesture_id <= _agent_consumed_gesture_id
             time_since_paste = time.time() - float(_agent_last_paste_start or 0)
             time_since_finish = time.time() - float(_agent_last_paste_finish_time or 0)
-            if living or (same_gesture and time_since_paste < 0.8) or (same_gesture and time_since_finish < 0.8):
-                agent_print(
-                    f"[ClipboardAgent] WM_RENDERFORMAT coalesce (living={living}, "
-                    f"elapsed_start={time_since_paste:.2f}s, elapsed_finish={time_since_finish:.2f}s) — trả empty HDROP."
-                )
-                log_overwrite_conflict(
-                    f"RENDERFORMAT EXIT: living={living} recent paste elapsed_start={time_since_paste:.2f}s "
-                    f"elapsed_finish={time_since_finish:.2f}s"
-                )
-                if _offer_empty_hdrop():
-                    _agent_dummy_h_active = True
-                return 0
-
             # Paste mới: gesture mới HOẶC Ctrl+V / click Paste sau lần paste trước.
             fresh_input = (
                 _agent_last_ctrl_v_time > _agent_last_paste_start + 0.08
@@ -3622,6 +3661,20 @@ def run_clipboard_agent_mode():
                     )
                 )
             )
+            # Cho phép chạy song song khi living=True nếu có thao tác Paste mới (không chặn cứng theo living).
+            if (same_gesture and not fresh_input) and (time_since_paste < 0.8 or time_since_finish < 0.8):
+                agent_print(
+                    f"[ClipboardAgent] WM_RENDERFORMAT coalesce (living={living}, "
+                    f"elapsed_start={time_since_paste:.2f}s, elapsed_finish={time_since_finish:.2f}s) — trả empty HDROP."
+                )
+                log_overwrite_conflict(
+                    f"RENDERFORMAT EXIT: same_gesture coalesce living={living} elapsed_start={time_since_paste:.2f}s "
+                    f"elapsed_finish={time_since_finish:.2f}s"
+                )
+                if _offer_empty_hdrop():
+                    _agent_dummy_h_active = True
+                return 0
+
             if same_gesture and not fresh_input:
                 agent_print("[ClipboardAgent] GetData trùng (chưa có Paste mới) — không mở dialog thêm.")
                 log_overwrite_conflict(
@@ -3660,7 +3713,7 @@ def run_clipboard_agent_mode():
                 f"RENDERFORMAT → PASTE OK is_menu={is_menu!r} fresh={fresh_input} "
                 f"living={living} → conflict_check"
             )
-            if fresh_input and (not living) and (time_since_finish >= 0.5 or not same_gesture):
+            if fresh_input and time_since_paste >= 0.18:
                 _note_paste_gesture()
             _is_rendering = True
             try:
@@ -3868,7 +3921,7 @@ def run_clipboard_agent_mode():
                     is_paste = _agent_lmb_is_context_paste(on_self)
             if is_paste:
                 now_trig = time.time()
-                if now_trig - _agent_last_menu_paste_trigger_time >= 0.8:
+                if now_trig - _agent_last_menu_paste_trigger_time >= 0.4:
                     _agent_last_menu_paste_trigger_time = now_trig
                     threading.Thread(
                         target=_agent_trigger_paste,
@@ -4061,16 +4114,70 @@ def run_clipboard_agent_mode():
     def _open_paste_progress_dialog(paste_id, display_name, total_size, dest_dir):
         """Một paste_id → một dialog. Paste song song = nhiều dialog (stack_index)."""
         nonlocal active_dialog
-        if paste_id is not None and active_dialogs.get(paste_id):
-            dlg = active_dialogs[paste_id]
-            try:
-                dlg.deiconify()
-                dlg.lift()
-                dlg.attributes("-topmost", True)
-                dlg.update_progress(0, status="")
-            except Exception:
-                pass
-            return dlg
+
+        # Dọn dẹp các dialog đã bị đóng/destroy khỏi active_dialogs
+        dead_keys = [k for k, d in active_dialogs.items() if not (d and getattr(d, "winfo_exists", lambda: False)())]
+        for dk in dead_keys:
+            active_dialogs.pop(dk, None)
+
+        cand_keys = set()
+        if paste_id is not None:
+            cand_keys.add(paste_id)
+            try: cand_keys.add(int(paste_id))
+            except Exception: pass
+            cand_keys.add(str(paste_id))
+
+        # 1. Tìm theo paste_id trong active_dialogs (hỗ trợ cả int và str)
+        for k in cand_keys:
+            if k in active_dialogs and active_dialogs[k]:
+                dlg = active_dialogs[k]
+                try:
+                    if dlg.winfo_exists():
+                        dlg.deiconify()
+                        dlg.lift()
+                        dlg.attributes("-topmost", True)
+                        return dlg
+                except Exception:
+                    pass
+
+        # 2. Tìm theo d.job_id trong các dialog đang hiển thị
+        for k, d in list(active_dialogs.items()):
+            if d and getattr(d, "job_id", None) in cand_keys:
+                try:
+                    if d.winfo_exists():
+                        d.deiconify()
+                        d.lift()
+                        d.attributes("-topmost", True)
+                        if paste_id is not None:
+                            active_dialogs[paste_id] = d
+                        return d
+                except Exception:
+                    pass
+
+        # 3. Chống tạo đúp: Nếu đã có dialog đang mở cho cùng display_name và total_size
+        # (do _begin_download và pipe START cùng tới), tái sử dụng dialog đó thay vì tạo dialog thứ 2
+        clean_name = display_name or ""
+        try:
+            sz_check = int(total_size or 0)
+        except Exception:
+            sz_check = 0
+        for k, d in list(active_dialogs.items()):
+            if d:
+                try:
+                    if not d.winfo_exists():
+                        continue
+                    d_name = getattr(d, "filename", "") or ""
+                    d_total = getattr(d, "total_size", -1)
+                    if (d_name == clean_name or not clean_name) and (sz_check <= 0 or d_total == sz_check or d_total <= 0):
+                        d.deiconify()
+                        d.lift()
+                        d.attributes("-topmost", True)
+                        if paste_id is not None:
+                            active_dialogs[paste_id] = d
+                        return d
+                except Exception:
+                    pass
+
         job = _agent_jobs.get(paste_id) if paste_id is not None else None
         if job is not None and not job.get("allow"):
             agent_print("[ClipboardAgent] Bo dialog (job da Huy).")
@@ -4084,7 +4191,8 @@ def run_clipboard_agent_mode():
         )
         if pending_kind in ("file", "folder") and not job_files:
             kind = pending_kind
-        stack = len([d for d in active_dialogs.values() if d])
+        used_stacks = {int(getattr(d, "stack_index", 0) or 0) for d in active_dialogs.values() if d and getattr(d, "winfo_exists", lambda: False)()}
+        stack = next((i for i in range(32) if i not in used_stacks), len(used_stacks))
         try:
             sz = int(total_size or 0)
         except Exception:
@@ -4304,10 +4412,10 @@ def run_clipboard_agent_mode():
                             except Exception: pass
                         if dlg is None:
                             dlg = active_dialogs.get(str(pid))
-                    if dlg is None:
+                    else:
                         dlg = active_dialog
-                    if dlg is None and len(active_dialogs) == 1:
-                        dlg = next(iter(active_dialogs.values()), None)
+                        if dlg is None and len(active_dialogs) == 1:
+                            dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.update_progress(nbytes)
                         except: pass
@@ -4323,14 +4431,18 @@ def run_clipboard_agent_mode():
                         n, pid = (val[0] if val else 0), (val[1] if len(val) > 1 else None)
                     else:
                         n, pid = val, None
-                    dlg = active_dialogs.get(pid) if pid is not None else active_dialog
-                    if dlg is None and pid is not None:
-                        try: dlg = active_dialogs.get(int(pid))
-                        except Exception: pass
-                    if dlg is None and pid is not None:
-                        dlg = active_dialogs.get(str(pid))
-                    if dlg is None and len(active_dialogs) == 1:
-                        dlg = next(iter(active_dialogs.values()), None)
+                    dlg = None
+                    if pid is not None:
+                        dlg = active_dialogs.get(pid)
+                        if dlg is None:
+                            try: dlg = active_dialogs.get(int(pid))
+                            except Exception: pass
+                        if dlg is None:
+                            dlg = active_dialogs.get(str(pid))
+                    else:
+                        dlg = active_dialog
+                        if dlg is None and len(active_dialogs) == 1:
+                            dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.begin_finalize(n or 0)
                         except: pass
@@ -4339,14 +4451,18 @@ def run_clipboard_agent_mode():
                         n, pid = (val[0] if val else 0), (val[1] if len(val) > 1 else None)
                     else:
                         n, pid = val, None
-                    dlg = active_dialogs.get(pid) if pid is not None else active_dialog
-                    if dlg is None and pid is not None:
-                        try: dlg = active_dialogs.get(int(pid))
-                        except Exception: pass
-                    if dlg is None and pid is not None:
-                        dlg = active_dialogs.get(str(pid))
-                    if dlg is None and len(active_dialogs) == 1:
-                        dlg = next(iter(active_dialogs.values()), None)
+                    dlg = None
+                    if pid is not None:
+                        dlg = active_dialogs.get(pid)
+                        if dlg is None:
+                            try: dlg = active_dialogs.get(int(pid))
+                            except Exception: pass
+                        if dlg is None:
+                            dlg = active_dialogs.get(str(pid))
+                    else:
+                        dlg = active_dialog
+                        if dlg is None and len(active_dialogs) == 1:
+                            dlg = next(iter(active_dialogs.values()), None)
                     if dlg:
                         try: dlg.add_finalize_bytes(n or 0)
                         except: pass
@@ -4430,7 +4546,9 @@ def run_clipboard_agent_mode():
                             name = f.get("name") if isinstance(f, dict) else str(f)
                             top = str(name).replace("\\", "/").strip("/").split("/")[0]
                             src = local_map.get(os.path.normcase(top)) or local_map.get(top)
-                            if not src or not os.path.exists(src):
+                            if not src or not os.path.exists(src) or _path_in_xfer_staging(src):
+                                return False
+                            if isinstance(f, dict) and not _paths_match_expected_sizes([src], [f]):
                                 return False
                             try:
                                 dst_guess = os.path.join(dest_dir, top)
@@ -4610,7 +4728,7 @@ def run_clipboard_agent_mode():
                                 _begin_download()
                             _done_conflict()
                             continue
-                        cleanup_incomplete_named_files([dest_dir], files)
+                        cleanup_incomplete_named_files([dest_dir], files, wipe_all_staging=False)
                         _schedule_scrub_probe(dest_dir)
                         conflicts = []
                         seen_conflict = set()
@@ -4797,6 +4915,33 @@ def run_clipboard_agent_mode():
                                                 pass
                                         except Exception as e_vis:
                                             log_overwrite_conflict(f"DIALOG raise/focus loi: {e_vis}")
+                                        def _pump_bg_progress():
+                                            if dialog is None or not dialog.winfo_exists():
+                                                return
+                                            deferred = []
+                                            while not gui_queue.empty():
+                                                try:
+                                                    bg_act, bg_val = gui_queue.get_nowait()
+                                                except queue.Empty:
+                                                    break
+                                                if bg_act == "progress" and isinstance(bg_val, (tuple, list)):
+                                                    b_pid, b_n = (bg_val[0] if bg_val else None), (bg_val[1] if len(bg_val) > 1 else 0)
+                                                    b_dlg = active_dialogs.get(b_pid) or active_dialogs.get(int(b_pid) if str(b_pid).isdigit() else b_pid)
+                                                    if b_dlg:
+                                                        try: b_dlg.update_progress(b_n)
+                                                        except Exception: pass
+                                                else:
+                                                    deferred.append((bg_act, bg_val))
+                                            for item in deferred:
+                                                gui_queue.put(item)
+                                            try:
+                                                dialog.after(50, _pump_bg_progress)
+                                            except Exception:
+                                                pass
+                                        try:
+                                            dialog.after(50, _pump_bg_progress)
+                                        except Exception:
+                                            pass
                                         root.wait_window(dialog)
                                         choice = dialog.choice if dialog.choice else "cancel"
                                         elapsed = time.time() - t0

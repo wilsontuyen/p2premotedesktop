@@ -214,7 +214,6 @@ class ProgressDialog(tk.Toplevel):
         if not self._embed:
             self.attributes("-topmost", True)
         self.lift()
-        self.focus_force()
         try:
             self.attributes("-alpha", 1.0)
         except Exception:
@@ -239,7 +238,7 @@ class ProgressDialog(tk.Toplevel):
                 pass
 
     def _force_show(self):
-        """Parent Tk withdrawn có thể nuốt deiconify lần đầu — hiện lại dialog tiến trình."""
+        """Parent Tk withdrawn có thể nuốt deiconify lần đầu — hiện lại dialog tiến trình (không cướp focus của Explorer)."""
         if self._embed:
             return
         try:
@@ -263,13 +262,13 @@ class ProgressDialog(tk.Toplevel):
             HWND_TOPMOST = -1
             SWP_NOSIZE = 0x0001
             SWP_NOMOVE = 0x0002
+            SWP_NOACTIVATE = 0x0010
             SWP_SHOWWINDOW = 0x0040
             user32.SetWindowPos(
                 ctypes.c_void_p(hwnd), HWND_TOPMOST, 0, 0, 0, 0,
-                SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )
-            user32.BringWindowToTop(ctypes.c_void_p(hwnd))
-            user32.ShowWindow(ctypes.c_void_p(hwnd), 5)  # SW_SHOW
+            user32.ShowWindow(ctypes.c_void_p(hwnd), 4)  # SW_SHOWNOACTIVATE
         except Exception:
             pass
 
@@ -354,10 +353,25 @@ class ProgressDialog(tk.Toplevel):
             left, top, right, bottom = bounds
             x = left + max(0, (right - left - my_w) // 2)
             y = top + max(0, (bottom - top - my_h) // 2)
+            avail_bottom = max(top, bottom - my_h)
         else:
-            x = (self.winfo_screenwidth() - my_w) // 2
-            y = (self.winfo_screenheight() - my_h) // 2
-        y += int(getattr(self, "stack_index", 0) or 0) * (my_h + 8)
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            top = 0
+            x = (sw - my_w) // 2
+            y = (sh - my_h) // 2
+            avail_bottom = max(0, sh - my_h - 48)
+        idx = int(getattr(self, "stack_index", 0) or 0)
+        if idx > 0:
+            step = my_h + 8
+            target_y = y + idx * step
+            if target_y <= avail_bottom:
+                y = target_y
+            else:
+                span = max(step, avail_bottom - (top + 24))
+                wrap_round = (target_y - avail_bottom) // span + 1
+                y = (top + 24) + ((idx * step) % span)
+                x += wrap_round * 20
         self._move_to_screen(x, y)
 
     def trigger_cancel(self):
