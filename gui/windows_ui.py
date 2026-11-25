@@ -1008,21 +1008,20 @@ def setup_windows_ui(self):
         
         self.entry_p_pass = tk.Entry(right_panel, textvariable=self.partner_pass_var, font=(APP_FONT_NAME, 16), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=0, highlightthickness=0, highlightbackground=self.card_color)
         self.entry_p_pass.pack(pady=(5, 6), padx=20, fill=tk.X)
-        
-        # Tự động điền mật khẩu ngay khi gõ xong hoặc rời khỏi ô nhập ID đối tác
-        def on_p_id_check_autofill(event=None):
-            clean_id = "".join(c for c in self.partner_id_var.get() if c.isdigit())
-            if len(clean_id) in (9, 12) and hasattr(self, 'load_saved_computers'):
+
+        # Khi bấm/focus vào ô mật khẩu đối tác lần đầu, tự động bôi đen toàn bộ để gõ hoặc dán mới sẽ thay thế chứ không nối vào mật khẩu cũ
+        _p_pass_focus = {"had": False}
+        def _on_p_pass_focus_in(_e):
+            if not _p_pass_focus["had"]:
+                _p_pass_focus["had"] = True
                 try:
-                    saved = self.load_saved_computers()
-                    matched = next((c for c in saved if "".join(ch for ch in c.get('id', '') if ch.isdigit()) == clean_id or c.get('id', '').replace(' ', '') == clean_id), None)
-                    if matched and matched.get('password'):
-                        self.partner_pass_var.set(matched['password'])
+                    self.entry_p_pass.after(1, lambda: self.entry_p_pass.select_range(0, tk.END) if self.entry_p_pass.winfo_exists() else None)
                 except Exception:
                     pass
-
-        self.entry_p_id.bind("<FocusOut>", on_p_id_check_autofill)
-        self.entry_p_id.bind("<KeyRelease>", on_p_id_check_autofill)
+        def _on_p_pass_focus_out(_e):
+            _p_pass_focus["had"] = False
+        self.entry_p_pass.bind("<FocusIn>", _on_p_pass_focus_in, add="+")
+        self.entry_p_pass.bind("<FocusOut>", _on_p_pass_focus_out, add="+")
 
         # Bind Enter keys to trigger Connection immediately
         self.entry_p_id.bind("<Return>", lambda event: self.click_connect())
@@ -1056,7 +1055,7 @@ def setup_windows_ui(self):
 
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
-        self.make_context_menu(self.entry_p_pass)
+        self.make_context_menu(self.entry_p_pass, replace_on_paste=True)
         
         # BOTTOM STATUS BAR
         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)

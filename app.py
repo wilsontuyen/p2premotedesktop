@@ -357,7 +357,7 @@ from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, r
 
 from core.host import HostMixin, check_desktop_change
 from core.network_manager import NetworkMixin
-from pclist import SavedListMixin, get_computers_xml_path, get_app_data_dir
+from pclist import SavedListMixin, get_computers_xml_path, get_app_data_dir, get_app_base_dir, _XML_FILE_LOCK, _atomic_write_xml
 
 class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
     def after(self, ms, func=None, *args):
@@ -820,8 +820,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         except:
             pass
         
-        # Migrate old JSON list to new encrypted XML format
-        old_json_file = "saved_computers.json"
+        # Migrate old JSON list (in app main dir only) to new encrypted XML format
+        old_json_file = os.path.join(get_app_base_dir(), "saved_computers.json")
         new_xml_file = get_computers_xml_path()
         if os.path.exists(old_json_file) and not os.path.exists(new_xml_file):
             try:
@@ -843,7 +843,8 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     pass_node.text = encrypt_text(comp.get("password", ""))
                 
                 tree = ET.ElementTree(root)
-                tree.write(new_xml_file, encoding="utf-8", xml_declaration=True)
+                with _XML_FILE_LOCK:
+                    _atomic_write_xml(tree, new_xml_file)
                 os.remove(old_json_file)
                 print("[Migration] Đã chuyển đổi thành công danh sách máy tính sang XML mã hóa!")
             except Exception as e:
@@ -900,17 +901,18 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 print(f"[Host GUI] New session password saved to {pass_path}")
             except Exception as e:
                 print(f"[Host GUI] Failed to save session password: {e}")
-        # Migrate old fixed_password.txt to XML if it exists
+        # Migrate old fixed_password.txt (in app main dir only) to XML if it exists
         self.fixed_password = ""
-        if os.path.exists("fixed_password.txt"):
+        old_fp_file = os.path.join(get_app_base_dir(), "fixed_password.txt")
+        if os.path.exists(old_fp_file):
             try:
-                with open("fixed_password.txt", "r", encoding="utf-8") as f:
+                with open(old_fp_file, "r", encoding="utf-8") as f:
                     encrypted = f.read().strip()
                     if encrypted:
                         self.fixed_password = decrypt_text(encrypted)
                 if self.fixed_password:
                     self.save_fixed_password_to_xml(self.fixed_password)
-                os.remove("fixed_password.txt")
+                os.remove(old_fp_file)
                 print("[Migration] Đã di trú mật khẩu cố định sang saved_computers.xml và xóa tệp cũ!")
             except Exception as e:
                 print(f"[Config] Lỗi di trú mật khẩu cố định: {e}")
@@ -952,6 +954,15 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.status_var = tk.StringVar(value=_("Đang kết nối tới mạng đăng ký..."))
         self.partner_id_var = tk.StringVar()
         self.partner_pass_var = tk.StringVar()
+        self._partner_pass_autofilled = False
+        self._setting_autofill_pass = False
+        self._last_autofill_partner_id = ""
+
+        def _on_partner_pass_changed(*_args):
+            if not getattr(self, "_setting_autofill_pass", False):
+                self._partner_pass_autofilled = False
+
+        self.partner_pass_var.trace_add("write", _on_partner_pass_changed)
         self.force_relay_var = tk.BooleanVar(value=False)
         self.startup_var = tk.BooleanVar(value=self.is_startup_enabled())
         
@@ -1226,16 +1237,32 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         else:
             formatted = clean_val
         
-        # Tự động điền mật khẩu nếu ID khớp với "Danh sách máy tính đã lưu"
+        # Tự động điền mật khẩu CHỈ khi chuỗi số ID thực sự thay đổi:
+        # - Ưu tiên bản ghi mới nhất (reversed) nếu file có bản sao ID.
+        # - Nếu đổi sang ID khác chưa có trong danh sách thì xóa sạch mật khẩu autofill cũ để không bị chèn nối đuôi.
         def _try_autofill_saved_password(cid):
+            prev_cid = getattr(self, "_last_autofill_partner_id", "")
+            if cid == prev_cid:
+                return
+            self._last_autofill_partner_id = cid
             if len(cid) in (9, 12) and hasattr(self, 'partner_pass_var') and hasattr(self, 'load_saved_computers'):
                 try:
                     saved = self.load_saved_computers()
-                    matched = next((c for c in saved if "".join(ch for ch in c.get('id', '') if ch.isdigit()) == cid or c.get('id', '').replace(' ', '') == cid), None)
+                    matched = next(
+                        (
+                            c for c in reversed(saved)
+                            if ("".join(ch for ch in c.get('id', '') if ch.isdigit()) == cid or c.get('id', '').replace(' ', '') == cid)
+                            and c.get('password')
+                        ),
+                        None,
+                    )
                     if matched and matched.get('password'):
-                        self.partner_pass_var.set(matched['password'])
+                        self._set_autofill_partner_pass(matched['password'])
+                        return
                 except Exception:
                     pass
+            if getattr(self, "_partner_pass_autofilled", False):
+                self._set_autofill_partner_pass("")
 
         # Only update if the value actually changed
         if current_val == formatted:
@@ -1622,14 +1649,31 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     p_pass = lines[1].split(':')[-1].strip()
 
         if p_id:
-            self.partner_id_var.set(p_id)
+            clean_pid = re.sub(r'\D', '', p_id)[:12]
             if p_pass:
+                self._last_autofill_partner_id = clean_pid
+                self.partner_id_var.set(p_id)
+                self._setting_autofill_pass = False
+                self._partner_pass_autofilled = False
                 self.partner_pass_var.set(p_pass)
                 self.update_status(_("Đã dán cả ID & Mật khẩu!"), is_success=True)
             else:
+                # Xóa mật khẩu máy cũ trước rồi mới gán ID mới để chỉ autofill nếu ID mới có lưu
+                self._set_autofill_partner_pass("")
+                self._last_autofill_partner_id = ""
+                self.partner_id_var.set(p_id)
                 self.update_status(_("Đã dán ID đối tác!"), is_success=True)
         else:
             self.update_status(_("Không tìm thấy ID & Mật khẩu hợp lệ trong bộ nhớ tạm!"), is_error=True)
+
+
+    def _set_autofill_partner_pass(self, pw):
+        self._setting_autofill_pass = True
+        try:
+            self.partner_pass_var.set(pw or "")
+            self._partner_pass_autofilled = bool(pw)
+        finally:
+            self._setting_autofill_pass = False
 
 
     def copy_to_clipboard(self, text):
@@ -1648,19 +1692,35 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         self.update_status(_("Đã sao chép vào bộ nhớ tạm: ") + text.strip(), is_success=True)
 
 
-    def make_context_menu(self, entry):
+    def make_context_menu(self, entry, replace_on_paste=False):
+        def _do_paste():
+            try:
+                entry.focus_set()
+                if replace_on_paste and not entry.selection_present():
+                    entry.delete(0, tk.END)
+            except Exception:
+                pass
+            entry.event_generate("<<Paste>>")
+
         menu = tk.Menu(entry, tearoff=0)
         menu.add_command(label=_("Cắt (Cut)"), command=lambda: entry.event_generate("<<Cut>>"))
         menu.add_command(label=_("Sao chép (Copy)"), command=lambda: entry.event_generate("<<Copy>>"))
-        menu.add_command(label=_("Dán (Paste)"), command=lambda: entry.event_generate("<<Paste>>"))
+        menu.add_command(label=_("Dán (Paste)"), command=_do_paste)
         menu.add_command(label=_("Chọn tất cả (Select All)"), command=lambda: entry.event_generate("<<SelectAll>>"))
         
         # Giữ tham chiếu mạnh (Strong Reference) tránh rác hệ thống làm mất menu
         entry.menu = menu
-        
+
+        def _popup_menu(e):
+            try:
+                entry.focus_set()
+            except Exception:
+                pass
+            entry.menu.post(e.x_root, e.y_root)
+
         # Bắt chuột phải trên cả Windows (Button-3) và một số Touchpad/Mac (Button-2)
-        entry.bind("<Button-3>", lambda e: entry.menu.post(e.x_root, e.y_root))
-        entry.bind("<Button-2>", lambda e: entry.menu.post(e.x_root, e.y_root))
+        entry.bind("<Button-3>", _popup_menu)
+        entry.bind("<Button-2>", _popup_menu)
 
 
     def refresh_password(self):
@@ -1801,20 +1861,21 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                     elif not isinstance(ls, str) or "-" not in str(ls) or ":" not in str(ls):
                         v_copy["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    # 2. Tự động đồng bộ saved_password và MAC từ saved_computers.xml nếu chưa có
+                    # 2. Tự động đồng bộ saved_password và MAC từ saved_computers.xml nếu chưa có (chỉ khi khớp chính xác ID 12 số hoặc tên máy)
                     spw = str(v_copy.get("saved_password") or "").strip()
                     matched = match_saved_computer(v_copy.get("computer_name"), canonical_k, v_copy.get("saved_id"))
-                    if not spw and matched and matched.get("password"):
-                        spw = str(matched["password"]).strip()
-                    if not v_copy.get("macs") and matched and matched.get("mac"):
-                        v_copy["macs"] = str(matched["mac"]).strip()
+                    exact_matched = matched if _is_exact_saved_match(matched, v_copy.get("computer_name"), canonical_k) else None
+                    if not spw and exact_matched and exact_matched.get("password"):
+                        spw = str(exact_matched["password"]).strip()
+                    if not v_copy.get("macs") and exact_matched and exact_matched.get("mac"):
+                        v_copy["macs"] = str(exact_matched["mac"]).strip()
                         v["macs"] = v_copy["macs"]
 
                     # 3. Đảm bảo saved_id chỉ lấy từ matched khi khớp CHÍNH XÁC tên máy hoặc ID (tránh gán nhầm làm gộp mất máy!)
                     if len(str(canonical_k)) == 12 and str(canonical_k).isdigit():
                         v_copy["saved_id"] = canonical_k
-                    elif matched and _is_exact_saved_match(matched, v_copy.get("computer_name"), canonical_k) and matched.get("id"):
-                        m_clean = ''.join(ch for ch in str(matched["id"]) if ch.isdigit())
+                    elif exact_matched and exact_matched.get("id"):
+                        m_clean = ''.join(ch for ch in str(exact_matched["id"]) if ch.isdigit())
                         if len(m_clean) == 12:
                             v_copy["saved_id"] = m_clean
                             v_copy["hwid"] = m_clean
@@ -1869,27 +1930,28 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         try:
-            if os.path.exists(computers_file):
-                tree = ET.parse(computers_file)
-                root = tree.getroot()
-            else:
-                if not password:
-                    return
-                root = ET.Element("computers")
-                tree = ET.ElementTree(root)
+            with _XML_FILE_LOCK:
+                if os.path.exists(computers_file):
+                    tree = ET.parse(computers_file)
+                    root = tree.getroot()
+                else:
+                    if not password:
+                        return
+                    root = ET.Element("computers")
+                    tree = ET.ElementTree(root)
 
-            old_fp = root.find("fixed_password")
-            if old_fp is not None:
-                root.remove(old_fp)
-            if password:
-                fixed_node = ET.Element("fixed_password")
-                fixed_node.text = encrypt_text(password)
-                root.insert(0, fixed_node)
+                old_fp = root.find("fixed_password")
+                if old_fp is not None:
+                    root.remove(old_fp)
+                if password:
+                    fixed_node = ET.Element("fixed_password")
+                    fixed_node.text = encrypt_text(password)
+                    root.insert(0, fixed_node)
 
-            if hasattr(ET, "indent"):
-                ET.indent(root, space="  ")
+                if hasattr(ET, "indent"):
+                    ET.indent(root, space="  ")
 
-            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+                _atomic_write_xml(tree, computers_file)
         except Exception as e:
             print(f"[Config] Lỗi lưu XML: {e}")
 
@@ -1924,28 +1986,29 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         try:
-            if os.path.exists(computers_file):
-                tree = ET.parse(computers_file)
-                root = tree.getroot()
-            else:
-                if not value:
-                    return
-                root = ET.Element("computers")
-                tree = ET.ElementTree(root)
+            with _XML_FILE_LOCK:
+                if os.path.exists(computers_file):
+                    tree = ET.parse(computers_file)
+                    root = tree.getroot()
+                else:
+                    if not value:
+                        return
+                    root = ET.Element("computers")
+                    tree = ET.ElementTree(root)
 
-            old_zalo = root.find("zalo_phone")
-            if old_zalo is not None:
-                root.remove(old_zalo)
-            if value:
-                zalo_node = ET.Element("zalo_phone")
-                zalo_node.text = value
-                insert_idx = 1 if root.find("fixed_password") is not None else 0
-                root.insert(insert_idx, zalo_node)
+                old_zalo = root.find("zalo_phone")
+                if old_zalo is not None:
+                    root.remove(old_zalo)
+                if value:
+                    zalo_node = ET.Element("zalo_phone")
+                    zalo_node.text = value
+                    insert_idx = 1 if root.find("fixed_password") is not None else 0
+                    root.insert(insert_idx, zalo_node)
 
-            if hasattr(ET, "indent"):
-                ET.indent(root, space="  ")
+                if hasattr(ET, "indent"):
+                    ET.indent(root, space="  ")
 
-            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
+                _atomic_write_xml(tree, computers_file)
         except Exception as e:
             print(f"[Config] Lỗi lưu Zalo/Điện thoại vào XML: {e}")
 

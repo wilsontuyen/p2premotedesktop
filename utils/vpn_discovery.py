@@ -494,21 +494,16 @@ def get_lan_peers_json_path():
         pass
     target_path = os.path.join(data_dir, "lan_peers.json")
 
-    # Di trú 1 lần nếu có file lan_peers.json cũ ở ngoài thư mục gốc hoặc APPDATA
-    legacy_paths = [os.path.join(app_dir, "lan_peers.json")]
-    if sys.platform == "win32":
-        appdata = os.environ.get('APPDATA', '')
-        if appdata:
-            legacy_paths.append(os.path.join(appdata, "EasyRemoteDesktop", "lan_peers.json"))
-    for old_p in legacy_paths:
-        if old_p and os.path.isfile(old_p) and os.path.abspath(old_p) != os.path.abspath(target_path):
-            try:
-                if not os.path.exists(target_path):
-                    import shutil
-                    shutil.copy2(old_p, target_path)
-                os.remove(old_p)
-            except Exception:
-                pass
+    # Chỉ di trú từ ngay thư mục chính app_dir vào app_dir/Data (không kéo file cũ từ APPDATA)
+    old_p = os.path.join(app_dir, "lan_peers.json")
+    if old_p and os.path.isfile(old_p) and os.path.abspath(old_p) != os.path.abspath(target_path):
+        try:
+            if not os.path.exists(target_path):
+                import shutil
+                shutil.copy2(old_p, target_path)
+            os.remove(old_p)
+        except Exception:
+            pass
 
     return target_path
 

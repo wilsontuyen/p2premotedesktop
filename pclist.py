@@ -39,6 +39,7 @@ def E(text):
 
 
 _DATA_DIR_MIGRATED = False
+_XML_FILE_LOCK = threading.RLock()
 _CONFIG_FILENAMES = (
     "lan_peers.json",
     "saved_computers.xml",
@@ -50,19 +51,63 @@ _CONFIG_FILENAMES = (
 )
 
 
-def get_app_data_dir():
-    """Thư mục lưu trữ toàn bộ cấu hình của ứng dụng: luôn là <app_dir>/Data."""
-    global _DATA_DIR_MIGRATED
+def get_app_base_dir():
+    """Trả về thư mục chính của ứng dụng đang chạy (không dùng CWD hay APPDATA)."""
     if getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False) or ("__compiled__" in globals()):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         exe_dir = os.path.dirname(os.path.abspath(__file__))
 
     if sys.platform != "win32" and os.path.exists("/opt/p2p_remote"):
-        base_dir = "/opt/p2p_remote"
-    else:
-        base_dir = exe_dir
+        return "/opt/p2p_remote"
+    return exe_dir
 
+
+def _atomic_write_xml(tree, target_path):
+    """Ghi tệp XML an toàn qua tệp tạm trong cùng thư mục để tránh hỏng/mất dữ liệu."""
+    target_abs = os.path.abspath(target_path)
+    parent_dir = os.path.dirname(target_abs)
+    os.makedirs(parent_dir, exist_ok=True)
+    tmp_path = f"{target_abs}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
+        os.replace(tmp_path, target_abs)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+def _bind_password_entry_ux(app_self, entry):
+    """Đảm bảo khi focus lần đầu hoặc chuột phải Dán trên ô mật khẩu sẽ thay thế thay vì nối vào mật khẩu cũ."""
+    state = {"had_focus": False}
+
+    def _on_focus_in(_e):
+        if not state["had_focus"]:
+            state["had_focus"] = True
+            try:
+                entry.after(1, lambda: entry.select_range(0, tk.END) if entry.winfo_exists() else None)
+            except Exception:
+                pass
+
+    def _on_focus_out(_e):
+        state["had_focus"] = False
+
+    entry.bind("<FocusIn>", _on_focus_in, add="+")
+    entry.bind("<FocusOut>", _on_focus_out, add="+")
+    if hasattr(app_self, "make_context_menu"):
+        try:
+            app_self.make_context_menu(entry, replace_on_paste=True)
+        except TypeError:
+            app_self.make_context_menu(entry)
+
+
+def get_app_data_dir():
+    """Thư mục lưu trữ toàn bộ cấu hình của ứng dụng: luôn là <app_dir>/Data thuộc thư mục chính của app."""
+    global _DATA_DIR_MIGRATED
+    base_dir = get_app_base_dir()
     data_dir = os.path.join(base_dir, "Data")
     try:
         os.makedirs(data_dir, exist_ok=True)
@@ -73,30 +118,38 @@ def get_app_data_dir():
 
     if not _DATA_DIR_MIGRATED:
         _DATA_DIR_MIGRATED = True
-        legacy_dirs = [base_dir]
-        if sys.platform == "win32":
-            appdata = os.environ.get("APPDATA")
-            if appdata:
-                legacy_dirs.append(os.path.join(appdata, "EasyRemoteDesktop"))
-        for ldir in legacy_dirs:
-            if not ldir or not os.path.isdir(ldir) or os.path.abspath(ldir) == os.path.abspath(data_dir):
-                continue
+        # Chỉ di trú từ ngay thư mục chính base_dir vào base_dir/Data (TUYỆT ĐỐI không kéo file cũ từ APPDATA)
+        if base_dir and os.path.isdir(base_dir) and os.path.abspath(base_dir) != os.path.abspath(data_dir):
             for fname in _CONFIG_FILENAMES:
-                old_file = os.path.join(ldir, fname)
+                old_file = os.path.join(base_dir, fname)
                 if not os.path.isfile(old_file):
                     continue
                 new_file = os.path.join(data_dir, fname)
                 try:
                     if not os.path.exists(new_file):
                         shutil.copy2(old_file, new_file)
-                    os.remove(old_file)
-                except Exception:
-                    pass
-            # Dọn dẹp thư mục APPDATA\EasyRemoteDesktop cũ nếu đã trống
-            if sys.platform == "win32" and ldir.lower().endswith("easyremotedesktop") and "appdata" in ldir.lower():
-                try:
-                    if not os.listdir(ldir):
-                        os.rmdir(ldir)
+                        os.remove(old_file)
+                    elif fname == "saved_computers.xml":
+                        # Nếu Data/saved_computers.xml chỉ mới có fixed_password/zalo_phone (0 computer)
+                        # còn <app_dir>/saved_computers.xml có danh sách máy tính thì gộp sang Data rồi mới xóa bản gốc
+                        try:
+                            old_tree = ET.parse(old_file)
+                            old_root = old_tree.getroot()
+                            new_tree = ET.parse(new_file)
+                            new_root = new_tree.getroot()
+                            if len(new_root.findall("computer")) == 0 and len(old_root.findall("computer")) > 0:
+                                fp_node = new_root.find("fixed_password")
+                                zp_node = new_root.find("zalo_phone")
+                                if fp_node is not None and old_root.find("fixed_password") is None:
+                                    old_root.insert(0, fp_node)
+                                if zp_node is not None and old_root.find("zalo_phone") is None:
+                                    old_root.insert(0, zp_node)
+                                _atomic_write_xml(old_tree, new_file)
+                            os.remove(old_file)
+                        except Exception:
+                            pass
+                    else:
+                        os.remove(old_file)
                 except Exception:
                     pass
 
@@ -104,8 +157,20 @@ def get_app_data_dir():
 
 
 def get_computers_xml_path():
-    """Trả về đường dẫn duy nhất của saved_computers.xml trong thư mục <app_dir>/Data."""
+    """Trả về đường dẫn duy nhất của saved_computers.xml trong thư mục chính của app (<app_dir>/Data/saved_computers.xml)."""
     return os.path.join(get_app_data_dir(), "saved_computers.xml")
+
+
+def get_export_computers_xml_path():
+    """Chỉ lấy file danh sách máy tính chính nằm trong thư mục chính của app (<app_dir>/Data hoặc <app_dir>)."""
+    base_dir = get_app_base_dir()
+    data_xml = os.path.join(base_dir, "Data", "saved_computers.xml")
+    if os.path.isfile(data_xml):
+        return data_xml
+    root_xml = os.path.join(base_dir, "saved_computers.xml")
+    if os.path.isfile(root_xml):
+        return root_xml
+    return data_xml
 
 
 class SavedListMixin:
@@ -139,14 +204,51 @@ class SavedListMixin:
         )
         if filepath:
             try:
-                import shutil
-                dest = get_computers_xml_path()
-                shutil.copy2(filepath, dest)
-                self._saved_computers_cache = None
+                with _XML_FILE_LOCK:
+                    imp_tree = ET.parse(filepath)
+                    imp_root = imp_tree.getroot()
+                    if imp_root is None or imp_root.tag != "computers":
+                        raise ValueError(_("Định dạng tệp XML danh sách máy tính không hợp lệ."))
+
+                    dest = get_computers_xml_path()
+                    if os.path.abspath(filepath) != os.path.abspath(dest):
+                        # Giữ lại fixed_password và zalo_phone cục bộ của máy hiện tại (nếu đã cài đặt)
+                        local_fp = None
+                        local_zp = None
+                        if os.path.isfile(dest):
+                            try:
+                                cur_root = ET.parse(dest).getroot()
+                                local_fp = cur_root.find("fixed_password")
+                                local_zp = cur_root.find("zalo_phone")
+                            except Exception:
+                                pass
+                        if local_fp is not None and local_fp.text:
+                            old_fp = imp_root.find("fixed_password")
+                            if old_fp is not None:
+                                imp_root.remove(old_fp)
+                            imp_root.insert(0, local_fp)
+                        if local_zp is not None and local_zp.text:
+                            old_zp = imp_root.find("zalo_phone")
+                            if old_zp is not None:
+                                imp_root.remove(old_zp)
+                            idx = 1 if imp_root.find("fixed_password") is not None else 0
+                            imp_root.insert(idx, local_zp)
+                        if hasattr(ET, "indent"):
+                            ET.indent(imp_root, space="  ")
+                        _atomic_write_xml(imp_tree, dest)
+
+                    self._saved_computers_cache = None
+                    self._saved_computers_mtime = None
+                    if hasattr(self, "collapsed_groups_loaded"):
+                        delattr(self, "collapsed_groups_loaded")
+
+                # Đồng bộ lại mật khẩu từ danh sách vừa nhập khẩu sang lan_peers (tránh mật khẩu cũ trong LAN đè ngược)
+                self._sync_all_saved_passwords_to_lan_peers()
+
                 if hasattr(self, 'saved_computers_dialog') and self.saved_computers_dialog and self.saved_computers_dialog.winfo_exists():
                     if hasattr(self.saved_computers_dialog, 'refresh_list_func'):
                         try:
-                            self.saved_computers_dialog.refresh_list_func()
+                            self.saved_computers_dialog.refresh_list_func(force=True)
                         except Exception:
                             pass
                 msg = f"{_('Đã nhập khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
@@ -165,16 +267,101 @@ class SavedListMixin:
         )
         if filepath:
             try:
-                import shutil
-                src = get_computers_xml_path()
-                if os.path.exists(src):
-                    shutil.copy2(src, filepath)
-                    msg = f"{_('Đã xuất khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
-                    InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
-                else:
-                    InfoDialog(self, _("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."), auto_close_sec=5)
+                with _XML_FILE_LOCK:
+                    # CHỈ lấy file danh sách máy tính chính nằm trong thư mục chính của app (<app_dir>/Data/saved_computers.xml)
+                    src = get_export_computers_xml_path()
+                    if os.path.isfile(src):
+                        if os.path.abspath(src) != os.path.abspath(filepath):
+                            dest_abs = os.path.abspath(filepath)
+                            os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
+                            tmp_export = f"{dest_abs}.{os.getpid()}.tmp"
+                            try:
+                                shutil.copy2(src, tmp_export)
+                                os.replace(tmp_export, dest_abs)
+                            finally:
+                                if os.path.exists(tmp_export):
+                                    try:
+                                        os.remove(tmp_export)
+                                    except Exception:
+                                        pass
+                        msg = f"{_('Đã xuất khẩu danh sách máy tính thành công!')}\n\n{_('Tệp')}: {os.path.basename(filepath)}\n{_('Đường dẫn')}: {filepath}"
+                        InfoDialog(self, _("Thành công"), msg, auto_close_sec=5)
+                    else:
+                        InfoDialog(self, _("Cảnh báo"), _("Không tìm thấy danh sách máy tính để xuất khẩu."), auto_close_sec=5)
             except Exception as e:
                 messagebox.showerror(_("Lỗi"), f"Không thể xuất khẩu: {e}")
+
+    def _sync_saved_entry_to_lan_peers(self, clean_id, password, mac=None):
+        """Đồng bộ mật khẩu mới từ Danh sách máy tính chính sang lan_peers (chỉ khớp đúng ID 12 số) để tránh mật khẩu LAN cũ đè ngược."""
+        if not clean_id or len(clean_id) != 12 or not password:
+            return
+        if not hasattr(self, "lan_peers"):
+            return
+        try:
+            from utils.vpn_discovery import hash_password_md5
+            pw_md5 = hash_password_md5(password)
+            pw_enc = encrypt_text(password)
+            changed = False
+            lock = getattr(self, "lan_peers_lock", None)
+            if lock:
+                lock.acquire()
+            try:
+                for k, v in list(self.lan_peers.items()):
+                    k_digits = "".join(ch for ch in str(k) if ch.isdigit())
+                    h_digits = "".join(ch for ch in str(v.get("hwid") or "") if ch.isdigit())
+                    if k_digits == clean_id or h_digits == clean_id:
+                        if v.get("saved_password") != pw_md5 or v.get("lan_password_enc") != pw_enc:
+                            v["saved_password"] = pw_md5
+                            v["lan_password_enc"] = pw_enc
+                            changed = True
+                        if mac and not v.get("macs"):
+                            v["macs"] = mac
+                            changed = True
+            finally:
+                if lock:
+                    lock.release()
+            if changed and hasattr(self, "save_lan_peers"):
+                self.save_lan_peers()
+        except Exception:
+            pass
+
+    def _sync_all_saved_passwords_to_lan_peers(self):
+        try:
+            if not hasattr(self, "lan_peers") or not self.lan_peers:
+                return
+            comps = self.load_saved_computers()
+            by_id = {}
+            for c in comps:
+                cid = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                if len(cid) == 12 and c.get("password"):
+                    by_id[cid] = c
+            if not by_id:
+                return
+            from utils.vpn_discovery import hash_password_md5
+            changed = False
+            lock = getattr(self, "lan_peers_lock", None)
+            if lock:
+                lock.acquire()
+            try:
+                for k, v in list(self.lan_peers.items()):
+                    k_digits = "".join(ch for ch in str(k) if ch.isdigit())
+                    h_digits = "".join(ch for ch in str(v.get("hwid") or "") if ch.isdigit())
+                    sc = by_id.get(h_digits) or by_id.get(k_digits)
+                    if sc:
+                        pw = sc["password"]
+                        pw_md5 = hash_password_md5(pw)
+                        pw_enc = encrypt_text(pw)
+                        if v.get("saved_password") != pw_md5 or v.get("lan_password_enc") != pw_enc:
+                            v["saved_password"] = pw_md5
+                            v["lan_password_enc"] = pw_enc
+                            changed = True
+            finally:
+                if lock:
+                    lock.release()
+            if changed and hasattr(self, "save_lan_peers"):
+                self.save_lan_peers()
+        except Exception:
+            pass
 
     def import_lan_computers(self):
         from tkinter import filedialog
@@ -437,8 +624,14 @@ class SavedListMixin:
                 return
             self._last_saved_connect_time = now
             print(f"[PCLIST] connect_computer: {item.get('name')} ({item.get('id')})")
+            self._last_autofill_partner_id = "".join(ch for ch in str(item.get("id") or "") if ch.isdigit())[:12]
+            if hasattr(self, "_set_autofill_partner_pass"):
+                self._set_autofill_partner_pass(item.get("password", ""))
             self.partner_id_var.set(item["id"])
-            self.partner_pass_var.set(item["password"])
+            if hasattr(self, "_set_autofill_partner_pass"):
+                self._set_autofill_partner_pass(item.get("password", ""))
+            else:
+                self.partner_pass_var.set(item["password"])
             # Giữ cửa sổ Danh sách Máy tính tiếp tục hiển thị theo yêu cầu người dùng
             # Trigger connection immediately
             self.click_connect()
@@ -1025,6 +1218,11 @@ class SavedListMixin:
         entry_mac = tk.Entry(add_win, font=(APP_FONT_NAME, 10), fg=self.entry_fg, bg=self.entry_bg, relief=tk.FLAT, bd=3, insertbackground=self.text_white)
         entry_mac.pack(fill=tk.X, padx=20, pady=(3, 12))
 
+        if hasattr(self, "make_context_menu"):
+            for _ent in (entry_name, entry_comp_id, entry_group, entry_mac):
+                self.make_context_menu(_ent)
+        _bind_password_entry_ux(self, entry_comp_pass)
+
         def load_computers():
             return self.load_saved_computers()
 
@@ -1041,11 +1239,9 @@ class SavedListMixin:
                 self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=add_win)
                 return
 
-            computers = load_computers()
-            for c in computers:
-                if c["id"] == cid and c["name"] == name:
-                    self.show_custom_error(_("Trùng lặp"), _("Máy tính này đã tồn tại trong danh sách!"), parent=add_win)
-                    return
+            clean_cid = "".join(ch for ch in cid if ch.isdigit())
+            if clean_cid and len(clean_cid) == len(cid.replace(" ", "")) and len(clean_cid) in (9, 12):
+                cid = " ".join(clean_cid[i:i+3] for i in range(0, len(clean_cid), 3))
 
             raw_mac = entry_mac.get().strip().upper()
             try:
@@ -1053,14 +1249,54 @@ class SavedListMixin:
                 cmac = format_mac_address(raw_mac)
             except Exception:
                 cmac = raw_mac
-            computers.append({
-                "name": name,
-                "id": cid,
-                "password": cpass,
-                "group": cgroup,
-                "mac": cmac
-            })
+
+            computers = load_computers()
+            existing_indices = []
+            for idx_c, c in enumerate(computers):
+                c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                if (clean_cid and c_digits == clean_cid) or (not clean_cid and c.get("id", "").strip() == cid):
+                    existing_indices.append(idx_c)
+
+            if existing_indices:
+                # Nếu trùng hoàn toàn cả ID, tên và mật khẩu thì báo trùng lặp
+                first_c = computers[existing_indices[-1]]
+                if (
+                    first_c.get("name", "").strip().lower() == name.lower()
+                    and first_c.get("password", "") == cpass
+                    and (not cmac or first_c.get("mac", "") == cmac)
+                    and (not cgroup or first_c.get("group", "").strip() == cgroup)
+                ):
+                    self.show_custom_error(_("Trùng lặp"), _("Máy tính này đã tồn tại trong danh sách!"), parent=add_win)
+                    return
+
+                # Cùng ID nhưng đổi tên hoặc đổi mật khẩu mới -> cập nhật trực tiếp bản ghi đó và loại bỏ bản sao cũ trùng ID
+                keep_idx = existing_indices[0]
+                old_grp = computers[keep_idx].get("group", "")
+                old_mac = computers[keep_idx].get("mac", "")
+                computers[keep_idx] = {
+                    "name": name,
+                    "id": cid,
+                    "password": cpass,
+                    "group": cgroup if cgroup else old_grp,
+                    "mac": cmac if cmac else old_mac,
+                }
+                for dup_idx in reversed(existing_indices[1:]):
+                    computers.pop(dup_idx)
+            else:
+                computers.append({
+                    "name": name,
+                    "id": cid,
+                    "password": cpass,
+                    "group": cgroup,
+                    "mac": cmac
+                })
             save_computers(computers)
+            self._sync_saved_entry_to_lan_peers(clean_cid, cpass, cmac)
+            if hasattr(self, "partner_pass_var") and "".join(ch for ch in self.partner_id_var.get() if ch.isdigit()) == clean_cid:
+                if hasattr(self, "_set_autofill_partner_pass"):
+                    self._set_autofill_partner_pass(cpass)
+                else:
+                    self.partner_pass_var.set(cpass)
             if on_save:
                 on_save()
             if not parent_win:
@@ -1139,6 +1375,11 @@ class SavedListMixin:
         entry_mac.pack(fill=tk.X, padx=20, pady=(3, 12))
         entry_mac.insert(0, item.get("mac", ""))
 
+        if hasattr(self, "make_context_menu"):
+            for _ent in (entry_name, entry_comp_id, entry_group, entry_mac):
+                self.make_context_menu(_ent)
+        _bind_password_entry_ux(self, entry_comp_pass)
+
         def load_computers():
             return self.load_saved_computers()
 
@@ -1155,26 +1396,53 @@ class SavedListMixin:
                 self.show_custom_error(_("Lỗi nhập liệu"), _("Vui lòng điền đầy đủ các thông tin!"), parent=edit_win)
                 return
 
+            clean_new_id = "".join(ch for ch in new_id if ch.isdigit())
+            if clean_new_id and len(clean_new_id) == len(new_id.replace(" ", "")) and len(clean_new_id) in (9, 12):
+                new_id = " ".join(clean_new_id[i:i+3] for i in range(0, len(clean_new_id), 3))
+
+            raw_mac = entry_mac.get().strip().upper()
+            try:
+                from utils.vpn_discovery import format_mac_address
+                cmac = format_mac_address(raw_mac)
+            except Exception:
+                cmac = raw_mac
+
             computers = load_computers()
             updated = False
-            for c in computers:
-                if c["id"] == item["id"] and c["name"] == item["name"]:
-                    raw_mac = entry_mac.get().strip().upper()
-                    try:
-                        from utils.vpn_discovery import format_mac_address
-                        cmac = format_mac_address(raw_mac)
-                    except Exception:
-                        cmac = raw_mac
+            primary_idx = None
+            dup_indices = []
+            old_clean_id = "".join(ch for ch in str(item.get("id") or "") if ch.isdigit())
+
+            for idx_c, c in enumerate(computers):
+                if c["id"] == item["id"] and c["name"] == item["name"] and primary_idx is None:
                     c["name"] = name
                     c["id"] = new_id
                     c["password"] = cpass
                     c["group"] = cgroup
                     c["mac"] = cmac
+                    primary_idx = idx_c
                     updated = True
-                    break
-            
+
+            # Nếu vẫn còn bản ghi trùng đúng cùng ID số (ví dụ bản sao cũ từ đợt trước), đồng bộ hoặc gộp lại để không sót mật khẩu cũ
+            if updated and clean_new_id:
+                for idx_c, c in enumerate(computers):
+                    if idx_c == primary_idx:
+                        continue
+                    c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                    if c_digits == clean_new_id:
+                        if c.get("name", "").strip().lower() == name.lower() or clean_new_id == old_clean_id:
+                            dup_indices.append(idx_c)
+                for dup_idx in reversed(dup_indices):
+                    computers.pop(dup_idx)
+
             if updated:
                 save_computers(computers)
+                self._sync_saved_entry_to_lan_peers(clean_new_id, cpass, cmac)
+                if hasattr(self, "partner_pass_var") and "".join(ch for ch in self.partner_id_var.get() if ch.isdigit()) == clean_new_id:
+                    if hasattr(self, "_set_autofill_partner_pass"):
+                        self._set_autofill_partner_pass(cpass)
+                    else:
+                        self.partner_pass_var.set(cpass)
                 if on_save:
                     on_save()
                 edit_win.destroy()
@@ -1267,65 +1535,65 @@ class SavedListMixin:
         computers_file = get_computers_xml_path()
         import xml.etree.ElementTree as ET
         try:
-            fixed_node = None
-            zalo_node = None
-            old_gs_node = None
-            if os.path.exists(computers_file):
+            with _XML_FILE_LOCK:
+                fixed_node = None
+                zalo_node = None
+                old_gs_node = None
+                if os.path.exists(computers_file):
+                    try:
+                        tree = ET.parse(computers_file)
+                        root = tree.getroot()
+                        fixed_node = root.find("fixed_password")
+                        zalo_node = root.find("zalo_phone")
+                        old_gs_node = root.find("group_states")
+                    except Exception:
+                        pass
+
+                root = ET.Element("computers")
+
+                if fixed_node is not None:
+                    root.append(fixed_node)
+                if zalo_node is not None:
+                    root.append(zalo_node)
+
+                if hasattr(self, 'collapsed_groups'):
+                    gs_node = ET.SubElement(root, "group_states")
+                    for grp in self.collapsed_groups:
+                        gt_up = grp.strip().upper()
+                        if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
+                            continue
+                        g_node = ET.SubElement(gs_node, "collapsed_group")
+                        g_node.text = encrypt_text(grp)
+                elif old_gs_node is not None:
+                    root.append(old_gs_node)
+
+                for comp in lst:
+                    comp_node = ET.SubElement(root, "computer")
+                    name_node = ET.SubElement(comp_node, "name")
+                    name_node.text = encrypt_text(comp["name"])
+
+                    id_node = ET.SubElement(comp_node, "id")
+                    id_node.text = encrypt_text(comp["id"])
+
+                    pass_node = ET.SubElement(comp_node, "password")
+                    pass_node.text = encrypt_text(comp["password"])
+
+                    group_node = ET.SubElement(comp_node, "group")
+                    group_node.text = encrypt_text(comp.get("group", ""))
+
+                    mac_node = ET.SubElement(comp_node, "mac")
+                    mac_node.text = encrypt_text(comp.get("mac", ""))
+
+                if hasattr(ET, "indent"):
+                    ET.indent(root, space="  ")
+
+                tree = ET.ElementTree(root)
+                _atomic_write_xml(tree, computers_file)
+                self._saved_computers_cache = [dict(c) for c in lst]
                 try:
-                    tree = ET.parse(computers_file)
-                    root = tree.getroot()
-                    fixed_node = root.find("fixed_password")
-                    zalo_node = root.find("zalo_phone")
-                    old_gs_node = root.find("group_states")
-                except:
-                    pass
-
-            root = ET.Element("computers")
-
-            if fixed_node is not None:
-                root.append(fixed_node)
-            if zalo_node is not None:
-                root.append(zalo_node)
-
-            if hasattr(self, 'collapsed_groups'):
-                gs_node = ET.SubElement(root, "group_states")
-                for grp in self.collapsed_groups:
-                    gt_up = grp.strip().upper()
-                    if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
-                        continue
-                    g_node = ET.SubElement(gs_node, "collapsed_group")
-                    g_node.text = encrypt_text(grp)
-            elif old_gs_node is not None:
-                root.append(old_gs_node)
-                
-
-            for comp in lst:
-                comp_node = ET.SubElement(root, "computer")
-                name_node = ET.SubElement(comp_node, "name")
-                name_node.text = encrypt_text(comp["name"])
-                
-                id_node = ET.SubElement(comp_node, "id")
-                id_node.text = encrypt_text(comp["id"])
-                
-                pass_node = ET.SubElement(comp_node, "password")
-                pass_node.text = encrypt_text(comp["password"])
-                
-                group_node = ET.SubElement(comp_node, "group")
-                group_node.text = encrypt_text(comp.get("group", ""))
-                
-                mac_node = ET.SubElement(comp_node, "mac")
-                mac_node.text = encrypt_text(comp.get("mac", ""))
-                
-            if hasattr(ET, "indent"):
-                ET.indent(root, space="  ")
-                
-            tree = ET.ElementTree(root)
-            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
-            self._saved_computers_cache = [dict(c) for c in lst]
-            try:
-                self._saved_computers_mtime = os.path.getmtime(computers_file)
-            except Exception:
-                self._saved_computers_mtime = None
+                    self._saved_computers_mtime = os.path.getmtime(computers_file)
+                except Exception:
+                    self._saved_computers_mtime = None
 
             try:
                 self._ensure_status_query_worker()
@@ -1343,26 +1611,27 @@ class SavedListMixin:
             return
         import xml.etree.ElementTree as ET
         try:
-            tree = ET.parse(computers_file)
-            root = tree.getroot()
-            old_gs = root.find("group_states")
-            if old_gs is not None:
-                root.remove(old_gs)
-            if hasattr(self, 'collapsed_groups'):
-                gs_node = ET.SubElement(root, "group_states")
-                for grp in self.collapsed_groups:
-                    gt_up = grp.strip().upper()
-                    if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
-                        continue
-                    g_node = ET.SubElement(gs_node, "collapsed_group")
-                    g_node.text = encrypt_text(grp)
-            if hasattr(ET, "indent"):
-                ET.indent(root, space="  ")
-            tree.write(computers_file, encoding="utf-8", xml_declaration=True)
-            try:
-                self._saved_computers_mtime = os.path.getmtime(computers_file)
-            except Exception:
-                pass
+            with _XML_FILE_LOCK:
+                tree = ET.parse(computers_file)
+                root = tree.getroot()
+                old_gs = root.find("group_states")
+                if old_gs is not None:
+                    root.remove(old_gs)
+                if hasattr(self, 'collapsed_groups'):
+                    gs_node = ET.SubElement(root, "group_states")
+                    for grp in self.collapsed_groups:
+                        gt_up = grp.strip().upper()
+                        if gt_up in ("LAN", "MẠNG LAN", "MẠNG LAN & VPN", "MANG LAN", "MANG LAN & VPN") or gt_up.startswith("WINDOWS VPN"):
+                            continue
+                        g_node = ET.SubElement(gs_node, "collapsed_group")
+                        g_node.text = encrypt_text(grp)
+                if hasattr(ET, "indent"):
+                    ET.indent(root, space="  ")
+                _atomic_write_xml(tree, computers_file)
+                try:
+                    self._saved_computers_mtime = os.path.getmtime(computers_file)
+                except Exception:
+                    pass
         except Exception:
             pass
 

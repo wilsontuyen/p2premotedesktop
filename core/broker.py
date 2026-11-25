@@ -132,7 +132,9 @@ def _data_dir():
                 if not os.path.exists(new_p):
                     import shutil
                     shutil.copy2(old_p, new_p)
-                os.remove(old_p)
+                    os.remove(old_p)
+                elif fname != "saved_computers.xml":
+                    os.remove(old_p)
             except Exception:
                 pass
     return d

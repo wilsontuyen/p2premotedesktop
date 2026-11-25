@@ -329,8 +329,20 @@ def setup_mac_ui(self):
         lan_btn.pack(side=tk.TOP, padx=20, fill=tk.X, pady=(5, 10))
 
         # Attach Context Menus for Copy & Paste
+        _p_pass_focus = {"had": False}
+        def _on_p_pass_focus_in(_e):
+            if not _p_pass_focus["had"]:
+                _p_pass_focus["had"] = True
+                try:
+                    self.entry_p_pass.after(1, lambda: self.entry_p_pass.select_range(0, tk.END) if self.entry_p_pass.winfo_exists() else None)
+                except Exception:
+                    pass
+        def _on_p_pass_focus_out(_e):
+            _p_pass_focus["had"] = False
+        self.entry_p_pass.bind("<FocusIn>", _on_p_pass_focus_in, add="+")
+        self.entry_p_pass.bind("<FocusOut>", _on_p_pass_focus_out, add="+")
         self.make_context_menu(self.entry_p_id)
-        self.make_context_menu(self.entry_p_pass)
+        self.make_context_menu(self.entry_p_pass, replace_on_paste=True)
         
         # BOTTOM STATUS BAR
         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)

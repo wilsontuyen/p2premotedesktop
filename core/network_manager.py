@@ -880,34 +880,67 @@ class NetworkMixin:
             "probe_cancel_event": threading.Event(),
         }
 
+        def _find_exact_saved_comp(comp_name, cand_hwid, cand_saved_id=None, comps_list=None):
+            """Chỉ đối chiếu CHÍNH XÁC 100% theo ID 12 số hoặc tên máy (tuyệt đối không khớp mờ theo từ đơn làm lệch mật khẩu sang máy khác)."""
+            saved = comps_list if comps_list is not None else (self.load_saved_computers() if hasattr(self, "load_saved_computers") else [])
+            if not saved:
+                return None
+            id_cands = ["".join(ch for ch in str(x or "") if ch.isdigit()) for x in (cand_hwid, cand_saved_id) if x]
+            id_cands = [x for x in id_cands if len(x) == 12]
+            for cid in id_cands:
+                for c in reversed(saved):
+                    c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                    if c_digits == cid and c.get("password"):
+                        return c
+                for c in reversed(saved):
+                    c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                    if c_digits == cid:
+                        return c
+            cn = str(comp_name or "").strip().lower()
+            if cn and cn not in ("unknown", "không rõ", "localhost") and not re.match(r"^(unknown|pc)-\d+$", cn):
+                for c in reversed(saved):
+                    c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                    if id_cands and len(c_digits) == 12 and c_digits not in id_cands:
+                        continue
+                    if str(c.get("name") or "").strip().lower() == cn and c.get("password"):
+                        return c
+                for c in reversed(saved):
+                    c_digits = "".join(ch for ch in str(c.get("id") or "") if ch.isdigit())
+                    if id_cands and len(c_digits) == 12 and c_digits not in id_cands:
+                        continue
+                    if str(c.get("name") or "").strip().lower() == cn:
+                        return c
+            return None
+
         def _persist_peer_password(target_hwid, peer_info, new_pw, new_mac=None):
-            """Lưu mật khẩu và MAC đồng bộ vào cả saved_computers.xml và lan_peers.json."""
+            """Lưu mật khẩu và MAC đồng bộ vào cả saved_computers.xml (CHỈ khi khớp chính xác 100%) và lan_peers.json."""
             comp_name = str(peer_info.get("computer_name") or "").strip()
-            # Ưu tiên HWID thực tế 12 số của peer
+            comp_name_lower = comp_name.lower()
             p_hw = ''.join(ch for ch in str(peer_info.get("hwid") or target_hwid or "") if ch.isdigit())
             p_sid = ''.join(ch for ch in str(peer_info.get("saved_id") or "") if ch.isdigit())
+            is_ver_hwid = bool(peer_info.get("hwid_verified")) and len(p_hw) == 12
             canonical_id = p_hw if len(p_hw) == 12 else (p_sid if len(p_sid) == 12 else (p_hw or p_sid or target_hwid))
 
-            # 1. Cập nhật saved_computers.xml (cập nhật tất cả các bản ghi trùng ID hoặc tên để không sót mật khẩu cũ)
+            # 1. Cập nhật saved_computers.xml (CHỈ cập nhật bản ghi trùng CHÍNH XÁC ID 12 số hoặc trùng CHÍNH XÁC tên máy khi không mâu thuẫn ID)
             comps = self.load_saved_computers()
-            matched_existing = match_saved_computer(comp_name, canonical_id, canonical_id)
-            matched_existing_id = ''.join(ch for ch in str(matched_existing.get('id', '')) if ch.isdigit()) if matched_existing else ''
-            matched_existing_name = str(matched_existing.get('name', '')).strip().lower() if matched_existing else ''
-
-            id_targets = {x for x in (canonical_id, matched_existing_id) if x}
-            name_targets = {x for x in (comp_name.lower(), matched_existing_name) if x and x not in ('unknown', 'không rõ')}
-
+            exact_id_targets = {x for x in (p_hw, p_sid) if len(x) == 12}
             fmt_saved_id = f"{canonical_id[:3]} {canonical_id[3:6]} {canonical_id[6:9]} {canonical_id[9:]}" if len(canonical_id) == 12 else canonical_id
             updated_any = False
             for idx, c in enumerate(comps):
                 c_id_clean = ''.join(ch for ch in str(c.get('id', '')) if ch.isdigit())
                 c_name_lower = str(c.get('name', '')).strip().lower()
-                if (c_id_clean and c_id_clean in id_targets) or (c_name_lower and c_name_lower in name_targets):
+                id_exact = bool(c_id_clean and c_id_clean in exact_id_targets)
+                name_exact = (
+                    bool(comp_name_lower and comp_name_lower not in ('unknown', 'không rõ', 'localhost'))
+                    and c_name_lower == comp_name_lower
+                    and not (len(c_id_clean) == 12 and is_ver_hwid and c_id_clean != p_hw)
+                )
+                if id_exact or name_exact:
                     comps[idx]["password"] = new_pw
                     if new_mac is not None:
                         comps[idx]["mac"] = new_mac
-                    # Cập nhật ID chuẩn nếu bản ghi cũ bị sai hoặc thiếu
-                    if len(canonical_id) == 12:
+                    # CHỈ cập nhật lại ID khi peer có HWID 12 số ĐÃ XÁC THỰC và bản ghi cũ bị thiếu/sai định dạng
+                    if is_ver_hwid and len(c_id_clean) != 12:
                         comps[idx]["id"] = fmt_saved_id
                     # Xóa nhóm tự động từ LAN/VPN nếu bản ghi cũ đã vô tình lưu
                     c_grp = comps[idx].get("group", "").strip()
@@ -963,9 +996,10 @@ class NetworkMixin:
             # Lưu lại hàm gọi để có thể mở lại khi sai mật khẩu
             self._last_lan_connect_fn = lambda fp=True: connect_to_peer(hwid, peer_info, force_prompt=fp)
 
-            # 1. Tìm đối chiếu máy tính trong saved_computers (chỉ khớp chính xác HWID, saved_id hoặc tên)
-            existing_comp = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
-            saved_pw = (existing_comp.get("password", "") if existing_comp else "") or _peer_lan_password(peer_info)
+            # 1. Tìm đối chiếu máy tính trong saved_computers (CHỈ khớp chính xác HWID 12 số hoặc tên máy; ưu tiên mật khẩu LAN mới nhất nếu đã nhập riêng)
+            existing_comp = _find_exact_saved_comp(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
+            lan_explicit_pw = _peer_lan_password(peer_info)
+            saved_pw = lan_explicit_pw or (existing_comp.get("password", "") if existing_comp else "")
             saved_id = (existing_comp.get("id", "") if existing_comp else "") or peer_info.get("saved_id") or hwid
 
             # Đồng bộ lại thông tin vào peer_info (mã hóa MD5 mật khẩu, không xóa hash cũ nếu chưa khớp)
@@ -978,9 +1012,13 @@ class NetworkMixin:
 
             # Điền ID và Mật khẩu lên cửa sổ chính để người dùng thấy rõ
             if hasattr(self, 'partner_id_var'):
+                self._last_autofill_partner_id = clean_id[:12]
                 self.partner_id_var.set(fmt_id)
             if saved_pw and hasattr(self, 'partner_pass_var'):
-                self.partner_pass_var.set(saved_pw)
+                if hasattr(self, '_set_autofill_partner_pass'):
+                    self._set_autofill_partner_pass(saved_pw)
+                else:
+                    self.partner_pass_var.set(saved_pw)
 
             # Nếu đã lưu và có mật khẩu và không ép nhập lại, kết nối luôn không cần hỏi lại
             if saved_pw and not force_prompt:
@@ -1022,6 +1060,8 @@ class NetworkMixin:
             pass_var = tk.StringVar(value=saved_pw)
             pass_entry = tk.Entry(pass_dialog, textvariable=pass_var, font=("Segoe UI", 13), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, show="*", relief=tk.FLAT, bd=4)
             pass_entry.pack(padx=30, fill=tk.X, pady=(3, 5))
+            if hasattr(self, "make_context_menu"):
+                self.make_context_menu(pass_entry, replace_on_paste=True)
             
             save_var = tk.BooleanVar(value=True)
             save_cb = tk.Checkbutton(pass_dialog, text=_("Lưu mật khẩu máy tính này"), variable=save_var, font=("Segoe UI", 9), fg=self.text_gray, bg=self.bg_color, selectcolor=self.bg_color, activebackground=self.bg_color, activeforeground=self.text_gray, cursor="hand2")
@@ -1060,8 +1100,8 @@ class NetworkMixin:
 
         def open_change_lan_password_dialog(hwid, peer_info):
             """Hộp thoại thay đổi mật khẩu và địa chỉ MAC cho máy trong danh sách LAN & VPN."""
-            existing = match_saved_computer(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
-            current_pw = (existing.get("password", "") if existing else "") or _peer_lan_password(peer_info)
+            existing = _find_exact_saved_comp(peer_info.get("computer_name"), hwid, peer_info.get("saved_id"))
+            current_pw = _peer_lan_password(peer_info) or (existing.get("password", "") if existing else "")
             current_mac = str(peer_info.get("macs") or (existing.get("mac") if existing else "") or "").strip()
             
             pwd_win = tk.Toplevel(dialog)
@@ -1101,6 +1141,9 @@ class NetworkMixin:
             mac_var = tk.StringVar(value=current_mac)
             entry_mac = tk.Entry(pwd_win, textvariable=mac_var, font=("Segoe UI", 10), fg=self.entry_fg, bg=self.entry_bg, insertbackground=self.text_white, relief=tk.FLAT, bd=3)
             entry_mac.pack(fill=tk.X, padx=30, pady=(3, 2))
+            if hasattr(self, "make_context_menu"):
+                self.make_context_menu(entry_pw, replace_on_paste=True)
+                self.make_context_menu(entry_mac)
 
             lbl_mac_hint = tk.Label(pwd_win, text=_("Ví dụ: 00-11-22-33-44-55 (hoặc dấu hai chấm)"), font=("Segoe UI", 7), fg=self.text_gray, bg=self.bg_color)
             lbl_mac_hint.pack(anchor=tk.W, padx=30, pady=(0, 10))
@@ -1124,9 +1167,14 @@ class NetworkMixin:
 
                 _persist_peer_password(hwid, peer_info, new_pw, new_mac)
 
-                # Cập nhật partner_pass_var nếu ID khớp
-                if hasattr(self, 'partner_pass_var'):
-                    self.partner_pass_var.set(new_pw)
+                # Cập nhật partner_pass_var CHỈ KHI ID đang nhập trên màn hình chính trùng với máy này
+                if hasattr(self, 'partner_pass_var') and hasattr(self, 'partner_id_var'):
+                    cur_main_id = ''.join(ch for ch in self.partner_id_var.get() if ch.isdigit())
+                    if cur_main_id and cur_main_id == clean_h:
+                        if hasattr(self, '_set_autofill_partner_pass'):
+                            self._set_autofill_partner_pass(new_pw)
+                        else:
+                            self.partner_pass_var.set(new_pw)
 
                 pwd_win.destroy()
                 refresh_list()
@@ -1883,10 +1931,10 @@ class NetworkMixin:
                 # Ưu tiên HWID thực tế 12 số của peer (từ probe_pong hoặc key 12 số)
                 actual_hwid = clean_info_hwid if len(clean_info_hwid) == 12 else (clean_hwid_key if len(clean_hwid_key) == 12 else "")
 
-                # Đối chiếu với danh sách đã lưu (ưu tiên saved_computers.xml ở thư mục app) để lấy mật khẩu
+                # Đối chiếu CHÍNH XÁC với danh sách máy tính chính ở thư mục app (không khớp mờ tên làm lấy nhầm mật khẩu máy khác)
                 from utils.vpn_discovery import _is_exact_saved_match
-                matched = match_saved_computer(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
-                saved_pw = (matched.get("password", "") if matched else "") or _peer_lan_password(info)
+                matched = _find_exact_saved_comp(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
+                saved_pw = _peer_lan_password(info) or (matched.get("password", "") if matched else "")
                 saved_mac = matched.get("mac", "") if matched else ""
                 if saved_mac and not info.get("macs"):
                     info["macs"] = saved_mac
@@ -2261,8 +2309,8 @@ class NetworkMixin:
                 k_lbl = ui_item.get("lbl_key")
                 k_tip = ui_item.get("key_tooltip")
                 if k_lbl and k_lbl.winfo_exists():
-                    matched_c = match_saved_computer(inf.get("computer_name"), inf.get("hwid"), inf.get("saved_id"))
-                    sp = (matched_c.get("password", "") if matched_c else "") or _peer_lan_password(inf) or inf.get("saved_password", "")
+                    matched_c = _find_exact_saved_comp(inf.get("computer_name"), inf.get("hwid"), inf.get("saved_id"))
+                    sp = _peer_lan_password(inf) or (matched_c.get("password", "") if matched_c else "") or inf.get("saved_password", "")
                     h_pw = bool(sp)
                     k_lbl.config(
                         bg="#145A32" if h_pw else "#4A5568",
@@ -2847,6 +2895,23 @@ class NetworkMixin:
                 if host_macs:
                     self.sync_received_host_mac(hwid, computer_name, host_macs, peer_info)
 
+                # Nếu mật khẩu này là mật khẩu người dùng đã chủ động bấm Lưu ở LAN/VPN (lan_password_enc)
+                # và vừa xác thực thành công với máy có HWID 12 số chuẩn -> đồng bộ sang bản ghi trùng đúng ID trong saved_computers.xml
+                try:
+                    explicit_lan_pw = _peer_lan_password(peer_info)
+                    ver_id = ''.join(ch for ch in str(peer_info.get("hwid") or hwid or "") if ch.isdigit()) if peer_info.get("hwid_verified") else ""
+                    if explicit_lan_pw and password == explicit_lan_pw and len(ver_id) == 12 and hasattr(self, "load_saved_computers") and hasattr(self, "save_saved_computers"):
+                        comps = self.load_saved_computers()
+                        pw_synced = False
+                        for c in comps:
+                            if ''.join(ch for ch in str(c.get("id") or "") if ch.isdigit()) == ver_id and c.get("password") != password:
+                                c["password"] = password
+                                pw_synced = True
+                        if pw_synced:
+                            self.save_saved_computers(comps)
+                except Exception as sync_pw_err:
+                    print(f"[LAN Direct] Warning syncing verified saved password: {sync_pw_err}")
+
                 if is_android:
                     client_android_speed_test(sock, password, self.update_status)
                 self.update_status(_("Kết nối LAN thành công! Đang khởi động màn hình..."))
@@ -3244,10 +3309,20 @@ class NetworkMixin:
         if not partner_pass and hasattr(self, 'load_saved_computers'):
             try:
                 saved = self.load_saved_computers()
-                matched = next((c for c in saved if "".join(ch for ch in c.get('id', '') if ch.isdigit()) == partner_id or c.get('id', '').replace(' ', '') == partner_id), None)
+                matched = next(
+                    (
+                        c for c in reversed(saved)
+                        if ("".join(ch for ch in c.get('id', '') if ch.isdigit()) == partner_id or c.get('id', '').replace(' ', '') == partner_id)
+                        and c.get('password')
+                    ),
+                    None,
+                )
                 if matched and matched.get('password'):
                     partner_pass = matched['password']
-                    self.partner_pass_var.set(partner_pass)
+                    if hasattr(self, '_set_autofill_partner_pass'):
+                        self._set_autofill_partner_pass(partner_pass)
+                    else:
+                        self.partner_pass_var.set(partner_pass)
             except Exception:
                 pass
 
