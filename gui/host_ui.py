@@ -1,7 +1,7 @@
 import tkinter as tk
 import sys
 from core.i18n import _, get_available_languages, get_language_name
-from gui.components import ToolTip
+from gui.components import ToolTip, bind_flat_button_keyboard, setup_panel_keyboard_nav
 
 
 def E(text):
@@ -63,6 +63,11 @@ def setup_host_ui(self):
                 lbl_text.config(bg=active_bg)
 
             def on_leave(e):
+                try:
+                    if self.focus_get() is frame:
+                        return
+                except Exception:
+                    pass
                 frame.config(bg=bg)
                 inner.config(bg=bg)
                 lbl_icon.config(bg=bg)
@@ -73,13 +78,23 @@ def setup_host_ui(self):
                 w.bind("<Leave>", on_leave)
                 if cmd:
                     w.bind("<Button-1>", lambda e: cmd())
+            bind_flat_button_keyboard(frame, (frame, inner, lbl_icon, lbl_text), bg, active_bg, cmd, parent_bg=parent["bg"])
             return frame
 
+        orig_bg = kwargs.get("bg")
         lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
         lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
-        lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get("bg"): l.config(bg=c))
+        def _lbl_leave(e, l=lbl, c=orig_bg):
+            try:
+                if self.focus_get() is l:
+                    return
+            except Exception:
+                pass
+            l.config(bg=c)
+        lbl.bind("<Leave>", _lbl_leave)
         if cmd:
             lbl.bind("<Button-1>", lambda e, c=cmd: c())
+        bind_flat_button_keyboard(lbl, (lbl,), orig_bg, active_bg, cmd, parent_bg=parent["bg"])
         return lbl
 
     menubar = tk.Menu(self)
@@ -287,6 +302,12 @@ def setup_host_ui(self):
         anchor=tk.W,
     )
     startup_chk.pack(fill=tk.X, anchor=tk.W, padx=16, pady=(0, 8))
+
+    setup_panel_keyboard_nav(
+        self,
+        [copy_all_btn, fixed_btn, startup_chk, copy_id_btn, refresh_btn, copy_pass_btn],
+        default_focus=copy_all_btn,
+    )
 
     # Stubs only — real Tk Entry/Button steal OLE clipboard and break remote paste.
     class _HostUiStub:

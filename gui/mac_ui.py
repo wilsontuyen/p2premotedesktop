@@ -1,7 +1,7 @@
 import tkinter as tk
 import sys
 from core.i18n import _, get_available_languages, get_language_name
-from gui.components import ToolTip
+from gui.components import ToolTip, bind_flat_button_keyboard, setup_panel_keyboard_nav
 
 def E(text):
     if sys.platform == "darwin":
@@ -66,6 +66,11 @@ def setup_mac_ui(self):
                     lbl_icon.config(bg=active_bg)
                     lbl_text.config(bg=active_bg)
                 def on_leave(e):
+                    try:
+                        if self.focus_get() is frame:
+                            return
+                    except Exception:
+                        pass
                     frame.config(bg=bg)
                     inner.config(bg=bg)
                     lbl_icon.config(bg=bg)
@@ -85,14 +90,23 @@ def setup_mac_ui(self):
                     inner.bind("<Button-1>", lambda e: cmd())
                     lbl_icon.bind("<Button-1>", lambda e: cmd())
                     lbl_text.bind("<Button-1>", lambda e: cmd())
-                    
+                bind_flat_button_keyboard(frame, (frame, inner, lbl_icon, lbl_text), bg, active_bg, cmd, parent_bg=parent["bg"])
                 return frame
 
+            orig_bg = kwargs.get('bg')
             lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
-            lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+            def _lbl_leave(e, l=lbl, c=orig_bg):
+                try:
+                    if self.focus_get() is l:
+                        return
+                except Exception:
+                    pass
+                l.config(bg=c)
+            lbl.bind("<Leave>", _lbl_leave)
             if cmd:
                 lbl.bind("<Button-1>", lambda e, c=cmd: c())
+            bind_flat_button_keyboard(lbl, (lbl,), orig_bg, active_bg, cmd, parent_bg=parent["bg"])
             return lbl
 
         # Setup Window Menu Bar
@@ -343,6 +357,22 @@ def setup_mac_ui(self):
         self.entry_p_pass.bind("<FocusOut>", _on_p_pass_focus_out, add="+")
         self.make_context_menu(self.entry_p_id)
         self.make_context_menu(self.entry_p_pass, replace_on_paste=True)
+        setup_panel_keyboard_nav(
+            self,
+            [
+                self.entry_p_id,
+                self.entry_p_pass,
+                self.connect_btn,
+                self.add_partner_btn,
+                lan_btn,
+                copy_id_btn,
+                refresh_btn,
+                copy_pass_btn,
+                copy_all_btn,
+                saved_list_btn,
+            ],
+            default_focus=self.entry_p_id,
+        )
         
         # BOTTOM STATUS BAR
         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)

@@ -62,6 +62,15 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     btn_cancel.bind("<Return>", _cancel)
     btn_cancel.bind("<KP_Enter>", _cancel)
     btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
+
+    ask_nav = [entry, btn_ok, btn_cancel]
+    for idx_w, w_item in enumerate(ask_nav):
+        w_item.bind("<Down>", lambda e, i=idx_w: (ask_nav[(i + 1) % len(ask_nav)].focus_set(), "break")[1])
+        w_item.bind("<Up>", lambda e, i=idx_w: (ask_nav[(i - 1) % len(ask_nav)].focus_set(), "break")[1])
+    btn_ok.bind("<Right>", lambda e: (btn_cancel.focus_set(), "break")[1])
+    btn_ok.bind("<Left>", lambda e: (btn_cancel.focus_set(), "break")[1])
+    btn_cancel.bind("<Right>", lambda e: (btn_ok.focus_set(), "break")[1])
+    btn_cancel.bind("<Left>", lambda e: (btn_ok.focus_set(), "break")[1])
     
     dlg.grab_set()
     parent.update_idletasks()
@@ -125,6 +134,9 @@ def inline_messagebox(parent, title, message, m_type="info"):
         btn_no.bind("<Return>", _no)
         btn_no.bind("<KP_Enter>", _no)
         btn_no.pack(side=tk.RIGHT, padx=(5, 50))
+        for b_cur, b_other in ((btn_yes, btn_no), (btn_no, btn_yes)):
+            for k_seq in ("<Left>", "<Right>", "<Up>", "<Down>"):
+                b_cur.bind(k_seq, lambda e, t=b_other: (t.focus_set(), "break")[1])
         btn_yes.focus_force()
     else:
         btn_ok = ttk.Button(btn_frame, text=_("Đóng"), command=_yes, width=12, default="active")
@@ -352,16 +364,26 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 add_row(_("Sửa đổi:"), modified_time)
 
             # Close button
-            def _close_props():
+            def _close_props(e=None):
                 try: dlg.grab_release()
                 except: pass
                 dlg.destroy()
+                return "break"
             
             btn_frame = tk.Frame(dlg, bg="#F0F0F0")
             btn_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
-            ttk.Button(btn_frame, text=_("Đóng"), command=_close_props, width=12).pack(side=tk.RIGHT)
+            btn_close_props = ttk.Button(btn_frame, text=_("Đóng"), command=_close_props, width=12)
+            btn_close_props.pack(side=tk.RIGHT)
+            btn_close_props.bind("<Return>", _close_props)
+            btn_close_props.bind("<KP_Enter>", _close_props)
+            btn_close_props.bind("<Escape>", _close_props)
+            dlg.bind("<Return>", _close_props)
+            dlg.bind("<KP_Enter>", _close_props)
+            dlg.bind("<Escape>", _close_props)
 
-            try: dlg.grab_set()
+            try:
+                dlg.grab_set()
+                btn_close_props.focus_force()
             except: pass
             
             return dlg, size_label
@@ -437,6 +459,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         tk.Button(local_nav, text=_("⬆ Lên"), command=go_up_local).pack(side=tk.LEFT)
         local_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        local_entry.bind("<Return>", lambda e: (refresh_local(), "break")[1])
+        local_entry.bind("<KP_Enter>", lambda e: (refresh_local(), "break")[1])
         tk.Button(local_nav, text=_("Đi"), command=refresh_local).pack(side=tk.LEFT)
 
         local_tree_frame = tk.Frame(left_frame, bd=1, relief=tk.SUNKEN)
@@ -479,6 +503,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             go_up_local()
             return "break"
         local_tree.bind("<Double-1>", local_double_click)
+        local_tree.bind("<Return>", lambda e: (local_double_click(e), "break")[1])
+        local_tree.bind("<KP_Enter>", lambda e: (local_double_click(e), "break")[1])
+        local_tree.bind("<Delete>", lambda e: (local_action("delete"), "break")[1])
         local_tree.bind("<BackSpace>", _handle_bs_local)
 
         local_menu = tk.Menu(top, tearoff=0)
@@ -680,7 +707,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                             except Exception as e:
                                                 messagebox.showerror(_("Lỗi"), _("Không thể lưu: {e}").format(e=e), parent=win)
                                         return save_file
-                                    tk.Button(np_win, text=_("Lưu"), command=make_save(full_path, text_area, np_win), bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                                    _save_local_fn = make_save(full_path, text_area, np_win)
+                                    tk.Button(np_win, text=_("Lưu"), command=_save_local_fn, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                                    np_win.bind("<Escape>", lambda e, w=np_win: (w.destroy(), "break")[1])
+                                    np_win.bind("<Control-s>", lambda e, fn=_save_local_fn: (fn(), "break")[1])
+                                    np_win.bind("<Control-S>", lambda e, fn=_save_local_fn: (fn(), "break")[1])
+                                    text_area.focus_set()
                                     print(f"{ts} [Local] Window created successfully.")
                                 except Exception as ex:
                                     import traceback
@@ -885,6 +917,10 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         send_event(req)
                         messagebox.showinfo(_("Thông báo"), _("Đã gửi yêu cầu lưu tệp tới thiết bị điều khiển."), parent=np_win)
                     tk.Button(np_win, text=_("Lưu"), command=save_remote_file, bg="green", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
+                    np_win.bind("<Escape>", lambda e, w=np_win: (w.destroy(), "break")[1])
+                    np_win.bind("<Control-s>", lambda e: (save_remote_file(), "break")[1])
+                    np_win.bind("<Control-S>", lambda e: (save_remote_file(), "break")[1])
+                    text_area.focus_set()
                 else:
                     messagebox.showerror(_("Lỗi"), event.get("error", _("Không thể đọc tệp")), parent=top)
             elif evt_type == "write_text_file_result":
@@ -962,6 +998,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         tk.Button(remote_nav, text=_("⬆ Lên"), command=go_up_remote).pack(side=tk.LEFT)
         remote_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        remote_entry.bind("<Return>", lambda e: (request_remote_dir(remote_entry.get()), "break")[1])
+        remote_entry.bind("<KP_Enter>", lambda e: (request_remote_dir(remote_entry.get()), "break")[1])
         tk.Button(remote_nav, text=_("Đi"), command=lambda: request_remote_dir(remote_entry.get())).pack(side=tk.LEFT)
 
         remote_tree_frame = tk.Frame(right_frame, bd=1, relief=tk.SUNKEN)
@@ -999,6 +1037,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             go_up_remote()
             return "break"
         remote_tree.bind("<Double-1>", remote_double_click)
+        remote_tree.bind("<Return>", lambda e: (remote_double_click(e), "break")[1])
+        remote_tree.bind("<KP_Enter>", lambda e: (remote_double_click(e), "break")[1])
+        remote_tree.bind("<Delete>", lambda e: (remote_action("delete"), "break")[1])
         remote_tree.bind("<BackSpace>", _handle_bs_remote)
 
         remote_menu = tk.Menu(top, tearoff=0)
@@ -1178,7 +1219,16 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             tree.see(items[new_idx])
             return "break"
 
+        def _ensure_tree_sel(event, tr):
+            if not tr.selection():
+                kids = tr.get_children()
+                if kids:
+                    tr.selection_set(kids[0])
+                    tr.focus(kids[0])
+                    tr.see(kids[0])
+
         for t in (local_tree, remote_tree):
+            t.bind("<FocusIn>", lambda e, tr=t: _ensure_tree_sel(e, tr), add="+")
             t.bind("<Home>", lambda e, tr=t: tree_go_home(e, tr))
             t.bind("<End>", lambda e, tr=t: tree_go_end(e, tr))
             t.bind("<Prior>", lambda e, tr=t: tree_page_up(e, tr))
@@ -1307,6 +1357,18 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
                 btn_ow_all = tk.Button(btn_frame, text=_("Ghi đè toàn bộ"), font=("Segoe UI", 10, "bold"), bg="#e0e0e0", fg="black", width=15, relief="raised", borderwidth=2, command=lambda: make_decision("overwrite_all"))
                 btn_ow_all.pack(side="right", padx=10)
+
+                cf_btns = [btn_ow_all, btn_ow, btn_skip, btn_cancel]
+                for idx_b, b_cf in enumerate(cf_btns):
+                    b_cf.bind("<Return>", lambda e, bt=b_cf: (bt.invoke(), "break")[1])
+                    b_cf.bind("<KP_Enter>", lambda e, bt=b_cf: (bt.invoke(), "break")[1])
+                    b_cf.bind("<Escape>", lambda e: (make_decision("cancel"), "break")[1])
+                    for k_next in ("<Right>", "<Down>"):
+                        b_cf.bind(k_next, lambda e, i=idx_b: (cf_btns[(i + 1) % len(cf_btns)].focus_set(), "break")[1])
+                    for k_prev in ("<Left>", "<Up>"):
+                        b_cf.bind(k_prev, lambda e, i=idx_b: (cf_btns[(i - 1) % len(cf_btns)].focus_set(), "break")[1])
+                dlg.bind("<Escape>", lambda e: (make_decision("cancel"), "break")[1])
+                btn_ow.focus_force()
 
                 parent.wait_window(dlg)
                 if decision[0] == "cancel": return None
@@ -1703,11 +1765,16 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         btn_upload.config(command=do_upload)
         btn_download.config(command=do_download)
 
-        def on_close():
-            try: top.withdraw()
+        def on_close(e=None):
+            try:
+                if top.grab_current() not in (None, top):
+                    return None
+                top.withdraw()
             except: pass
+            return "break"
 
         top.protocol("WM_DELETE_WINDOW", on_close)
+        top.bind("<Escape>", on_close)
 
         # init
         refresh_local()

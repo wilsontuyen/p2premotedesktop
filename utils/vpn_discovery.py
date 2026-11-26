@@ -750,6 +750,13 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     real_v1 = _is_real_verified_name(p1)
     real_v2 = _is_real_verified_name(p2)
 
+    # Bảo vệ 1b: Một bên đã xác thực cả HWID 12 số lẫn tên máy thực, còn bên kia hoàn toàn chưa xác thực
+    # (VD: máy bản cũ trả lỗi trả về Unknown-204 trên IP VPN động) -> TUYỆT ĐỐI không coi là cùng máy
+    if (p1.get("hwid_verified") and real_v1 and not p2.get("hwid_verified") and not real_v2) or (
+        p2.get("hwid_verified") and real_v2 and not p1.get("hwid_verified") and not real_v1
+    ):
+        return False
+
     # 1. Trùng HWID chính xác (khi cả 2 không mâu thuẫn tên đã xác thực)
     id_set_1 = {''.join(ch for ch in str(x) if ch.isdigit()) for x in (hwid1, p1.get("hwid")) if x}
     id_set_1.discard('')
@@ -794,29 +801,128 @@ def are_same_machine(hwid1, p1, hwid2, p2):
     return False
 
 
+def _clean_peer_ip_list(raw_ips):
+    """Chuẩn hóa danh sách IP của peer, loại bỏ loopback, APIPA (169.254.x.x) và VirtualBox Host-Only mặc định."""
+    out = []
+    for item in raw_ips:
+        for part in str(item or "").split(","):
+            ip = part.strip()
+            if not ip or ip.startswith("127.") or ip.startswith("169.254.") or ip == "192.168.56.1":
+                continue
+            if ip not in out:
+                out.append(ip)
+    return out
+
+
+def _clean_peer_mac_list(raw_macs):
+    """Chuẩn hóa danh sách MAC hợp lệ dạng XX-XX-XX-XX-XX-XX, loại bỏ chuỗi số thập phân fallback."""
+    out = []
+    for item in raw_macs:
+        for part in str(item or "").split(","):
+            p = part.strip()
+            if not p:
+                continue
+            hex_only = re.sub(r"[^0-9A-Fa-f]", "", p).upper()
+            if len(hex_only) == 12 and not all(c == "0" for c in hex_only) and not all(c == "F" for c in hex_only):
+                fmt = "-".join(hex_only[i:i + 2] for i in range(0, 12, 2))
+                if fmt not in out:
+                    out.append(fmt)
+    return out
+
+
+def release_ip_from_other_peers(peers_dict, owner_hwid, owner_peer, claimed_ip):
+    """
+    Khi một máy tính đã xác thực (hwid_verified) được khẳng định trực tiếp đang giữ `claimed_ip`,
+    gỡ bỏ `claimed_ip` khỏi danh sách IP phụ cũ của các máy KHÁC (do VPN RRAS / DHCP cấp phát lại IP),
+    nhưng TUYỆT ĐỐI không xóa bất kỳ bản ghi máy tính nào khỏi `peers_dict`.
+    Trả về True nếu có ít nhất 1 bản ghi khác được làm sạch IP cũ.
+    """
+    ip_clean = str(claimed_ip or "").strip()
+    if not ip_clean or ip_clean.startswith("127.") or ip_clean.startswith("169.254.") or not isinstance(peers_dict, dict):
+        return False
+    if not (owner_peer or {}).get("hwid_verified"):
+        return False
+
+    changed = False
+    for k, v in peers_dict.items():
+        if not isinstance(v, dict):
+            continue
+        if k == owner_hwid or are_same_machine(k, v, owner_hwid, owner_peer):
+            continue
+        v_ips = _clean_peer_ip_list([v.get("source_ip", ""), v.get("local_ip", "")])
+        if ip_clean not in v_ips:
+            continue
+        remaining = [x for x in v_ips if x != ip_clean]
+        if remaining:
+            v["local_ip"] = ",".join(remaining)
+            if str(v.get("source_ip") or "").strip() == ip_clean:
+                v["source_ip"] = remaining[0]
+            v["_ips_pruned_exact"] = True
+            changed = True
+    return changed
+
+
 def merge_peers(p_winner, p_loser):
     """
     Gộp thông tin của 2 bản ghi cùng máy tính:
     - p_winner là bản ghi ưu tiên (ví dụ: bản ghi vừa probe online thành công hoặc có last_seen mới hơn).
     - p_loser là bản ghi cũ cần gộp vào.
-    - Giữ lại các IP cũ bổ sung vào local_ip (không xóa IP nào, đặt IP mới lên đầu).
-    - Giữ lại MAC, mật khẩu đã lưu (saved_password), saved_id, tên verified từ bản ghi cũ nếu winner bị thiếu.
+    - Nếu p_winner là dữ liệu trực tiếp đã xác thực từ probe_pong / UDP beacon (_live_authoritative=True),
+      loại bỏ các IP động VPN/DHCP cũ không còn hiệu lực thay vì cộng dồn cả dải pool VPN qua nhiều ngày.
+    - Giữ lại mật khẩu đã lưu (saved_password, lan_password_enc), saved_id, tên verified từ bản ghi cũ nếu winner bị thiếu.
     """
     res = dict(p_winner)
+    winner_auth = bool(p_winner.get("_live_authoritative"))
+    loser_auth = bool(p_loser.get("_live_authoritative"))
+    winner_pruned = bool(p_winner.get("_ips_pruned_exact"))
 
-    # 1. Gộp local_ip (IP mới nhất của winner đứng trước, sau đó là các IP khác)
-    winner_ips = [x.strip() for x in (str(p_winner.get("local_ip", "")) + "," + str(p_winner.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
-    loser_ips = [x.strip() for x in (str(p_loser.get("local_ip", "")) + "," + str(p_loser.get("source_ip", ""))).split(",") if x.strip() and not x.strip().startswith("127.")]
-    merged_ips = list(dict.fromkeys(winner_ips + loser_ips))
+    # 1. Gộp local_ip (ưu tiên source_ip thực tế đứng đầu, tránh giữ lại IP VPN động cũ đã cấp cho máy khác)
+    winner_ips = _clean_peer_ip_list([p_winner.get("source_ip", ""), p_winner.get("local_ip", "")])
+    loser_ips = _clean_peer_ip_list([p_loser.get("source_ip", ""), p_loser.get("local_ip", "")])
+
+    if winner_auth and winner_ips:
+        winner_prefixes = {ip.rsplit(".", 1)[0] for ip in winner_ips if ip.count(".") == 3}
+        merged_ips = list(winner_ips)
+        if not winner_pruned:
+            # Chỉ giữ thêm tối đa 1 IP thuộc mạng LAN vật lý cục bộ (nếu máy đang kết nối qua VPN từ nơi khác)
+            for lip in loser_ips:
+                pfx = lip.rsplit(".", 1)[0] if lip.count(".") == 3 else ""
+                if lip not in merged_ips and is_in_physical_lan_subnet(lip) and pfx not in winner_prefixes:
+                    merged_ips.append(lip)
+                    winner_prefixes.add(pfx)
+                    break
+    elif winner_pruned and winner_ips:
+        merged_ips = list(winner_ips)
+    elif loser_auth and loser_ips:
+        loser_prefixes = {ip.rsplit(".", 1)[0] for ip in loser_ips if ip.count(".") == 3}
+        merged_ips = list(dict.fromkeys(
+            [ip for ip in winner_ips if (ip.rsplit(".", 1)[0] if ip.count(".") == 3 else "") not in loser_prefixes or ip in loser_ips]
+            + loser_ips
+        ))
+    else:
+        merged_ips = list(dict.fromkeys(winner_ips + loser_ips))
+
     if merged_ips:
         res["local_ip"] = ",".join(merged_ips)
+        if str(res.get("source_ip") or "").strip() not in merged_ips:
+            res["source_ip"] = merged_ips[0]
 
-    # 2. Gộp MAC
-    w_macs = [x.strip() for x in str(p_winner.get("macs", "")).split(",") if x.strip()]
-    l_macs = [x.strip() for x in str(p_loser.get("macs", "")).split(",") if x.strip()]
-    merged_macs = list(dict.fromkeys(w_macs + l_macs))
+    # 2. Gộp MAC (khi winner có MAC trực tiếp từ probe_pong/beacon đã xác thực thì không nối thêm MAC ngoại lai cũ)
+    w_macs = _clean_peer_mac_list([p_winner.get("macs", "")])
+    l_macs = _clean_peer_mac_list([p_loser.get("macs", "")])
+    if winner_auth and w_macs:
+        merged_macs = w_macs
+    elif loser_auth and l_macs and not w_macs:
+        merged_macs = l_macs
+    else:
+        merged_macs = list(dict.fromkeys(w_macs + l_macs))
     if merged_macs:
         res["macs"] = ",".join(merged_macs)
+
+    if winner_auth or loser_auth:
+        res["_live_authoritative"] = True
+    if winner_pruned:
+        res["_ips_pruned_exact"] = True
 
     # 3. Tên máy tính (ưu tiên tên đã verified hoặc tên rõ ràng, không generic)
     w_name = str(res.get("computer_name") or "").strip()
@@ -1581,15 +1687,21 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                 if not known_peer:
                     return False
                 kh_c = ''.join(ch for ch in str(known_peer.get("hwid") or "") if ch.isdigit())
-                if len(resp_hwid_clean) == 12 and known_peer.get("hwid_verified") and len(kh_c) == 12 and resp_hwid_clean != kh_c:
-                    return False
                 kn_c = str(known_peer.get("computer_name") or "").strip().lower().split('.')[0].strip()
                 rn_c = str(resp_name or "").strip().lower().split('.')[0].strip()
+                if known_peer.get("hwid_verified") and len(kh_c) == 12:
+                    if len(resp_hwid_clean) == 12:
+                        return resp_hwid_clean == kh_c
+                    # known_peer đã xác thực HWID 12 số mà phản hồi không có HWID -> chỉ khớp nếu tên máy xác thực trùng khớp 100%
+                    if resp_name_ver and rn_c and kn_c and rn_c not in ("unknown", "không rõ") and not re.match(r"^unknown-\d+$", rn_c):
+                        return rn_c == kn_c
+                    return False
                 if (
                     resp_name_ver and rn_c and rn_c not in ("unknown", "không rõ") and not re.match(r"^unknown-\d+$", rn_c)
                     and _is_real_verified_name(known_peer) and kn_c and rn_c != kn_c
-                    and not (len(resp_hwid_clean) == 12 and known_peer.get("hwid_verified") and resp_hwid_clean == kh_c)
                 ):
+                    return False
+                if not _is_real_verified_name(known_peer) and resp_name_ver and rn_c and not re.match(r"^unknown-\d+$", rn_c) and net_label == "VPN":
                     return False
                 return True
 
@@ -1606,8 +1718,8 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
             if data.get("type") == "probe_pong":
                 pong_hwid_raw = str(data.get("hwid") or "").strip()
                 clean_pong_hwid = ''.join(ch for ch in pong_hwid_raw if ch.isdigit())
-                comp_name = data.get("computer_name")
-                is_verified = bool(comp_name)
+                comp_name = str(data.get("computer_name") or "").strip()
+                is_verified = bool(comp_name and comp_name.lower() not in ("unknown", "không rõ") and not re.match(r"^unknown-\d+$", comp_name.lower()))
 
                 # Nếu IP này nay đã được DHCP/VPN cấp cho một máy tính KHÁC với known_peer -> hủy liên kết known_peer ngay để không ghi đè/xóa máy cũ!
                 if known_peer and not _known_matches_peer(clean_pong_hwid, comp_name, is_verified):
@@ -1615,7 +1727,8 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                     known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
                     known_verified = known_has_real_name = False
 
-                nb_mac = data.get("macs", "") or known_mac
+                pong_mac_clean = ",".join(_clean_peer_mac_list([data.get("macs", "")]))
+                nb_mac = pong_mac_clean or known_mac
                 os_name = data.get("os", "") or known_os
                 if not comp_name:
                     if known_has_real_name:
@@ -1661,10 +1774,10 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                         hwid_verified = False
                     saved_pw = matched_comp.get("password", "") if matched_comp else ""
 
-                full_local_ip = data.get("local_ip") or ip
-                # Đảm bảo IP đang thăm dò nằm trong danh sách local_ip
-                if ip not in [x.strip() for x in full_local_ip.split(',')]:
-                    full_local_ip = f"{full_local_ip},{ip}"
+                pong_raw_lip = str(data.get("local_ip") or "").strip()
+                clean_lips = _clean_peer_ip_list([ip, pong_raw_lip])
+                full_local_ip = ",".join(clean_lips) if clean_lips else ip
+                is_live_auth = bool(pong_raw_lip and (len(clean_pong_hwid) == 12 or is_verified))
 
                 final_pw_hash = hash_password_md5(saved_pw) if saved_pw else known_saved_pw
 
@@ -1681,46 +1794,62 @@ def probe_single_host(ip, port=BOUND_PORT, vpn_type_label="VPN", timeout=1.05, r
                     "source_ip": ip,
                     "saved_password": final_pw_hash,
                     "saved_id": saved_id,
-                    "hwid_verified": hwid_verified
+                    "hwid_verified": hwid_verified,
                 }
+                if is_live_auth:
+                    res_dict["_live_authoritative"] = True
                 if known_peer:
                     res_dict = merge_peers(res_dict, known_peer)
                 return (res_dict, "ok") if return_err_reason else res_dict
 
-            # Bản cũ hoặc phản hồi mật khẩu sai (xác nhận 100% đang chạy app)
+            # Bản cũ hoặc phản hồi mật khẩu sai (không gửi probe_pong / không có HWID)
             if data.get("status") == "error":
-                if net_label == "VPN":
-                    if known_has_real_name:
-                        comp_name = known_name
-                        nb_mac = known_mac
-                        os_name = known_os
-                        is_verified = known_verified or True
-                    else:
-                        comp_name = f"Unknown-{ip.split('.')[-1]}"
-                        nb_mac = known_mac
-                        os_name = known_os
-                        is_verified = False
-                else:
-                    r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
-                    if known_peer and r_ver and not _known_matches_peer("", r_name, r_ver):
+                r_name, r_mac, r_os, r_ver = resolve_host_info_safe(ip)
+                if not r_mac and net_label != "VPN":
+                    r_mac = get_mac_from_arp(ip)
+
+                # Xác minh nghiêm ngặt trước khi cho phép kế thừa known_peer:
+                # Máy bản cũ trả status="error" KHÔNG có HWID, nên TUYỆT ĐỐI không được mạo danh
+                # một máy đã xác thực (VD: HATHUONG2024 / salesadmin) khi VPN/DHCP cấp lại IP cũ cho máy khác!
+                if known_peer:
+                    legacy_matches_known = False
+                    if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
+                        legacy_matches_known = _known_matches_peer("", r_name, True)
+                    elif net_label != "VPN" and not known_peer.get("hwid_verified") and r_mac:
+                        r_hex = re.sub(r"[^A-Fa-f0-9]", "", r_mac).upper()
+                        k_hex_list = [
+                            re.sub(r"[^A-Fa-f0-9]", "", m).upper()
+                            for m in str(known_mac).split(",")
+                            if _is_valid_unique_physical_mac(re.sub(r"[^A-Fa-f0-9]", "", m).upper())
+                        ]
+                        if _is_valid_unique_physical_mac(r_hex) and r_hex in k_hex_list:
+                            legacy_matches_known = True
+                    elif not known_has_real_name and not known_peer.get("hwid_verified"):
+                        if str(known_peer.get("source_ip") or "").strip() == ip:
+                            legacy_matches_known = True
+
+                    if not legacy_matches_known:
                         known_peer = None
                         known_name = known_mac = known_os = known_hwid = known_saved_pw = known_saved_id = ""
                         known_verified = known_has_real_name = False
 
-                    if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
-                        comp_name = r_name
-                        nb_mac = r_mac or known_mac
-                        os_name = r_os or known_os
-                        is_verified = True
-                    elif known_has_real_name:
-                        comp_name = known_name
-                        nb_mac = known_mac or r_mac
-                        os_name = known_os or r_os
-                        is_verified = known_verified or True
-                    else:
-                        comp_name, nb_mac, os_name, is_verified = r_name, (r_mac or known_mac), (r_os or known_os), r_ver
-                    if not nb_mac:
-                        nb_mac = get_mac_from_arp(ip)
+                if r_ver and r_name and not re.match(r"^unknown-\d+$", r_name.lower()):
+                    comp_name = r_name
+                    nb_mac = r_mac or known_mac
+                    os_name = r_os or known_os
+                    is_verified = True
+                elif known_has_real_name:
+                    comp_name = known_name
+                    nb_mac = known_mac or r_mac
+                    os_name = known_os or r_os
+                    is_verified = known_verified or True
+                elif net_label == "VPN":
+                    comp_name = f"Unknown-{ip.split('.')[-1]}"
+                    nb_mac = known_mac
+                    os_name = known_os
+                    is_verified = False
+                else:
+                    comp_name, nb_mac, os_name, is_verified = r_name, (r_mac or known_mac), (r_os or known_os), r_ver
 
                 # Thử đối chiếu với saved_computers để lấy ID và mật khẩu chuẩn nếu có (chỉ lấy ID khi khớp chính xác)
                 matched_comp = match_saved_computer(comp_name, known_hwid, known_saved_id)
@@ -1949,8 +2078,17 @@ def scan_custom_range(start_ip, end_ip, ports=None, max_workers=75, progress_cal
 
     known_by_ip = {}
     if known_peers and isinstance(known_peers, dict):
-        for p_info in known_peers.values():
-            p_ips = [x.strip() for x in (str(p_info.get("local_ip", "")) + "," + str(p_info.get("source_ip", ""))).split(",") if x.strip()]
+        sorted_kp = sorted(
+            [p for p in known_peers.values() if isinstance(p, dict)],
+            key=lambda p: get_last_seen_epoch(p.get("last_seen", 0)),
+            reverse=True,
+        )
+        for p_info in sorted_kp:
+            src_only = str(p_info.get("source_ip") or "").strip()
+            if src_only and src_only not in known_by_ip:
+                known_by_ip[src_only] = p_info
+        for p_info in sorted_kp:
+            p_ips = [x.strip() for x in str(p_info.get("local_ip", "")).split(",") if x.strip()]
             for p_ip in p_ips:
                 if p_ip not in known_by_ip:
                     known_by_ip[p_ip] = p_info

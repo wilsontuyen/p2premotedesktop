@@ -360,7 +360,7 @@ from network.upnp import attempt_upnp_forward
 from utils.clipboard_api import (ENABLE_CLIPBOARD_SYNC, set_clipboard_dword_format, setup_clipboard_exclusions, 
                                 get_clipboard_files, set_clipboard_files, get_clipboard_text, set_clipboard_text)
 
-from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip, InfoDialog
+from gui.components import PremiumProgressBar, get_file_icon_as_image, ClassicCopyDialog, ProgressDialog, ConfirmDialog, ToolTip, InfoDialog, setup_dialog_keyboard
 from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, run_clipboard_agent_mode, run_clipboard_agent_mode
 
 from core.host import HostMixin, check_desktop_change
@@ -1880,7 +1880,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
                 clean_my_hwid = ''.join(ch for ch in str(my_hwid) if ch.isdigit())
 
                 for k, v in self.lan_peers.items():
-                    v_copy = dict(v)
+                    v_copy = {ck: cv for ck, cv in v.items() if not str(ck).startswith("_")}
                     k_clean = ''.join(ch for ch in str(k) if ch.isdigit())
                     h_clean = ''.join(ch for ch in str(v_copy.get("hwid") or "") if ch.isdigit())
                     canonical_k = k_clean if len(k_clean) == 12 else (h_clean if len(h_clean) == 12 else k)
@@ -2117,6 +2117,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=save_val,
+            on_escape=dialog.destroy,
+            default_focus=entry_val,
+            parent=self,
+            nav_widgets=[entry_val, btn_save, btn_cancel],
+            accent_color=self.btn_color,
+        )
+
 
     def show_server_settings_dialog(self):
         dialog = tk.Toplevel(self)
@@ -2213,6 +2223,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=save_config,
+            on_escape=dialog.destroy,
+            default_focus=entry_hosts,
+            parent=self,
+            nav_widgets=[entry_hosts, entry_port, btn_save, btn_cancel],
+            accent_color=self.btn_color,
+        )
+
 
     def update_fixed_password_indicator(self):
         if hasattr(self, 'fixed_pass_indicator'):
@@ -2299,6 +2319,16 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=save_password,
+            on_escape=dialog.destroy,
+            default_focus=entry_pass,
+            parent=self,
+            nav_widgets=[entry_pass, chk_show, btn_save, btn_cancel],
+            accent_color=self.btn_color,
+        )
 
 
     def _startup_run_key_name(self):
@@ -2474,6 +2504,7 @@ Comment=Remote Desktop P2P AutoStart
             lbl_title = tk.Label(dialog, text=_("CHỌN ĐỐI TÁC ĐỂ LIÊN HỆ ZALO"), font=(APP_FONT_NAME, 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
+            zalo_btns = []
             for v in self.active_viewers:
                 c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
@@ -2492,6 +2523,16 @@ Comment=Remote Desktop P2P AutoStart
                     relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=contact
                 )
                 btn.pack(fill=tk.X, padx=30, pady=4)
+                zalo_btns.append(btn)
+            setup_dialog_keyboard(
+                dialog,
+                on_enter=lambda: zalo_btns[0].invoke() if zalo_btns else dialog.destroy(),
+                on_escape=dialog.destroy,
+                default_focus=zalo_btns[0] if zalo_btns else None,
+                parent=self,
+                nav_widgets=zalo_btns,
+                accent_color=self.btn_color,
+            )
             return
         else:
             phone_val = self.load_zalo_phone_from_xml()
@@ -2535,6 +2576,15 @@ Comment=Remote Desktop P2P AutoStart
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_ok.pack()
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=dialog.destroy,
+            on_escape=dialog.destroy,
+            default_focus=btn_ok,
+            parent=self,
+            nav_widgets=[btn_ok],
+            accent_color=self.btn_color,
+        )
 
 
     def open_phone_dialog(self):
@@ -2567,6 +2617,7 @@ Comment=Remote Desktop P2P AutoStart
             lbl_title = tk.Label(dialog, text=_("CHỌN ĐỐI TÁC XEM ĐIỆN THOẠI"), font=(APP_FONT_NAME, 10, "bold"), fg=self.btn_color, bg=self.bg_color)
             lbl_title.pack(pady=(12, 10))
             
+            phone_btns = []
             for v in self.active_viewers:
                 c_name = v["computer_name"] or _("Không rõ")
                 p_val = v["zalo_phone"]
@@ -2582,6 +2633,16 @@ Comment=Remote Desktop P2P AutoStart
                     relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=show_phone
                 )
                 btn.pack(fill=tk.X, padx=30, pady=4)
+                phone_btns.append(btn)
+            setup_dialog_keyboard(
+                dialog,
+                on_enter=lambda: phone_btns[0].invoke() if phone_btns else dialog.destroy(),
+                on_escape=dialog.destroy,
+                default_focus=phone_btns[0] if phone_btns else None,
+                parent=self,
+                nav_widgets=phone_btns,
+                accent_color=self.btn_color,
+            )
             return
         else:
             phone_val = self.load_zalo_phone_from_xml()
@@ -2623,6 +2684,15 @@ Comment=Remote Desktop P2P AutoStart
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2", command=dialog.destroy
         )
         btn_ok.pack()
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=dialog.destroy,
+            on_escape=dialog.destroy,
+            default_focus=btn_ok,
+            parent=self,
+            nav_widgets=[btn_ok],
+            accent_color=self.btn_color,
+        )
 
 
     def maybe_show_disclaimer(self):
@@ -2716,7 +2786,7 @@ Comment=Remote Desktop P2P AutoStart
                 fg=self.text_gray if hasattr(self, "text_gray") else "#A0A0A0",
                 bg=self.bg_color,
             ).pack(pady=(0, 8))
-            tk.Button(
+            btn_accept = tk.Button(
                 btns,
                 text=_("Tôi đã đọc và đồng ý"),
                 font=(APP_FONT_NAME, 9, "bold"),
@@ -2729,8 +2799,9 @@ Comment=Remote Desktop P2P AutoStart
                 pady=6,
                 cursor="hand2",
                 command=accept,
-            ).pack(side=tk.LEFT, padx=6)
-            tk.Button(
+            )
+            btn_accept.pack(side=tk.LEFT, padx=6)
+            btn_decline = tk.Button(
                 btns,
                 text=_("Không đồng ý — Thoát"),
                 font=(APP_FONT_NAME, 9, "bold"),
@@ -2743,10 +2814,13 @@ Comment=Remote Desktop P2P AutoStart
                 pady=6,
                 cursor="hand2",
                 command=decline,
-            ).pack(side=tk.LEFT, padx=6)
+            )
+            btn_decline.pack(side=tk.LEFT, padx=6)
             dlg.protocol("WM_DELETE_WINDOW", decline)
+            disc_nav = [btn_accept, btn_decline]
+            disc_default = btn_accept
         else:
-            tk.Button(
+            btn_close_disc = tk.Button(
                 btns,
                 text=_("Đóng"),
                 font=(APP_FONT_NAME, 9, "bold"),
@@ -2759,8 +2833,26 @@ Comment=Remote Desktop P2P AutoStart
                 pady=6,
                 cursor="hand2",
                 command=dlg.destroy,
-            ).pack()
+            )
+            btn_close_disc.pack()
             dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+            disc_nav = [btn_close_disc]
+            disc_default = btn_close_disc
+
+        setup_dialog_keyboard(
+            dlg,
+            on_enter=accept if require_accept else dlg.destroy,
+            on_escape=decline if require_accept else dlg.destroy,
+            default_focus=disc_default,
+            parent=self,
+            nav_widgets=disc_nav,
+            accent_color=self.btn_color,
+            enable_up_down=False,
+        )
+        dlg.bind("<Up>", lambda e: (txt.yview_scroll(-2, "units"), "break")[1])
+        dlg.bind("<Down>", lambda e: (txt.yview_scroll(2, "units"), "break")[1])
+        dlg.bind("<Prior>", lambda e: (txt.yview_scroll(-1, "pages"), "break")[1])
+        dlg.bind("<Next>", lambda e: (txt.yview_scroll(1, "pages"), "break")[1])
 
         dlg.update_idletasks()
         dw, dh = 560, 480
@@ -2851,6 +2943,15 @@ Comment=Remote Desktop P2P AutoStart
         
         # Áp dụng hình học hình chữ nhật căn giữa
         about.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
+        setup_dialog_keyboard(
+            about,
+            on_enter=about.destroy,
+            on_escape=about.destroy,
+            default_focus=close_btn,
+            parent=self,
+            nav_widgets=[disc_btn, close_btn],
+            accent_color=self.btn_color,
+        )
         
         # Khóa tương tác của luồng cho đến khi Modal đóng
         self.wait_window(about)
@@ -2918,6 +3019,15 @@ Comment=Remote Desktop P2P AutoStart
                     dialog.destroy()
             update_countdown(auto_close_sec)
         
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=dialog.destroy,
+            on_escape=dialog.destroy,
+            default_focus=btn_ok,
+            parent=p,
+            nav_widgets=[btn_ok],
+            accent_color=self.btn_color,
+        )
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)
         self.force_repaint()
@@ -2969,6 +3079,15 @@ Comment=Remote Desktop P2P AutoStart
             relief=tk.FLAT, bd=0, width=8, pady=3, cursor="hand2", command=dialog.destroy
         )
         btn_ok.pack(side=tk.RIGHT)
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=dialog.destroy,
+            on_escape=dialog.destroy,
+            default_focus=btn_ok,
+            parent=p,
+            nav_widgets=[btn_ok],
+            accent_color="#E05252",
+        )
         
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)
@@ -3065,12 +3184,22 @@ Comment=Remote Desktop P2P AutoStart
         tk.Frame(dialog, bg="#2A2A3A", height=1).pack(fill=tk.X, padx=20, pady=(10, 0))
         btn_frame = tk.Frame(dialog, bg=self.bg_color)
         btn_frame.pack(fill=tk.X, padx=20, pady=(8, 14))
-        tk.Button(
+        btn_understood = tk.Button(
             btn_frame, text=_("Đã hiểu"), font=(APP_FONT_NAME, 9, "bold"),
             fg=self.text_white, bg="#E05252", activebackground="#C0392B",
             relief=tk.FLAT, bd=0, width=12, pady=5, cursor="hand2",
             command=dialog.destroy
-        ).pack(side=tk.RIGHT)
+        )
+        btn_understood.pack(side=tk.RIGHT)
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=dialog.destroy,
+            on_escape=dialog.destroy,
+            default_focus=btn_understood,
+            parent=self,
+            nav_widgets=[btn_understood],
+            accent_color="#E05252",
+        )
 
         self.wait_window(dialog)
 
@@ -3143,6 +3272,15 @@ Comment=Remote Desktop P2P AutoStart
         btn_yes.pack(side=tk.RIGHT, padx=(0, 4))
         
         dialog.protocol("WM_DELETE_WINDOW", on_no)
+        setup_dialog_keyboard(
+            dialog,
+            on_enter=on_yes,
+            on_escape=on_no,
+            default_focus=btn_yes,
+            parent=p,
+            nav_widgets=[btn_yes, btn_no],
+            accent_color=self.btn_color,
+        )
         
         # Đợi cho đến khi cửa sổ Modal này đóng để đồng bộ luồng chặn
         self.wait_window(dialog)

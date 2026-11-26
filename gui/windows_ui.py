@@ -165,6 +165,9 @@ class ProgressDialog(tk.Toplevel):
             def btn_leave(event): btn_cancel.configure(bg="#E1E1E1", bd=1)
             btn_cancel.bind("<Enter>", btn_enter)
             btn_cancel.bind("<Leave>", btn_leave)
+            btn_cancel.bind("<Return>", lambda e: (self.trigger_cancel(), "break")[1])
+            btn_cancel.bind("<KP_Enter>", lambda e: (self.trigger_cancel(), "break")[1])
+            self.bind("<Escape>", lambda e: (self.trigger_cancel(), "break")[1])
             self.protocol("WM_DELETE_WINDOW", self.trigger_cancel)
             
         self.update_idletasks()
@@ -710,7 +713,7 @@ def E(text):
     return text
 
 def setup_windows_ui(self):
-    from gui.components import ToolTip
+    from gui.components import ToolTip, bind_flat_button_keyboard, setup_panel_keyboard_nav
     try:
         from host_build_flag import HOST_ONLY_BUILD
     except Exception:
@@ -764,6 +767,11 @@ def setup_windows_ui(self):
                     lbl_icon.config(bg=active_bg)
                     lbl_text.config(bg=active_bg)
                 def on_leave(e):
+                    try:
+                        if self.focus_get() is frame:
+                            return
+                    except Exception:
+                        pass
                     frame.config(bg=bg)
                     inner.config(bg=bg)
                     lbl_icon.config(bg=bg)
@@ -783,14 +791,23 @@ def setup_windows_ui(self):
                     inner.bind("<Button-1>", lambda e: cmd())
                     lbl_icon.bind("<Button-1>", lambda e: cmd())
                     lbl_text.bind("<Button-1>", lambda e: cmd())
-                    
+                bind_flat_button_keyboard(frame, (frame, inner, lbl_icon, lbl_text), bg, active_bg, cmd, parent_bg=parent["bg"])
                 return frame
 
+            orig_bg = kwargs.get('bg')
             lbl = tk.Label(parent, pady=pady, padx=padx, **kwargs)
             lbl.bind("<Enter>", lambda e, l=lbl, c=active_bg: l.config(bg=c))
-            lbl.bind("<Leave>", lambda e, l=lbl, c=kwargs.get('bg'): l.config(bg=c))
+            def _lbl_leave(e, l=lbl, c=orig_bg):
+                try:
+                    if self.focus_get() is l:
+                        return
+                except Exception:
+                    pass
+                l.config(bg=c)
+            lbl.bind("<Leave>", _lbl_leave)
             if cmd:
                 lbl.bind("<Button-1>", lambda e, c=cmd: c())
+            bind_flat_button_keyboard(lbl, (lbl,), orig_bg, active_bg, cmd, parent_bg=parent["bg"])
             return lbl
 
         # Setup Window Menu Bar
@@ -1056,6 +1073,24 @@ def setup_windows_ui(self):
         # Attach Context Menus for Copy & Paste
         self.make_context_menu(self.entry_p_id)
         self.make_context_menu(self.entry_p_pass, replace_on_paste=True)
+
+        setup_panel_keyboard_nav(
+            self,
+            [
+                self.entry_p_id,
+                self.entry_p_pass,
+                paste_all_btn,
+                self.connect_btn,
+                self.add_partner_btn,
+                lan_btn,
+                copy_id_btn,
+                refresh_btn,
+                copy_pass_btn,
+                copy_all_btn,
+                saved_list_btn,
+            ],
+            default_focus=self.entry_p_id,
+        )
         
         # BOTTOM STATUS BAR
         status_bar = tk.Frame(self, bg=self.entry_bg, height=25)

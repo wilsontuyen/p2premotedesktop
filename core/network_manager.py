@@ -31,7 +31,7 @@ from network.socket_utils import send_msg, recv_msg, is_lan_socket, tune_socket_
 from utils.vpn_discovery import (
     detect_vpn_interfaces, scan_vpn_network, scan_custom_range, probe_single_host, match_saved_computer,
     hash_password_md5, get_last_seen_epoch, format_last_seen_str,
-    deduplicate_lan_peers, are_same_machine, merge_peers, get_all_local_ipv4,
+    deduplicate_lan_peers, are_same_machine, merge_peers, release_ip_from_other_peers, get_all_local_ipv4,
     parse_ip_range_input, connect_tcp_any_route, is_in_physical_lan_subnet
 )
 from utils.logger import log_debug
@@ -333,6 +333,15 @@ class NetworkMixin:
                 relief=tk.FLAT, bd=0, padx=14, pady=2, cursor="hand2", command=top.destroy
             )
             btn_close.pack(side=tk.BOTTOM, pady=(0, 10))
+            from gui.components import setup_dialog_keyboard
+            setup_dialog_keyboard(
+                top,
+                on_enter=top.destroy,
+                on_escape=top.destroy,
+                default_focus=btn_close,
+                parent=p,
+                accent_color=btn_col,
+            )
 
             def _update_wol_countdown(remaining):
                 try:
@@ -567,6 +576,7 @@ class NetworkMixin:
                     "network_type": "LAN" if is_in_physical_lan_subnet(addr[0]) else "VPN",
                     "last_seen": time.time(),
                     "source_ip": addr[0],
+                    "_live_authoritative": True,
                 }
                 peer_key = peer_info["hwid"]
                 
@@ -588,8 +598,10 @@ class NetworkMixin:
                         if matched_k != peer_key:
                             self.lan_peers.pop(matched_k, None)
                     is_new = matched_k is None
+                    pruned_other = release_ip_from_other_peers(self.lan_peers, peer_key, peer_info, addr[0])
                     should_save = (
                         is_new
+                        or pruned_other
                         or (old_ip != peer_info.get("local_ip"))
                         or (old_net != peer_info.get("network_type"))
                         or (old_src != peer_info.get("source_ip"))
@@ -648,6 +660,8 @@ class NetworkMixin:
             self.lan_computers_dialog.focus_force()
             if hasattr(self, '_lan_refresh_list_func') and self._lan_refresh_list_func:
                 self._lan_refresh_list_func()
+            if hasattr(self.lan_computers_dialog, '_focus_lan_list_initial'):
+                self.lan_computers_dialog._focus_lan_list_initial()
             return
 
         self._merge_stored_lan_peers_safe()
@@ -827,13 +841,21 @@ class NetworkMixin:
         progress_label.pack(pady=(0, 4))
 
         # Scrollable list frame
-        list_outer = tk.Frame(dialog, bg=self.entry_bg, bd=1, relief=tk.SUNKEN)
+        list_outer = tk.Frame(
+            dialog, bg=self.entry_bg, bd=0, relief=tk.FLAT,
+            highlightthickness=2, highlightbackground=self.divider_color, highlightcolor=self.btn_color
+        )
         list_outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20, pady=(0, 8))
 
-        canvas = tk.Canvas(list_outer, bg=self.entry_bg, highlightthickness=0)
-        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL, command=canvas.yview)
+        canvas = tk.Canvas(list_outer, bg=self.entry_bg, highlightthickness=0, takefocus=1)
+        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL, command=canvas.yview, takefocus=0)
         scroll_frame = tk.Frame(canvas, bg=self.entry_bg)
         active_frame_box = [scroll_frame]
+        dialog._kb_selected = None
+        dialog._default_kb_focus = canvas
+
+        canvas.bind("<FocusIn>", lambda e: list_outer.config(highlightbackground=self.btn_color) if e.widget is canvas else None)
+        canvas.bind("<FocusOut>", lambda e: list_outer.config(highlightbackground=self.divider_color) if e.widget is canvas else None)
 
         canvas_win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
 
@@ -1004,6 +1026,14 @@ class NetworkMixin:
             self.save_lan_peers()
 
         def connect_to_peer(hwid, peer_info, force_prompt=False):
+            try:
+                dialog._kb_selected = ("comp", hwid)
+                if hasattr(dialog, "_sync_lan_selection"):
+                    dialog._sync_lan_selection(ensure_visible=False)
+                if canvas.winfo_exists():
+                    canvas.focus_set()
+            except Exception:
+                pass
             # Nếu máy này đã có cửa sổ điều khiển đang mở -> không mở thêm, chỉ blink viền đỏ & đưa lên trên cùng
             if not force_prompt and self._focus_existing_viewer(hwid, peer_info.get("saved_id"), peer_info.get("hwid")):
                 return
@@ -1109,13 +1139,24 @@ class NetworkMixin:
                     self.connect_btn.config(state=tk.DISABLED)
                 threading.Thread(target=self._connect_lan_direct, args=(hwid, peer_info, password), daemon=True).start()
 
-            pass_entry.bind("<Return>", lambda e: do_connect())
-            pass_entry.bind("<KP_Enter>", lambda e: do_connect())
-
             btn_frame = tk.Frame(pass_dialog, bg=self.bg_color)
             btn_frame.pack(fill=tk.X, padx=30, pady=(0, 15))
-            tk.Button(btn_frame, text=_("Kết nối"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-            tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+            btn_conn_pw = tk.Button(btn_frame, text=_("Kết nối"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=do_connect)
+            btn_conn_pw.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            btn_canc_pw = tk.Button(btn_frame, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=4, cursor="hand2", command=pass_dialog.destroy)
+            btn_canc_pw.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+            from gui.components import setup_dialog_keyboard
+            setup_dialog_keyboard(
+                pass_dialog,
+                on_enter=do_connect,
+                on_escape=pass_dialog.destroy,
+                default_focus=pass_entry,
+                parent=dialog,
+                restore_focus_to=canvas,
+                nav_widgets=[pass_entry, save_cb, btn_conn_pw, btn_canc_pw],
+                accent_color=self.btn_color,
+            )
 
         def open_change_lan_password_dialog(hwid, peer_info):
             """Hộp thoại thay đổi mật khẩu và địa chỉ MAC cho máy trong danh sách LAN & VPN."""
@@ -1195,23 +1236,48 @@ class NetworkMixin:
                         else:
                             self.partner_pass_var.set(new_pw)
 
+                target_sel_id = peer_info.get("hwid") or hwid
+                dialog._kb_selected = ("comp", target_sel_id)
                 pwd_win.destroy()
                 refresh_list()
+                if hasattr(dialog, "_sync_lan_selection"):
+                    dialog.after(30, lambda: (canvas.focus_set(), dialog._sync_lan_selection(ensure_visible=True)) if dialog.winfo_exists() else None)
                 progress_label.config(text=_("Đã cập nhật mật khẩu & MAC cho {name}!").format(name=comp_name))
                 dialog.after(3000, lambda: progress_label.config(text=""))
 
-            entry_pw.bind("<Return>", lambda e: do_save_password())
-            entry_pw.bind("<KP_Enter>", lambda e: do_save_password())
-
             btn_f = tk.Frame(pwd_win, bg=self.bg_color)
             btn_f.pack(fill=tk.X, padx=30, pady=(0, 15))
-            tk.Button(btn_f, text=_("Lưu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=do_save_password).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-            tk.Button(btn_f, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=pwd_win.destroy).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+            btn_save_pw = tk.Button(btn_f, text=_("Lưu"), font=("Segoe UI", 9, "bold"), fg=self.text_white, bg=self.btn_color, activebackground=self.btn_hover, relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=do_save_password)
+            btn_save_pw.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            btn_canc_mac = tk.Button(btn_f, text=_("Hủy"), font=("Segoe UI", 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, relief=tk.FLAT, bd=0, pady=5, cursor="hand2", command=pwd_win.destroy)
+            btn_canc_mac.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+            from gui.components import setup_dialog_keyboard
+            setup_dialog_keyboard(
+                pwd_win,
+                on_enter=do_save_password,
+                on_escape=pwd_win.destroy,
+                default_focus=entry_pw,
+                parent=dialog,
+                restore_focus_to=canvas,
+                nav_widgets=[entry_pw, entry_mac, btn_save_pw, btn_canc_mac],
+                accent_color=self.btn_color,
+            )
 
         def delete_lan_peer(hwid, peer_info):
             """Xóa máy tính khỏi danh sách LAN & VPN (chỉ khi người dùng bấm Xóa và xác nhận)."""
             comp_name = peer_info.get("computer_name", hwid)
             if self.show_custom_question(_("Xóa máy tính"), _("Bạn có chắc muốn xóa") + f" '{comp_name}' " + _("khỏi danh sách?"), parent=dialog):
+                try:
+                    af = active_frame_box[0]
+                    if af and af.winfo_exists():
+                        vis = [w for w in af.pack_slaves() if getattr(w, "is_group_header", False) or hasattr(w, "comp_id")]
+                        del_idx = next((i for i, w in enumerate(vis) if getattr(w, "comp_id", None) == hwid), None)
+                        if del_idx is not None and len(vis) > 1:
+                            nxt_w = vis[del_idx + 1] if del_idx + 1 < len(vis) else vis[del_idx - 1]
+                            dialog._kb_selected = ("group", nxt_w.group_name) if getattr(nxt_w, "is_group_header", False) else ("comp", nxt_w.comp_id)
+                except Exception:
+                    pass
                 with self.lan_peers_lock:
                     keys_to_del = [
                         k for k, v in list(self.lan_peers.items())
@@ -1222,6 +1288,8 @@ class NetworkMixin:
                         scan_state.setdefault("online_status", {}).pop(dk, None)
                 self.save_lan_peers(allow_shrink=True)
                 refresh_list()
+                if hasattr(dialog, "_sync_lan_selection"):
+                    dialog.after(30, lambda: (canvas.focus_set(), dialog._sync_lan_selection(ensure_visible=False)) if dialog.winfo_exists() else None)
                 progress_label.config(text=_("Đã xóa '{name}' khỏi danh sách!").format(name=comp_name))
                 dialog.after(3000, lambda: progress_label.config(text=""))
 
@@ -1430,9 +1498,11 @@ class NetworkMixin:
                             pass
                         scan_state.setdefault("online_status", {}).pop(existing_key, None)
                     self.lan_peers[target_key] = p
+                    release_ip_from_other_peers(self.lan_peers, target_key, p, p.get("source_ip"))
                     scan_state.setdefault("online_status", {})[target_key] = True
                 else:
                     self.lan_peers[p["hwid"]] = p
+                    release_ip_from_other_peers(self.lan_peers, p["hwid"], p, p.get("source_ip"))
                     scan_state.setdefault("online_status", {})[p["hwid"]] = True
 
             # Không cập nhật giao diện trong lúc đang quét để tránh giật nháy màn hình liên tục.
@@ -1738,8 +1808,7 @@ class NetworkMixin:
                 online_state = scan_state.get("online_status", {})
                 if h_key in online_state:
                     return online_state[h_key]
-                age = time.time() - get_last_seen_epoch(h_info.get("last_seen", 0))
-                return True if age < 30 else None
+                return None
 
             # Sắp xếp: nhóm "LAN" lên trên, nhóm "VPN" ở dưới; trong mỗi nhóm máy Online đưa lên trên, sau đó theo bảng chữ cái
             def _peer_sort_key(item):
@@ -1764,23 +1833,32 @@ class NetworkMixin:
                     fg=self.text_gray,
                     bg=self.entry_bg,
                     anchor=tk.W,
+                    padx=8,
+                    pady=4,
                     cursor="hand2",
                 )
                 hdr_lbl.is_group_header = True
                 hdr_lbl.group_name = grp_name
 
-                def _toggle_lan_group(event, g=grp_name):
+                def _toggle_lan_group_direct(g=grp_name):
                     if g in self.lan_collapsed_groups:
                         self.lan_collapsed_groups.remove(g)
                         just_expanded = True
                     else:
                         self.lan_collapsed_groups.add(g)
                         just_expanded = False
+                    dialog._kb_selected = ("group", g)
                     save_lan_dialog_prefs()
-                    reorder_lan_list()
+                    reorder_lan_list(anchor_group=g)
                     if just_expanded and rescan_group_ref[0] is not None:
                         rescan_group_ref[0](g, reset_dots=False)
 
+                def _toggle_lan_group(event, g=grp_name, h_w=hdr_lbl):
+                    dialog._kb_selected = ("group", g)
+                    canvas.focus_set()
+                    _toggle_lan_group_direct(g)
+
+                hdr_lbl._toggle_fn = _toggle_lan_group_direct
                 hdr_lbl.bind("<Button-1>", _toggle_lan_group)
                 group_headers[grp_name] = hdr_lbl
 
@@ -1905,7 +1983,7 @@ class NetworkMixin:
                         container, image=wol_icon, width=target_w, height=target_h,
                         bg=wol_bg, activebackground=wol_active_bg,
                         relief=tk.FLAT, bd=0, highlightthickness=0, cursor=cursor_style,
-                        command=_do_wol
+                        takefocus=0, command=_do_wol
                     )
                     btn.image = wol_icon
                 else:
@@ -1914,7 +1992,7 @@ class NetworkMixin:
                         container, text="⏻", font=("Segoe UI Symbol", font_size, "bold"),
                         fg="#FFFFFF", activeforeground="#FFFFFF", bg=wol_bg, activebackground=wol_active_bg,
                         relief=tk.FLAT, bd=0, highlightthickness=0, padx=6, pady=2, cursor=cursor_style,
-                        command=_do_wol
+                        takefocus=0, command=_do_wol
                     )
 
                 if is_online is True:
@@ -2081,7 +2159,11 @@ class NetworkMixin:
                 row_menu.add_separator()
                 row_menu.add_command(label=_("🗑 Xóa"), command=lambda h=hwid, i=info: delete_lan_peer(h, i))
 
-                def show_context(event, m=row_menu):
+                def show_context(event, m=row_menu, r_w=row):
+                    dialog._kb_selected = ("comp", getattr(r_w, "comp_id", hwid))
+                    canvas.focus_set()
+                    if hasattr(dialog, "_sync_lan_selection"):
+                        dialog._sync_lan_selection(ensure_visible=False)
                     try:
                         m.tk_popup(event.x_root, event.y_root)
                     finally:
@@ -2100,6 +2182,8 @@ class NetworkMixin:
                 row.comp_id = hwid
                 row.comp_name = info.get("computer_name", "Unknown")
                 row.comp_group = normalized_net
+                row.comp_info = info
+                row._context_menu = row_menu
 
                 row_ui_map[hwid] = {
                     "row": row,
@@ -2117,7 +2201,11 @@ class NetworkMixin:
                     "comp_group": normalized_net,
                 }
 
-                def on_row_click(e, h=hwid, i=info):
+                def on_row_click(e, h=hwid, i=info, r_w=row):
+                    dialog._kb_selected = ("comp", h)
+                    canvas.focus_set()
+                    if hasattr(dialog, "_sync_lan_selection"):
+                        dialog._sync_lan_selection(ensure_visible=False)
                     connect_to_peer(h, i)
 
                 # Dòng máy OFFLINE được làm tối hơn để phân biệt trực quan
@@ -2151,9 +2239,15 @@ class NetworkMixin:
                 justify=tk.CENTER
             )
 
-            def reorder_lan_list():
+            def reorder_lan_list(anchor_group=None):
                 if not dialog.winfo_exists() or not new_scroll_frame.winfo_exists():
                     return
+                try:
+                    old_req_h = new_scroll_frame.winfo_reqheight()
+                    old_canv_h = canvas.winfo_height()
+                    prev_top_px = (canvas.yview()[0] * old_req_h) if (old_req_h > old_canv_h > 1) else 0.0
+                except Exception:
+                    prev_top_px = None
                 try:
                     for ch in new_scroll_frame.winfo_children():
                         ch.pack_forget()
@@ -2237,6 +2331,25 @@ class NetworkMixin:
                         empty_offline_lbl.pack(pady=24, padx=20)
 
                     _sync_canvas_layout(new_scroll_frame, reset_top=False)
+                    if prev_top_px is not None:
+                        try:
+                            new_req_h = max(1, new_scroll_frame.winfo_reqheight())
+                            new_canv_h = max(1, canvas.winfo_height())
+                            if new_req_h > new_canv_h > 1:
+                                clamped_px = max(0.0, min(float(new_req_h - new_canv_h), float(prev_top_px)))
+                                canvas.yview_moveto(clamped_px / float(new_req_h))
+                        except Exception:
+                            pass
+                    if anchor_group is not None and anchor_group in group_headers:
+                        from gui.components import ensure_expanded_group_visible, ensure_canvas_widget_visible
+                        hdr_a = group_headers[anchor_group]
+                        if anchor_group not in self.lan_collapsed_groups:
+                            grp_rows_a = [it[1] for it in grouped_rows.get(anchor_group, [])]
+                            ensure_expanded_group_visible(canvas, new_scroll_frame, hdr_a, grp_rows_a, pad=10)
+                        else:
+                            ensure_canvas_widget_visible(canvas, new_scroll_frame, hdr_a, pad=10)
+                    if hasattr(dialog, "_sync_lan_selection"):
+                        dialog._sync_lan_selection(ensure_visible=False)
                 except Exception:
                     pass
 
@@ -2258,6 +2371,8 @@ class NetworkMixin:
 
             # Hoàn tất hiển thị giao diện mới mượt mà (double-buffering)
             _finish_swap()
+            if hasattr(dialog, "_sync_lan_selection"):
+                dialog._sync_lan_selection(ensure_visible=False)
 
             # Khởi chạy luồng thăm dò trạng thái trực tuyến của toàn bộ máy trong mạng LAN & VPN
             # Dùng trực tiếp TCP socket kết nối thẳng tới từng máy (cực nhanh, không qua Signaling Server)
@@ -2275,13 +2390,22 @@ class NetworkMixin:
                 status_changed = (prev_online != is_on)
                 ui_item["peer_online"] = is_on
 
-                # Kiểm tra và gộp thông tin mới (nếu có) trước để xác định xem nhóm có thay đổi không
+                # Kiểm tra và gộp thông tin mới (nếu có) trước để xác định xem nhóm hoặc địa chỉ IP có thay đổi không
                 inf = ui_item.get("info", {})
                 group_changed = False
+                meta_changed = False
                 if u_data:
+                    old_src_ui = inf.get("source_ip")
+                    old_lip_ui = inf.get("local_ip")
+                    old_mac_ui = inf.get("macs")
                     merged_ui = merge_peers(u_data, inf)
                     merged_ui["hwid"] = inf.get("hwid") or h_id
                     inf.update(merged_ui)
+                    meta_changed = (
+                        old_src_ui != inf.get("source_ip")
+                        or old_lip_ui != inf.get("local_ip")
+                        or old_mac_ui != inf.get("macs")
+                    )
                     new_grp = _resolve_peer_group(h_id, inf)
                     if new_grp != ui_item.get("comp_group"):
                         ui_item["comp_group"] = new_grp
@@ -2297,8 +2421,12 @@ class NetworkMixin:
                         group_changed = True
 
                 # CHỈ cập nhật giao diện dòng và làm mới/sắp xếp lại danh sách khi trạng thái Online/Offline
-                # hoặc nhóm mạng của máy thực sự thay đổi (không làm mới định kỳ khi trạng thái giữ nguyên)
+                # hoặc nhóm mạng của máy thực sự thay đổi (riêng khi đổi IP/MAC vẫn cập nhật lại Tooltip)
                 if not status_changed and not group_changed:
+                    if meta_changed:
+                        tip = ui_item.get("tooltip")
+                        if tip:
+                            tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
                     return
 
                 # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
@@ -2412,10 +2540,15 @@ class NetworkMixin:
                             if h in self.lan_peers:
                                 old_net = self.lan_peers[h].get("network_type")
                                 old_src = self.lan_peers[h].get("source_ip")
+                                old_lip = self.lan_peers[h].get("local_ip")
+                                old_mac = self.lan_peers[h].get("macs")
                                 merged = merge_peers(u_data, self.lan_peers[h])
                                 merged["hwid"] = self.lan_peers[h].get("hwid") or h
                                 self.lan_peers[h] = merged
+                                pruned_other = release_ip_from_other_peers(self.lan_peers, h, merged, merged.get("source_ip"))
                                 merged_copy = dict(merged)
+                                if old_lip != merged.get("local_ip") or old_mac != merged.get("macs") or pruned_other:
+                                    any_changed[0] = True
                                 group_or_ip_changed = (old_net != merged.get("network_type")) or (old_src != merged.get("source_ip"))
                     if merged_copy is not None:
                         if ui_grp is not None and ui_grp != _resolve_peer_group(h, merged_copy):
@@ -2529,6 +2662,21 @@ class NetworkMixin:
 
             rescan_group_ref[0] = _rescan_group_peers
 
+            def _set_peer_online_external(h_target, is_on_val, u_val=None):
+                if not dialog.winfo_exists():
+                    return
+                matched_h = h_target if h_target in row_ui_map else None
+                if matched_h is None and u_val:
+                    for cand_k, cand_ui in row_ui_map.items():
+                        if are_same_machine(cand_k, cand_ui.get("info", {}), h_target, u_val):
+                            matched_h = cand_k
+                            break
+                if matched_h is not None:
+                    scan_state.setdefault("online_status", {})[matched_h] = is_on_val
+                    _apply_peer_online_status_ui(matched_h, is_on_val, u_val)
+
+            dialog._set_peer_online_external = _set_peer_online_external
+
             if filtered_peers:
                 _probe_all_peers_bg(filtered_peers, cur_probe_gen)
 
@@ -2633,6 +2781,19 @@ class NetworkMixin:
                 canvas.unbind_all("<MouseWheel>")
             except: pass
             dialog.destroy()
+            try:
+                if self.winfo_exists() and self.state() != "withdrawn":
+                    self.lift()
+                    def _ret_main():
+                        if self.winfo_exists() and self.state() != "withdrawn":
+                            cand = getattr(self, "_default_kb_focus", None)
+                            if cand is not None and cand.winfo_exists():
+                                cand.focus_set()
+                            else:
+                                self.focus_force()
+                    self.after(20, _ret_main)
+            except Exception:
+                pass
 
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
         dialog.bind("<Escape>", lambda e: on_dialog_close())
@@ -2746,8 +2907,229 @@ class NetworkMixin:
         btn_close.pack(side=tk.RIGHT)
         RowTooltip(btn_close, _("Đóng cửa sổ máy tính mạng LAN & VPN"), bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
 
+        from gui.components import enhance_dialog_controls, ensure_canvas_widget_visible, set_row_selected
+        enhance_dialog_controls(vpn_toolbar, accent_color=self.btn_color)
+        enhance_dialog_controls(btn_frame, accent_color=self.btn_color)
+
+        def _get_visible_lan_items():
+            af = active_frame_box[0]
+            if not af or not af.winfo_exists():
+                return []
+            return [
+                w for w in af.pack_slaves()
+                if getattr(w, "is_group_header", False) or hasattr(w, "comp_id")
+            ]
+
+        def _lan_item_key(w):
+            if getattr(w, "is_group_header", False):
+                return ("group", getattr(w, "group_name", ""))
+            return ("comp", getattr(w, "comp_id", ""))
+
+        def _sync_lan_selection(ensure_visible=False):
+            af = active_frame_box[0]
+            if not af or not af.winfo_exists():
+                return None
+            items = _get_visible_lan_items()
+            sel_key = getattr(dialog, "_kb_selected", None)
+            sel_w = None
+            if sel_key is not None:
+                for w in items:
+                    if _lan_item_key(w) == sel_key:
+                        sel_w = w
+                        break
+            if sel_w is None and items:
+                sel_w = next((w for w in items if hasattr(w, "comp_id")), items[0])
+            dialog._kb_selected = _lan_item_key(sel_w) if sel_w is not None else None
+
+            for ch in af.winfo_children():
+                if getattr(ch, "is_group_header", False) or hasattr(ch, "comp_id"):
+                    is_sel = (ch is sel_w)
+                    if is_sel or getattr(ch, "_kb_selected", False):
+                        set_row_selected(
+                            ch,
+                            is_sel,
+                            base_bg=self.card_color,
+                            accent_color=self.btn_color,
+                            fg_names=(self.text_white, self.text_gray),
+                        )
+            if ensure_visible and sel_w is not None:
+                ensure_canvas_widget_visible(canvas, af, sel_w)
+            return sel_w
+
+        dialog._sync_lan_selection = _sync_lan_selection
+
+        def _move_lan_selection(delta=0, to_edge=None):
+            items = _get_visible_lan_items()
+            if not items:
+                canvas.focus_set()
+                return "break"
+            cur_w = _sync_lan_selection(ensure_visible=False)
+            cur_idx = items.index(cur_w) if cur_w in items else 0
+            if to_edge == "first":
+                new_idx = 0
+            elif to_edge == "last":
+                new_idx = len(items) - 1
+            else:
+                new_idx = max(0, min(len(items) - 1, cur_idx + delta))
+            dialog._kb_selected = _lan_item_key(items[new_idx])
+            _sync_lan_selection(ensure_visible=True)
+            canvas.focus_set()
+            return "break"
+
+        def _on_lan_return(_event=None):
+            fw = None
+            try:
+                fw = dialog.focus_get()
+            except Exception:
+                pass
+            if fw in (entry_start, entry_end):
+                run_vpn_scan_background()
+                return "break"
+            if isinstance(fw, tk.Button):
+                try:
+                    if str(fw.cget("state")) != "disabled":
+                        fw.invoke()
+                except Exception:
+                    pass
+                return "break"
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None:
+                if getattr(sel_w, "is_group_header", False):
+                    fn = getattr(sel_w, "_toggle_fn", None)
+                    if callable(fn):
+                        fn()
+                elif hasattr(sel_w, "comp_id") and hasattr(sel_w, "comp_info"):
+                    connect_to_peer(sel_w.comp_id, sel_w.comp_info)
+            return "break"
+
+        lan_tab_ring = [
+            entry_start, entry_end, btn_vpn_scan, canvas,
+            btn_refresh, btn_clear, btn_filter_named, btn_hide_offline, btn_close,
+        ]
+
+        def _cycle_lan_tab(delta):
+            avail = []
+            for w in lan_tab_ring:
+                try:
+                    if w.winfo_exists() and w.winfo_ismapped() and str(w.cget("state")) != "disabled":
+                        avail.append(w)
+                except Exception:
+                    if w.winfo_exists() and w.winfo_ismapped():
+                        avail.append(w)
+            if not avail:
+                return "break"
+            cur = None
+            try:
+                cur = dialog.focus_get()
+            except Exception:
+                pass
+            idx = (avail.index(cur) + delta) % len(avail) if cur in avail else (0 if delta > 0 else len(avail) - 1)
+            avail[idx].focus_set()
+            if avail[idx] is canvas:
+                _sync_lan_selection(ensure_visible=True)
+            return "break"
+
+        def _on_lan_left_right(delta, event):
+            w = event.widget
+            if w in (entry_start, entry_end):
+                return None
+            btns = [
+                b for b in (btn_vpn_scan, btn_refresh, btn_clear, btn_filter_named, btn_hide_offline, btn_close)
+                if b.winfo_exists() and str(b.cget("state")) != "disabled"
+            ]
+            if w in btns:
+                btns[(btns.index(w) + delta) % len(btns)].focus_set()
+                return "break"
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None:
+                if getattr(sel_w, "is_group_header", False):
+                    grp_n = getattr(sel_w, "group_name", "")
+                    is_col = grp_n in self.lan_collapsed_groups
+                    if (delta > 0 and is_col) or (delta < 0 and not is_col):
+                        fn = getattr(sel_w, "_toggle_fn", None)
+                        if callable(fn):
+                            fn()
+                elif delta < 0 and hasattr(sel_w, "comp_group"):
+                    for it in _get_visible_lan_items():
+                        if getattr(it, "is_group_header", False) and getattr(it, "group_name", None) == sel_w.comp_group:
+                            dialog._kb_selected = _lan_item_key(it)
+                            _sync_lan_selection(ensure_visible=True)
+                            break
+            return "break"
+
+        def _on_lan_f2(_event=None):
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None and hasattr(sel_w, "comp_id") and hasattr(sel_w, "comp_info"):
+                open_change_lan_password_dialog(sel_w.comp_id, sel_w.comp_info)
+            return "break"
+
+        def _on_lan_delete(event):
+            if event.widget in (entry_start, entry_end):
+                return None
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None and hasattr(sel_w, "comp_id") and hasattr(sel_w, "comp_info"):
+                delete_lan_peer(sel_w.comp_id, sel_w.comp_info)
+            return "break"
+
+        def _on_lan_context_key(_event=None):
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None:
+                m = getattr(sel_w, "_context_menu", None)
+                if m is not None:
+                    rx = sel_w.winfo_rootx() + 40
+                    ry = sel_w.winfo_rooty() + max(8, sel_w.winfo_height() // 2)
+                    try:
+                        m.tk_popup(rx, ry)
+                    finally:
+                        m.grab_release()
+            return "break"
+
+        def _on_lan_space(_event=None):
+            sel_w = _sync_lan_selection(ensure_visible=True)
+            if sel_w is not None and getattr(sel_w, "is_group_header", False):
+                fn = getattr(sel_w, "_toggle_fn", None)
+                if callable(fn):
+                    fn()
+            return "break"
+
+        dialog.bind("<Return>", _on_lan_return)
+        dialog.bind("<KP_Enter>", _on_lan_return)
+        dialog.bind("<Up>", lambda e: _move_lan_selection(-1))
+        dialog.bind("<Down>", lambda e: _move_lan_selection(1))
+        dialog.bind("<Tab>", lambda e: _cycle_lan_tab(1))
+        dialog.bind("<Shift-Tab>", lambda e: _cycle_lan_tab(-1))
+        if sys.platform != "win32":
+            dialog.bind("<ISO_Left_Tab>", lambda e: _cycle_lan_tab(-1))
+        dialog.bind("<Left>", lambda e: _on_lan_left_right(-1, e))
+        dialog.bind("<Right>", lambda e: _on_lan_left_right(1, e))
+        dialog.bind("<F2>", _on_lan_f2)
+        dialog.bind("<Delete>", _on_lan_delete)
+        dialog.bind("<App>", _on_lan_context_key)
+        dialog.bind("<Shift-F10>", _on_lan_context_key)
+
+        canvas.bind("<space>", _on_lan_space)
+        canvas.bind("<Prior>", lambda e: _move_lan_selection(-6))
+        canvas.bind("<Next>", lambda e: _move_lan_selection(6))
+        canvas.bind("<Home>", lambda e: _move_lan_selection(0, to_edge="first"))
+        canvas.bind("<End>", lambda e: _move_lan_selection(0, to_edge="last"))
+
+        def _focus_lan_list_initial():
+            try:
+                if dialog.winfo_exists():
+                    items = _get_visible_lan_items()
+                    if items:
+                        canvas.focus_set()
+                        _sync_lan_selection(ensure_visible=True)
+                    else:
+                        entry_start.focus_set()
+            except Exception:
+                pass
+
+        dialog._focus_lan_list_initial = _focus_lan_list_initial
+
         self._lan_refresh_list_func = refresh_list
         refresh_list()
+        dialog.after(50, _focus_lan_list_initial)
         auto_probe_timer[0] = dialog.after(8000, _auto_probe_expanded_groups)
 
     def _focus_existing_viewer(self, *candidate_ids):
@@ -2817,17 +3199,39 @@ class NetworkMixin:
         import platform
         ip = peer_info.get("local_ip", "")
         port = peer_info.get("port", BOUND_PORT)
-        
-        # Ưu tiên kết nối tới source_ip (IP thực tế đã dò thấy qua VPN/LAN) trước các local_ip phụ
-        ips_to_try = []
+
+        try:
+            my_local_ips = get_all_local_ipv4()
+        except Exception:
+            my_local_ips = set()
+
+        def _valid_conn_ip(ip_s):
+            if not ip_s or ip_s.startswith("127.") or ip_s.startswith("169.254.") or ip_s == "192.168.56.1":
+                return False
+            if ip_s in my_local_ips:
+                return False
+            return True
+
+        # Ưu tiên kết nối tới source_ip (IP thực tế đã dò thấy qua VPN/LAN) và IP cùng dải / LAN vật lý trước
+        raw_candidates = []
         source_ip = str(peer_info.get("source_ip") or "").strip()
-        if source_ip and not source_ip.startswith("127."):
-            ips_to_try.append(source_ip)
-        for i in ip.split(','):
+        if _valid_conn_ip(source_ip):
+            raw_candidates.append(source_ip)
+        for i in str(ip).split(','):
             i_clean = i.strip()
-            if i_clean and not i_clean.startswith("127.") and i_clean not in ips_to_try:
-                ips_to_try.append(i_clean)
-            
+            if _valid_conn_ip(i_clean) and i_clean not in raw_candidates:
+                raw_candidates.append(i_clean)
+
+        src_pfx = source_ip.rsplit(".", 1)[0] if (source_ip in raw_candidates and source_ip.count(".") == 3) else ""
+        primary_ips = []
+        secondary_ips = []
+        for cand_ip in raw_candidates:
+            if cand_ip == source_ip or is_in_physical_lan_subnet(cand_ip) or (src_pfx and cand_ip.rsplit(".", 1)[0] == src_pfx):
+                primary_ips.append(cand_ip)
+            else:
+                secondary_ips.append(cand_ip)
+        ips_to_try = primary_ips + secondary_ips
+
         ports_to_try = [port]
         for p_alt in (12345, 12346):
             if p_alt not in ports_to_try:
@@ -2836,18 +3240,60 @@ class NetworkMixin:
         sock = None
         connected = False
         connected_port = port
-        
+        mismatched_hosts = []  # [(ip, other_name)] khi IP cũ nay thuộc về máy khác
+
         for try_ip in ips_to_try:
+            ip_is_lan = is_in_physical_lan_subnet(try_ip)
+            vpn_lbl = "LAN" if ip_is_lan else "VPN"
             for try_port in ports_to_try:
+                # Xác minh danh tính máy đích trước khi gửi mật khẩu (chống kết nối nhầm khi VPN/DHCP cấp lại IP cho máy khác)
+                probe_res, probe_reason = probe_single_host(
+                    try_ip,
+                    port=try_port,
+                    vpn_type_label=vpn_lbl,
+                    timeout=2.0,
+                    recv_timeout=2.0,
+                    known_peer=peer_info,
+                    retries=0,
+                    return_err_reason=True,
+                )
+                if probe_res is not None and not are_same_machine(hwid, peer_info, probe_res.get("hwid"), probe_res):
+                    other_name = probe_res.get("computer_name") or try_ip
+                    print(f"[LAN Direct] Skipping {try_ip}:{try_port} — occupied by another host ({other_name} / {probe_res.get('hwid')}), expected {peer_info.get('computer_name')} ({hwid})")
+                    mismatched_hosts.append((try_ip, other_name))
+                    if probe_res.get("hwid_verified"):
+                        with self.lan_peers_lock:
+                            if release_ip_from_other_peers(self.lan_peers, probe_res.get("hwid"), probe_res, try_ip):
+                                self.save_lan_peers()
+                    break
+
+                if probe_res is None and probe_reason == "timeout":
+                    print(f"[LAN Direct] Probe timed out on {try_ip}:{try_port}")
+                    break
+
                 s = None
                 try:
-                    s, _used_tun = connect_tcp_any_route(try_ip, try_port, timeout=2.5)
+                    s, _used_tun = connect_tcp_any_route(
+                        try_ip, try_port, timeout=2.5, prefer_vpn_only=(not ip_is_lan)
+                    )
                     if not s:
                         raise ConnectionError(f"Timed out / unreachable {try_ip}:{try_port}")
                     s.settimeout(15.0)
                     sock = s
                     connected = True
                     connected_port = try_port
+                    if probe_res is not None:
+                        merged_live = merge_peers(probe_res, peer_info)
+                        merged_live["hwid"] = peer_info.get("hwid") or hwid
+                        peer_info.update(merged_live)
+                        with self.lan_peers_lock:
+                            if hwid in self.lan_peers:
+                                self.lan_peers[hwid] = dict(merged_live)
+                                release_ip_from_other_peers(self.lan_peers, hwid, merged_live, try_ip)
+                        self.save_lan_peers()
+                        dlg_ref = getattr(self, "lan_computers_dialog", None)
+                        if dlg_ref is not None and hasattr(dlg_ref, "_set_peer_online_external"):
+                            self.after(0, lambda h_v=hwid, m_v=dict(merged_live): dlg_ref._set_peer_online_external(h_v, True, m_v) if dlg_ref.winfo_exists() else None)
                     print(f"[LAN Direct] Connected to {try_ip}:{try_port}")
                     break
                 except Exception as e:
@@ -2862,10 +3308,23 @@ class NetworkMixin:
         if not connected or not sock:
             comp_name = peer_info.get('computer_name', 'máy đích')
             self.update_status(_("Kết nối LAN thất bại!"))
-            err_msg = _("Không thể kết nối tới {name} ({ip}:{port}).\n\nVui lòng kiểm tra lại:\n• Mật khẩu kết nối (nhấp chuột phải vào tên máy để chọn 'Thay đổi mật khẩu' nếu máy đổi mật khẩu).\n• Tường lửa (Firewall) hoặc đảm bảo máy đích đang mở Easy Remote Desktop.").format(
-                name=comp_name, ip=ip, port=port
-            )
-            self.after(0, lambda: self.show_custom_error(_("Lỗi kết nối LAN"), err_msg))
+            dlg_ref = getattr(self, "lan_computers_dialog", None)
+            if dlg_ref is not None and hasattr(dlg_ref, "_set_peer_online_external"):
+                self.after(0, lambda h_v=hwid: dlg_ref._set_peer_online_external(h_v, False, None) if dlg_ref.winfo_exists() else None)
+            disp_ip = source_ip or (ips_to_try[0] if ips_to_try else ip)
+            if mismatched_hosts:
+                stale_ip = mismatched_hosts[0][0]
+                err_msg = _(
+                    "Máy {name} hiện đang Ngoại tuyến (Offline) hoặc đã đổi sang địa chỉ IP mới.\n"
+                    "(Địa chỉ IP cũ {ip} hiện đang được cấp cho một máy tính khác trong mạng).\n\n"
+                    "Vui lòng bấm 'Làm mới' hoặc 'Quét dải IP' nếu máy đích vừa kết nối lại mạng."
+                ).format(name=comp_name, ip=stale_ip)
+            else:
+                err_msg = _("Không thể kết nối tới {name} ({ip}:{port}).\n\nVui lòng kiểm tra lại:\n• Đảm bảo máy đích đang bật và mở Easy Remote Desktop.\n• Bấm 'Làm mới' hoặc 'Quét dải IP' nếu máy đích đã đổi địa chỉ IP.\n• Kiểm tra Tường lửa (Firewall).").format(
+                    name=comp_name, ip=disp_ip, port=port
+                )
+            parent_win = dlg_ref if (dlg_ref is not None and dlg_ref.winfo_exists()) else None
+            self.after(0, lambda p_w=parent_win, m=err_msg: self.show_custom_error(_("Máy đang Ngoại tuyến hoặc đổi IP"), m, parent=p_w))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
             return
 

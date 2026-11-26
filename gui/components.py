@@ -31,22 +31,567 @@ def _blend_hex(widget, color, target, ratio):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
-    """Làm tối dòng máy tính OFFLINE để phân biệt trực quan (theo mọi giao diện).
+def _color_luminance(widget, color):
+    """Tính độ sáng cảm nhận (0..255) của mã màu Tk."""
+    if not color:
+        return 128
+    try:
+        r, g, b = [v // 257 for v in widget.winfo_rgb(color)]
+        return int(0.299 * r + 0.587 * g + 0.114 * b)
+    except Exception:
+        return 128
 
-    - Nền các widget đang dùng `base_bg` được pha tối ~22% khi offline, trả về `base_bg` khi online.
-    - Chữ (Label có fg trùng `fg_names`) được pha mờ ~35% về phía nền tối khi offline.
-    Các widget có màu riêng (badge LAN/VPN, nút, chấm trạng thái) được giữ nguyên.
-    is_online=None (đang kiểm tra) được xem như online (không làm tối).
+
+def _pick_focus_border_color(widget, bg_color=None, parent_bg=None, accent_color=None):
+    """Chọn màu viền focus tương phản cao cho mọi giao diện (Sáng/Tối/Pha lê/Đỏ/Cam...)."""
+    try:
+        if bg_color is None:
+            bg_color = widget.cget("bg")
+    except Exception:
+        bg_color = "#2A2A35"
+    if parent_bg is None:
+        try:
+            parent = widget.nametowidget(widget.winfo_parent())
+            parent_bg = parent.cget("bg")
+        except Exception:
+            parent_bg = bg_color
+
+    p_lum = _color_luminance(widget, parent_bg)
+    b_lum = _color_luminance(widget, bg_color)
+    if p_lum > 165:
+        if b_lum < 85:
+            return accent_color or "#00ADB5"
+        return "#0F172A"
+    if b_lum > 200:
+        return accent_color or "#0F172A"
+    return "#FFFFFF"
+
+
+def attach_focus_ring(widget, bg_widgets=None, normal_bg=None, focus_bg=None, border_color=None, thickness=2, on_click=None):
+    """Gắn viền focus 2px bằng .place() (không làm thay đổi kích thước/bố cục widget)."""
+    if widget is None or getattr(widget, "_focus_ring_attached", False):
+        return
+    widget._focus_ring_attached = True
+    strips = []
+
+    def _ensure_strips():
+        if strips:
+            return strips
+        col = border_color or _pick_focus_border_color(widget, normal_bg)
+        for _ in range(4):
+            s = tk.Frame(widget, bg=col, bd=0, highlightthickness=0, takefocus=0)
+            s._focus_strip = True
+            if on_click is not None:
+                s.bind("<ButtonRelease-1>", lambda e: on_click(e))
+            elif isinstance(widget, tk.Button):
+                s.bind("<ButtonRelease-1>", lambda e: widget.invoke() if str(widget.cget("state")) != "disabled" else None)
+            strips.append(s)
+        return strips
+
+    def _on_focus_in(event):
+        if event.widget is not widget:
+            return
+        try:
+            if str(widget.cget("state")) == "disabled":
+                return
+        except Exception:
+            pass
+        try:
+            cur_bg = normal_bg if normal_bg is not None else widget.cget("bg")
+        except Exception:
+            cur_bg = "#2A2A35"
+        col = border_color or _pick_focus_border_color(widget, cur_bg)
+        try:
+            s_top, s_bot, s_left, s_right = _ensure_strips()
+            for s in (s_top, s_bot, s_left, s_right):
+                s.config(bg=col)
+            s_top.place(relx=0.0, rely=0.0, relwidth=1.0, height=thickness)
+            s_bot.place(relx=0.0, rely=1.0, anchor="sw", relwidth=1.0, height=thickness)
+            s_left.place(relx=0.0, rely=0.0, relheight=1.0, width=thickness)
+            s_right.place(relx=1.0, rely=0.0, anchor="ne", relheight=1.0, width=thickness)
+            for s in (s_top, s_bot, s_left, s_right):
+                s.lift()
+        except Exception:
+            pass
+        if bg_widgets and focus_bg:
+            for bw in bg_widgets:
+                try:
+                    bw.config(bg=focus_bg)
+                except Exception:
+                    pass
+
+    def _on_focus_out(event):
+        if event.widget is not widget:
+            return
+        for s in strips:
+            try:
+                s.place_forget()
+            except Exception:
+                pass
+        if bg_widgets and normal_bg:
+            for bw in bg_widgets:
+                try:
+                    bw.config(bg=normal_bg)
+                except Exception:
+                    pass
+
+    widget.bind("<FocusIn>", _on_focus_in, add="+")
+    widget.bind("<FocusOut>", _on_focus_out, add="+")
+
+
+def bind_flat_button_keyboard(root_widget, bg_widgets, bg, active_bg, cmd, parent_bg=None):
+    """Cho phép flat button (Frame/Label) nhận Tab focus, hiển thị viền focus và bấm bằng Enter/Space."""
+    try:
+        root_widget.configure(takefocus=1)
+    except Exception:
+        pass
+    root_widget._is_kb_focusable = True
+
+    def _invoke(_event=None):
+        try:
+            if str(root_widget.cget("state")) == "disabled":
+                return "break"
+        except Exception:
+            pass
+        if callable(cmd):
+            cmd()
+        return "break"
+
+    root_widget._kb_invoke = _invoke
+    root_widget.bind("<Return>", _invoke)
+    root_widget.bind("<KP_Enter>", _invoke)
+    root_widget.bind("<space>", _invoke)
+
+    lum = _color_luminance(root_widget, bg)
+    focus_bg = active_bg if (active_bg and active_bg != bg) else _blend_hex(
+        root_widget, bg, "#FFFFFF" if lum < 160 else "#000000", 0.18
+    )
+    b_col = _pick_focus_border_color(root_widget, bg_color=bg, parent_bg=parent_bg)
+    attach_focus_ring(
+        root_widget,
+        bg_widgets=bg_widgets,
+        normal_bg=bg,
+        focus_bg=focus_bg,
+        border_color=b_col,
+        thickness=2,
+        on_click=_invoke,
+    )
+    return root_widget
+
+
+def ensure_canvas_widget_visible(canvas, scroll_frame, widget, pad=8):
+    """Cuộn Canvas vừa đủ để widget đang chọn bằng phím mũi tên luôn nằm trong vùng nhìn thấy."""
+    try:
+        if not (canvas and scroll_frame and widget):
+            return
+        if not (canvas.winfo_exists() and scroll_frame.winfo_exists() and widget.winfo_exists()):
+            return
+        scroll_frame.update_idletasks()
+        canvas.update_idletasks()
+        total_h = max(1, scroll_frame.winfo_reqheight())
+        canvas_h = max(1, canvas.winfo_height())
+        if total_h <= canvas_h:
+            canvas.yview_moveto(0.0)
+            return
+        wy = widget.winfo_y()
+        wh = widget.winfo_height()
+        top_frac, bot_frac = canvas.yview()
+        vis_top = top_frac * total_h
+        vis_bot = bot_frac * total_h
+        if wy - pad < vis_top:
+            canvas.yview_moveto(max(0.0, float(wy - pad) / total_h))
+        elif wy + wh + pad > vis_bot:
+            canvas.yview_moveto(min(1.0, float(wy + wh + pad - canvas_h) / total_h))
+    except Exception:
+        pass
+
+
+def ensure_expanded_group_visible(canvas, scroll_frame, header_widget, group_rows=(), pad=10):
+    """Khi bung một nhóm, đưa khung nhìn tham chiếu ngay tới tiêu đề nhóm và các máy bên trong nhóm đó."""
+    try:
+        if not (canvas and scroll_frame and header_widget):
+            return
+        if not (canvas.winfo_exists() and scroll_frame.winfo_exists() and header_widget.winfo_exists()):
+            return
+        scroll_frame.update_idletasks()
+        canvas.update_idletasks()
+        req_h = max(1, scroll_frame.winfo_reqheight())
+        canv_w = max(1, canvas.winfo_width())
+        canv_h = max(1, canvas.winfo_height())
+        canvas.configure(scrollregion=(0, 0, canv_w, max(req_h, canv_h)))
+        if req_h <= canv_h:
+            canvas.yview_moveto(0.0)
+            return
+
+        hdr_top = header_widget.winfo_y()
+        grp_bot = hdr_top + header_widget.winfo_height()
+        for r in group_rows or ():
+            if r is not None and r.winfo_exists() and r.winfo_ismapped():
+                grp_bot = max(grp_bot, r.winfo_y() + r.winfo_height())
+
+        top_frac = canvas.yview()[0]
+        vis_top = top_frac * req_h
+        vis_bot = vis_top + canv_h
+        block_h = (grp_bot - hdr_top) + pad * 2
+
+        if block_h >= canv_h:
+            target_px = hdr_top - pad
+        elif hdr_top - pad < vis_top:
+            target_px = hdr_top - pad
+        elif grp_bot + pad > vis_bot:
+            target_px = grp_bot + pad - canv_h
+        else:
+            return
+
+        max_px = max(0, req_h - canv_h)
+        target_px = max(0, min(max_px, target_px))
+        canvas.yview_moveto(float(target_px) / float(req_h))
+    except Exception:
+        pass
+
+
+def _is_widget_focusable_now(w):
+    try:
+        if w is None or not w.winfo_exists() or not w.winfo_ismapped():
+            return False
+        st = str(w.cget("state"))
+        if st == "disabled":
+            return False
+    except Exception:
+        pass
+    try:
+        tf = str(w.cget("takefocus"))
+        if tf == "0":
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def enhance_dialog_controls(container, accent_color=None):
+    """Tự động gắn hiệu ứng focus rõ nét và phím Enter cho Button/Entry/Checkbutton bên trong container."""
+    found = []
+
+    def _walk(w):
+        for ch in w.winfo_children():
+            if getattr(ch, "_focus_strip", False):
+                continue
+            if isinstance(ch, (tk.Button, ttk.Button)):
+                if isinstance(ch, tk.Button):
+                    attach_focus_ring(ch, thickness=2)
+                def _btn_ret(e, b=ch):
+                    try:
+                        if str(b.cget("state")) != "disabled":
+                            b.invoke()
+                    except Exception:
+                        pass
+                    return "break"
+                ch.bind("<Return>", _btn_ret)
+                ch.bind("<KP_Enter>", _btn_ret)
+                found.append(ch)
+            elif isinstance(ch, (tk.Checkbutton, ttk.Checkbutton, tk.Radiobutton, ttk.Radiobutton)):
+                if isinstance(ch, (tk.Checkbutton, tk.Radiobutton)):
+                    attach_focus_ring(ch, thickness=1)
+                found.append(ch)
+            elif isinstance(ch, (tk.Entry, ttk.Entry)):
+                if isinstance(ch, tk.Entry):
+                    try:
+                        bd_val = int(float(ch.cget("bd")))
+                        ht_val = int(float(ch.cget("highlightthickness")))
+                        ebg = ch.cget("bg")
+                        fcol = accent_color or _pick_focus_border_color(ch, ebg)
+                        if str(ch.cget("relief")) == "flat" and ht_val == 0 and bd_val >= 2:
+                            ch.configure(
+                                bd=max(1, bd_val - 1),
+                                highlightthickness=1,
+                                highlightbackground=ebg,
+                                highlightcolor=fcol,
+                            )
+                    except Exception:
+                        pass
+                found.append(ch)
+            elif getattr(ch, "_is_kb_focusable", False):
+                found.append(ch)
+                continue
+            _walk(ch)
+
+    try:
+        _walk(container)
+    except Exception:
+        pass
+    return found
+
+
+def setup_dialog_keyboard(
+    dialog,
+    on_enter=None,
+    on_escape=None,
+    default_focus=None,
+    parent=None,
+    restore_focus_to=None,
+    nav_widgets=None,
+    accent_color=None,
+    enable_up_down=True,
+    enable_left_right=True,
+):
+    """Thiết lập đầy đủ điều hướng bàn phím (Enter, Esc, Tab, Up/Down, Left/Right) và hoàn trả focus khi đóng dialog."""
+    if dialog is None:
+        return
+
+    if parent is None:
+        try:
+            p_name = dialog.winfo_parent()
+            if p_name:
+                parent = dialog.nametowidget(p_name)
+        except Exception:
+            parent = None
+
+    prev_focus = restore_focus_to
+    if prev_focus is None and parent is not None:
+        try:
+            pf = parent.focus_get()
+            if pf is not None and str(pf).startswith(str(parent)):
+                prev_focus = pf
+        except Exception:
+            prev_focus = None
+
+    discovered = enhance_dialog_controls(dialog, accent_color=accent_color)
+
+    def _get_controls():
+        src = nav_widgets if nav_widgets is not None else discovered
+        return [w for w in src if _is_widget_focusable_now(w)]
+
+    def _focus_widget(target):
+        try:
+            if target is None or not target.winfo_exists():
+                return
+            target.focus_set()
+        except Exception:
+            pass
+
+    def _move_focus(delta):
+        ctrls = _get_controls()
+        if not ctrls:
+            return "break"
+        cur = None
+        try:
+            cur = dialog.focus_get()
+        except Exception:
+            pass
+        if cur in ctrls:
+            idx = (ctrls.index(cur) + delta) % len(ctrls)
+        else:
+            idx = 0 if delta > 0 else len(ctrls) - 1
+        _focus_widget(ctrls[idx])
+        return "break"
+
+    def _handle_return(event):
+        w = None
+        try:
+            w = dialog.focus_get()
+        except Exception:
+            pass
+        if w is not None:
+            if isinstance(w, (tk.Button, ttk.Button)):
+                try:
+                    if str(w.cget("state")) != "disabled":
+                        w.invoke()
+                except Exception:
+                    pass
+                return "break"
+            kb_inv = getattr(w, "_kb_invoke", None)
+            if callable(kb_inv):
+                kb_inv(event)
+                return "break"
+            if isinstance(w, tk.Text):
+                try:
+                    if str(w.cget("takefocus")) != "0":
+                        return None
+                except Exception:
+                    return None
+        if callable(on_enter):
+            on_enter()
+            return "break"
+        return None
+
+    def _handle_escape(_event):
+        if callable(on_escape):
+            on_escape()
+            return "break"
+        return None
+
+    def _handle_up(event):
+        if not enable_up_down:
+            return None
+        w = event.widget
+        if isinstance(w, tk.Text):
+            try:
+                if str(w.cget("takefocus")) != "0":
+                    return None
+            except Exception:
+                return None
+        return _move_focus(-1)
+
+    def _handle_down(event):
+        if not enable_up_down:
+            return None
+        w = event.widget
+        if isinstance(w, tk.Text):
+            try:
+                if str(w.cget("takefocus")) != "0":
+                    return None
+            except Exception:
+                return None
+        return _move_focus(1)
+
+    def _handle_left(event):
+        if not enable_left_right:
+            return None
+        w = event.widget
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Text)):
+            return None
+        return _move_focus(-1)
+
+    def _handle_right(event):
+        if not enable_left_right:
+            return None
+        w = event.widget
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Text)):
+            return None
+        return _move_focus(1)
+
+    if on_enter is not None or discovered:
+        dialog.bind("<Return>", _handle_return)
+        dialog.bind("<KP_Enter>", _handle_return)
+    if on_escape is not None:
+        dialog.bind("<Escape>", _handle_escape)
+    if enable_up_down:
+        dialog.bind("<Up>", _handle_up)
+        dialog.bind("<Down>", _handle_down)
+    if enable_left_right:
+        dialog.bind("<Left>", _handle_left)
+        dialog.bind("<Right>", _handle_right)
+
+    def _restore_parent_focus(_event=None):
+        if parent is None:
+            return
+        def _do_restore():
+            try:
+                if not parent.winfo_exists() or parent.state() == "withdrawn":
+                    return
+                parent.lift()
+                cand = prev_focus or getattr(parent, "_default_kb_focus", None)
+                if cand is not None and cand.winfo_exists():
+                    cand.focus_set()
+                else:
+                    parent.focus_force()
+            except Exception:
+                pass
+        try:
+            parent.after(15, _do_restore)
+        except Exception:
+            pass
+
+    dialog.bind("<Destroy>", lambda e: _restore_parent_focus(e) if e.widget is dialog else None, add="+")
+
+    target_init = default_focus
+    if target_init is None and discovered:
+        target_init = discovered[0]
+    dialog._default_kb_focus = target_init
+
+    def _apply_initial_focus():
+        try:
+            if not dialog.winfo_exists():
+                return
+            dialog.lift()
+            if target_init is not None and target_init.winfo_exists():
+                target_init.focus_set()
+            else:
+                dialog.focus_force()
+        except Exception:
+            pass
+
+    _apply_initial_focus()
+    try:
+        dialog.after(35, _apply_initial_focus)
+    except Exception:
+        pass
+
+
+def setup_panel_keyboard_nav(root_win, ordered_widgets, default_focus=None):
+    """Điều hướng phím mũi tên Lên/Xuống/Trái/Phải và Tab mượt mà cho các ô và nút trên cửa sổ chính."""
+    for w in ordered_widgets:
+        if isinstance(w, (tk.Entry, tk.Button, tk.Checkbutton)):
+            if isinstance(w, tk.Button):
+                attach_focus_ring(w, thickness=2)
+            elif isinstance(w, tk.Checkbutton):
+                attach_focus_ring(w, thickness=1)
+
+    def _avail():
+        return [w for w in ordered_widgets if _is_widget_focusable_now(w)]
+
+    def _step(cur_w, delta):
+        lst = _avail()
+        if not lst:
+            return "break"
+        idx = (lst.index(cur_w) + delta) % len(lst) if cur_w in lst else (0 if delta > 0 else len(lst) - 1)
+        try:
+            lst[idx].focus_set()
+        except Exception:
+            pass
+        return "break"
+
+    for w in ordered_widgets:
+        try:
+            w.bind("<Down>", lambda e, cw=w: _step(cw, 1))
+            w.bind("<Up>", lambda e, cw=w: _step(cw, -1))
+            w.bind("<Tab>", lambda e, cw=w: _step(cw, 1))
+            w.bind("<Shift-Tab>", lambda e, cw=w: _step(cw, -1))
+            if sys.platform != "win32":
+                w.bind("<ISO_Left_Tab>", lambda e, cw=w: _step(cw, -1))
+            if not isinstance(w, (tk.Entry, ttk.Entry)):
+                w.bind("<Right>", lambda e, cw=w: _step(cw, 1))
+                w.bind("<Left>", lambda e, cw=w: _step(cw, -1))
+        except Exception:
+            pass
+
+    init_w = default_focus or (ordered_widgets[0] if ordered_widgets else None)
+    if init_w is not None:
+        root_win._default_kb_focus = init_w
+        try:
+            root_win.after(60, lambda: init_w.focus_set() if init_w.winfo_exists() else None)
+        except Exception:
+            pass
+
+
+def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
+    """Làm tối dòng máy tính OFFLINE để phân biệt trực quan (theo mọi giao diện),
+    đồng thời bảo toàn màu highlight nếu dòng đang được chọn bằng bàn phím.
     """
     try:
         if row_root is None or not row_root.winfo_exists():
             return
+        row_root._row_is_online = is_online
+        row_root._row_base_bg = base_bg
+        if fg_names:
+            row_root._row_fg_names = fg_names
+        else:
+            fg_names = getattr(row_root, "_row_fg_names", ())
+
         off_bg = _blend_hex(row_root, base_bg, "#000000", 0.22)
-        want_off = (is_online is False)
-        target_bg = off_bg if want_off else base_bg
-        base_rgb = row_root.winfo_rgb(base_bg)
-        off_rgb = row_root.winfo_rgb(off_bg)
+        sel_bg = getattr(row_root, "_row_sel_bg", None)
+        is_sel = bool(getattr(row_root, "_kb_selected", False)) and bool(sel_bg)
+
+        want_off = (is_online is False) and not is_sel
+        target_bg = sel_bg if is_sel else (off_bg if want_off else base_bg)
+
+        recognized_rgbs = {row_root.winfo_rgb(base_bg), row_root.winfo_rgb(off_bg)}
+        if sel_bg:
+            try:
+                recognized_rgbs.add(row_root.winfo_rgb(sel_bg))
+            except Exception:
+                pass
+
         fg_rgbs = set()
         for n in fg_names:
             try:
@@ -55,12 +600,14 @@ def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
                 pass
 
         def walk(w):
+            if getattr(w, "_focus_strip", False):
+                return
             try:
                 cur_bg = w.cget("bg")
                 cur_rgb = w.winfo_rgb(cur_bg)
             except Exception:
                 cur_bg, cur_rgb = None, None
-            if cur_rgb is not None and cur_rgb in (base_rgb, off_rgb):
+            if cur_rgb is not None and cur_rgb in recognized_rgbs:
                 try:
                     w.config(bg=target_bg)
                 except Exception:
@@ -79,6 +626,67 @@ def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
                 walk(ch)
 
         walk(row_root)
+    except Exception:
+        pass
+
+
+def set_row_selected(row_root, is_selected, is_online=None, base_bg="#2A2A35", accent_color="#00ADB5", fg_names=()):
+    """Bật/tắt highlight trực quan cho một dòng máy tính hoặc tiêu đề nhóm khi điều hướng bằng phím mũi tên."""
+    try:
+        if row_root is None or not row_root.winfo_exists():
+            return
+        row_root._kb_selected = bool(is_selected)
+
+        if getattr(row_root, "is_group_header", False):
+            orig_bg = getattr(row_root, "_orig_hdr_bg", None)
+            if orig_bg is None:
+                orig_bg = row_root.cget("bg")
+                row_root._orig_hdr_bg = orig_bg
+            orig_fg = getattr(row_root, "_orig_hdr_fg", None)
+            if orig_fg is None:
+                orig_fg = row_root.cget("fg")
+                row_root._orig_hdr_fg = orig_fg
+            if is_selected:
+                sel_hdr_bg = _blend_hex(row_root, orig_bg, accent_color, 0.25)
+                row_root.config(bg=sel_hdr_bg, fg=accent_color)
+            else:
+                row_root.config(bg=orig_bg, fg=orig_fg)
+        else:
+            lum = _color_luminance(row_root, base_bg)
+            if lum > 150:
+                tinted = _blend_hex(row_root, base_bg, accent_color, 0.30)
+                sel_bg = _blend_hex(row_root, tinted, "#000000", 0.10)
+            else:
+                sel_bg = _blend_hex(row_root, base_bg, accent_color, 0.32)
+            row_root._row_sel_bg = sel_bg
+
+            eff_online = is_online if is_online is not None else getattr(row_root, "_row_is_online", True)
+            apply_row_online_state(row_root, eff_online, base_bg, fg_names)
+
+        strips = getattr(row_root, "_sel_strips", None)
+        if is_selected:
+            if not strips:
+                strips = []
+                for _ in range(4):
+                    s = tk.Frame(row_root, bg=accent_color, bd=0, highlightthickness=0, takefocus=0)
+                    s._focus_strip = True
+                    strips.append(s)
+                row_root._sel_strips = strips
+            s_top, s_bot, s_left, s_right = strips
+            for s in strips:
+                s.config(bg=accent_color)
+            s_top.place(relx=0.0, rely=0.0, relwidth=1.0, height=2)
+            s_bot.place(relx=0.0, rely=1.0, anchor="sw", relwidth=1.0, height=2)
+            s_left.place(relx=0.0, rely=0.0, relheight=1.0, width=4)
+            s_right.place(relx=1.0, rely=0.0, anchor="ne", relheight=1.0, width=2)
+            for s in strips:
+                s.lift()
+        elif strips:
+            for s in strips:
+                try:
+                    s.place_forget()
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -233,28 +841,50 @@ class ClassicCopyDialog(tk.Toplevel):
             normal_bg = "#FFFFFF"
             hover_bg = "#E5F1FB"
             normal_border = "#FFFFFF"
-            hover_border = "#B8D6F3"
+            hover_border = "#0066CC"
             
-            frame.configure(background=normal_bg, highlightbackground=normal_border, highlightthickness=1, bd=0)
-            
-            def on_enter(event):
-                frame.configure(background=hover_bg, highlightbackground=hover_border)
+            frame.configure(background=normal_bg, highlightbackground=normal_border, highlightcolor=hover_border, highlightthickness=1, bd=0, takefocus=1)
+            frame._is_kb_focusable = True
+
+            def _set_highlight(active):
+                bg_c = hover_bg if active else normal_bg
+                bd_c = hover_border if active else normal_border
+                frame.configure(background=bg_c, highlightbackground=bd_c)
                 for child in get_all_children(frame):
-                    try: child.configure(background=hover_bg)
-                    except: pass
+                    if child is not frame:
+                        try: child.configure(background=bg_c)
+                        except: pass
+
+            def on_enter(event):
+                _set_highlight(True)
                     
             def on_leave(event):
                 x, y = frame.winfo_pointerx() - frame.winfo_rootx(), frame.winfo_pointery() - frame.winfo_rooty()
                 if x < 0 or x >= frame.winfo_width() or y < 0 or y >= frame.winfo_height():
-                    frame.configure(background=normal_bg, highlightbackground=normal_border)
-                    for child in get_all_children(frame):
-                        try: child.configure(background=normal_bg)
-                        except: pass
+                    has_focus = False
+                    try:
+                        has_focus = (self.focus_get() is frame)
+                    except Exception:
+                        pass
+                    if not has_focus:
+                        _set_highlight(False)
                         
             def on_click(event):
                 if not getattr(self, "_clicks_armed", False):
                     return "break"
                 self._finish(action_val)
+
+            def on_kb_invoke(_event=None):
+                self._clicks_armed = True
+                self._finish(action_val)
+                return "break"
+
+            frame._kb_invoke = on_kb_invoke
+            frame.bind("<FocusIn>", lambda e: _set_highlight(True) if e.widget is frame else None)
+            frame.bind("<FocusOut>", lambda e: _set_highlight(False) if e.widget is frame else None)
+            frame.bind("<Return>", on_kb_invoke)
+            frame.bind("<KP_Enter>", on_kb_invoke)
+            frame.bind("<space>", on_kb_invoke)
                 
             for w in get_all_children(frame):
                 w.bind("<Enter>", on_enter)
@@ -383,10 +1013,24 @@ class ClassicCopyDialog(tk.Toplevel):
             if not getattr(self, "_clicks_armed", False):
                 return "break"
             self.on_cancel()
-        btn_cancel.configure(command=lambda: None)
+        btn_cancel.configure(command=self.on_cancel)
+        btn_cancel.bind("<Button-1>", lambda e: "break" if not getattr(self, "_clicks_armed", False) else None)
         btn_cancel.bind("<ButtonRelease-1>", _cancel_click)
         
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+        nav_items = [link1, link2]
+        if has_multiple:
+            nav_items.append(chk)
+        nav_items.append(btn_cancel)
+        setup_dialog_keyboard(
+            self,
+            on_enter=lambda: link1._kb_invoke(),
+            on_escape=self.on_cancel,
+            default_focus=link1,
+            parent=parent,
+            nav_widgets=nav_items,
+            accent_color="#0066CC",
+        )
 
         # Chiều cao theo nội dung (DPI 125%/150% làm 520x420 cắt mất nút Hủy).
         self.update_idletasks()
@@ -629,6 +1273,15 @@ class ConfirmDialog(tk.Toplevel):
         btn_no.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
         
         self.protocol("WM_DELETE_WINDOW", _no)
+        setup_dialog_keyboard(
+            self,
+            on_enter=_yes,
+            on_escape=_no,
+            default_focus=btn_yes,
+            parent=parent,
+            nav_widgets=[btn_yes, btn_no],
+            accent_color="#00ADB5",
+        )
         
         self.update_idletasks()
         dialog_w = 420
@@ -715,6 +1368,7 @@ class InfoDialog(tk.Toplevel):
         )
         btn_ok.pack(side=tk.RIGHT if not show_cancel else tk.LEFT, fill=tk.X if show_cancel else tk.NONE, expand=show_cancel, padx=(0, 5) if show_cancel else 0)
         
+        nav_btns = [btn_ok]
         if show_cancel:
             if cancel_text is None:
                 cancel_text = _("Hủy (Cancel)")
@@ -724,17 +1378,20 @@ class InfoDialog(tk.Toplevel):
                 relief=tk.FLAT, bd=0, padx=15, pady=6, cursor="hand2", command=_cancel
             )
             btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+            nav_btns.append(btn_cancel)
             self.protocol("WM_DELETE_WINDOW", _cancel)
         else:
             self.protocol("WM_DELETE_WINDOW", _ok)
 
-        self.bind("<Escape>", lambda e: _cancel() if show_cancel else _ok())
-        self.bind("<Return>", lambda e: _ok())
-        self.bind("<KP_Enter>", lambda e: _ok())
-        try:
-            btn_ok.focus_set()
-        except Exception:
-            pass
+        setup_dialog_keyboard(
+            self,
+            on_enter=_ok,
+            on_escape=_cancel if show_cancel else _ok,
+            default_focus=btn_ok,
+            parent=parent,
+            nav_widgets=nav_btns,
+            accent_color="#00ADB5",
+        )
 
         if auto_close_sec is not None and auto_close_sec > 0:
             def update_countdown(remaining):

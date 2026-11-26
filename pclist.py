@@ -12,7 +12,15 @@ from tkinter import messagebox
 
 from core.i18n import _
 from core.host import encrypt_text, decrypt_text
-from gui.components import InfoDialog
+from gui.components import (
+    InfoDialog,
+    attach_focus_ring,
+    enhance_dialog_controls,
+    ensure_canvas_widget_visible,
+    ensure_expanded_group_visible,
+    set_row_selected,
+    setup_dialog_keyboard,
+)
 from network.socket_utils import APP_KEY, send_msg
 
 if sys.platform == "darwin":
@@ -461,6 +469,8 @@ class SavedListMixin:
                         self.saved_computers_dialog.attributes("-alpha", 1.0)
                         self.saved_computers_dialog.lift()
                         self.saved_computers_dialog.focus_force()
+                        if hasattr(self.saved_computers_dialog, "_focus_list_initial"):
+                            self.saved_computers_dialog._focus_list_initial()
                     self._sync_saved_status_ui_flags()
                 self.after(50, _show_reopen)
                 self._sync_saved_status_ui_flags()
@@ -468,6 +478,8 @@ class SavedListMixin:
                 return
             self.saved_computers_dialog.lift()
             self.saved_computers_dialog.focus_force()
+            if hasattr(self.saved_computers_dialog, "_focus_list_initial"):
+                self.saved_computers_dialog._focus_list_initial()
             self._sync_saved_status_ui_flags()
             self._wake_saved_status_workers()
             return
@@ -511,11 +523,13 @@ class SavedListMixin:
         entry_search.configure(fg=self.text_gray)
         
         def on_focus_in(event):
+            search_inner.configure(highlightbackground=self.btn_color)
             if entry_search.get() == _("Tìm kiếm theo tên hoặc ID..."):
                 entry_search.delete(0, tk.END)
                 entry_search.configure(fg=self.text_white)
                 
         def on_focus_out(event):
+            search_inner.configure(highlightbackground=self.divider_color)
             if entry_search.get() == "":
                 entry_search.insert(0, _("Tìm kiếm theo tên hoặc ID..."))
                 entry_search.configure(fg=self.text_gray)
@@ -544,16 +558,26 @@ class SavedListMixin:
             self.save_saved_computers(lst)
 
         # Container for the list (Sẽ pack ở cuối cùng sau khi đã pack bottom_frame để tránh bị đè/cắt nút)
-        list_container = tk.Frame(dialog, bg=self.card_color)
+        list_container = tk.Frame(
+            dialog, bg=self.card_color,
+            highlightthickness=2, highlightbackground=self.bg_color, highlightcolor=self.btn_color
+        )
 
         # Canvas & Scrollbar for scrollable area
-        canvas = tk.Canvas(list_container, bg=self.card_color, highlightthickness=0)
-        scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL, command=canvas.yview)
+        canvas = tk.Canvas(list_container, bg=self.card_color, highlightthickness=0, takefocus=1)
+        scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL, command=canvas.yview, takefocus=0)
         scrollable_frame = tk.Frame(canvas, bg=self.card_color)
+        dialog._kb_selected = None
+        dialog._default_kb_focus = canvas
+
+        canvas.bind("<FocusIn>", lambda e: list_container.config(highlightbackground=self.btn_color) if e.widget is canvas else None)
+        canvas.bind("<FocusOut>", lambda e: list_container.config(highlightbackground=self.bg_color) if e.widget is canvas else None)
 
         scrollable_frame.bind(
             "<Configure>",
-            lambda e: None if getattr(dialog, "_building_list", False) else canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: None if getattr(dialog, "_building_list", False) else canvas.configure(
+                scrollregion=(0, 0, max(1, canvas.winfo_width()), max(scrollable_frame.winfo_reqheight(), canvas.winfo_height()))
+            )
         )
 
         canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
@@ -615,10 +639,31 @@ class SavedListMixin:
                 pass
             self._sync_saved_status_ui_flags()
             self._wake_saved_status_workers()
+            try:
+                if self.winfo_exists() and self.state() != "withdrawn":
+                    self.lift()
+                    def _ret_focus():
+                        if self.winfo_exists() and self.state() != "withdrawn":
+                            cand = getattr(self, "_default_kb_focus", None)
+                            if cand is not None and cand.winfo_exists():
+                                cand.focus_set()
+                            else:
+                                self.focus_force()
+                    self.after(20, _ret_focus)
+            except Exception:
+                pass
             
         dialog.protocol("WM_DELETE_WINDOW", on_dialog_destroy)
 
         def connect_computer(item):
+            try:
+                dialog._kb_selected = ("comp", str(item.get("id") or "").replace(" ", ""), str(item.get("name") or ""))
+                if hasattr(dialog, "_sync_saved_selection"):
+                    dialog._sync_saved_selection(ensure_visible=False)
+                if canvas.winfo_exists():
+                    canvas.focus_set()
+            except Exception:
+                pass
             now = time.time()
             if getattr(self, '_last_saved_connect_time', 0) > now - 0.8:
                 return
@@ -638,6 +683,19 @@ class SavedListMixin:
 
         def delete_computer(item):
             if self.show_custom_question(_("Xóa máy tính"), _("Bạn có chắc muốn xóa") + f" '{item['name']}' " + _("khỏi danh sách?"), parent=dialog):
+                try:
+                    vis = _get_visible_list_items()
+                    del_clean = item["id"].replace(" ", "")
+                    del_idx = next(
+                        (i for i, w in enumerate(vis) if hasattr(w, "comp_id") and w.comp_id == del_clean and getattr(w, "comp_name", "") == item["name"]),
+                        None,
+                    )
+                    if del_idx is not None and len(vis) > 1:
+                        nxt_w = vis[del_idx + 1] if del_idx + 1 < len(vis) else vis[del_idx - 1]
+                        dialog._kb_selected = _item_key(nxt_w)
+                except Exception:
+                    pass
+                dialog._pending_focus_selected = True
                 computers = load_computers()
                 computers = [c for c in computers if not (c["id"] == item["id"] and c["name"] == item["name"])]
                 save_computers(computers)
@@ -719,15 +777,15 @@ class SavedListMixin:
                     pass
                 self.auto_scroll_job = None
                 
-            try:
-                if scrollable_frame.winfo_exists():
-                    for c in scrollable_frame.winfo_children():
-                        if getattr(c, 'is_group_header', False):
-                            c["fg"] = self.text_gray
-            except Exception:
-                pass
-                
             was_dragging = getattr(self, '_is_dragging', False)
+            if was_dragging:
+                try:
+                    if scrollable_frame.winfo_exists():
+                        for c in scrollable_frame.winfo_children():
+                            if getattr(c, 'is_group_header', False):
+                                c["fg"] = self.btn_color if getattr(c, '_kb_selected', False) else self.text_gray
+                except Exception:
+                    pass
             self._is_dragging = False
             drag_id = getattr(self, 'drag_card_id', None)
             comp_data = getattr(self, 'drag_comp_data', None)
@@ -772,6 +830,11 @@ class SavedListMixin:
                             updated = True
                         break
                 if updated:
+                    if target_group in getattr(self, "collapsed_groups", set()):
+                        self.collapsed_groups.discard(target_group)
+                        self.save_group_states_only()
+                    dialog._kb_selected = ("comp", drag_id)
+                    dialog._pending_focus_selected = True
                     save_computers(comps)
                     refresh_list()
 
@@ -812,6 +875,8 @@ class SavedListMixin:
                     if old_group_name in getattr(self, 'collapsed_groups', set()):
                         self.collapsed_groups.remove(old_group_name)
                         self.collapsed_groups.add(new_name)
+                    dialog._kb_selected = ("group", new_name)
+                    dialog._pending_focus_selected = True
                     refresh_list()
                 rn_win.destroy()
 
@@ -824,12 +889,86 @@ class SavedListMixin:
             btn_cancel = tk.Button(btn_frame, text=_("Hủy"), font=(APP_FONT_NAME, 9, "bold"), fg=self.btn_cancel_fg, bg=self.btn_cancel_bg, activebackground="#2A2A35", relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=rn_win.destroy)
             btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
-        def reorder_list():
+            setup_dialog_keyboard(
+                rn_win,
+                on_enter=do_rename,
+                on_escape=rn_win.destroy,
+                default_focus=entry,
+                parent=dialog,
+                restore_focus_to=canvas,
+                accent_color=self.btn_color,
+            )
+
+        def _get_visible_list_items():
+            if not scrollable_frame.winfo_exists():
+                return []
+            return [
+                w for w in scrollable_frame.pack_slaves()
+                if getattr(w, "is_group_header", False) or hasattr(w, "comp_id")
+            ]
+
+        def _item_key(w):
+            if getattr(w, "is_group_header", False):
+                return ("group", getattr(w, "group_name", ""))
+            return ("comp", getattr(w, "comp_id", ""), getattr(w, "comp_name", ""))
+
+        def _sync_selection_highlight(ensure_visible=False):
+            if not scrollable_frame.winfo_exists():
+                return None
+            items = _get_visible_list_items()
+            sel_key = getattr(dialog, "_kb_selected", None)
+            sel_w = None
+            if sel_key is not None:
+                for w in items:
+                    if _item_key(w) == sel_key:
+                        sel_w = w
+                        break
+                if sel_w is None and sel_key[0] == "comp":
+                    for w in items:
+                        if hasattr(w, "comp_id") and w.comp_id == sel_key[1]:
+                            sel_w = w
+                            break
+            if sel_w is None and items:
+                sel_w = next((w for w in items if hasattr(w, "comp_id")), items[0])
+            dialog._kb_selected = _item_key(sel_w) if sel_w is not None else None
+
+            for ch in scrollable_frame.winfo_children():
+                if getattr(ch, "is_group_header", False) or hasattr(ch, "comp_id"):
+                    is_sel = (ch is sel_w)
+                    if is_sel or getattr(ch, "_kb_selected", False):
+                        set_row_selected(
+                            ch,
+                            is_sel,
+                            base_bg=self.card_color,
+                            accent_color=self.btn_color,
+                            fg_names=(self.text_white, self.text_gray),
+                        )
+            if ensure_visible and sel_w is not None:
+                ensure_canvas_widget_visible(canvas, scrollable_frame, sel_w)
+            return sel_w
+
+        def _select_widget(target_w, ensure_visible=True):
+            if target_w is None or not target_w.winfo_exists():
+                return
+            dialog._kb_selected = _item_key(target_w)
+            _sync_selection_highlight(ensure_visible=ensure_visible)
+
+        dialog._sync_saved_selection = _sync_selection_highlight
+
+        def reorder_list(preserve_yview=None, preserve_top_px=None, anchor_group=None):
             if not scrollable_frame.winfo_exists(): return
             children = scrollable_frame.winfo_children()
             headers = [c for c in children if getattr(c, 'is_group_header', False)]
             cards = [c for c in children if hasattr(c, 'comp_id')]
             if not cards and not headers: return
+
+            if preserve_top_px is None and preserve_yview is None:
+                try:
+                    old_req_h = scrollable_frame.winfo_reqheight()
+                    old_canv_h = canvas.winfo_height()
+                    preserve_top_px = (canvas.yview()[0] * old_req_h) if (old_req_h > old_canv_h > 1) else 0.0
+                except Exception:
+                    preserve_top_px = None
             
             def get_is_online(c):
                 known = getattr(self, "_status_online", {}) or {}
@@ -844,12 +983,13 @@ class SavedListMixin:
                         return widgets[0].cget("fg") == "#00F5D4"
                 return False
 
+            grouped_cards = {}
+            header_map = {}
             dialog._building_list = True
             try:
                 for c in children:
                     c.pack_forget()
 
-                grouped_cards = {}
                 for c in cards:
                     grp = getattr(c, 'comp_group', '')
                     if grp not in grouped_cards:
@@ -874,9 +1014,53 @@ class SavedListMixin:
             finally:
                 dialog._building_list = False
                 try:
-                    canvas.configure(scrollregion=canvas.bbox("all"))
+                    scrollable_frame.update_idletasks()
+                    canvas.update_idletasks()
+                    req_h = max(1, scrollable_frame.winfo_reqheight())
+                    canv_w = max(1, canvas.winfo_width())
+                    canv_h = max(1, canvas.winfo_height())
+                    canvas.configure(scrollregion=(0, 0, canv_w, max(req_h, canv_h)))
+                    if req_h > canv_h > 1:
+                        if preserve_top_px is not None:
+                            clamped_px = max(0.0, min(float(req_h - canv_h), float(preserve_top_px)))
+                            canvas.yview_moveto(clamped_px / float(req_h))
+                        elif preserve_yview is not None:
+                            canvas.yview_moveto(preserve_yview)
+                    else:
+                        canvas.yview_moveto(0.0)
                 except Exception:
                     pass
+
+                if anchor_group is not None and anchor_group in header_map:
+                    hdr_anchor = header_map[anchor_group]
+                    if anchor_group not in self.collapsed_groups:
+                        grp_rows_anchor = grouped_cards.get(anchor_group, [])
+                        ensure_expanded_group_visible(canvas, scrollable_frame, hdr_anchor, grp_rows_anchor, pad=10)
+                    else:
+                        ensure_canvas_widget_visible(canvas, scrollable_frame, hdr_anchor, pad=10)
+
+                need_focus = bool(getattr(dialog, "_pending_focus_selected", False))
+                if need_focus:
+                    dialog._pending_focus_selected = False
+                _sync_selection_highlight(ensure_visible=need_focus)
+                if need_focus or anchor_group is not None:
+                    try:
+                        canvas.focus_set()
+                        def _post_focus_anchor(ag=anchor_group, nf=need_focus):
+                            if not (dialog.winfo_exists() and canvas.winfo_exists() and scrollable_frame.winfo_exists()):
+                                return
+                            canvas.focus_set()
+                            if ag is not None and ag in header_map and header_map[ag].winfo_exists():
+                                if ag not in self.collapsed_groups:
+                                    ensure_expanded_group_visible(canvas, scrollable_frame, header_map[ag], grouped_cards.get(ag, []), pad=10)
+                                else:
+                                    ensure_canvas_widget_visible(canvas, scrollable_frame, header_map[ag], pad=10)
+                                _sync_selection_highlight(ensure_visible=False)
+                            elif nf:
+                                _sync_selection_highlight(ensure_visible=True)
+                        dialog.after(25, _post_focus_anchor)
+                    except Exception:
+                        pass
 
         def schedule_reorder():
             job = getattr(self, "_saved_list_reorder_job", None)
@@ -929,6 +1113,13 @@ class SavedListMixin:
                     if fg != "#8A8A9A":
                         current_online[cid] = (fg == "#00F5D4")
 
+            try:
+                old_req_h = scrollable_frame.winfo_reqheight()
+                old_canv_h = canvas.winfo_height()
+                saved_scroll_px = (canvas.yview()[0] * old_req_h) if (old_req_h > old_canv_h > 1) else 0.0
+            except Exception:
+                saved_scroll_px = 0.0
+
             dialog._building_list = True
             try:
                 for widget in scrollable_frame.winfo_children():
@@ -951,11 +1142,11 @@ class SavedListMixin:
                     icon = "▶" if grp in self.collapsed_groups else "▼"
                     header_text = f"{icon} {grp_display.upper()}"
                     
-                    header = tk.Label(scrollable_frame, text=header_text, font=(APP_FONT_NAME, 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, cursor="hand2")
+                    header = tk.Label(scrollable_frame, text=header_text, font=(APP_FONT_NAME, 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, padx=8, pady=4, cursor="hand2")
                     header.is_group_header = True
                     header.group_name = grp
                     
-                    def toggle_group(event, g=grp):
+                    def _toggle_group_by_name(g=grp, hdr_w=header):
                         if g in self.collapsed_groups:
                             self.collapsed_groups.remove(g)
                             just_expanded = True
@@ -964,8 +1155,10 @@ class SavedListMixin:
                             just_expanded = False
                         new_icon = "▶" if g in self.collapsed_groups else "▼"
                         g_display = g if g else _("Chưa phân nhóm")
-                        event.widget.config(text=f"{new_icon} {g_display.upper()}")
-                        reorder_list()
+                        if hdr_w.winfo_exists():
+                            hdr_w.config(text=f"{new_icon} {g_display.upper()}")
+                        dialog._kb_selected = ("group", g)
+                        reorder_list(anchor_group=g)
                         self.save_group_states_only()
                         self._sync_saved_status_ui_flags()
                         if just_expanded:
@@ -975,14 +1168,22 @@ class SavedListMixin:
                             self._status_fg_scan_ids = None
                             self._status_fg_scan_idx = 0
                             self._wake_saved_status_workers()
+
+                    def toggle_group(event, g=grp, hdr_w=header):
+                        canvas.focus_set()
+                        _toggle_group_by_name(g, hdr_w)
                         
+                    header._toggle_fn = _toggle_group_by_name
                     header.bind("<Button-1>", toggle_group)
                     header.bind("<ButtonRelease-1>", on_drop)
 
                     grp_context_menu = tk.Menu(header, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
                     grp_context_menu.add_command(label=_("Đổi tên nhóm"), command=lambda g=grp: rename_group_dialog(g))
+                    header._context_menu = grp_context_menu
 
-                    def show_grp_context(event, menu=grp_context_menu):
+                    def show_grp_context(event, menu=grp_context_menu, hdr_w=header):
+                        _select_widget(hdr_w, ensure_visible=False)
+                        canvas.focus_set()
                         menu.tk_popup(event.x_root, event.y_root)
 
                     header.bind("<ButtonRelease-3>", show_grp_context)
@@ -992,6 +1193,7 @@ class SavedListMixin:
                     card.comp_id = comp["id"].replace(" ", "")
                     card.comp_name = comp["name"]
                     card.comp_group = comp.get("group", "").strip()
+                    card.comp_data = comp
 
                     content_frame = tk.Frame(card, bg=self.card_color, pady=5, padx=12)
                     content_frame.pack(fill=tk.X)
@@ -1051,11 +1253,16 @@ class SavedListMixin:
                     context_menu.add_separator()
                     context_menu.add_command(label=_("Thay đổi thông tin"), command=lambda c=comp: self.open_edit_computer_dialog(c, dialog, refresh_list))
                     context_menu.add_command(label=_("Xóa máy tính"), command=lambda c=comp: delete_computer(c))
+                    card._context_menu = context_menu
 
-                    def show_context_menu(event, menu=context_menu):
+                    def show_context_menu(event, menu=context_menu, row_card=card):
+                        _select_widget(row_card, ensure_visible=False)
+                        canvas.focus_set()
                         menu.tk_popup(event.x_root, event.y_root)
                             
-                    def start_drag(event, c_id=clean_id, c_data=comp):
+                    def start_drag(event, c_id=clean_id, c_data=comp, row_card=card):
+                        _select_widget(row_card, ensure_visible=False)
+                        canvas.focus_set()
                         self.drag_card_id = c_id
                         self.drag_comp_data = c_data
                         self._drag_start_x = event.x_root
@@ -1063,9 +1270,9 @@ class SavedListMixin:
                         self._is_dragging = False
 
                     for w in [card, content_frame, separator, info_frame, dot_lbl, name_lbl, id_lbl]:
-                        w.bind("<Double-Button-1>", lambda e, c=comp: connect_computer(c))
+                        w.bind("<Double-Button-1>", lambda e, c=comp, rc=card: (_select_widget(rc, ensure_visible=False), connect_computer(c)))
                         w.bind("<ButtonRelease-3>", show_context_menu)
-                        w.bind("<ButtonPress-1>", lambda e, c_id=clean_id, c_data=comp: start_drag(e, c_id, c_data))
+                        w.bind("<ButtonPress-1>", start_drag)
                         w.bind("<B1-Motion>", on_drag_motion)
                         w.bind("<ButtonRelease-1>", on_drop)
                         try:
@@ -1087,7 +1294,7 @@ class SavedListMixin:
             finally:
                 dialog._building_list = False
                 
-            reorder_list()
+            reorder_list(preserve_top_px=saved_scroll_px)
 
         # Bottom buttons panel
         bottom_frame = tk.Frame(dialog, bg=self.bg_color)
@@ -1142,6 +1349,183 @@ class SavedListMixin:
         # Pack list_container sau cùng để lấp đầy phần diện tích còn lại ở giữa Search Bar và Bottom Buttons!
         list_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
 
+        enhance_dialog_controls(bottom_frame, accent_color=self.btn_color)
+
+        def _flush_pending_search():
+            job = getattr(dialog, "_search_job", None)
+            if job is not None:
+                try:
+                    dialog.after_cancel(job)
+                except Exception:
+                    pass
+                dialog._search_job = None
+                _refresh_list_inner()
+
+        def _move_list_selection(delta=0, to_edge=None):
+            _flush_pending_search()
+            items = _get_visible_list_items()
+            if not items:
+                canvas.focus_set()
+                return "break"
+            cur_w = _sync_selection_highlight(ensure_visible=False)
+            cur_idx = items.index(cur_w) if cur_w in items else 0
+            if to_edge == "first":
+                new_idx = 0
+            elif to_edge == "last":
+                new_idx = len(items) - 1
+            else:
+                new_idx = max(0, min(len(items) - 1, cur_idx + delta))
+            _select_widget(items[new_idx], ensure_visible=True)
+            canvas.focus_set()
+            return "break"
+
+        def _on_dialog_return(_event=None):
+            _flush_pending_search()
+            fw = None
+            try:
+                fw = dialog.focus_get()
+            except Exception:
+                pass
+            if isinstance(fw, tk.Button):
+                try:
+                    if str(fw.cget("state")) != "disabled":
+                        fw.invoke()
+                except Exception:
+                    pass
+                return "break"
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is not None:
+                if getattr(sel_w, "is_group_header", False):
+                    fn = getattr(sel_w, "_toggle_fn", None)
+                    if callable(fn):
+                        fn()
+                elif hasattr(sel_w, "comp_data"):
+                    connect_computer(sel_w.comp_data)
+            return "break"
+
+        tab_ring = [entry_search, btn_add, btn_refresh, btn_close, canvas]
+
+        def _cycle_tab(delta):
+            avail = []
+            for w in tab_ring:
+                try:
+                    if w.winfo_exists() and w.winfo_ismapped() and str(w.cget("state")) != "disabled":
+                        avail.append(w)
+                except Exception:
+                    if w.winfo_exists() and w.winfo_ismapped():
+                        avail.append(w)
+            if not avail:
+                return "break"
+            cur = None
+            try:
+                cur = dialog.focus_get()
+            except Exception:
+                pass
+            idx = (avail.index(cur) + delta) % len(avail) if cur in avail else (0 if delta > 0 else len(avail) - 1)
+            avail[idx].focus_set()
+            if avail[idx] is canvas:
+                _sync_selection_highlight(ensure_visible=True)
+            return "break"
+
+        def _on_left_right(delta, event):
+            w = event.widget
+            if w is entry_search:
+                return None
+            btns = [b for b in (btn_add, btn_refresh, btn_close) if b.winfo_exists() and str(b.cget("state")) != "disabled"]
+            if w in btns:
+                btns[(btns.index(w) + delta) % len(btns)].focus_set()
+                return "break"
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is not None:
+                if getattr(sel_w, "is_group_header", False):
+                    grp_n = getattr(sel_w, "group_name", "")
+                    is_col = grp_n in self.collapsed_groups
+                    if (delta > 0 and is_col) or (delta < 0 and not is_col):
+                        fn = getattr(sel_w, "_toggle_fn", None)
+                        if callable(fn):
+                            fn()
+                elif delta < 0 and hasattr(sel_w, "comp_group"):
+                    for it in _get_visible_list_items():
+                        if getattr(it, "is_group_header", False) and getattr(it, "group_name", None) == sel_w.comp_group:
+                            _select_widget(it, ensure_visible=True)
+                            break
+            return "break"
+
+        def _on_canvas_space(_event=None):
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is not None and getattr(sel_w, "is_group_header", False):
+                fn = getattr(sel_w, "_toggle_fn", None)
+                if callable(fn):
+                    fn()
+            return "break"
+
+        def _on_f2(_event=None):
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is None:
+                return "break"
+            if getattr(sel_w, "is_group_header", False):
+                rename_group_dialog(getattr(sel_w, "group_name", ""))
+            elif hasattr(sel_w, "comp_data"):
+                self.open_edit_computer_dialog(sel_w.comp_data, dialog, refresh_list)
+            return "break"
+
+        def _on_delete(event):
+            if event.widget is entry_search:
+                return None
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is not None and hasattr(sel_w, "comp_data"):
+                delete_computer(sel_w.comp_data)
+            return "break"
+
+        def _on_context_key(_event=None):
+            sel_w = _sync_selection_highlight(ensure_visible=True)
+            if sel_w is not None:
+                m = getattr(sel_w, "_context_menu", None)
+                if m is not None:
+                    rx = sel_w.winfo_rootx() + 40
+                    ry = sel_w.winfo_rooty() + max(8, sel_w.winfo_height() // 2)
+                    m.tk_popup(rx, ry)
+            return "break"
+
+        def _focus_search(_event=None):
+            entry_search.focus_set()
+            if entry_search.get() != _("Tìm kiếm theo tên hoặc ID..."):
+                entry_search.select_range(0, tk.END)
+            return "break"
+
+        dialog.bind("<Escape>", lambda e: (on_dialog_destroy(), "break")[1])
+        dialog.bind("<Return>", _on_dialog_return)
+        dialog.bind("<KP_Enter>", _on_dialog_return)
+        dialog.bind("<Up>", lambda e: _move_list_selection(-1))
+        dialog.bind("<Down>", lambda e: _move_list_selection(1))
+        dialog.bind("<Tab>", lambda e: _cycle_tab(1))
+        dialog.bind("<Shift-Tab>", lambda e: _cycle_tab(-1))
+        if sys.platform != "win32":
+            dialog.bind("<ISO_Left_Tab>", lambda e: _cycle_tab(-1))
+        dialog.bind("<Left>", lambda e: _on_left_right(-1, e))
+        dialog.bind("<Right>", lambda e: _on_left_right(1, e))
+        dialog.bind("<Delete>", _on_delete)
+        dialog.bind("<F2>", _on_f2)
+        dialog.bind("<App>", _on_context_key)
+        dialog.bind("<Shift-F10>", _on_context_key)
+        dialog.bind("<Control-f>", _focus_search)
+        dialog.bind("<Control-F>", _focus_search)
+
+        canvas.bind("<space>", _on_canvas_space)
+        canvas.bind("<Prior>", lambda e: _move_list_selection(-6))
+        canvas.bind("<Next>", lambda e: _move_list_selection(6))
+        canvas.bind("<Home>", lambda e: _move_list_selection(0, to_edge="first"))
+        canvas.bind("<End>", lambda e: _move_list_selection(0, to_edge="last"))
+
+        def _focus_list_initial():
+            try:
+                if dialog.winfo_exists():
+                    canvas.focus_set()
+                    _sync_selection_highlight(ensure_visible=True)
+            except Exception:
+                pass
+
+        dialog._focus_list_initial = _focus_list_initial
         dialog.refresh_list_func = refresh_list
         refresh_list()
 
@@ -1153,6 +1537,7 @@ class SavedListMixin:
                 dialog.attributes("-alpha", 1.0)
                 dialog.lift()
                 dialog.focus_force()
+                _focus_list_initial()
             self._sync_saved_status_ui_flags()
         dialog.after(50, _show_initial)
         self._sync_saved_status_ui_flags()
@@ -1297,6 +1682,13 @@ class SavedListMixin:
                     self._set_autofill_partner_pass(cpass)
                 else:
                     self.partner_pass_var.set(cpass)
+            if parent_win is not None and hasattr(parent_win, "_kb_selected"):
+                target_grp = cgroup if (not existing_indices or cgroup) else old_grp
+                if target_grp in getattr(self, "collapsed_groups", set()):
+                    self.collapsed_groups.discard(target_grp)
+                    self.save_group_states_only()
+                parent_win._kb_selected = ("comp", cid.replace(" ", ""), name)
+                parent_win._pending_focus_selected = True
             if on_save:
                 on_save()
             if not parent_win:
@@ -1319,6 +1711,17 @@ class SavedListMixin:
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=add_win.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+        setup_dialog_keyboard(
+            add_win,
+            on_enter=save_new,
+            on_escape=add_win.destroy,
+            default_focus=entry_name,
+            parent=parent,
+            restore_focus_to=getattr(parent, "_default_kb_focus", None),
+            nav_widgets=[entry_name, entry_comp_id, entry_comp_pass, entry_group, entry_mac, btn_save, btn_cancel],
+            accent_color=self.btn_color,
+        )
 
 
     def open_edit_computer_dialog(self, item, parent_win, on_save):
@@ -1443,6 +1846,12 @@ class SavedListMixin:
                         self._set_autofill_partner_pass(cpass)
                     else:
                         self.partner_pass_var.set(cpass)
+                if parent is not None and hasattr(parent, "_kb_selected"):
+                    if cgroup in getattr(self, "collapsed_groups", set()):
+                        self.collapsed_groups.discard(cgroup)
+                        self.save_group_states_only()
+                    parent._kb_selected = ("comp", new_id.replace(" ", ""), name)
+                    parent._pending_focus_selected = True
                 if on_save:
                     on_save()
                 edit_win.destroy()
@@ -1465,6 +1874,17 @@ class SavedListMixin:
             relief=tk.FLAT, bd=0, padx=15, pady=5, cursor="hand2", command=edit_win.destroy
         )
         btn_cancel.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+
+        setup_dialog_keyboard(
+            edit_win,
+            on_enter=save_edit,
+            on_escape=edit_win.destroy,
+            default_focus=entry_name,
+            parent=parent,
+            restore_focus_to=getattr(parent, "_default_kb_focus", None),
+            nav_widgets=[entry_name, entry_comp_id, entry_comp_pass, entry_group, entry_mac, btn_save, btn_cancel],
+            accent_color=self.btn_color,
+        )
 
 
     def load_saved_computers(self):
