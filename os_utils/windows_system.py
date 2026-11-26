@@ -203,7 +203,7 @@ def ensure_firewall_rule_native(rule_name, exe_path):
                 pass
 
 
-def kill_process_tree_native(pid=None, include_self=True):
+def kill_process_tree_native(pid=None, include_self=True, exclude_pids=()):
     """Kill cây tiến trình bằng psutil (TerminateProcess), không spawn taskkill/cmd.exe."""
     try:
         import os
@@ -217,8 +217,11 @@ def kill_process_tree_native(pid=None, include_self=True):
             children = parent.children(recursive=True)
         except Exception:
             children = []
+        skip = set(exclude_pids or ())
         for child in children:
             try:
+                if child.pid in skip:
+                    continue
                 child.kill()
             except Exception:
                 pass

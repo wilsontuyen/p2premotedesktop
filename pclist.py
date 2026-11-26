@@ -14,10 +14,13 @@ from core.i18n import _
 from core.host import encrypt_text, decrypt_text
 from gui.components import (
     InfoDialog,
+    _blend_hex,
+    apply_group_header_style,
     attach_focus_ring,
     enhance_dialog_controls,
     ensure_canvas_widget_visible,
     ensure_expanded_group_visible,
+    resolve_open_group_colors,
     set_row_selected,
     setup_dialog_keyboard,
 )
@@ -762,10 +765,15 @@ class SavedListMixin:
                 if scrollable_frame.winfo_exists():
                     for c in scrollable_frame.winfo_children():
                         if getattr(c, 'is_group_header', False):
+                            base_h_bg = getattr(c, "_base_hdr_bg", self.card_color)
+                            base_h_fg = getattr(c, "_base_hdr_fg", self.text_gray)
                             if target_group is not None and c.group_name == target_group:
-                                c["fg"] = self.btn_color
+                                if getattr(c, "_group_expanded", False):
+                                    c.config(bg=_blend_hex(c, base_h_bg, self.btn_color, 0.25), fg=base_h_fg)
+                                else:
+                                    c.config(bg=_blend_hex(c, base_h_bg, self.btn_color, 0.18), fg=self.btn_color)
                             else:
-                                c["fg"] = self.text_gray
+                                c.config(bg=base_h_bg, fg=base_h_fg)
             except Exception:
                 pass
 
@@ -781,9 +789,19 @@ class SavedListMixin:
             if was_dragging:
                 try:
                     if scrollable_frame.winfo_exists():
+                        open_bg, open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
                         for c in scrollable_frame.winfo_children():
                             if getattr(c, 'is_group_header', False):
-                                c["fg"] = self.btn_color if getattr(c, '_kb_selected', False) else self.text_gray
+                                apply_group_header_style(
+                                    c,
+                                    c.group_name not in self.collapsed_groups,
+                                    collapsed_bg=self.card_color,
+                                    collapsed_fg=self.text_gray,
+                                    open_bg=open_bg,
+                                    open_fg=open_fg,
+                                    accent_color=self.btn_color,
+                                )
+                        _sync_selection_highlight(ensure_visible=False)
                 except Exception:
                     pass
             self._is_dragging = False
@@ -1001,12 +1019,30 @@ class SavedListMixin:
                 
                 sorted_groups = sorted(grouped_cards.keys(), key=group_sort_key)
                 header_map = {h.group_name: h for h in headers}
+                open_bg, open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
+                first_grp = True
 
                 for grp in sorted_groups:
+                    is_expanded = grp not in self.collapsed_groups
                     if grp in header_map:
-                        header_map[grp].pack(fill=tk.X, pady=(15, 5), padx=15)
+                        hdr_w = header_map[grp]
+                        g_display = grp if grp else _("Chưa phân nhóm")
+                        icon = "▼" if is_expanded else "▶"
+                        hdr_w.config(text=f"{icon} {g_display.upper()}")
+                        apply_group_header_style(
+                            hdr_w,
+                            is_expanded,
+                            collapsed_bg=self.card_color,
+                            collapsed_fg=self.text_gray,
+                            open_bg=open_bg,
+                            open_fg=open_fg,
+                            accent_color=self.btn_color,
+                        )
+                        top_pad = 8 if first_grp else 15
+                        hdr_w.pack(fill=tk.X, pady=(top_pad, 5), padx=(4, 10))
+                        first_grp = False
                     
-                    if grp not in self.collapsed_groups:
+                    if is_expanded:
                         grp_cards = grouped_cards.get(grp, [])
                         grp_cards.sort(key=lambda c: (not get_is_online(c), c.comp_name.lower()))
                         for c in grp_cards:
@@ -1137,14 +1173,35 @@ class SavedListMixin:
                 for c in computers:
                     unique_groups.add(c.get("group", "").strip())
                 
+                open_bg, open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
                 for grp in unique_groups:
+                    is_expanded = grp not in self.collapsed_groups
                     grp_display = grp if grp else _("Chưa phân nhóm")
-                    icon = "▶" if grp in self.collapsed_groups else "▼"
+                    icon = "▼" if is_expanded else "▶"
                     header_text = f"{icon} {grp_display.upper()}"
                     
-                    header = tk.Label(scrollable_frame, text=header_text, font=(APP_FONT_NAME, 9, "bold"), fg=self.text_gray, bg=self.card_color, anchor=tk.W, padx=8, pady=4, cursor="hand2")
+                    header = tk.Label(
+                        scrollable_frame,
+                        text=header_text,
+                        font=(APP_FONT_NAME, 9, "bold"),
+                        fg=open_fg if is_expanded else self.text_gray,
+                        bg=open_bg if is_expanded else self.card_color,
+                        anchor=tk.W,
+                        padx=8,
+                        pady=5,
+                        cursor="hand2",
+                    )
                     header.is_group_header = True
                     header.group_name = grp
+                    apply_group_header_style(
+                        header,
+                        is_expanded,
+                        collapsed_bg=self.card_color,
+                        collapsed_fg=self.text_gray,
+                        open_bg=open_bg,
+                        open_fg=open_fg,
+                        accent_color=self.btn_color,
+                    )
                     
                     def _toggle_group_by_name(g=grp, hdr_w=header):
                         if g in self.collapsed_groups:
@@ -1153,10 +1210,21 @@ class SavedListMixin:
                         else:
                             self.collapsed_groups.add(g)
                             just_expanded = False
-                        new_icon = "▶" if g in self.collapsed_groups else "▼"
+                        is_exp = g not in self.collapsed_groups
+                        new_icon = "▼" if is_exp else "▶"
                         g_display = g if g else _("Chưa phân nhóm")
                         if hdr_w.winfo_exists():
                             hdr_w.config(text=f"{new_icon} {g_display.upper()}")
+                            cur_open_bg, cur_open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
+                            apply_group_header_style(
+                                hdr_w,
+                                is_exp,
+                                collapsed_bg=self.card_color,
+                                collapsed_fg=self.text_gray,
+                                open_bg=cur_open_bg,
+                                open_fg=cur_open_fg,
+                                accent_color=self.btn_color,
+                            )
                         dialog._kb_selected = ("group", g)
                         reorder_list(anchor_group=g)
                         self.save_group_states_only()

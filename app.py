@@ -1214,7 +1214,7 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             self.save_window_position()
             import subprocess
             import os
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, 'frozen', False) or is_compiled:
                 subprocess.Popen([sys.executable] + sys.argv[1:])
                 os._exit(0)
             else:
@@ -3740,7 +3740,8 @@ Comment=Remote Desktop P2P AutoStart
             try:
                 if sys.platform == "win32":
                     from os_utils.windows_system import kill_process_tree_native
-                    kill_process_tree_native()
+                    # Không giết tiến trình GUI mới vừa được khởi động lại (đổi giao diện / ngôn ngữ)
+                    kill_process_tree_native(exclude_pids=getattr(self, "_restart_pids", ()))
             except:
                 pass
             try:

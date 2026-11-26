@@ -630,6 +630,46 @@ def apply_row_online_state(row_root, is_online, base_bg, fg_names=()):
         pass
 
 
+def resolve_open_group_colors(app_or_owner=None, base_bg="#2A2A35", accent_color="#00ADB5"):
+    """Lấy cặp màu (open_bg, open_fg) cho tiêu đề nhóm đang mở trên mọi giao diện."""
+    open_bg = getattr(app_or_owner, "group_open_bg", None) if app_or_owner is not None else None
+    open_fg = getattr(app_or_owner, "group_open_fg", None) if app_or_owner is not None else None
+    if open_bg and open_fg:
+        return open_bg, open_fg
+    from gui.themes import compute_open_group_colors
+    return compute_open_group_colors(base_bg, accent_color)
+
+
+def apply_group_header_style(
+    header_widget,
+    is_expanded,
+    collapsed_bg="#2A2A35",
+    collapsed_fg="#A0A0B0",
+    open_bg="#346B78",
+    open_fg="#FFFFFF",
+    accent_color="#00ADB5",
+):
+    """Áp dụng màu nền highlight luôn hiện diện cho nhóm đang mở (và màu thường cho nhóm thu gọn)."""
+    try:
+        if header_widget is None or not header_widget.winfo_exists():
+            return
+        expanded = bool(is_expanded)
+        header_widget._group_expanded = expanded
+        base_bg = open_bg if expanded else collapsed_bg
+        base_fg = open_fg if expanded else collapsed_fg
+        header_widget._base_hdr_bg = base_bg
+        header_widget._base_hdr_fg = base_fg
+        header_widget._orig_hdr_bg = base_bg
+        header_widget._orig_hdr_fg = base_fg
+
+        if getattr(header_widget, "_kb_selected", False):
+            set_row_selected(header_widget, True, base_bg=collapsed_bg, accent_color=accent_color)
+        else:
+            header_widget.config(bg=base_bg, fg=base_fg)
+    except Exception:
+        pass
+
+
 def set_row_selected(row_root, is_selected, is_online=None, base_bg="#2A2A35", accent_color="#00ADB5", fg_names=()):
     """Bật/tắt highlight trực quan cho một dòng máy tính hoặc tiêu đề nhóm khi điều hướng bằng phím mũi tên."""
     try:
@@ -638,19 +678,20 @@ def set_row_selected(row_root, is_selected, is_online=None, base_bg="#2A2A35", a
         row_root._kb_selected = bool(is_selected)
 
         if getattr(row_root, "is_group_header", False):
-            orig_bg = getattr(row_root, "_orig_hdr_bg", None)
-            if orig_bg is None:
-                orig_bg = row_root.cget("bg")
-                row_root._orig_hdr_bg = orig_bg
-            orig_fg = getattr(row_root, "_orig_hdr_fg", None)
-            if orig_fg is None:
-                orig_fg = row_root.cget("fg")
-                row_root._orig_hdr_fg = orig_fg
-            if is_selected:
-                sel_hdr_bg = _blend_hex(row_root, orig_bg, accent_color, 0.25)
+            base_hdr_bg = getattr(row_root, "_base_hdr_bg", None)
+            if base_hdr_bg is None:
+                base_hdr_bg = getattr(row_root, "_orig_hdr_bg", None) or row_root.cget("bg")
+                row_root._base_hdr_bg = base_hdr_bg
+            base_hdr_fg = getattr(row_root, "_base_hdr_fg", None)
+            if base_hdr_fg is None:
+                base_hdr_fg = getattr(row_root, "_orig_hdr_fg", None) or row_root.cget("fg")
+                row_root._base_hdr_fg = base_hdr_fg
+
+            if is_selected and not getattr(row_root, "_group_expanded", False):
+                sel_hdr_bg = _blend_hex(row_root, base_hdr_bg, accent_color, 0.20)
                 row_root.config(bg=sel_hdr_bg, fg=accent_color)
             else:
-                row_root.config(bg=orig_bg, fg=orig_fg)
+                row_root.config(bg=base_hdr_bg, fg=base_hdr_fg)
         else:
             lum = _color_luminance(row_root, base_bg)
             if lum > 150:
@@ -665,16 +706,21 @@ def set_row_selected(row_root, is_selected, is_online=None, base_bg="#2A2A35", a
 
         strips = getattr(row_root, "_sel_strips", None)
         if is_selected:
+            strip_col = accent_color
+            if getattr(row_root, "is_group_header", False) and getattr(row_root, "_group_expanded", False):
+                hdr_bg_now = getattr(row_root, "_base_hdr_bg", base_bg)
+                if abs(_color_luminance(row_root, hdr_bg_now) - _color_luminance(row_root, accent_color)) < 45:
+                    strip_col = getattr(row_root, "_base_hdr_fg", accent_color)
             if not strips:
                 strips = []
                 for _ in range(4):
-                    s = tk.Frame(row_root, bg=accent_color, bd=0, highlightthickness=0, takefocus=0)
+                    s = tk.Frame(row_root, bg=strip_col, bd=0, highlightthickness=0, takefocus=0)
                     s._focus_strip = True
                     strips.append(s)
                 row_root._sel_strips = strips
             s_top, s_bot, s_left, s_right = strips
             for s in strips:
-                s.config(bg=accent_color)
+                s.config(bg=strip_col)
             s_top.place(relx=0.0, rely=0.0, relwidth=1.0, height=2)
             s_bot.place(relx=0.0, rely=1.0, anchor="sw", relwidth=1.0, height=2)
             s_left.place(relx=0.0, rely=0.0, relheight=1.0, width=4)

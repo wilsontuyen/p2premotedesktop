@@ -1,3 +1,38 @@
+def _parse_hex_rgb(color, fallback=(42, 42, 53)):
+    try:
+        if isinstance(color, str) and color.startswith("#") and len(color) == 7:
+            return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    except Exception:
+        pass
+    return fallback
+
+
+def _rgb_to_hex(r, g, b):
+    return f"#{max(0, min(255, int(round(r)))):02X}{max(0, min(255, int(round(g)))):02X}{max(0, min(255, int(round(b)))):02X}"
+
+
+def compute_open_group_colors(card_color, btn_color):
+    """Tính cặp màu (group_open_bg, group_open_fg) highlight cho nhóm đang mở từ bảng màu bất kỳ."""
+    cr, cg, cb = _parse_hex_rgb(card_color, (42, 42, 53))
+    ar, ag, ab = _parse_hex_rgb(btn_color, (0, 173, 181))
+    lum = 0.299 * cr + 0.587 * cg + 0.114 * cb
+    if lum < 165:
+        mr = cr + (ar - cr) * 0.35
+        mg = cg + (ag - cg) * 0.35
+        mb = cb + (ab - cb) * 0.35
+        rr = mr + (255 - mr) * 0.16
+        rg = mg + (255 - mg) * 0.16
+        rb = mb + (255 - mb) * 0.16
+        res_lum = 0.299 * rr + 0.587 * rg + 0.114 * rb
+        fg = "#1C1C21" if res_lum > 175 else "#FFFFFF"
+        return _rgb_to_hex(rr, rg, rb), fg
+    rr = cr + (ar - cr) * 0.28
+    rg = cg + (ag - cg) * 0.28
+    rb = cb + (ab - cb) * 0.28
+    fg = _rgb_to_hex(ar * 0.42, ag * 0.42, ab * 0.42)
+    return _rgb_to_hex(rr, rg, rb), fg
+
+
 def get_theme_palette(theme_name):
     if theme_name == "light":
         return {
@@ -11,7 +46,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#1C1C22",
             "divider_color": "#D1D5DB",
             "btn_cancel_bg": "#3A3A4A",
-            "btn_cancel_fg": "#FFFFFC"
+            "btn_cancel_fg": "#FFFFFC",
+            "group_open_bg": "#CCF2F5",
+            "group_open_fg": "#005A60",
         }
     elif theme_name == "gray":
         return {
@@ -25,7 +62,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#FFFFFE",
             "divider_color": "#7D848C",
             "btn_cancel_bg": "#3A3A4A",
-            "btn_cancel_fg": "#FFFFFD"
+            "btn_cancel_fg": "#FFFFFD",
+            "group_open_bg": "#3B9AA6",
+            "group_open_fg": "#FFFFFF",
         }
     elif theme_name == "pink":
         return {
@@ -39,7 +78,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#3B2F37",
             "divider_color": "#FFC0CB",
             "btn_cancel_bg": "#3A3A4A",
-            "btn_cancel_fg": "#FF69B4"
+            "btn_cancel_fg": "#FF69B4",
+            "group_open_bg": "#FFCCE6",
+            "group_open_fg": "#880E4F",
         }
     elif theme_name == "crystal":
         return {
@@ -53,7 +94,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#006064",
             "divider_color": "#80DEEA",
             "btn_cancel_bg": "#80DEEA",
-            "btn_cancel_fg": "#006064"
+            "btn_cancel_fg": "#006064",
+            "group_open_bg": "#7CE8F8",
+            "group_open_fg": "#004D56",
         }
     elif theme_name == "orange":
         return {
@@ -67,7 +110,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#3E2723",
             "divider_color": "#FFB74D",
             "btn_cancel_bg": "#FFB74D",
-            "btn_cancel_fg": "#4E342E"
+            "btn_cancel_fg": "#4E342E",
+            "group_open_bg": "#FFC46B",
+            "group_open_fg": "#4A2500",
         }
     elif theme_name == "red":
         return {
@@ -81,7 +126,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#B71C1C",
             "divider_color": "#EF9A9A",
             "btn_cancel_bg": "#EF9A9A",
-            "btn_cancel_fg": "#B71C1C"
+            "btn_cancel_fg": "#B71C1C",
+            "group_open_bg": "#FF9AA2",
+            "group_open_fg": "#7F0000",
         }
 
     elif theme_name == "custom":
@@ -96,7 +143,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#FFFFFE",
             "divider_color": "#3A3A4A",
             "btn_cancel_bg": "#3A3A4B",
-            "btn_cancel_fg": "#FFFFFD"
+            "btn_cancel_fg": "#FFFFFD",
+            "group_open_bg": "#346B78",
+            "group_open_fg": "#FFFFFF",
         }
         try:
             import configparser, os
@@ -108,11 +157,17 @@ def get_theme_palette(theme_name):
                     config.write(configfile)
             else:
                 config = configparser.ConfigParser()
-                config.read(ini_path)
+                config.read(ini_path, encoding="utf-8")
                 if 'COLORS' in config:
+                    sec = config['COLORS']
                     for k in custom_pal:
-                        if k in config['COLORS']:
-                            custom_pal[k] = config['COLORS'][k]
+                        if k in sec:
+                            custom_pal[k] = sec[k]
+                    auto_bg, auto_fg = compute_open_group_colors(custom_pal["card_color"], custom_pal["btn_color"])
+                    if "group_open_bg" not in sec:
+                        custom_pal["group_open_bg"] = auto_bg
+                    if "group_open_fg" not in sec:
+                        custom_pal["group_open_fg"] = auto_fg
         except:
             pass
         return custom_pal
@@ -128,7 +183,9 @@ def get_theme_palette(theme_name):
             "entry_fg": "#FFFFFE",
             "divider_color": "#3A3A4A",
             "btn_cancel_bg": "#3A3A4B",
-            "btn_cancel_fg": "#FFFFFD"
+            "btn_cancel_fg": "#FFFFFD",
+            "group_open_bg": "#346B78",
+            "group_open_fg": "#FFFFFF",
         }
 
 
@@ -161,6 +218,9 @@ def setup_app_theme(app, config_file):
     app.divider_color = pal["divider_color"]
     app.btn_cancel_bg = pal.get("btn_cancel_bg", "#3A3A4A")
     app.btn_cancel_fg = pal.get("btn_cancel_fg", "#FFFFFF")
+    auto_open_bg, auto_open_fg = compute_open_group_colors(app.card_color, app.btn_color)
+    app.group_open_bg = pal.get("group_open_bg", auto_open_bg)
+    app.group_open_fg = pal.get("group_open_fg", auto_open_fg)
 
     app.config(bg=app.bg_color)
     
@@ -185,7 +245,15 @@ def change_app_theme(app):
     import sys, subprocess, os
     
     # Clean existing delay arguments
-    args = sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv
+    # Nuitka không đặt sys.frozen -> phải nhận diện thêm __compiled__ (nếu không exe bị truyền thừa chính nó làm đối số)
+    is_compiled_app = getattr(sys, 'frozen', False) or ("__compiled__" in globals()) or hasattr(sys, '__compiled__')
+    if not is_compiled_app:
+        try:
+            main_mod = sys.modules.get("__main__")
+            is_compiled_app = hasattr(main_mod, "__compiled__")
+        except Exception:
+            pass
+    args = sys.argv[1:] if is_compiled_app else sys.argv
     clean_args = []
     i = 0
     while i < len(args):
@@ -200,7 +268,12 @@ def change_app_theme(app):
     if sys.platform == "win32":
         popen_kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         
-    subprocess.Popen([sys.executable] + clean_args + ["--delay-startup", "2.0"], **popen_kwargs)
+    new_proc = subprocess.Popen([sys.executable] + clean_args + ["--delay-startup", "2.0"], **popen_kwargs)
+    try:
+        # destroy() có luồng dọn dẹp kill toàn bộ tiến trình con -> loại trừ tiến trình mới khỏi danh sách kill
+        app._restart_pids = (new_proc.pid,)
+    except Exception:
+        pass
         
     # Close current instance gracefully
     try:

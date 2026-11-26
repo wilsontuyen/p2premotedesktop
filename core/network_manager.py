@@ -1821,25 +1821,37 @@ class NetworkMixin:
                 comp_name = (p.get("computer_name") or "").strip().lower()
                 return (group_rank, online_rank, comp_name)
 
+            from gui.components import apply_group_header_style, resolve_open_group_colors
             sorted_items = sorted(filtered_peers.items(), key=_peer_sort_key)
             row_ui_map = {}
             group_headers = {}
+            open_bg, open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
 
             for grp_name in ("LAN", "VPN"):
-                icon = "▶" if grp_name in self.lan_collapsed_groups else "▼"
+                is_expanded = grp_name not in self.lan_collapsed_groups
+                icon = "▼" if is_expanded else "▶"
                 hdr_lbl = tk.Label(
                     new_scroll_frame,
                     text=f"{icon} {grp_name}",
                     font=("Segoe UI", 9, "bold"),
-                    fg=self.text_gray,
-                    bg=self.entry_bg,
+                    fg=open_fg if is_expanded else self.text_gray,
+                    bg=open_bg if is_expanded else self.entry_bg,
                     anchor=tk.W,
                     padx=8,
-                    pady=4,
+                    pady=5,
                     cursor="hand2",
                 )
                 hdr_lbl.is_group_header = True
                 hdr_lbl.group_name = grp_name
+                apply_group_header_style(
+                    hdr_lbl,
+                    is_expanded,
+                    collapsed_bg=self.entry_bg,
+                    collapsed_fg=self.text_gray,
+                    open_bg=open_bg,
+                    open_fg=open_fg,
+                    accent_color=self.btn_color,
+                )
 
                 def _toggle_lan_group_direct(g=grp_name):
                     if g in self.lan_collapsed_groups:
@@ -2306,10 +2318,21 @@ class NetworkMixin:
                             pass
                         hdr = group_headers.get(grp)
                         if hdr and hdr.winfo_exists():
-                            icon = "▶" if grp in self.lan_collapsed_groups else "▼"
+                            is_exp = grp not in self.lan_collapsed_groups
+                            icon = "▼" if is_exp else "▶"
                             hdr.config(text=f"{icon} {grp}")
+                            cur_open_bg, cur_open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
+                            apply_group_header_style(
+                                hdr,
+                                is_exp,
+                                collapsed_bg=self.entry_bg,
+                                collapsed_fg=self.text_gray,
+                                open_bg=cur_open_bg,
+                                open_fg=cur_open_fg,
+                                accent_color=self.btn_color,
+                            )
                             top_pad = 8 if first_grp else 14
-                            hdr.pack(fill=tk.X, padx=10, pady=(top_pad, 4))
+                            hdr.pack(fill=tk.X, padx=5, pady=(top_pad, 4))
                             first_grp = False
 
                         if grp not in self.lan_collapsed_groups and grp_items:
