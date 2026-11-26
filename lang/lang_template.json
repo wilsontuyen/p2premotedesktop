@@ -556,5 +556,10 @@
   "Đã ẩn {n} máy Offline": "Đã ẩn {n} máy Offline",
   "Đã ẩn {n} máy chưa rõ tên": "Đã ẩn {n} máy chưa rõ tên",
   "Đang kiểm tra trạng thái trực tuyến của các máy...": "Đang kiểm tra trạng thái trực tuyến của các máy...",
-  "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.": "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline."
+  "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.": "Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.",
+  "Đang thử kết nối tới signaling server: {server}...": "Đang thử kết nối tới signaling server: {server}...",
+  "Đang thử kết nối tới signaling server": "Đang thử kết nối tới signaling server",
+  "Thử kết nối lại trong vòng {sec} giây...": "Thử kết nối lại trong vòng {sec} giây...",
+  "Thử kết nối lại trong vòng": "Thử kết nối lại trong vòng",
+  "Đã cập nhật máy chủ thành công!\nĐang kết nối lại tới máy chủ Signaling mới...": "Đã cập nhật máy chủ thành công!\nĐang kết nối lại tới máy chủ Signaling mới..."
 }

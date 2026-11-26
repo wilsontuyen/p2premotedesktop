@@ -3,6 +3,7 @@ import time
 import sys
 import glob
 import shutil
+import threading
 
 if getattr(sys, 'frozen', False):
     app_dir = os.path.dirname(sys.executable)
@@ -175,6 +176,7 @@ def migrate_legacy_logs():
         legacy_names = [
             "gui.log", "agent.log", "service.log", "clipboard_agent.log",
             "overwrite_conflict.log", "broker.log", "activity.log", "activity_log.txt",
+            "connection.log",
             "log.txt", "crash.log", "early_crash.log", "transfer.log",
             "client_error.log", "host_error.log", "task_creation.log",
             "task_run.log", "clipboard_debug.log", "viewer.log",
@@ -477,6 +479,31 @@ def log_overwrite_conflict(msg, tag="OW"):
         log_debug(f"[OW] {msg}")
     except Exception:
         pass
+
+
+_conn_log_lock = threading.Lock()
+
+
+def log_connection_event(is_connected, server_name, port):
+    """
+    Ghi nhật ký kết nối / mất kết nối tới Signaling Server vào Logs/connection.log.
+    Format:
+      - Kết nối thành công: [YYYY-MM-DD HH:MM:SS]: đã kết nối thành công với <server_name> - <port>
+      - Mất kết nối:        [YYYY-MM-DD HH:MM:SS]: đã mất kết nối với <server_name> - <port>
+    """
+    try:
+        timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+        srv = str(server_name or "").strip()
+        prt = str(port or "").strip()
+        if is_connected:
+            line = f"{timestamp}: đã kết nối thành công với {srv} - {prt}\n"
+        else:
+            line = f"{timestamp}: đã mất kết nối với {srv} - {prt}\n"
+        filepath = get_log_filepath("connection.log")
+        with _conn_log_lock:
+            safe_write_log_line(filepath, line, "connection.log")
+    except Exception as e:
+        print(f"[Log] Lỗi ghi connection.log: {e}")
 
 
 def log_activity(msg):

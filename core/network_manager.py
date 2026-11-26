@@ -13,6 +13,7 @@ import tempfile
 import platform
 import psutil
 import re
+import random
 import multiprocessing as mp
 from tkinter import ttk, messagebox
 try:
@@ -34,7 +35,7 @@ from utils.vpn_discovery import (
     deduplicate_lan_peers, are_same_machine, merge_peers, release_ip_from_other_peers, get_all_local_ipv4,
     parse_ip_range_input, connect_tcp_any_route, is_in_physical_lan_subnet
 )
-from utils.logger import log_debug
+from utils.logger import log_debug, log_connection_event
 
 
 def _peer_lan_password(info):
@@ -3475,179 +3476,398 @@ class NetworkMixin:
             self.update_status(_("Đang tự động cấu hình Router (UPnP)..."))
             upnp_success = attempt_upnp_forward(BOUND_PORT)
         
-        # 3. Get Public & Local IPs
-        self.update_status(_("Đang lấy thông vị trí mạng..."))
-        print("[DEBUG] Calling get_public_ip()")
-        self.current_ip = get_public_ip()
-        print("[DEBUG] Returned from get_public_ip()")
-        print("[DEBUG] Calling get_public_ipv6()")
-        self.ipv6 = get_public_ipv6()
-        print("[DEBUG] Returned from get_public_ipv6()")
-        print("[DEBUG] Calling get_local_ip()")
+        # 3. Get Local IP ngay lập tức; Public IPv4/IPv6 lấy ở nền để không làm nghẽn kết nối Signaling khi mất mạng
         self.local_ip = get_local_ip()
-        print("[DEBUG] Returned from get_local_ip()")
-        print(f"[Host] Public IPv4: {self.current_ip}, IPv6: {self.ipv6}, Local IP: {self.local_ip}")
-        
-        # 4. Connect to real-time Signaling Server
-        self.update_status(_("Đang kết nối tới các Signaling Server..."))
+        self._refresh_public_ips_async()
+        print(f"[Host] Local IP: {self.local_ip}")
+
+        # 4. Start LAN Discovery (UDP Broadcast) - Phát hiện máy trong mạng nội bộ ngay lập tức
+        self.start_lan_discovery()
+
+        # 5. Connect to real-time Signaling Server (tuần tự + retry ngẫu nhiên 1-5s + đếm ngược 10-20s khi hết danh sách)
         self.signaling_sockets = {}
         self.primary_signaling_socket = None
         self.current_signaling_host = None
-        
-        for host in core.config.SIGNALING_SERVER_HOSTS:
-            threading.Thread(target=self.signaling_maintainer_thread, args=(host,), daemon=True).start()
-            
-        # Try to wait up to 8 seconds for at least one connection
-        # (GUI instance starts after headless, needs more time for Signaling Server to stabilize)
-        timeout = 8.0
-        while timeout > 0 and not self.signaling_sockets:
-            time.sleep(0.2)
-            timeout -= 0.2
-            # Hiện thông báo đang chờ mỗi 2 giây
-            elapsed = 8.0 - timeout
-            if abs(elapsed - 2.0) < 0.1 or abs(elapsed - 5.0) < 0.1:
-                self.update_status(_("Đang kết nối Signaling Server... ({sec}s)").format(sec=8 - int(timeout)))
-            
-        if self.signaling_sockets:
-            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
-            if upnp_success:
-                self.update_status(_("Kết nối Signaling & Mở cổng Router thành công (Cổng {port})!{suffix}").format(port=BOUND_PORT, suffix=suffix))
-            else:
-                self.update_status(_("Kết nối Signaling thành công (Cổng {port})! Sẵn sàng kết nối.{suffix}").format(port=BOUND_PORT, suffix=suffix))
-        else:
-            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
-            self.update_status(_("Chưa kết nối Signaling Server. Đang thử lại ở chế độ nền... {suffix}").format(suffix=suffix))
+        self.start_signaling_connection(upnp_success=upnp_success)
 
-        # 5. Start LAN Discovery (UDP Broadcast) - Phát hiện máy trong mạng nội bộ
-        self.start_lan_discovery()
+    def _refresh_public_ips_silent(self):
+        try:
+            self.local_ip = get_local_ip()
+        except Exception:
+            pass
+        try:
+            ip4 = get_public_ip()
+            if ip4:
+                self.current_ip = ip4
+        except Exception:
+            pass
+        try:
+            ip6 = get_public_ipv6()
+            if ip6:
+                self.ipv6 = ip6
+        except Exception:
+            pass
 
+    def _refresh_public_ips_async(self):
+        threading.Thread(target=self._refresh_public_ips_silent, daemon=True, name="RefreshPublicIPs").start()
 
-    def signaling_maintainer_thread(self, host):
-        retry_delay = 2  # Bắt đầu retry nhanh (2s), tăng dần sau 3 lần thất bại
-        fail_count = 0
-        while self.running_server:
-            sock = None
+    def _ensure_signaling_ctrl_state(self):
+        if not hasattr(self, "signaling_lock") or self.signaling_lock is None:
+            self.signaling_lock = threading.Lock()
+        if not hasattr(self, "_signaling_ctrl_lock") or self._signaling_ctrl_lock is None:
+            self._signaling_ctrl_lock = threading.Lock()
+        if not hasattr(self, "_signaling_gen"):
+            self._signaling_gen = 0
+        if not hasattr(self, "_signaling_cancel_event") or self._signaling_cancel_event is None:
+            self._signaling_cancel_event = threading.Event()
+        if not hasattr(self, "_suppressed_disconnect_gens") or self._suppressed_disconnect_gens is None:
+            self._suppressed_disconnect_gens = set()
+        if not hasattr(self, "signaling_sockets") or self.signaling_sockets is None:
+            self.signaling_sockets = {}
+
+    def start_signaling_connection(self, upnp_success=None, suppress_disconnect_log=False):
+        """Khởi động (hoặc khởi động lại từ đầu) quá trình kết nối & retry tuần tự tới danh sách Signaling Server."""
+        self._ensure_signaling_ctrl_state()
+        with self._signaling_ctrl_lock:
+            if upnp_success is not None:
+                self._upnp_success = bool(upnp_success)
+            prev_gen = getattr(self, "_signaling_gen", 0)
+            if suppress_disconnect_log and prev_gen > 0:
+                self._suppressed_disconnect_gens.add(prev_gen)
+
+            self._signaling_gen = prev_gen + 1
+            my_gen = self._signaling_gen
+
+            old_cancel = getattr(self, "_signaling_cancel_event", None)
+            if old_cancel is not None:
+                old_cancel.set()
+
+            cancel_ev = threading.Event()
+            self._signaling_cancel_event = cancel_ev
+
+            connecting_sock = getattr(self, "_connecting_signaling_sock", None)
+            self._connecting_signaling_sock = None
+            if connecting_sock is not None:
+                try:
+                    force_close_socket(connecting_sock)
+                except Exception:
+                    pass
+
+            with self.signaling_lock:
+                old_socks = list(self.signaling_sockets.values())
+                self.signaling_sockets.clear()
+                self.primary_signaling_socket = None
+                self.current_signaling_host = None
+            for s in old_socks:
+                try:
+                    force_close_socket(s)
+                except Exception:
+                    pass
+
+        threading.Thread(
+            target=self._signaling_lifecycle_worker,
+            args=(my_gen, cancel_ev),
+            daemon=True,
+            name=f"SignalingWorker-{my_gen}",
+        ).start()
+
+    def restart_signaling_connection(self, suppress_disconnect_log=False):
+        """Hủy tiến trình retry / kết nối hiện tại và khởi động lại quá trình kết nối Signaling từ đầu danh sách."""
+        self.start_signaling_connection(suppress_disconnect_log=suppress_disconnect_log)
+
+    def _is_signaling_gen_aborted(self, my_gen, cancel_ev):
+        return (
+            not getattr(self, "running_server", True)
+            or cancel_ev.is_set()
+            or getattr(self, "_signaling_gen", 0) != my_gen
+        )
+
+    def _try_connect_single_signaling(self, host, port, cancel_ev, my_gen):
+        """Thử kết nối và xác thực đăng ký tới 1 Signaling Server duy nhất. Trả về (sock, early_messages)."""
+        if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+            return None, []
+
+        sock = None
+        try:
             try:
-                # 1. Connect
+                self.local_ip = get_local_ip()
+            except Exception:
+                pass
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._connecting_signaling_sock = sock
+            try:
+                sock.bind(("0.0.0.0", BOUND_PORT))
+            except Exception as e:
+                print(f"[Signaling] Warning: Could not bind to BOUND_PORT {BOUND_PORT} for signaling: {e}")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind(('0.0.0.0', BOUND_PORT))
-                except Exception as e:
-                    print(f"[Signaling] Warning: Could not bind to BOUND_PORT {BOUND_PORT} for signaling: {e}")
-                    try: sock.close()
-                    except: pass
+                self._connecting_signaling_sock = sock
+
+            try:
+                if os.name == "nt":
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                    sock.ioctl(sio_keepalive, (1, 30000, 10000))
+                else:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            except Exception:
+                pass
+
+            sock.settimeout(4.0)
+            try:
+                sock.connect((host, int(port)))
+            except Exception as ce:
+                if getattr(ce, "winerror", None) == 10048 or "10048" in str(ce):
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    
-                try:
-                    if os.name == 'nt':
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
-                        sock.ioctl(sio_keepalive, (1, 30000, 10000))
-                    else:
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                except Exception: pass
-                
-                sock.settimeout(5.0)
-                try:
-                    sock.connect((host, core.config.SIGNALING_SERVER_PORT))
-                except Exception as ce:
-                    if getattr(ce, 'winerror', None) == 10048 or "10048" in str(ce):
-                        try: sock.close()
-                        except: pass
-                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        sock.settimeout(5.0)
-                        sock.connect((host, core.config.SIGNALING_SERVER_PORT))
-                    else:
-                        raise ce
-                sock.settimeout(None)
-                
-                # Use base HWID if we are the primary instance (port 12345), else append port to avoid stealing ID from background service
-                is_svc_active = False
-                if hasattr(self, 'check_if_service_active'):
-                    is_svc_active = self.check_if_service_active()
+                    self._connecting_signaling_sock = sock
+                    sock.settimeout(4.0)
+                    sock.connect((host, int(port)))
                 else:
-                    is_svc_active = getattr(self, 'is_service_active', False)
-                register_id = self.my_id_clean if (BOUND_PORT == PORTS_TO_TRY[0] and not is_svc_active) else f"{self.my_id_clean}_{BOUND_PORT}"
-                print(f"[Signaling] Register as {register_id} (port={BOUND_PORT}, service={is_svc_active})")
-                
-                req = json.dumps({"action": "register", "hwid": register_id})
-                req_data = req.encode('utf-8')
-                send_msg(sock, req_data, APP_KEY)
-                
-                with self.signaling_lock:
-                    self.signaling_sockets[host] = sock
-                    if getattr(self, 'current_signaling_host', None) is None:
-                        self.current_signaling_host = host
-                        self.primary_signaling_socket = sock
-                    # Luôn cập nhật status khi kết nối thành công (kể cả lần đầu sau timeout hoặc sau reconnect)
-                    self.after(0, lambda: self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối.")))
-                
-                # Reset counters khi kết nối thành công
-                fail_count = 0
-                retry_delay = 2
-                
-                print(f"[Signaling] Connected to {host}")
-                
-                last_ping = time.time()
-                last_pong = time.time()
-                
-                import select
-                while self.running_server:
-                    r, _w, _e = select.select([sock], [], [], 1.0)
-                    if r:
-                        msg_bytes = recv_msg(sock, APP_KEY)
-                        if msg_bytes is None:
-                            break
-                        if msg_bytes == b'':
-                            continue
-                        
-                        try:
-                            msg = msg_bytes.decode('utf-8')
-                            self.process_signaling_message(msg, sock, host)
-                            if "pong" in msg:
-                                last_pong = time.time()
-                        except Exception as de:
-                            print(f"[Signaling] Decode error: {de}")
-                                
-                    now = time.time()
-                    if now - last_ping > 20:
-                        ping_req = json.dumps({"action": "ping"})
-                        send_msg(sock, ping_req.encode('utf-8'), APP_KEY)
-                        last_ping = now
-                        
-                    if now - last_pong > 50:
-                        print(f"[Signaling] Heartbeat timeout for {host}")
+                    raise ce
+
+            if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                force_close_socket(sock)
+                return None, []
+
+            is_svc_active = (
+                self.check_if_service_active()
+                if hasattr(self, "check_if_service_active")
+                else getattr(self, "is_service_active", False)
+            )
+            register_id = (
+                self.my_id_clean
+                if (BOUND_PORT == PORTS_TO_TRY[0] and not is_svc_active)
+                else f"{self.my_id_clean}_{BOUND_PORT}"
+            )
+            print(f"[Signaling] Register as {register_id} on {host}:{port} (port={BOUND_PORT}, service={is_svc_active})")
+
+            req_data = json.dumps({"action": "register", "hwid": register_id}).encode("utf-8")
+            if not send_msg(sock, req_data, APP_KEY):
+                raise ConnectionError("Failed to send register packet")
+
+            ping_data = json.dumps({"action": "ping"}).encode("utf-8")
+            if not send_msg(sock, ping_data, APP_KEY):
+                raise ConnectionError("Failed to send initial ping packet")
+
+            # Chờ xác nhận pong từ Signaling Server để đảm bảo kết nối thực sự thông suốt
+            deadline = time.monotonic() + 4.0
+            verified = False
+            early_msgs = []
+            while time.monotonic() < deadline:
+                if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                    force_close_socket(sock)
+                    return None, []
+                r, _w, _e = select.select([sock], [], [], 0.2)
+                if not r:
+                    continue
+                msg_bytes = recv_msg(sock, APP_KEY)
+                if msg_bytes is None or msg_bytes == b"":
+                    raise ConnectionError("Signaling server closed or rejected handshake")
+                decoded = msg_bytes.decode("utf-8")
+                for line in decoded.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    act = obj.get("action")
+                    if act == "pong":
+                        verified = True
+                    elif act:
+                        verified = True
+                        early_msgs.append(line)
+                if verified:
+                    break
+
+            if not verified:
+                raise TimeoutError("Timed out waiting for signaling pong")
+
+            sock.settimeout(None)
+            return sock, early_msgs
+        except Exception as e:
+            print(f"[Signaling] Connection error on {host}:{port}: {e}")
+            if sock:
+                force_close_socket(sock)
+            return None, []
+        finally:
+            if getattr(self, "_connecting_signaling_sock", None) is sock:
+                self._connecting_signaling_sock = None
+
+    def _run_signaling_monitor_loop(self, sock, host, port, cancel_ev, my_gen):
+        """Luồng kiểm tra kết nối (heartbeat ping/pong) sau khi đã kết nối thành công với Signaling Server."""
+        last_ping = time.time()
+        last_pong = time.time()
+        try:
+            while not self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                r, _w, _e = select.select([sock], [], [], 1.0)
+                if r:
+                    msg_bytes = recv_msg(sock, APP_KEY)
+                    if msg_bytes is None:
                         break
-                        
-            except Exception as e:
-                print(f"[Signaling] Connection error on {host}: {e}")
-                
-            finally:
-                if sock:
-                    try: force_close_socket(sock)
-                    except: pass
-                with self.signaling_lock:
-                    if host in getattr(self, 'signaling_sockets', {}):
-                        del self.signaling_sockets[host]
-                    if getattr(self, 'current_signaling_host', None) == host:
-                        self.current_signaling_host = None
-                        self.primary_signaling_socket = None
-                        if self.signaling_sockets:
-                            new_host = next(iter(self.signaling_sockets))
-                            self.current_signaling_host = new_host
-                            self.primary_signaling_socket = self.signaling_sockets[new_host]
-                        else:
-                            if self.running_server:
-                                self.after(0, lambda: self.update_status(_("Mất kết nối toàn bộ Signaling Server. Đang thử lại..."), is_error=True, blink=True))
-            
-            time.sleep(retry_delay)
-            # Tăng retry_delay sau 3 lần thất bại liên tiếp
-            fail_count += 1
-            if fail_count >= 3:
-                retry_delay = 5
+                    if msg_bytes == b"":
+                        continue
+                    try:
+                        msg = msg_bytes.decode("utf-8")
+                        for part in msg.splitlines():
+                            part = part.strip()
+                            if not part:
+                                continue
+                            self.process_signaling_message(part, sock, host)
+                            if "pong" in part:
+                                last_pong = time.time()
+                    except Exception as de:
+                        print(f"[Signaling] Decode error: {de}")
+
+                now = time.time()
+                if now - last_ping > 20:
+                    ping_req = json.dumps({"action": "ping"})
+                    if not send_msg(sock, ping_req.encode("utf-8"), APP_KEY):
+                        print(f"[Signaling] Ping send failed for {host}:{port}")
+                        break
+                    last_ping = now
+
+                if now - last_pong > 50:
+                    print(f"[Signaling] Heartbeat timeout for {host}:{port}")
+                    break
+        except Exception as e:
+            print(f"[Signaling] Monitor error on {host}:{port}: {e}")
+        finally:
+            try:
+                force_close_socket(sock)
+            except Exception:
+                pass
+            with self.signaling_lock:
+                if self.signaling_sockets.get(host) is sock:
+                    del self.signaling_sockets[host]
+                if getattr(self, "primary_signaling_socket", None) is sock:
+                    self.primary_signaling_socket = None
+                    self.current_signaling_host = None
+
+            suppressed_gens = getattr(self, "_suppressed_disconnect_gens", None)
+            suppress_log = bool(suppressed_gens is not None and my_gen in suppressed_gens)
+            if suppressed_gens is not None:
+                suppressed_gens.discard(my_gen)
+            if getattr(self, "running_server", True) and not suppress_log:
+                log_connection_event(False, host, port)
+                print(f"[Signaling] Disconnected from {host}:{port}")
+
+    def _signaling_lifecycle_worker(self, my_gen, cancel_ev):
+        """
+        Vòng đời kết nối Signaling:
+        1. Retry tuần tự từng máy chủ trong danh sách với độ trễ ngẫu nhiên 1-5s (chống lụt mạng),
+           cập nhật thanh trạng thái "Đang thử kết nối tới signaling server: abc.com...".
+           Khi đi hết danh sách mà chưa kết nối được, tạm ngưng ngẫu nhiên 10-20s và đếm ngược
+           trên thanh trạng thái "Thử kết nối lại trong vòng xx giây...".
+        2. Khi kết nối thành công với 1 máy chủ: hủy toàn bộ quá trình retry, ghi connection.log,
+           và chỉ chạy luồng kiểm tra kết nối (_run_signaling_monitor_loop).
+        3. Nếu mất kết nối: ghi connection.log và tự động bắt đầu lại quy trình retry (1).
+        """
+        while not self._is_signaling_gen_aborted(my_gen, cancel_ev):
+            raw_hosts = list(core.config.SIGNALING_SERVER_HOSTS or [])
+            default_port = int(getattr(core.config, "SIGNALING_SERVER_PORT", 8765) or 8765)
+            targets = []
+            for entry in raw_hosts:
+                h_name, h_port = core.config.parse_signaling_host_entry(entry, default_port)
+                if h_name and (h_name, h_port) not in targets:
+                    targets.append((h_name, h_port))
+
+            if not targets:
+                if cancel_ev.wait(5.0):
+                    return
+                continue
+
+            connected_sock = None
+            connected_host = None
+            connected_port = None
+            early_msgs = []
+
+            for srv_host, srv_port in targets:
+                if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                    return
+
+                self.update_status(
+                    _("Đang thử kết nối tới signaling server: {server}...").format(server=srv_host)
+                )
+
+                sock, early = self._try_connect_single_signaling(srv_host, srv_port, cancel_ev, my_gen)
+                if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                    if sock:
+                        force_close_socket(sock)
+                    return
+
+                if sock is not None:
+                    connected_sock = sock
+                    connected_host = srv_host
+                    connected_port = srv_port
+                    early_msgs = early
+                    break
+
+                # Ngẫu nhiên từ 1 đến 5 giây cho mỗi lần retry để tránh spam / lụt đường truyền
+                retry_delay = random.uniform(1.0, 5.0)
+                if cancel_ev.wait(retry_delay):
+                    return
+
+            if connected_sock is None:
+                pause_secs = random.randint(10, 20)
+                for remaining in range(pause_secs, 0, -1):
+                    if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                        return
+                    self.update_status(
+                        _("Thử kết nối lại trong vòng {sec} giây...").format(sec=remaining)
+                    )
+                    if cancel_ev.wait(1.0):
+                        return
+                continue
+
+            # Kết nối thành công -> hủy toàn bộ quá trình retry ở trên, lưu socket và ghi connection.log
+            with self.signaling_lock:
+                if self._is_signaling_gen_aborted(my_gen, cancel_ev):
+                    force_close_socket(connected_sock)
+                    return
+                self.signaling_sockets.clear()
+                self.signaling_sockets[connected_host] = connected_sock
+                self.current_signaling_host = connected_host
+                self.current_signaling_port = connected_port
+                self.primary_signaling_socket = connected_sock
+
+            log_connection_event(True, connected_host, connected_port)
+            print(f"[Signaling] Connected to {connected_host}:{connected_port}")
+            self._refresh_public_ips_async()
+
+            suffix = _(" (Dịch vụ hoạt động)") if getattr(self, "is_service_active", False) else ""
+            if getattr(self, "_upnp_success", False) and not getattr(self, "_shown_upnp_banner", False):
+                self._shown_upnp_banner = True
+                self.update_status(
+                    _("Kết nối Signaling & Mở cổng Router thành công (Cổng {port})!{suffix}").format(
+                        port=BOUND_PORT, suffix=suffix
+                    ),
+                    is_success=True,
+                )
+            else:
+                self.update_status(_("Kết nối Signaling thành công! Sẵn sàng kết nối."), is_success=True)
+
+            for emsg in early_msgs:
+                try:
+                    self.process_signaling_message(emsg, connected_sock, connected_host)
+                except Exception as pe:
+                    print(f"[Signaling] Early message error: {pe}")
+
+            # Chỉ còn luồng kiểm tra kết nối duy trì như hiện có
+            self._run_signaling_monitor_loop(connected_sock, connected_host, connected_port, cancel_ev, my_gen)
+
+    def signaling_maintainer_thread(self, host=None):
+        """Giữ tương thích ngược nếu có lời gọi cũ: chuyển sang cơ chế quản lý tập trung mới."""
+        self.start_signaling_connection()
 
     def process_signaling_message(self, msg, sock, host):
         try:
@@ -3705,18 +3925,21 @@ class NetworkMixin:
     def start_relay_host(self, session_id, specific_host=None):
         try:
             print(f"[Relay] Host đang kết nối tới Relay Server cho session: {session_id}")
-            host_to_connect = specific_host if specific_host else core.config.SIGNALING_SERVER_HOSTS[0]
-            
+            raw_target = specific_host or getattr(self, "current_signaling_host", None) or (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else "")
+            host_to_connect, relay_port = core.config.parse_signaling_host_entry(raw_target, core.config.SIGNALING_SERVER_PORT)
+            if host_to_connect == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
+                relay_port = int(self.current_signaling_port)
+
             relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             relay_sock.settimeout(5.0)
-            relay_sock.connect((host_to_connect, core.config.SIGNALING_SERVER_PORT))
+            relay_sock.connect((host_to_connect, relay_port))
             relay_sock.settimeout(None)
             
             header = f"RELAY_HOST:{session_id}\n"
             relay_sock.sendall(header.encode('utf-8'))
             
             # Truyền hình ảnh qua kết nối Relay
-            threading.Thread(target=self.handle_host_handshake, args=(relay_sock, (host_to_connect, core.config.SIGNALING_SERVER_PORT)), daemon=True).start()
+            threading.Thread(target=self.handle_host_handshake, args=(relay_sock, (host_to_connect, relay_port)), daemon=True).start()
         except Exception as e:
             print(f"[Relay] Host kết nối Relay Server thất bại: {e}")
 
@@ -4081,7 +4304,10 @@ class NetworkMixin:
 
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         s.settimeout(4.0)
-                        s.connect((r_host, core.config.SIGNALING_SERVER_PORT))
+                        r_name, r_port = core.config.parse_signaling_host_entry(r_host, core.config.SIGNALING_SERVER_PORT)
+                        if r_name == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
+                            r_port = int(self.current_signaling_port)
+                        s.connect((r_name, r_port))
                         s.settimeout(None)
                         header = f"RELAY_CLIENT:{relay_session_id}\n"
                         s.sendall(header.encode('utf-8'))
@@ -4322,10 +4548,13 @@ class NetworkMixin:
                     else:
                         raise Exception("Chưa kết nối tới Signaling Server!")
                 
-                host_to_connect = specific_host if specific_host else core.config.SIGNALING_SERVER_HOSTS[0]
+                raw_relay_target = specific_host if specific_host else (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else "")
+                host_to_connect, relay_port = core.config.parse_signaling_host_entry(raw_relay_target, core.config.SIGNALING_SERVER_PORT)
+                if host_to_connect == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
+                    relay_port = int(self.current_signaling_port)
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(5.0)
-                s.connect((host_to_connect, core.config.SIGNALING_SERVER_PORT))
+                s.connect((host_to_connect, relay_port))
                 s.settimeout(None)
                 header = f"RELAY_CLIENT:{relay_session_id}\n"
                 s.sendall(header.encode('utf-8'))

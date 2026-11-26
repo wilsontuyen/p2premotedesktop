@@ -36,6 +36,7 @@ import json
 import time
 import socket
 import struct
+import random
 import threading
 
 import core.config
@@ -88,6 +89,28 @@ def notify_broker_password_update(session_password=None, fixed_password=None, pe
         return True
     except Exception as e:
         print(f"[Broker] notify password_update loi: {e}")
+        return False
+
+
+def notify_broker_signaling_update(hosts=None, port=None):
+    """GUI báo trực tiếp cho Broker (Session 0) tải lại cấu hình Signaling Server mới và kết nối lại từ đầu."""
+    payload = {"role": "signaling_update"}
+    if hosts is not None:
+        payload["hosts"] = [str(h).strip() for h in hosts if str(h).strip()]
+    if port is not None:
+        payload["port"] = int(port)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect(("127.0.0.1", AGENT_IPC_PORT))
+        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        try:
+            s.close()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f"[Broker] notify signaling_update loi: {e}")
         return False
 
 
@@ -228,6 +251,10 @@ class Broker:
             pass
         self.signaling_lock = threading.Lock()
         self.signaling_sockets = {}
+        self._sig_ctrl_lock = threading.Lock()
+        self._sig_gen = 0
+        self._sig_cancel_ev = threading.Event()
+        self._sig_connecting_sock = None
         self.active_viewers = []  # [(sock, password), ...]
         self.viewers_lock = threading.Lock()
         self._shutdown_sent = False
@@ -519,6 +546,10 @@ class Broker:
                 except: pass
             elif role == "password_update":
                 self._on_password_update(info)
+                try: conn.close()
+                except: pass
+            elif role == "signaling_update":
+                self._on_signaling_update(info)
                 try: conn.close()
                 except: pass
             else:
@@ -1189,78 +1220,234 @@ class Broker:
         except Exception as e:
             print(f"[Broker] UPnP loi: {e}")
 
-    def start_signaling(self):
-        hosts = list(core.config.SIGNALING_SERVER_HOSTS or [])
-        if not hosts:
-            print("[Broker] Khong co SIGNALING_SERVER_HOSTS")
-            return
-        for host in hosts:
-            threading.Thread(target=self._signaling_maintainer, args=(host,), daemon=True).start()
+    def _on_signaling_update(self, info):
+        try:
+            core.config.reload_signaling_config()
+            hosts = info.get("hosts")
+            port = info.get("port")
+            if hosts or port:
+                core.config.update_signaling_config(hosts, port)
+            print(f"[Broker] Nhan cap nhat Signaling Server moi: hosts={core.config.SIGNALING_SERVER_HOSTS}, port={core.config.SIGNALING_SERVER_PORT}")
+            self.start_signaling()
+        except Exception as e:
+            print(f"[Broker] _on_signaling_update loi: {e}")
 
-    def _signaling_maintainer(self, host):
-        retry_delay = 2
-        fail_count = 0
-        port = core.config.SIGNALING_SERVER_PORT
-        while True:
-            hwid = self._wait_hwid(timeout=8.0)
-            if not hwid:
-                print(f"[Broker] Signaling {host}: chua co HWID, doi...")
-                time.sleep(2)
-                continue
-            sock = None
+    def start_signaling(self):
+        with self._sig_ctrl_lock:
+            self._sig_gen += 1
+            my_gen = self._sig_gen
+            if self._sig_cancel_ev is not None:
+                self._sig_cancel_ev.set()
+            cancel_ev = threading.Event()
+            self._sig_cancel_ev = cancel_ev
+            cs = self._sig_connecting_sock
+            self._sig_connecting_sock = None
+            if cs is not None:
+                try:
+                    force_close_socket(cs)
+                except Exception:
+                    pass
+            with self.signaling_lock:
+                old_socks = list(self.signaling_sockets.values())
+                self.signaling_sockets.clear()
+            for s in old_socks:
+                try:
+                    force_close_socket(s)
+                except Exception:
+                    pass
+        threading.Thread(
+            target=self._signaling_lifecycle,
+            args=(my_gen, cancel_ev),
+            daemon=True,
+            name=f"BrokerSignaling-{my_gen}",
+        ).start()
+
+    def _try_connect_broker_signaling(self, host, port, hwid, cancel_ev, my_gen):
+        import select
+        if cancel_ev.is_set() or self._sig_gen != my_gen:
+            return None, []
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sig_connecting_sock = sock
             try:
+                sock.bind(("0.0.0.0", VIEWER_PORT))
+            except Exception:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind(("0.0.0.0", VIEWER_PORT))
-                except Exception:
+                self._sig_connecting_sock = sock
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                if os.name == "nt":
+                    sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                    sock.ioctl(sio_keepalive, (1, 30000, 10000))
+            except Exception:
+                pass
+            sock.settimeout(5.0)
+            try:
+                sock.connect((host, int(port)))
+            except Exception as ce:
+                if getattr(ce, "winerror", None) == 10048 or "10048" in str(ce):
                     try:
                         sock.close()
                     except Exception:
                         pass
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    self._sig_connecting_sock = sock
+                    sock.settimeout(5.0)
+                    sock.connect((host, int(port)))
+                else:
+                    raise ce
+
+            if cancel_ev.is_set() or self._sig_gen != my_gen:
+                force_close_socket(sock)
+                return None, []
+
+            if not send_msg(sock, json.dumps({"action": "register", "hwid": hwid}).encode("utf-8"), APP_KEY):
+                raise ConnectionError("Broker register send failed")
+            if not send_msg(sock, json.dumps({"action": "ping"}).encode("utf-8"), APP_KEY):
+                raise ConnectionError("Broker ping send failed")
+
+            deadline = time.monotonic() + 4.0
+            verified = False
+            early_msgs = []
+            while time.monotonic() < deadline:
+                if cancel_ev.is_set() or self._sig_gen != my_gen:
+                    force_close_socket(sock)
+                    return None, []
+                r, _w, _e = select.select([sock], [], [], 0.2)
+                if not r:
+                    continue
+                msg_bytes = recv_msg(sock, APP_KEY)
+                if msg_bytes is None or msg_bytes == b"":
+                    raise ConnectionError("Signaling closed during handshake")
+                decoded = msg_bytes.decode("utf-8")
+                for line in decoded.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    act = obj.get("action")
+                    if act == "pong":
+                        verified = True
+                    elif act:
+                        verified = True
+                        early_msgs.append(line)
+                if verified:
+                    break
+            if not verified:
+                raise TimeoutError("Broker signaling pong timeout")
+            sock.settimeout(None)
+            return sock, early_msgs
+        except Exception as e:
+            print(f"[Broker] Signaling {host}:{port}: {e}")
+            if sock:
+                force_close_socket(sock)
+            return None, []
+        finally:
+            if self._sig_connecting_sock is sock:
+                self._sig_connecting_sock = None
+
+    def _signaling_lifecycle(self, my_gen, cancel_ev):
+        import select
+        while not cancel_ev.is_set() and self._sig_gen == my_gen:
+            hwid = self._wait_hwid(timeout=5.0)
+            if not hwid:
+                if cancel_ev.wait(2.0):
+                    return
+                continue
+
+            raw_hosts = list(core.config.SIGNALING_SERVER_HOSTS or [])
+            default_port = int(getattr(core.config, "SIGNALING_SERVER_PORT", 8765) or 8765)
+            targets = []
+            for entry in raw_hosts:
+                h_name, h_port = core.config.parse_signaling_host_entry(entry, default_port)
+                if h_name and (h_name, h_port) not in targets:
+                    targets.append((h_name, h_port))
+            if not targets:
+                print("[Broker] Khong co SIGNALING_SERVER_HOSTS")
+                if cancel_ev.wait(5.0):
+                    return
+                continue
+
+            connected_sock = None
+            connected_host = None
+            connected_port = None
+            early_msgs = []
+
+            for srv_host, srv_port in targets:
+                if cancel_ev.is_set() or self._sig_gen != my_gen:
+                    return
+                cur_hwid = (self.identity or {}).get("hwid") or hwid
+                sock, early = self._try_connect_broker_signaling(srv_host, srv_port, cur_hwid, cancel_ev, my_gen)
+                if cancel_ev.is_set() or self._sig_gen != my_gen:
+                    if sock:
+                        force_close_socket(sock)
+                    return
+                if sock is not None:
+                    connected_sock = sock
+                    connected_host = srv_host
+                    connected_port = srv_port
+                    hwid = cur_hwid
+                    early_msgs = early
+                    break
+                if cancel_ev.wait(random.uniform(1.0, 5.0)):
+                    return
+
+            if connected_sock is None:
+                if cancel_ev.wait(random.randint(10, 20)):
+                    return
+                continue
+
+            with self.signaling_lock:
+                if cancel_ev.is_set() or self._sig_gen != my_gen:
+                    force_close_socket(connected_sock)
+                    return
+                self.signaling_sockets.clear()
+                self.signaling_sockets[connected_host] = connected_sock
+            print(f"[Broker] Signaling connected {connected_host}:{connected_port} hwid={hwid}")
+
+            for emsg in early_msgs:
                 try:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    if os.name == "nt":
-                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
-                        sock.ioctl(sio_keepalive, (1, 30000, 10000))
+                    self._process_signaling(emsg, connected_sock, connected_host)
                 except Exception:
                     pass
-                sock.settimeout(8.0)
-                sock.connect((host, port))
-                sock.settimeout(None)
-                hwid = (self.identity or {}).get("hwid") or hwid
-                send_msg(sock, json.dumps({"action": "register", "hwid": hwid}).encode("utf-8"), APP_KEY)
-                with self.signaling_lock:
-                    self.signaling_sockets[host] = sock
-                fail_count = 0
-                retry_delay = 2
-                print(f"[Broker] Signaling connected {host} hwid={hwid}")
-                last_ping = time.time()
-                last_pong = time.time()
-                import select
-                while True:
-                    r, _w, _e = select.select([sock], [], [], 1.0)
+
+            last_ping = time.time()
+            last_pong = time.time()
+            try:
+                while not cancel_ev.is_set() and self._sig_gen == my_gen:
+                    r, _w, _e = select.select([connected_sock], [], [], 1.0)
                     if r:
-                        msg_bytes = recv_msg(sock, APP_KEY)
+                        msg_bytes = recv_msg(connected_sock, APP_KEY)
                         if msg_bytes is None:
                             break
                         if msg_bytes == b"":
                             continue
                         try:
                             msg = msg_bytes.decode("utf-8")
-                            self._process_signaling(msg, sock, host)
-                            if "pong" in msg:
-                                last_pong = time.time()
+                            for part in msg.splitlines():
+                                part = part.strip()
+                                if not part:
+                                    continue
+                                self._process_signaling(part, connected_sock, connected_host)
+                                if "pong" in part:
+                                    last_pong = time.time()
                         except Exception as de:
                             print(f"[Broker] Signaling decode: {de}")
                     now = time.time()
                     if now - last_ping > 20:
-                        send_msg(sock, json.dumps({"action": "ping"}).encode("utf-8"), APP_KEY)
+                        if not send_msg(connected_sock, json.dumps({"action": "ping"}).encode("utf-8"), APP_KEY):
+                            break
                         last_ping = now
                     if now - last_pong > 50:
-                        print(f"[Broker] Signaling heartbeat timeout {host}")
+                        print(f"[Broker] Signaling heartbeat timeout {connected_host}:{connected_port}")
                         break
                     now_id = (self.identity or {}).get("hwid") or ""
                     try:
@@ -1275,19 +1462,15 @@ class Broker:
                         print(f"[Broker] Signaling HWID doi {hwid} -> {now_id}, dang ky lai")
                         break
             except Exception as e:
-                print(f"[Broker] Signaling {host}: {e}")
+                print(f"[Broker] Signaling monitor {connected_host}:{connected_port}: {e}")
             finally:
-                if sock:
-                    try:
-                        force_close_socket(sock)
-                    except Exception:
-                        pass
+                try:
+                    force_close_socket(connected_sock)
+                except Exception:
+                    pass
                 with self.signaling_lock:
-                    self.signaling_sockets.pop(host, None)
-            time.sleep(retry_delay)
-            fail_count += 1
-            if fail_count >= 3:
-                retry_delay = 5
+                    if self.signaling_sockets.get(connected_host) is connected_sock:
+                        self.signaling_sockets.pop(connected_host, None)
 
     def _process_signaling(self, msg, sock, host):
         try:
@@ -1357,15 +1540,16 @@ class Broker:
 
     def _start_relay_host(self, session_id, relay_host):
         try:
-            print(f"[Broker] Relay HOST connect {relay_host} session={session_id}")
+            r_name, r_port = core.config.parse_signaling_host_entry(relay_host, core.config.SIGNALING_SERVER_PORT)
+            print(f"[Broker] Relay HOST connect {r_name}:{r_port} session={session_id}")
             rs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             rs.settimeout(8.0)
-            rs.connect((relay_host, core.config.SIGNALING_SERVER_PORT))
+            rs.connect((r_name, r_port))
             rs.settimeout(None)
             rs.sendall(f"RELAY_HOST:{session_id}\n".encode("utf-8"))
             threading.Thread(
                 target=self._handle_viewer,
-                args=(rs, (relay_host, core.config.SIGNALING_SERVER_PORT)),
+                args=(rs, (r_name, r_port)),
                 daemon=True,
             ).start()
         except Exception as e:

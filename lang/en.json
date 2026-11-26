@@ -516,5 +516,10 @@
   "Trung bình": "Fair",
   "Xấu": "Poor",
   "Kém": "Poor",
-  "Yếu": "Weak"
+  "Yếu": "Weak",
+  "Đang thử kết nối tới signaling server: {server}...": "Trying to connect to signaling server: {server}...",
+  "Đang thử kết nối tới signaling server": "Trying to connect to signaling server",
+  "Thử kết nối lại trong vòng {sec} giây...": "Retrying connection in {sec} seconds...",
+  "Thử kết nối lại trong vòng": "Retrying connection in",
+  "Đã cập nhật máy chủ thành công!\nĐang kết nối lại tới máy chủ Signaling mới...": "Server updated successfully!\nReconnecting to the new Signaling server..."
 }

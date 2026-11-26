@@ -10,11 +10,26 @@ import configparser
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 LOG_CHECKONLINE = 1
-LOG_ALL = 1
+# LOG_ALL: 0 = tắt toàn bộ log, 1 = ghi log ra file (+ màn hình), 2 = chỉ log ra màn hình (mặc định)
+LOG_ALL = 2
 
+_orig_stdout = sys.stdout
+_orig_stderr = sys.stderr
 _orig_print = print
+
+
+def _(text):
+    return text
+
+
+def get_server_base_dir():
+    if getattr(sys, "frozen", False) or hasattr(sys, "__compiled__") or ("__compiled__" in globals()):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def print(*args, **kwargs):
-    if LOG_ALL:
+    if LOG_ALL in (1, 2):
         _orig_print(*args, **kwargs)
 
 APP_KEY = "q3tu0y7j"
@@ -102,16 +117,28 @@ def recv_msg(sock, password):
         return b''
 
 class TeeLogger:
-    def __init__(self, filename):
-        self.terminal = sys.stdout
+    def __init__(self, filename=None, mode=2, terminal=None):
+        self.terminal = terminal if terminal is not None else _orig_stdout
+        self.mode = mode  # 0: tắt toàn bộ, 1: ghi ra file (+ màn hình), 2: chỉ màn hình
         self.at_line_start = True
-        try:
-            self.log = open(filename, "a", encoding="utf-8-sig", buffering=1)
-        except:
+        self.log = None
+        if self.mode == 1 and filename:
+            try:
+                self.log = open(filename, "a", encoding="utf-8-sig", buffering=1)
+            except Exception:
+                self.log = None
+
+    def close(self):
+        if self.log:
+            try:
+                self.log.close()
+            except Exception:
+                pass
             self.log = None
 
     def write(self, message):
-        if not message: return
+        if not message or self.mode == 0:
+            return
         formatted_message = ""
         lines = message.split('\n')
         for i, line in enumerate(lines):
@@ -125,23 +152,48 @@ class TeeLogger:
                     self.at_line_start = False
                 formatted_message += line
 
-        if self.terminal:
-            try: self.terminal.write(formatted_message)
-            except: pass
-        if self.log:
-            try: self.log.write(formatted_message)
-            except: pass
+        if self.mode in (1, 2) and self.terminal:
+            try:
+                self.terminal.write(formatted_message)
+            except Exception:
+                pass
+        if self.mode == 1 and self.log:
+            try:
+                self.log.write(formatted_message)
+            except Exception:
+                pass
 
     def flush(self):
-        if self.terminal:
-            try: self.terminal.flush()
-            except: pass
-        if self.log:
-            try: self.log.flush()
-            except: pass
+        if self.mode == 0:
+            return
+        if self.mode in (1, 2) and self.terminal:
+            try:
+                self.terminal.flush()
+            except Exception:
+                pass
+        if self.mode == 1 and self.log:
+            try:
+                self.log.flush()
+            except Exception:
+                pass
 
-sys.stdout = TeeLogger("signaling_log.txt")
-sys.stderr = sys.stdout
+
+_active_logger = None
+
+
+def setup_logging(mode=None, base_dir=None):
+    global _active_logger
+    if mode is None:
+        mode = LOG_ALL
+    if base_dir is None:
+        base_dir = get_server_base_dir()
+    if _active_logger is not None:
+        _active_logger.close()
+    log_file = os.path.join(base_dir, "signaling_log.txt") if mode == 1 else None
+    _active_logger = TeeLogger(filename=log_file, mode=mode, terminal=_orig_stdout)
+    sys.stdout = _active_logger
+    sys.stderr = _active_logger
+    return _active_logger
 
 clients = {}
 clients_lock = threading.Lock()
@@ -444,38 +496,53 @@ def handle_client(conn, addr):
             if not silent_disconnect:
                 print(f"[-] Client ngắt kết nối: {addr} (ID: {hwid})")
 
-def load_config():
+def load_config(base_dir=None):
     global LOG_CHECKONLINE, LOG_ALL
+    if base_dir is None:
+        base_dir = get_server_base_dir()
     config = configparser.ConfigParser()
     # Thử đọc cả 2 tên file để tương thích
-    ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signaling_server.ini')
+    ini_path = os.path.join(base_dir, 'signaling_server.ini')
     if not os.path.exists(ini_path):
-        ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server.ini')
-        
+        ini_path = os.path.join(base_dir, 'server.ini')
+
     host = '0.0.0.0'
     port = 8765
-    
+    LOG_CHECKONLINE = 1
+    LOG_ALL = 2  # Mặc định: chỉ hiển thị log trên màn hình, không ghi ra file
+
+    config_err = None
     if os.path.exists(ini_path):
         try:
-            config.read(ini_path, encoding='utf-8')
-            if 'server' in config:
-                host = config['server'].get('host', host)
-                try:
-                    port = config['server'].getint('port', port)
-                except ValueError:
-                    pass
-            if 'Log' in config:
-                try:
-                    LOG_CHECKONLINE = config['Log'].getint('checkonline', 1)
-                except ValueError:
-                    pass
-                try:
-                    LOG_ALL = config['Log'].getint('all', 1)
-                except ValueError:
-                    pass
+            config.read(ini_path, encoding='utf-8-sig')
+            for sec in config.sections():
+                sec_lower = sec.lower()
+                if sec_lower == 'server':
+                    host = config[sec].get('host', host).strip() or host
+                    try:
+                        port = config[sec].getint('port', port)
+                    except ValueError:
+                        pass
+                elif sec_lower == 'log':
+                    try:
+                        LOG_CHECKONLINE = config[sec].getint('checkonline', LOG_CHECKONLINE)
+                    except ValueError:
+                        pass
+                    try:
+                        val_all = config[sec].getint('all', LOG_ALL)
+                        if val_all in (0, 1, 2):
+                            LOG_ALL = val_all
+                        else:
+                            LOG_ALL = 2
+                    except ValueError:
+                        pass
         except Exception as e:
-            print(f"[!] Lỗi đọc file cấu hình: {e}")
-            
+            config_err = e
+
+    setup_logging(mode=LOG_ALL, base_dir=base_dir)
+    if config_err is not None:
+        print(f"[!] Lỗi đọc file cấu hình: {config_err}")
+
     return host, port
 
 def main():

@@ -2166,9 +2166,10 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
         entry_port.pack(fill=tk.X, pady=(3, 15))
 
 
-        current_hosts = ", ".join(SIGNALING_SERVER_HOSTS)
+        import core.config as _sig_cfg
+        current_hosts = ", ".join(_sig_cfg.SIGNALING_SERVER_HOSTS)
         entry_hosts.insert(0, current_hosts)
-        entry_port.insert(0, str(SIGNALING_SERVER_PORT))
+        entry_port.insert(0, str(_sig_cfg.SIGNALING_SERVER_PORT))
         
         entry_hosts.focus()
 
@@ -2179,30 +2180,58 @@ class UnifiedApp(tk.Tk, HostMixin, NetworkMixin, SavedListMixin):
             if not new_hosts_str or not new_port_str:
                 self.show_custom_error(_("Lỗi"), _("Vui lòng nhập đầy đủ thông tin!"), parent=dialog)
                 return
+
+            new_hosts_list = [h.strip() for h in new_hosts_str.split(',') if h.strip()]
+            if not new_hosts_list:
+                self.show_custom_error(_("Lỗi"), _("Vui lòng nhập đầy đủ thông tin!"), parent=dialog)
+                return
                 
             try:
                 new_port = int(new_port_str)
+                if not (1 <= new_port <= 65535):
+                    raise ValueError("Port out of range")
             except ValueError:
                 self.show_custom_error(_("Lỗi"), _("Cổng kết nối (Port) phải là số!"), parent=dialog)
                 return
                 
             global SIGNALING_SERVER_HOSTS, SIGNALING_SERVER_PORT
-            SIGNALING_SERVER_HOSTS = [h.strip() for h in new_hosts_str.split(',') if h.strip()]
+            SIGNALING_SERVER_HOSTS = list(new_hosts_list)
             SIGNALING_SERVER_PORT = new_port
+            _sig_cfg.update_signaling_config(new_hosts_list, new_port)
             
             try:
                 import configparser
+                ini_file = os.path.join(app_dir, 'server.ini')
                 config = configparser.ConfigParser()
-                config.read('server.ini', encoding='utf-8')
+                config.read(ini_file, encoding='utf-8')
                 if 'server' not in config:
                     config.add_section('server')
-                config['server']['host'] = new_hosts_str
+                config['server']['host'] = ", ".join(new_hosts_list)
                 config['server']['port'] = str(new_port)
-                with open('server.ini', 'w', encoding='utf-8') as f:
+                with open(ini_file, 'w', encoding='utf-8') as f:
                     config.write(f)
-                
-                self.show_custom_info(_("Thành công"), _("Đã cập nhật máy chủ thành công!\nỨng dụng sẽ sử dụng cấu hình mới cho các kết nối tiếp theo."), parent=dialog)
+
                 dialog.destroy()
+
+                # Khởi động lại quá trình retry kết nối tới Signaling Server ngay lập tức từ đầu danh sách mới
+                if hasattr(self, "restart_signaling_connection"):
+                    self.restart_signaling_connection()
+
+                # Đồng bộ cấu hình mới xuống Broker nền (Session 0) nếu đang chạy trên Windows
+                if sys.platform == "win32":
+                    def _sync_broker_sig(h_list=list(new_hosts_list), p_val=new_port):
+                        try:
+                            from core.broker import notify_broker_signaling_update
+                            notify_broker_signaling_update(hosts=h_list, port=p_val)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_sync_broker_sig, daemon=True).start()
+
+                self.show_custom_info(
+                    _("Thành công"),
+                    _("Đã cập nhật máy chủ thành công!\nĐang kết nối lại tới máy chủ Signaling mới..."),
+                    parent=self,
+                )
             except Exception as e:
                 self.show_custom_error(_("Lỗi"), _("Không thể lưu file server.ini: ") + str(e), parent=dialog)
 
@@ -3461,7 +3490,9 @@ Comment=Remote Desktop P2P AutoStart
                     except:
                         pass
                 
-                if hasattr(self, 'signaling_sockets'):
+                if hasattr(self, 'restart_signaling_connection'):
+                    self.restart_signaling_connection(suppress_disconnect_log=True)
+                elif hasattr(self, 'signaling_sockets'):
                     sockets_to_close = list(self.signaling_sockets.values())
                     self.signaling_sockets.clear()
                     for sock in sockets_to_close:
@@ -3477,6 +3508,8 @@ Comment=Remote Desktop P2P AutoStart
                 _("Không thể kết nối Signaling"),
                 _("Chưa kết nối Signaling"),
                 _("Đang kết nối Signaling"),
+                _("Đang thử kết nối tới signaling server"),
+                _("Thử kết nối lại trong vòng"),
                 _("Đang thử lại"),
                 _("chế độ nền"),
                 _("Sẵn sàng kết nối"),  # cũng update nếu đang sẵn sàng mà Signaling chưa confirm
@@ -3738,8 +3771,13 @@ Comment=Remote Desktop P2P AutoStart
             try: self.server_socket.close()
             except: pass
         
+        if getattr(self, "_signaling_cancel_event", None) is not None:
+            try:
+                self._signaling_cancel_event.set()
+            except Exception:
+                pass
         if hasattr(self, 'signaling_sockets'):
-            for sock in self.signaling_sockets.values():
+            for sock in list(self.signaling_sockets.values()):
                 try: force_close_socket(sock)
                 except: pass
                 
