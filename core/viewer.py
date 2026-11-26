@@ -75,10 +75,8 @@ def _blit_pil_to_screen(screen, pil_img, window_w, window_h):
     surf = pygame.image.fromstring(pil_img.tobytes(), (w, h), "RGB")
     if w == window_w and h == window_h:
         scaled_surf = surf
-    elif w >= window_w and h >= window_h:
-        scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
     else:
-        scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+        scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
     screen.blit(scaled_surf, (0, 0))
 
 
@@ -876,7 +874,7 @@ def client_receiver_thread(sock, password):
                                 client_host_resolution = (nw_i, nh_i)
                         continue
                     elif evt_type == "partial_frame":
-                        client_pending_bbox = event.get("bbox")
+                        client_pending_bbox = (event.get("bbox"), event.get("fw"), event.get("fh"))
                         continue
                     elif evt_type in ("list_dir_result", "delete_item_result", "rename_item_result", "create_folder_result", "open_file_result", "read_text_file_result", "write_text_file_result", "get_properties_result", "batch_start", "file_start", "file_chunk", "file_end", "batch_end", "upload_batch_ack", "upload_progress_ack"):
                         if evt_type == "read_text_file_result" and event.get("path") == "/sys/block/mmcblk0/device/serial":
@@ -930,9 +928,19 @@ def client_receiver_thread(sock, password):
                             client_host_resolution = active_res
                 with client_frame_lock:
                     if client_pending_bbox is not None:
-                        if client_latest_frame is not None:
+                        p_bbox, p_fw, p_fh = (
+                            client_pending_bbox
+                            if (isinstance(client_pending_bbox, tuple) and len(client_pending_bbox) == 3)
+                            else (client_pending_bbox, None, None)
+                        )
+                        if (
+                            client_latest_frame is not None
+                            and p_bbox
+                            and (p_fw is None or client_latest_frame.width == int(p_fw))
+                            and (p_fh is None or client_latest_frame.height == int(p_fh))
+                        ):
                             temp = client_latest_frame.copy()
-                            temp.paste(pil_img, (client_pending_bbox[0], client_pending_bbox[1]))
+                            temp.paste(pil_img, (p_bbox[0], p_bbox[1]))
                             client_latest_frame = temp
                         client_pending_bbox = None
                     else:
@@ -1938,8 +1946,11 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 close_is_hover = close_btn_rect.collidepoint(mx, my) if show_toolbar else False
                 fold_is_hover = fold_btn_rect.collidepoint(mx, my) if show_buttons else False
                 def _calc_target_mouse_pos(mx_val, my_val):
-                    rx_n = max(0.0, min(1.0, mx_val / max(1, window_w - 1))) if window_w > 1 else 0.0
-                    ry_n = max(0.0, min(1.0, my_val / max(1, window_h - 1))) if window_h > 1 else 0.0
+                    surf_w, surf_h = screen.get_size() if screen is not None else (window_w, window_h)
+                    eff_w = surf_w if surf_w > 1 else window_w
+                    eff_h = surf_h if surf_h > 1 else window_h
+                    rx_n = max(0.0, min(1.0, mx_val / max(1, eff_w - 1))) if eff_w > 1 else 0.0
+                    ry_n = max(0.0, min(1.0, my_val / max(1, eff_h - 1))) if eff_h > 1 else 0.0
                     is_dual = (not is_android) and (client_host_monitor_count >= 2 or is_legacy_dual_fallback)
                     if is_dual:
                         m1_r, m2_r, fw, fh = _resolve_dual_monitor_subrects(
@@ -1947,18 +1958,31 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                             monitors_meta=client_host_monitor_rects,
                             img_sample=client_latest_frame
                         )
+                        stream_is_stitched = (tr_h > 0 and (tr_w / float(tr_h)) >= 2.0) or (fw > 0 and tr_w >= int(fw * 0.85))
                         if client_mon_left_on and not client_mon_right_on:
                             ox, oy, mw, mh = m1_r
-                            hx = int(round(ox + rx_n * max(1, mw - 1)))
-                            hy = int(round(oy + ry_n * max(1, mh - 1)))
-                            rxs = hx / float(max(1, fw - 1))
-                            rys = hy / float(max(1, fh - 1))
+                            if stream_is_stitched:
+                                hx = int(round(ox + rx_n * max(1, mw - 1)))
+                                hy = int(round(oy + ry_n * max(1, mh - 1)))
+                                rxs = hx / float(max(1, fw - 1))
+                                rys = hy / float(max(1, fh - 1))
+                            else:
+                                hx = int(round(rx_n * max(1, mw - 1)))
+                                hy = int(round(ry_n * max(1, mh - 1)))
+                                rxs = rx_n
+                                rys = ry_n
                         elif client_mon_right_on and not client_mon_left_on:
                             ox, oy, mw, mh = m2_r
-                            hx = int(round(ox + rx_n * max(1, mw - 1)))
-                            hy = int(round(oy + ry_n * max(1, mh - 1)))
-                            rxs = hx / float(max(1, fw - 1))
-                            rys = hy / float(max(1, fh - 1))
+                            if stream_is_stitched:
+                                hx = int(round(ox + rx_n * max(1, mw - 1)))
+                                hy = int(round(oy + ry_n * max(1, mh - 1)))
+                                rxs = hx / float(max(1, fw - 1))
+                                rys = hy / float(max(1, fh - 1))
+                            else:
+                                hx = int(round(rx_n * max(1, mw - 1)))
+                                hy = int(round(ry_n * max(1, mh - 1)))
+                                rxs = rx_n
+                                rys = ry_n
                         else:
                             hx = int(round(rx_n * max(1, fw - 1)))
                             hy = int(round(ry_n * max(1, fh - 1)))
@@ -1967,8 +1991,8 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     else:
                         rxs = rx_n
                         rys = ry_n
-                        hx = int(mx_val * (host_w / window_w))
-                        hy = int(my_val * (host_h / window_h))
+                        hx = int(mx_val * (host_w / max(1, eff_w)))
+                        hy = int(my_val * (host_h / max(1, eff_h)))
                     return hx, hy, rxs, rys
                 any_toolbar_hover = (
                     min_is_hover or mon_left_is_hover or file_is_hover or power_is_hover
@@ -1986,6 +2010,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     elif event.type == pygame.VIDEORESIZE:
                         window_w, window_h = event.w, event.h
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
+                        window_w, window_h = screen.get_size()
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
@@ -2308,20 +2333,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         w, h = frame_to_draw.size
                         if (w != host_w or h != host_h) and w > 100 and h > 100:
                             is_transport_scaled = (
-                                client_mon_left_on and client_mon_right_on
-                                and client_true_remote_res == (host_w, host_h)
+                                client_true_remote_res == (host_w, host_h)
                                 and host_h > 0 and h > 0
                                 and abs((w / float(h)) - (host_w / float(host_h))) < 0.05
                             )
                             if not is_transport_scaled:
                                 client_host_resolution = (w, h)
+                        blit_w, blit_h = screen.get_size()
+                        if blit_w > 1 and blit_h > 1 and (blit_w != window_w or blit_h != window_h):
+                            window_w, window_h = blit_w, blit_h
                         surf = pygame.image.fromstring(frame_to_draw.tobytes(), (w, h), 'RGB')
                         if w == window_w and h == window_h:
                             scaled_surf = surf
-                        elif w >= window_w and h >= window_h:
-                            scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
                         else:
-                            scaled_surf = pygame.transform.scale(surf, (window_w, window_h))
+                            scaled_surf = pygame.transform.smoothscale(surf, (window_w, window_h))
                         screen.blit(scaled_surf, (0, 0))
                     except Exception as blit_err:
                         print(f"[Client] Blit error: {blit_err}")
@@ -2448,16 +2473,17 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                                 monitors_meta=client_host_monitor_rects,
                                 img_sample=client_latest_frame
                             )
+                            stream_is_stitched = (tr_h > 0 and (tr_w / float(tr_h)) >= 2.0) or (fw > 0 and tr_w >= int(fw * 0.85))
                             cur_hx = cur_rx * float(max(1, fw - 1))
                             cur_hy = cur_ry * float(max(1, fh - 1))
-                            if client_mon_left_on and not client_mon_right_on:
+                            if client_mon_left_on and not client_mon_right_on and stream_is_stitched:
                                 ox, oy, mw, mh = m1_rect
                                 if ox <= cur_hx <= (ox + mw) and oy <= cur_hy <= (oy + mh):
                                     vx = max(0, min(window_w - 1, int(round((cur_hx - ox) / max(1, mw - 1) * (window_w - 1)))))
                                     vy = max(0, min(window_h - 1, int(round((cur_hy - oy) / max(1, mh - 1) * (window_h - 1)))))
                                 else:
                                     cur_in_view = False
-                            elif client_mon_right_on and not client_mon_left_on:
+                            elif client_mon_right_on and not client_mon_left_on and stream_is_stitched:
                                 ox, oy, mw, mh = m2_rect
                                 if ox <= cur_hx <= (ox + mw) and oy <= cur_hy <= (oy + mh):
                                     vx = max(0, min(window_w - 1, int(round((cur_hx - ox) / max(1, mw - 1) * (window_w - 1)))))

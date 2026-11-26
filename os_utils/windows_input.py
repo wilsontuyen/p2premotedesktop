@@ -305,6 +305,29 @@ _cached_screen_y = 0
 _cached_screen_time = 0
 _last_press_ts = 0.0
 
+class _PhysDpiInput(object):
+    """Đảm bảo luồng gửi chuột dùng Per-Monitor-V2 DPI để GetSystemMetrics(76..79),
+    SendInput(VIRTUALDESK) và SetCursorPos khớp 1:1 với toạ độ pixel vật lý."""
+    def __enter__(self):
+        self._old = None
+        try:
+            fn = ctypes.windll.user32.SetThreadDpiAwarenessContext
+            fn.restype = ctypes.c_void_p
+            fn.argtypes = [ctypes.c_void_p]
+            self._old = fn(ctypes.c_void_p(-4))
+        except Exception:
+            self._old = None
+        return self
+
+    def __exit__(self, *a):
+        if self._old:
+            try:
+                ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(self._old))
+            except Exception:
+                pass
+        return False
+
+
 def _mouse_abs_norm(x, y):
     """Chuẩn hoá toạ độ màn hình ảo 0..65535 cho SendInput ABSOLUTE|VIRTUALDESK."""
     global _cached_screen_w, _cached_screen_h, _cached_screen_x, _cached_screen_y, _cached_screen_time
@@ -352,6 +375,45 @@ def send_input_mouse_click(button_name, pressed):
 
 def send_input_mouse_click_at(x, y, button_name, pressed):
     """Di chuyển rồi click tuyệt đối (nguyên tử) — tương thích hoàn toàn XAML/UAC/BSDR Shutdown."""
+    with _PhysDpiInput():
+        return _send_input_mouse_click_at_impl(x, y, button_name, pressed)
+
+
+def _snap_cursor_physical(tx, ty):
+    """Đặt con trỏ về đúng toạ độ pixel vật lý (tx, ty) và kiểm tra lại.
+    Trả về True nếu xác nhận con trỏ đã nằm tại (tx, ty) (sai số <= 2 px)."""
+    try:
+        user32 = ctypes.windll.user32
+        tx_i, ty_i = int(tx), int(ty)
+        pt = wintypes.POINT()
+        got = False
+        if hasattr(user32, "GetPhysicalCursorPos") and user32.GetPhysicalCursorPos(ctypes.byref(pt)):
+            got = True
+        elif user32.GetCursorPos(ctypes.byref(pt)):
+            got = True
+        if got and abs(pt.x - tx_i) <= 1 and abs(pt.y - ty_i) <= 1:
+            return True
+        moved = False
+        if hasattr(user32, "SetPhysicalCursorPos") and user32.SetPhysicalCursorPos(tx_i, ty_i):
+            moved = True
+        elif user32.SetCursorPos(tx_i, ty_i):
+            moved = True
+        if moved:
+            # Phát 1 sự kiện MOUSEEVENTF_MOVE tương đối (0, 0) để cửa sổ/XAML tại điểm đích nhận WM_MOUSEMOVE
+            mv0 = INPUT()
+            mv0.type = INPUT_MOUSE
+            mv0.union.mi = MOUSEINPUT(0, 0, 0, MOUSEEVENTF_MOVE, 0, None)
+            _send_input_with_retry(1, ctypes.byref(mv0), ctypes.sizeof(INPUT))
+        if hasattr(user32, "GetPhysicalCursorPos") and user32.GetPhysicalCursorPos(ctypes.byref(pt)):
+            return abs(pt.x - tx_i) <= 2 and abs(pt.y - ty_i) <= 2
+        if user32.GetCursorPos(ctypes.byref(pt)):
+            return abs(pt.x - tx_i) <= 2 and abs(pt.y - ty_i) <= 2
+    except Exception:
+        pass
+    return False
+
+
+def _send_input_mouse_click_at_impl(x, y, button_name, pressed):
     try:
         nx, ny = _mouse_abs_norm(x, y)
         flags = 0
@@ -366,14 +428,12 @@ def send_input_mouse_click_at(x, y, button_name, pressed):
             return 0
 
         # Menu XAML (Start, nút Nguồn ở màn hình Login...) cần nhận sự kiện WM_MOUSEMOVE thật
-        # (pointer-enter/hover) trước khi nhận click. SetCursorPos rồi SendInput cùng toạ độ
-        # sẽ KHÔNG sinh mouse-move vì con trỏ đã ở sẵn đó -> click đầu tiên bị miss.
-        # Vì vậy chỉ dùng SendInput: nhích 1 bước lệch rồi vào đúng điểm, rồi mới nhấn.
+        # (pointer-enter/hover) trước khi nhận click.
         global _last_press_ts
         if pressed:
             try:
                 move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-                for (ax, ay, delay) in ((nx - 120, ny - 120, 0.03), (nx, ny, 0.06)):
+                for (ax, ay, delay) in ((nx - 32, ny, 0.02), (nx, ny, 0.03)):
                     mv = INPUT()
                     mv.type = INPUT_MOUSE
                     mv.union.mi = MOUSEINPUT(max(0, min(65535, ax)), max(0, min(65535, ay)), 0, move_flags, 0, None)
@@ -387,22 +447,33 @@ def send_input_mouse_click_at(x, y, button_name, pressed):
             gap = time.monotonic() - _last_press_ts
             if gap < 0.05:
                 time.sleep(0.05 - gap)
+
+        # Hiệu chỉnh con trỏ về đúng toạ độ pixel vật lý (x, y) trước khi nhấn/nhả nút:
+        # tránh lệch khi 2 màn hình khác chiều cao (vùng trống virtual desktop) hoặc khác DPI.
+        snapped = _snap_cursor_physical(x, y)
+
         inp = INPUT()
         inp.type = INPUT_MOUSE
-        inp.union.mi = MOUSEINPUT(
-            nx, ny, 0,
-            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
-            0, None
-        )
+        if snapped:
+            inp.union.mi = MOUSEINPUT(0, 0, 0, flags, 0, None)
+        else:
+            inp.union.mi = MOUSEINPUT(
+                nx, ny, 0,
+                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
+                0, None
+            )
         res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
         # Driver-level mouse_event fallback if SendInput failed
         if not res:
             try:
-                ctypes.windll.user32.mouse_event(
-                    MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
-                    nx, ny, 0, 0
-                )
+                if snapped:
+                    ctypes.windll.user32.mouse_event(flags, 0, 0, 0, 0)
+                else:
+                    ctypes.windll.user32.mouse_event(
+                        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags,
+                        nx, ny, 0, 0
+                    )
             except Exception:
                 pass
 
@@ -422,6 +493,11 @@ def send_input_mouse_scroll(dx, dy):
         print(f"[SendInput] Mouse scroll injection failed: {e}")
 
 def send_input_mouse_move(x, y):
+    with _PhysDpiInput():
+        return _send_input_mouse_move_impl(x, y)
+
+
+def _send_input_mouse_move_impl(x, y):
     try:
         nx, ny = _mouse_abs_norm(x, y)
         inp = INPUT()
@@ -432,14 +508,8 @@ def send_input_mouse_move(x, y):
             0, None
         )
         res = _send_input_with_retry(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-        # SendInput trước (sinh WM_MOUSEMOVE thật cho XAML); SetCursorPos chỉ để hiệu chỉnh sai số làm tròn
-        try:
-            pt = wintypes.POINT()
-            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-            if pt.x != int(x) or pt.y != int(y):
-                ctypes.windll.user32.SetCursorPos(int(x), int(y))
-        except Exception:
-            pass
+        # SendInput trước (sinh WM_MOUSEMOVE thật cho XAML); _snap_cursor_physical hiệu chỉnh sai số làm tròn/DPI
+        _snap_cursor_physical(x, y)
         return res
     except Exception as e:
         print(f"[SendInput] Mouse move injection failed: {e}")

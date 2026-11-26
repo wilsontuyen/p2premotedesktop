@@ -955,7 +955,7 @@ def _primary_screen_rect():
     return 0, 0, 1920, 1080
 
 
-def _virtual_screen_rect():
+def _virtual_screen_rect_impl():
     if sys.platform != "win32":
         return 0, 0, 1920, 1080
     user32 = ctypes.windll.user32
@@ -970,7 +970,7 @@ def _virtual_screen_rect():
     return left0, top0, w, h
 
 
-def _enum_win32_monitors():
+def _enum_win32_monitors_impl():
     """Lấy danh sách các màn hình trên Windows thông qua pywin32 (win32api.EnumDisplayMonitors)
     kèm fallback ctypes. Trả về danh sách dict {'left', 'top', 'width', 'height', 'is_primary'}."""
     if sys.platform != "win32":
@@ -1075,6 +1075,46 @@ def is_multi_monitor_windows():
 _active_monitor_rects_last = []
 
 
+class _PhysDpi(object):
+    """Đặt DPI awareness của LUỒNG hiện tại = Per-Monitor-V2 để các API toạ độ màn hình
+    (GetSystemMetrics, EnumDisplayMonitors, DXGI DesktopCoordinates) trả pixel VẬT LÝ.
+    Nếu không, màn hình có scale khác DPI hệ thống bị báo kích thước ảo -> tile bị co (nhòe) và lệch."""
+    def __enter__(self):
+        self._old = None
+        if sys.platform == "win32":
+            try:
+                fn = ctypes.windll.user32.SetThreadDpiAwarenessContext
+                fn.restype = ctypes.c_void_p
+                fn.argtypes = [ctypes.c_void_p]
+                self._old = fn(ctypes.c_void_p(-4))
+            except Exception:
+                self._old = None
+        return self
+
+    def __exit__(self, *a):
+        if self._old:
+            try:
+                ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(self._old))
+            except Exception:
+                pass
+        return False
+
+
+def _virtual_screen_rect():
+    with _PhysDpi():
+        return _virtual_screen_rect_impl()
+
+
+def _enum_win32_monitors():
+    with _PhysDpi():
+        return _enum_win32_monitors_impl()
+
+
+def _get_physical_monitor_rects(sct=None, dx_cams=None, composite=False):
+    with _PhysDpi():
+        return _get_physical_monitor_rects_impl(sct, dx_cams, composite)
+
+
 def _pick_primary_monitor_dict(valid_mons):
     """Chọn màn hình chính (is_primary hoặc gốc tọa độ 0,0 hoặc phần tử đầu tiên)."""
     if not valid_mons:
@@ -1161,9 +1201,10 @@ def _get_active_monitors_and_virtual_rect(sct=None):
             active_mons, valid_mons = _filter_active_mss_monitors(sct)
             mons = getattr(sct, "monitors", None) or []
         else:
-            with mss.mss() as _sct_tmp:
-                active_mons, valid_mons = _filter_active_mss_monitors(_sct_tmp)
-                mons = getattr(_sct_tmp, "monitors", None) or []
+            with _PhysDpi():
+                with mss.mss() as _sct_tmp:
+                    active_mons, valid_mons = _filter_active_mss_monitors(_sct_tmp)
+                    mons = getattr(_sct_tmp, "monitors", None) or []
         if len(active_mons) >= 2:
             chosen = active_mons
         elif len(active_mons) == 1:
@@ -1197,12 +1238,23 @@ def _get_active_monitors_and_virtual_rect(sct=None):
     return {"left": l0, "top": t0, "width": w0, "height": h0}, [(l0, t0, w0, h0)]
 
 
-def _get_physical_monitor_rects(sct=None, dx_cams=None):
+def _get_physical_monitor_rects_impl(sct=None, dx_cams=None, composite=False):
     """Trả về danh sách (left, top, width, height) của các màn hình vật lý đang hoạt động,
-    sắp xếp theo (left, top) tăng dần: index 0 = Màn hình Trái, index 1 = Màn hình Phải."""
+    sắp xếp theo (left, top) tăng dần: index 0 = Màn hình Trái, index 1 = Màn hình Phải.
+    composite=True: trả toạ độ trong khung ghép đã canh giữa (dùng để báo cho Viewer)."""
     rects = []
     seen = set()
     expected_min = 1
+    _lay = getattr(_stitch_tl, "layout", None)
+    if composite and _lay and len(_lay.get("tiles", [])) >= 2:
+        return [(int(t[4]), int(t[5]), int(t[2]), int(t[3])) for t in _lay["tiles"]]
+    # Ưu tiên toạ độ vật lý do bộ ghép hình đã xác nhận (cùng hệ toạ độ với ảnh gửi đi);
+    # EnumDisplayMonitors trả toạ độ logic theo DPI tiến trình -> sai trên laptop nhiều GPU/DPI.
+    if len(_active_monitor_rects_last or []) >= 2:
+        return sorted(
+            [(int(r[0]), int(r[1]), int(r[2]), int(r[3])) for r in _active_monitor_rects_last],
+            key=lambda r: (r[0], r[1]),
+        )
     if sys.platform == "win32":
         try:
             # SM_CMONITORS = 80: số màn hình hiển thị vật lý đang bật theo Windows Kernel
@@ -2264,9 +2316,176 @@ def grab_gdi_monitor_bgr(monitor_mode="both"):
     return grab_gdi_primary_bgr()
 
 
+_stitch_tl = threading.local()
+
+
+def _stitch_full_canvas(canvas, w, h):
+    """Trả về canvas ghép thô (h x w): TUYỆT ĐỐI tách biệt với _stitch_tl.comp (khung đã canh giữa)
+    để bước dán thô ở y=0 không ghi đè lên viền đen trên của màn hình thấp hơn."""
+    comp = getattr(_stitch_tl, "comp", None)
+    if canvas is not None and canvas is not comp:
+        base = getattr(canvas, "base", None)
+        if base is not comp:
+            if canvas.shape[0] == h and canvas.shape[1] == w:
+                return canvas
+            if base is not None and getattr(base, "ndim", 0) == 3 and base.shape[0] == h and base.shape[1] == w:
+                return base
+    cached = getattr(_stitch_tl, "real", None)
+    if cached is None or cached.shape[0] != h or cached.shape[1] != w:
+        cached = np.zeros((h, w, 3), dtype=np.uint8)
+        _stitch_tl.real = cached
+    return cached
+
+
+def _get_cached_phys_mon_rects():
+    now = time.time()
+    if now - getattr(_stitch_tl, "phys_ts", 0) > 2.0 or not getattr(_stitch_tl, "phys", None):
+        _stitch_tl.phys = [
+            (int(m["left"]), int(m["top"]), int(m["width"]), int(m["height"]))
+            for m in (_enum_win32_monitors() or [])
+        ]
+        _stitch_tl.phys_ts = now
+    return list(getattr(_stitch_tl, "phys", None) or [])
+
+
+def _finalize_multi_canvas(canvas, tiles, left0, top0):
+    """tiles: [(tile_bgr, (abs_left, abs_top))] của >= 2 màn hình có hình.
+    - Nếu các màn hình đặt cạnh nhau: ghép sát nhau và luôn canh GIỮA theo chiều dọc
+      (màn nhỏ hơn nằm chính giữa màn lớn, viền đen trên = viền đen dưới) kèm bảng dịch chuột.
+    - Ngược lại (xếp chồng dọc): cắt canvas về hộp bao của các màn hình (bỏ viền đen)."""
+    _stitch_tl.layout = None
+    try:
+        tl = sorted(tiles, key=lambda it: (int(it[1][0]), int(it[1][1])))
+        hs = [int(t.shape[0]) for t, _p in tl]
+        # Toa do DesktopCoordinates co the bi "ao hoa" theo DPI (nho hon kich thuoc tile that),
+        # nen khong so sanh voi chieu rong tile: chi can left tang dan la dat canh nhau.
+        side = all(
+            int(tl[i + 1][1][0]) > int(tl[i][1][0])
+            for i in range(len(tl) - 1)
+        )
+        if len(tl) >= 2 and side:
+            # Doi toa do ve pixel VAT LY (khop kich thuoc tile) de dich chuot dung tren may nhieu DPI.
+            try:
+                avail = _get_cached_phys_mon_rects()
+                fixed = []
+                for t, p in tl:
+                    th0, tw0 = int(t.shape[0]), int(t.shape[1])
+                    cands = [r for r in avail if r[2] == tw0 and r[3] == th0]
+                    if cands:
+                        best = min(cands, key=lambda r: abs(r[0] - int(p[0])) + abs(r[1] - int(p[1])))
+                        avail.remove(best)
+                        fixed.append((t, (best[0], best[1])))
+                    else:
+                        fixed.append((t, p))
+                tl = sorted(fixed, key=lambda it: (int(it[1][0]), int(it[1][1])))
+            except Exception:
+                pass
+            hm = max(hs)
+            wc = sum(int(t.shape[1]) for t, _p in tl)
+            key = tuple((int(t.shape[0]), int(t.shape[1])) for t, _p in tl)
+            comp = getattr(_stitch_tl, "comp", None)
+            if comp is None or comp.shape[0] != hm or comp.shape[1] != wc:
+                comp = np.zeros((hm, wc, 3), dtype=np.uint8)
+                _stitch_tl.comp = comp
+                _stitch_tl.comp_key = key
+            elif getattr(_stitch_tl, "comp_key", None) != key:
+                comp.fill(0)
+                _stitch_tl.comp_key = key
+            x = 0
+            lay = []
+            for t, (l, tp) in tl:
+                th, tw = int(t.shape[0]), int(t.shape[1])
+                y = (hm - th) // 2
+                if y > 0:
+                    comp[0:y, x:x + tw] = 0
+                comp[y:y + th, x:x + tw] = t[:, :, :3]
+                if y + th < hm:
+                    comp[y + th:hm, x:x + tw] = 0
+                lay.append((int(l), int(tp), tw, th, x, y))
+                x += tw
+            _stitch_tl.layout = {"w": wc, "h": hm, "tiles": lay}
+            return comp, wc, hm, (int(tl[0][1][0]), int(tl[0][1][1]))
+    except Exception:
+        _stitch_tl.layout = None
+    rects = [(int(p[0]), int(p[1]), int(t.shape[1]), int(t.shape[0])) for t, p in tiles]
+    return _crop_canvas_to_tiles(canvas, rects, left0, top0)
+
+
+def _compose_layout_frame(layout, uac_frame=None, uac_size=None):
+    """Dung lai khung ghep theo bang layout cu (giu nguyen kich thuoc/bo cuc de Viewer khong doi).
+    Dung khi UAC/secure desktop: chi chup duoc man hinh chinh -> dan vao dung vi tri, man khac chup GDI hoac den."""
+    comp = np.zeros((int(layout["h"]), int(layout["w"]), 3), dtype=np.uint8)
+    used_uac = False
+    for (rl, rt, w, h, cx, cy) in layout["tiles"]:
+        tile = None
+        if uac_frame is not None and not used_uac and uac_size and int(uac_size[0]) == w and int(uac_size[1]) == h:
+            tile = uac_frame
+            used_uac = True
+        else:
+            try:
+                cap = _bitblt_screen_rect_bgr(rl, rt, w, h)
+                if cap is not None:
+                    tile = cap[0]
+            except Exception:
+                tile = None
+        if tile is not None and tile.shape[0] == h and tile.shape[1] == w:
+            comp[cy:cy + h, cx:cx + w] = tile[:, :, :3]
+    return comp
+
+
+def _sharpen_downscaled(frame, ratio):
+    """Làm nét rất nhẹ (1 lần duy nhất) khi thu nhỏ mạnh để giữ nét chữ mà không gây viền răng cưa/rác JPEG."""
+    try:
+        if ratio >= 0.90:
+            return frame
+        amount = 0.16 if ratio < 0.65 else 0.10
+        blur = cv2.GaussianBlur(frame, (0, 0), 0.9)
+        return cv2.addWeighted(frame, 1.0 + amount, blur, -amount, 0)
+    except Exception:
+        return frame
+
+
+def _layout_comp_to_real(layout, px, py):
+    """Toạ độ trên khung ghép (đã canh giữa) -> toạ độ desktop thật."""
+    for (rl, rt, w, h, cx, cy) in layout["tiles"]:
+        if cx <= px < cx + w:
+            return rl + (px - cx), rt + min(max(py - cy, 0), h - 1)
+    rl, rt, w, h, cx, cy = layout["tiles"][-1]
+    return rl + w - 1, rt + min(max(py - cy, 0), h - 1)
+
+
+def _layout_real_to_comp(layout, x, y):
+    for (rl, rt, w, h, cx, cy) in layout["tiles"]:
+        if rl <= x < rl + w and rt <= y < rt + h:
+            return cx + (x - rl), cy + (y - rt)
+    return None
+
+
+def _crop_canvas_to_tiles(canvas, rects, left0, top0):
+    """Cắt canvas ghép về đúng hộp bao (bounding box) của các màn hình có nội dung.
+    Loại bỏ viền đen (trái/dưới) do virtual desktop rộng hơn tổng các màn hình thực
+    (màn hình ma, lệch toạ độ). rects: [(abs_left, abs_top, w, h)].
+    Trả về (canvas_view, w, h, (new_left0, new_top0))."""
+    ch, cw = canvas.shape[:2]
+    try:
+        x0 = max(0, min(int(r[0]) - left0 for r in rects))
+        y0 = max(0, min(int(r[1]) - top0 for r in rects))
+        x1 = min(cw, max(int(r[0]) - left0 + int(r[2]) for r in rects))
+        y1 = min(ch, max(int(r[1]) - top0 + int(r[3]) for r in rects))
+    except Exception:
+        return canvas, cw, ch, (left0, top0)
+    if x1 - x0 < 16 or y1 - y0 < 16 or (x0 == 0 and y0 == 0 and x1 == cw and y1 == ch):
+        return canvas, cw, ch, (left0, top0)
+    return canvas[y0:y1, x0:x1], x1 - x0, y1 - y0, (left0 + x0, top0 + y0)
+
+
 def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
     left0, top0, w, h = _virtual_screen_rect()
+    canvas = _stitch_full_canvas(canvas, w, h)
     cam_entries = []
+    _all_from_desc = True
+    _pd = _PhysDpi()
+    _pd.__enter__()
     for cam in list(cams):
         try:
             cam._output.update_desc()
@@ -2276,13 +2495,29 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
             ch = max(1, int(rc.bottom - rc.top))
             cam_entries.append((cam, cl, ct, cw, ch))
         except Exception:
+            _all_from_desc = False
             cam_entries.append((cam, left0, top0, w, h))
     cam_entries.sort(key=lambda it: (it[1], it[2]))
+    _pd.__exit__()
+    if _all_from_desc and len(cam_entries) >= 2:
+        # Laptop 2 GPU / DPI khác nhau: GetSystemMetrics (theo DPI của tiến trình) KHÔNG cùng hệ toạ độ
+        # với DesktopCoordinates (pixel vật lý) -> lệch + viền đen. Dùng hộp bao của chính các output.
+        left0 = min(e[1] for e in cam_entries)
+        top0 = min(e[2] for e in cam_entries)
+        w = max(e[1] + e[3] for e in cam_entries) - left0
+        h = max(e[2] + e[4] for e in cam_entries) - top0
+        canvas = _stitch_full_canvas(canvas, w, h)
 
     global _active_monitor_rects_last
     if len(cam_entries) == 1 or (monitor_mode in ("left", "right") and len(cam_entries) >= 2):
         idx = 0 if len(cam_entries) == 1 else (0 if monitor_mode == "left" else 1)
         target_cam, cl, ct, cw, ch = cam_entries[idx]
+        try:
+            _phys_list = _get_cached_phys_mon_rects()
+            if idx < len(_phys_list) and len(_phys_list) == len(cam_entries):
+                cl, ct = int(_phys_list[idx][0]), int(_phys_list[idx][1])
+        except Exception:
+            pass
         try:
             tile = target_cam.grab()
             if tile is not None and getattr(tile, "size", 0) > 0:
@@ -2390,6 +2625,9 @@ def grab_dxcam_virtual_bgr(cams, canvas=None, monitor_mode="both"):
                 (int(pos[0]), int(pos[1]), int(t.shape[1]), int(t.shape[0]))
                 for (t, pos) in non_black
             ]
+            canvas, w, h, (left0, top0) = _finalize_multi_canvas(
+                canvas, [(t, pos) for (t, pos) in non_black], left0, top0
+            )
         elif len(non_black) == 1:
             tile, (orig_x, orig_y) = non_black[0]
             canvas = tile
@@ -2446,6 +2684,7 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
             _active_monitor_rects_last = [(ml, mt, int(tw), int(th))]
         return tile, tw, th, (ml, mt)
 
+    canvas = _stitch_full_canvas(canvas, w, h)
     if canvas is None or canvas.shape[0] != h or canvas.shape[1] != w:
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
 
@@ -2491,6 +2730,11 @@ def grab_virtual_desktop_bgr(sct, canvas=None, monitor_mode="both"):
                 (int(m.get("left", 0)), int(m.get("top", 0)), int(t.shape[1]), int(t.shape[0]))
                 for (t, m) in non_black
             ]
+            canvas, w, h, (left0, top0) = _finalize_multi_canvas(
+                canvas,
+                [(t, (int(m.get("left", 0)), int(m.get("top", 0)))) for (t, m) in non_black],
+                left0, top0,
+            )
         elif len(non_black) == 1:
             tile, mon = non_black[0]
             canvas = tile
@@ -2990,16 +3234,31 @@ class HostMixin:
                     print(f"[Host] Win7 GDI handshake size {host_w}x{host_h}")
                 else:
                     active_mon_rects = []
-                    with mss.mss() as sct:
-                        monitor, active_mon_rects = _get_active_monitors_and_virtual_rect(sct)
-                        host_w = int(monitor.get('width', 0))
-                        host_h = int(monitor.get('height', 0))
-                        if host_w < 1 or host_h < 1:
-                            host_w = int(ctypes.windll.user32.GetSystemMetrics(0)) or 1280
-                            host_h = int(ctypes.windll.user32.GetSystemMetrics(1)) or 720
-                            monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
-                            active_mon_rects = [(0, 0, host_w, host_h)]
-                        self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
+                    with _PhysDpi():
+                        with mss.mss() as sct:
+                            monitor, active_mon_rects = _get_active_monitors_and_virtual_rect(sct)
+                            host_w = int(monitor.get('width', 0))
+                            host_h = int(monitor.get('height', 0))
+                            if host_w < 1 or host_h < 1:
+                                host_w = int(ctypes.windll.user32.GetSystemMetrics(0)) or 1280
+                                host_h = int(ctypes.windll.user32.GetSystemMetrics(1)) or 720
+                                monitor = {"left": 0, "top": 0, "width": host_w, "height": host_h}
+                                active_mon_rects = [(0, 0, host_w, host_h)]
+                            elif len(active_mon_rects) >= 2 and all(
+                                active_mon_rects[i + 1][0] > active_mon_rects[i][0]
+                                for i in range(len(active_mon_rects) - 1)
+                            ):
+                                host_w = sum(int(r[2]) for r in active_mon_rects)
+                                host_h = max(int(r[3]) for r in active_mon_rects)
+                                monitor = dict(monitor, width=host_w, height=host_h)
+                                _cx = 0
+                                _centered_rects = []
+                                for r in active_mon_rects:
+                                    _rw, _rh = int(r[2]), int(r[3])
+                                    _centered_rects.append((_cx, (host_h - _rh) // 2, _rw, _rh))
+                                    _cx += _rw
+                                active_mon_rects = _centered_rects
+                            self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
                 import platform
                 computer_name = platform.node()
@@ -3209,8 +3468,10 @@ class HostMixin:
                     print("[Host] Using GDI/MSS BitBlt capture (Windows 7 / Windows Server / Remote Session)")
                     attach_disconnected_session_to_console()
                     try:
-                        self.sct = mss.mss()
-                        self.sct.__enter__()
+                        with _PhysDpi():
+                            self.sct = mss.mss()
+                            self.sct.__enter__()
+                            _ = self.sct.monitors
                     except Exception as e:
                         print(f"[Host] mss init for legacy host fallback to GDI: {e}")
                         self.sct = None
@@ -3219,10 +3480,13 @@ class HostMixin:
                     print("[Host] Winlogon/Signing out: PrintWindow/BitBlt HWND (skip DXGI)")
                     return self
                 if sys.platform == "win32":
-                    self.dx_cams = _open_dxcam_outputs()
+                    with _PhysDpi():
+                        self.dx_cams = _open_dxcam_outputs()
                 try:
-                    self.sct = mss.mss()
-                    self.sct.__enter__()
+                    with _PhysDpi():
+                        self.sct = mss.mss()
+                        self.sct.__enter__()
+                        _ = self.sct.monitors
                 except Exception as e:
                     print(f"[Host] mss init failed: {e}")
                     self.sct = None
@@ -3298,7 +3562,28 @@ class HostMixin:
                             last_sent_pos = pos
                         else:
                             cap_rect = client_state.get("cap_rect")
-                            if cap_rect and cap_rect[2] > 1 and cap_rect[3] > 1:
+                            _clay = client_state.get("cap_layout")
+                            if _clay:
+                                _cp = _layout_real_to_comp(_clay, cx, cy)
+                                if _cp is None:
+                                    last_sent_pos = pos
+                                    if last_visible:
+                                        pkt = json.dumps({"type": "host_cursor", "visible": False}).encode("utf-8")
+                                        if send_msg(conn, pkt, password, lock_timeout=0.015):
+                                            last_visible = False
+                                else:
+                                    rx = max(0.0, min(1.0, _cp[0] / float(max(1, _clay["w"] - 1))))
+                                    ry = max(0.0, min(1.0, _cp[1] / float(max(1, _clay["h"] - 1))))
+                                    pkt = json.dumps({
+                                        "type": "host_cursor",
+                                        "rx": round(rx, 5),
+                                        "ry": round(ry, 5),
+                                        "visible": True,
+                                    }).encode("utf-8")
+                                    if send_msg(conn, pkt, password, lock_timeout=0.015):
+                                        last_sent_pos = pos
+                                        last_visible = True
+                            elif cap_rect and cap_rect[2] > 1 and cap_rect[3] > 1:
                                 ox, oy, cw, ch = cap_rect
                                 inside = (ox <= cx < ox + cw) and (oy <= cy < oy + ch)
                                 if not inside:
@@ -3528,12 +3813,24 @@ class HostMixin:
                                 last_vw, last_vh = sys_w, sys_h
 
                             mon_mode = client_state.get("monitor_mode", "both")
+                            _stitch_tl.layout = None
+                            if mon_mode != "both":
+                                client_state["cap_layout"] = None
                             grabbed = False
                             on_winlogon = want_logon
                             if on_uac:
                                 try:
                                     frame_bgr, cap_w, cap_h, origin = grab_uac_dialog_bgr()
                                     self._capture_origin = origin
+                                    _ll = client_state.get("last_layout")
+                                    if _ll and mon_mode == "both" and frame_bgr is not None and getattr(frame_bgr, "size", 0):
+                                        # Giu bo cuc 2 man hinh khi UAC: dan khung UAC vao man chinh, man con lai chup GDI/den
+                                        frame_bgr = _compose_layout_frame(_ll, frame_bgr, (cap_w, cap_h))
+                                        cap_w, cap_h = int(_ll["w"]), int(_ll["h"])
+                                        _stitch_tl.layout = _ll
+                                        _lt = _ll["tiles"][0]
+                                        origin = (int(_lt[0]), int(_lt[1]))
+                                        self._capture_origin = origin
                                     grabbed = bool(
                                         frame_bgr is not None
                                         and getattr(frame_bgr, "size", 0)
@@ -3698,12 +3995,16 @@ class HostMixin:
                                 client_state["_grab_fail_streak"] = 0
                                 orig_xy = origin if (origin and len(origin) >= 2) else (0, 0)
                                 client_state["cap_rect"] = (int(orig_xy[0]), int(orig_xy[1]), int(cap_w), int(cap_h))
+                                _lay_now = getattr(_stitch_tl, "layout", None)
+                                client_state["cap_layout"] = _lay_now if (_lay_now and int(_lay_now.get("w", 0)) == int(cap_w) and int(_lay_now.get("h", 0)) == int(cap_h)) else None
+                                if client_state["cap_layout"] and not on_uac:
+                                    client_state["last_layout"] = client_state["cap_layout"]
 
                             now_mon_chk = time.time()
                             if now_mon_chk - client_state.get("_last_mon_info_chk", 0) >= 2.0:
                                 client_state["_last_mon_info_chk"] = now_mon_chk
                                 try:
-                                    mon_rects = _get_physical_monitor_rects(sct, dx_cams)
+                                    mon_rects = _get_physical_monitor_rects(sct, dx_cams, composite=True)
                                     if mon_mode == "both" and len(mon_rects) > 1 and cap_w > 0 and cap_h > 0:
                                         matched_single = [r for r in mon_rects if r[2] == int(cap_w) and r[3] == int(cap_h)]
                                         if len(matched_single) == 1:
@@ -3743,8 +4044,13 @@ class HostMixin:
                             ):
                                 _user_desktop_was_shown(True)
                             
-                            target_w = getattr(self, 'client_viewer_w', 1280)
-                            target_h = getattr(self, 'client_viewer_h', 720)
+                            has_viewer_size = bool(client_state.get("has_viewer_size", False))
+                            if has_viewer_size:
+                                target_w = int(client_state.get("viewer_w") or getattr(self, 'client_viewer_w', cap_w))
+                                target_h = int(client_state.get("viewer_h") or getattr(self, 'client_viewer_h', cap_h))
+                            else:
+                                target_w = int(cap_w) if cap_w > 0 else 1920
+                                target_h = int(cap_h) if cap_h > 0 else 1080
                             
                             force_update = client_state.pop("force_update", False)
                             if on_winlogon or on_uac:
@@ -3841,10 +4147,37 @@ class HostMixin:
                                     client_state["running"] = False
                                     break
 
-                            # dyn_scale < 0 = gửi gần độ phân giải gốc (không thu về kích thước cửa sổ viewer)
-                            send_max_edge = _MAX_SEND_EDGE_LEGACY if _legacy_host else (
-                                _MAX_SEND_EDGE_LAN if client_state.get("is_lan") or net_class == "high" else _MAX_SEND_EDGE_WAN
-                            )
+                            # dyn_scale < 0 = gửi gần độ phân giải gốc / khớp 1:1 kích thước cửa sổ Viewer
+                            is_dual_wide = (cap_h > 0 and (cap_w / float(cap_h)) >= 1.8)
+                            if _legacy_host:
+                                send_max_edge = _MAX_SEND_EDGE_LEGACY
+                            elif client_state.get("is_lan") or net_class == "high":
+                                send_max_edge = _MAX_SEND_EDGE_LAN
+                            else:
+                                # 2 màn hình ghép ngang cần trần ~3840 (tương đương 1920/màn) để không bị bóp nhỏ rồi phóng to gây rác chữ
+                                send_max_edge = 3840 if is_dual_wide else _MAX_SEND_EDGE_WAN
+                            _orig_cap_w = frame_bgr.shape[1]
+                            if dyn_scale < 0 and not _legacy_host and has_viewer_size:
+                                try:
+                                    _vw, _vh = int(target_w), int(target_h)
+                                    if _vw >= 320 and _vh >= 240 and cap_w > 0 and cap_h > 0:
+                                        if _vw <= cap_w and _vh <= cap_h and abs((_vw / float(_vh)) - (cap_w / float(cap_h))) < 0.025:
+                                            # Khớp chính xác kích thước cửa sổ Viewer để phía Client vẽ 1:1 (không scale lần 2)
+                                            if (_vw, _vh) != (cap_w, cap_h):
+                                                frame_bgr = cv2.resize(frame_bgr, (_vw, _vh), interpolation=cv2.INTER_AREA)
+                                        else:
+                                            _fit = max(_vw / float(cap_w), _vh / float(cap_h))
+                                            if _fit < 1.0:
+                                                _fw = max(_vw, min(cap_w, int(round(cap_w * _fit))))
+                                                _fh = max(_vh, min(cap_h, int(round(cap_h * _fit))))
+                                                if (_fw, _fh) != (cap_w, cap_h):
+                                                    frame_bgr = cv2.resize(frame_bgr, (_fw, _fh), interpolation=cv2.INTER_AREA)
+                                        if client_state.get("is_lan") or net_class == "high":
+                                            send_max_edge = max(send_max_edge, min(7680, max(_vw, _vh)))
+                                        elif is_dual_wide:
+                                            send_max_edge = max(send_max_edge, min(4096, max(_vw, _vh)))
+                                except Exception:
+                                    pass
                             if dyn_scale >= 0:
                                 w = int(target_w * dyn_scale)
                                 h = int(target_h * dyn_scale)
@@ -3866,6 +4199,8 @@ class HostMixin:
                                 if cap_w != final_w or cap_h != final_h:
                                     frame_bgr = cv2.resize(frame_bgr, (final_w, final_h), interpolation=cv2.INTER_AREA)
                             frame_bgr = scale_frame_for_send(frame_bgr, frame_bgr.shape[1], frame_bgr.shape[0], send_max_edge)
+                            if _orig_cap_w > 0 and frame_bgr.shape[1] < _orig_cap_w:
+                                frame_bgr = _sharpen_downscaled(frame_bgr, frame_bgr.shape[1] / float(_orig_cap_w))
 
                             static_frame = False
                             diff_bbox = None
@@ -3912,7 +4247,7 @@ class HostMixin:
                                 frame_h_cur, frame_w_cur = frame_bgr.shape[:2]
                                 if box_w * box_h < (frame_w_cur * frame_h_cur) * 0.7:
                                     frame_bgr = frame_bgr[diff_bbox[1]:diff_bbox[3], diff_bbox[0]:diff_bbox[2]]
-                                    partial_meta = {"type": "partial_frame", "bbox": diff_bbox}
+                                    partial_meta = {"type": "partial_frame", "bbox": diff_bbox, "fw": int(frame_w_cur), "fh": int(frame_h_cur)}
                                     if not send_msg(conn, json.dumps(partial_meta).encode('utf-8'), password):
                                         client_state["running"] = False
                                         break
@@ -4092,18 +4427,34 @@ class HostMixin:
         
     def _resolve_client_mouse_target(self, event, client_state=None):
         cap_rect = client_state.get("cap_rect") if isinstance(client_state, dict) else None
+        _lay = None
+        if isinstance(client_state, dict) and client_state.get("monitor_mode", "both") == "both":
+            _lay = client_state.get("cap_layout") or client_state.get("last_layout")
         rx = event.get("rx")
         ry = event.get("ry")
-        if cap_rect and len(cap_rect) == 4 and rx is not None and ry is not None:
-            ox, oy, cw, ch = cap_rect
+        if rx is not None and ry is not None:
             rx_clamped = max(0.0, min(1.0, float(rx)))
             ry_clamped = max(0.0, min(1.0, float(ry)))
-            tx = int(round(ox + rx_clamped * max(1, cw - 1)))
-            ty = int(round(oy + ry_clamped * max(1, ch - 1)))
-            return tx, ty
+            if _lay:
+                try:
+                    px = int(round(rx_clamped * max(1, int(_lay["w"]) - 1)))
+                    py = int(round(ry_clamped * max(1, int(_lay["h"]) - 1)))
+                    return _layout_comp_to_real(_lay, px, py)
+                except Exception:
+                    pass
+            if cap_rect and len(cap_rect) == 4:
+                ox, oy, cw, ch = cap_rect
+                tx = int(round(ox + rx_clamped * max(1, cw - 1)))
+                ty = int(round(oy + ry_clamped * max(1, ch - 1)))
+                return tx, ty
         x, y = event.get("x"), event.get("y")
         if x is None or y is None:
             return None, None
+        if _lay:
+            try:
+                return _layout_comp_to_real(_lay, int(x), int(y))
+            except Exception:
+                pass
         if cap_rect and len(cap_rect) == 4:
             ox, oy = int(cap_rect[0]), int(cap_rect[1])
         else:
@@ -4158,6 +4509,9 @@ class HostMixin:
                 if client_state.get("monitor_mode", "both") != new_mode:
                     print(f"[Host] Client monitor mode changed to: {new_mode}")
                 client_state["monitor_mode"] = new_mode
+                if new_mode != "both":
+                    client_state["cap_layout"] = None
+                    client_state["last_layout"] = None
                 client_state.pop("prev_sent_img", None)
                 client_state.pop("_stitch_canvas", None)
                 client_state["force_update"] = True
@@ -4179,8 +4533,18 @@ class HostMixin:
             send_input_keyboard_event(key_name, pressed)
                 
         elif ev_type == 'resize_viewer':
-            self.client_viewer_w = event.get('w', 1280)
-            self.client_viewer_h = event.get('h', 720)
+            vw = int(event.get('w', 1280) or 1280)
+            vh = int(event.get('h', 720) or 720)
+            self.client_viewer_w = vw
+            self.client_viewer_h = vh
+            if isinstance(client_state, dict):
+                client_state["viewer_w"] = vw
+                client_state["viewer_h"] = vh
+                client_state["has_viewer_size"] = True
+                client_state.pop("prev_sent_img", None)
+                client_state["force_update"] = True
+                if "wake_event" in client_state:
+                    client_state["wake_event"].set()
             
         elif ev_type == 'quality_mode':
             mode = event.get('mode', 'quality')
