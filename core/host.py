@@ -2316,6 +2316,7 @@ def grab_gdi_monitor_bgr(monitor_mode="both"):
     return grab_gdi_primary_bgr()
 
 
+_DUAL_MON_GAP_PX = 3
 _stitch_tl = threading.local()
 
 
@@ -2380,9 +2381,10 @@ def _finalize_multi_canvas(canvas, tiles, left0, top0):
                 tl = sorted(fixed, key=lambda it: (int(it[1][0]), int(it[1][1])))
             except Exception:
                 pass
+            gap = _DUAL_MON_GAP_PX
             hm = max(hs)
-            wc = sum(int(t.shape[1]) for t, _p in tl)
-            key = tuple((int(t.shape[0]), int(t.shape[1])) for t, _p in tl)
+            wc = sum(int(t.shape[1]) for t, _p in tl) + gap * (len(tl) - 1)
+            key = (tuple((int(t.shape[0]), int(t.shape[1])) for t, _p in tl), gap)
             comp = getattr(_stitch_tl, "comp", None)
             if comp is None or comp.shape[0] != hm or comp.shape[1] != wc:
                 comp = np.zeros((hm, wc, 3), dtype=np.uint8)
@@ -2393,7 +2395,7 @@ def _finalize_multi_canvas(canvas, tiles, left0, top0):
                 _stitch_tl.comp_key = key
             x = 0
             lay = []
-            for t, (l, tp) in tl:
+            for i_t, (t, (l, tp)) in enumerate(tl):
                 th, tw = int(t.shape[0]), int(t.shape[1])
                 y = (hm - th) // 2
                 if y > 0:
@@ -2401,9 +2403,11 @@ def _finalize_multi_canvas(canvas, tiles, left0, top0):
                 comp[y:y + th, x:x + tw] = t[:, :, :3]
                 if y + th < hm:
                     comp[y + th:hm, x:x + tw] = 0
+                if i_t < len(tl) - 1 and gap > 0:
+                    comp[:, x + tw:x + tw + gap] = 0
                 lay.append((int(l), int(tp), tw, th, x, y))
-                x += tw
-            _stitch_tl.layout = {"w": wc, "h": hm, "tiles": lay}
+                x += tw + (gap if i_t < len(tl) - 1 else 0)
+            _stitch_tl.layout = {"w": wc, "h": hm, "tiles": lay, "gap": gap}
             return comp, wc, hm, (int(tl[0][1][0]), int(tl[0][1][1]))
     except Exception:
         _stitch_tl.layout = None
@@ -2446,12 +2450,18 @@ def _sharpen_downscaled(frame, ratio):
 
 
 def _layout_comp_to_real(layout, px, py):
-    """Toạ độ trên khung ghép (đã canh giữa) -> toạ độ desktop thật."""
-    for (rl, rt, w, h, cx, cy) in layout["tiles"]:
+    """Toạ độ trên khung ghép (đã canh giữa, có khe phân cách) -> toạ độ desktop thật."""
+    tiles = layout["tiles"]
+    for (rl, rt, w, h, cx, cy) in tiles:
         if cx <= px < cx + w:
             return rl + (px - cx), rt + min(max(py - cy, 0), h - 1)
-    rl, rt, w, h, cx, cy = layout["tiles"][-1]
-    return rl + w - 1, rt + min(max(py - cy, 0), h - 1)
+    best_tile = min(
+        tiles,
+        key=lambda t: min(abs(px - t[4]), abs(px - (t[4] + t[2] - 1))),
+    )
+    rl, rt, w, h, cx, cy = best_tile
+    clamped_dx = min(max(px - cx, 0), w - 1)
+    return rl + clamped_dx, rt + min(max(py - cy, 0), h - 1)
 
 
 def _layout_real_to_comp(layout, x, y):
@@ -3248,15 +3258,15 @@ class HostMixin:
                                 active_mon_rects[i + 1][0] > active_mon_rects[i][0]
                                 for i in range(len(active_mon_rects) - 1)
                             ):
-                                host_w = sum(int(r[2]) for r in active_mon_rects)
+                                host_w = sum(int(r[2]) for r in active_mon_rects) + _DUAL_MON_GAP_PX * (len(active_mon_rects) - 1)
                                 host_h = max(int(r[3]) for r in active_mon_rects)
                                 monitor = dict(monitor, width=host_w, height=host_h)
                                 _cx = 0
                                 _centered_rects = []
-                                for r in active_mon_rects:
+                                for _ri, r in enumerate(active_mon_rects):
                                     _rw, _rh = int(r[2]), int(r[3])
                                     _centered_rects.append((_cx, (host_h - _rh) // 2, _rw, _rh))
-                                    _cx += _rw
+                                    _cx += _rw + (_DUAL_MON_GAP_PX if _ri < len(active_mon_rects) - 1 else 0)
                                 active_mon_rects = _centered_rects
                             self._capture_origin = (int(monitor.get('left', 0)), int(monitor.get('top', 0)))
                     
@@ -4201,6 +4211,22 @@ class HostMixin:
                             frame_bgr = scale_frame_for_send(frame_bgr, frame_bgr.shape[1], frame_bgr.shape[0], send_max_edge)
                             if _orig_cap_w > 0 and frame_bgr.shape[1] < _orig_cap_w:
                                 frame_bgr = _sharpen_downscaled(frame_bgr, frame_bgr.shape[1] / float(_orig_cap_w))
+                                _cur_lay = client_state.get("cap_layout")
+                                if _cur_lay and mon_mode == "both" and len(_cur_lay.get("tiles", ())) >= 2:
+                                    try:
+                                        _sx = frame_bgr.shape[1] / float(max(1, int(_cur_lay["w"])))
+                                        _fw_out = frame_bgr.shape[1]
+                                        _ltiles = _cur_lay["tiles"]
+                                        for _ti in range(len(_ltiles) - 1):
+                                            _gx_src = int(_ltiles[_ti][4]) + int(_ltiles[_ti][2])
+                                            _gw_src = max(1, int(_cur_lay.get("gap", _DUAL_MON_GAP_PX)))
+                                            _gx0 = max(0, min(_fw_out - 1, int(round(_gx_src * _sx))))
+                                            _gw_out = max(2, min(3, int(round(_gw_src * _sx))))
+                                            _gx1 = min(_fw_out, _gx0 + _gw_out)
+                                            if _gx1 > _gx0:
+                                                frame_bgr[:, _gx0:_gx1] = 0
+                                    except Exception:
+                                        pass
 
                             static_frame = False
                             diff_bbox = None
