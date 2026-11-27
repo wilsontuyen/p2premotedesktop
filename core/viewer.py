@@ -1171,12 +1171,14 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
     try:
         pygame_theme = "dark"
         client_quality_mode = "quality"
+        _quality_cfg_mtime = 0.0
         try:
             import json, os
             cfg_path = os.path.join(app_dir, "Data", "window_config.json")
             if not os.path.exists(cfg_path):
                 cfg_path = os.path.join(app_dir, "window_config.json")
             if os.path.exists(cfg_path):
+                _quality_cfg_mtime = os.path.getmtime(cfg_path)
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     pygame_theme = cfg.get("theme", "dark")
@@ -1779,6 +1781,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         pygame.display.set_caption(_("P2P Remote Desktop  |  {comp}").format(comp=comp_title))
 
                 frame_counter += 1
+                # Theo dõi thay đổi nóng từ menu Options -> Chất lượng hình ảnh (không cần kết nối lại)
+                if frame_counter % 30 == 0:
+                    try:
+                        _chk_cfg = os.path.join(app_dir, "Data", "window_config.json")
+                        if not os.path.exists(_chk_cfg):
+                            _chk_cfg = os.path.join(app_dir, "window_config.json")
+                        if os.path.exists(_chk_cfg):
+                            _cur_mtime = os.path.getmtime(_chk_cfg)
+                            if _cur_mtime != _quality_cfg_mtime:
+                                _quality_cfg_mtime = _cur_mtime
+                                with open(_chk_cfg, "r", encoding="utf-8") as _cf:
+                                    _new_q = json.load(_cf).get("quality_mode", "quality")
+                                if _new_q and _new_q != client_quality_mode:
+                                    client_quality_mode = _new_q
+                                    send_event({"type": "quality_mode", "mode": client_quality_mode})
+                    except Exception:
+                        pass
                 # Check for blink signal file periodically
                 if blink_file and frame_counter % 15 == 0:
                     if os.path.exists(blink_file):

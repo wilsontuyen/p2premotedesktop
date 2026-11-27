@@ -4073,9 +4073,21 @@ class HostMixin:
                                 client_state["last_target_h"] = target_h
 
                             net_class = client_state.get("net_class", "medium")
-                            q_mode = getattr(self, 'client_quality_mode', 'quality')
+                            q_mode = client_state.get("quality_mode") or getattr(self, 'client_quality_mode', 'quality')
 
-                            if _legacy_host:
+                            if q_mode == "speed":
+                                # Chế độ Tốc độ: Giữ nguyên 100% độ phân giải (-1.0), dùng JPEG Q=75 (Chroma 4:2:0)
+                                base_quality = 75
+                                res_scale = -1.0
+                                if _legacy_host:
+                                    fps_limit = 10 if net_class == "low" else 15
+                                elif net_class == "high":
+                                    fps_limit = 60
+                                elif net_class == "low":
+                                    fps_limit = 15
+                                else:
+                                    fps_limit = 30
+                            elif _legacy_host:
                                 # Win7/GDI: CPU yếu hơn nên FPS thấp hơn, luôn ưu tiên chữ nét (-1.0)
                                 if q_mode == "quality" or net_class in ("high", "medium"):
                                     base_quality = 90
@@ -4114,7 +4126,7 @@ class HostMixin:
                             if "start_time" not in client_state:
                                 client_state["start_time"] = time.time()
                                 
-                            if time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
+                            if q_mode != "speed" and time.time() - client_state["start_time"] < 5.0 and cap_w * cap_h <= (1920 * 1200):
                                 # 5s đầu: ưu tiên nét (cả Win7) để UI/chữ đọc được ngay.
                                 boost = 6 if _legacy_host else 10
                                 quality = min(98 if not _legacy_host else 92, quality + boost)
@@ -4251,8 +4263,9 @@ class HostMixin:
                                 current_q = client_state.get("dyn_quality", 40)
                                 current_s = client_state.get("dyn_scale", 0.6)
                                 target_scale = -1.0  # Luôn phục hồi về độ phân giải gốc khi màn hình tĩnh để chữ nét tuyệt đối
-                                if current_q < 98 or (current_s >= 0 and current_s < target_scale) or (current_s >= 0 and target_scale < 0):
-                                    client_state["dyn_quality"] = min(98, current_q + 15)
+                                static_ceil_q = 75 if q_mode == "speed" else (92 if _legacy_host else 98)
+                                if current_q < static_ceil_q or (current_s >= 0 and current_s < target_scale) or (current_s >= 0 and target_scale < 0):
+                                    client_state["dyn_quality"] = min(static_ceil_q, current_q + 15)
                                     if target_scale < 0:
                                         client_state["dyn_scale"] = -1.0  # Phục hồi về full resolution
                                     else:
@@ -4281,10 +4294,15 @@ class HostMixin:
                             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
                             if (not _legacy_host) and hasattr(cv2, "IMWRITE_JPEG_OPTIMIZE"):
                                 encode_param.extend([int(cv2.IMWRITE_JPEG_OPTIMIZE), 1])
-                            # 4:4:4 giữ sắc độ chữ và icon (cả Win 7, Win 10, Win 11), tránh lem màu/vỡ viền
-                            _jpeg_444_min = 75
-                            if quality >= _jpeg_444_min and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
-                                encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
+                            if q_mode == "speed":
+                                # Chế độ Tốc độ: dùng Chroma 4:2:0 để giảm ~3-4 lần dung lượng gói tin và tải CPU
+                                if hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_420"):
+                                    encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_420)])
+                            else:
+                                # 4:4:4 giữ sắc độ chữ và icon (cả Win 7, Win 10, Win 11), tránh lem màu/vỡ viền
+                                _jpeg_444_min = 75
+                                if quality >= _jpeg_444_min and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR") and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR_444"):
+                                    encode_param.extend([int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR), int(cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444)])
                             result, encimg = cv2.imencode('.jpg', frame_bgr, encode_param)
                             if not result:
                                 time.sleep(0.05)
@@ -4313,6 +4331,17 @@ class HostMixin:
                                     sleep_time = min(0.12, sleep_time + 0.02)
                                 elif ema < 0.20:
                                     sleep_time = max(1.0 / (15 if _legacy_host else 30), sleep_time - 0.005)
+                                dyn_scale = -1.0
+                            elif q_mode == "speed":
+                                # Chế độ Tốc độ: trần cố định Q=75 (4:2:0), giữ nguyên 100% độ phân giải (dyn_scale = -1.0)
+                                if ema > 0.35:
+                                    quality = max(65, int(quality) - 5)
+                                    sleep_time = min(0.25, sleep_time + 0.03)
+                                elif ema < 0.20:
+                                    quality = min(75, int(quality) + 2)
+                                    sleep_time = max(1.0 / (15 if _legacy_host else 60), sleep_time - 0.005)
+                                else:
+                                    quality = min(75, max(65, int(quality)))
                                 dyn_scale = -1.0
                             elif ema > 0.35:
                                 # Mạng chậm: Chỉ giảm chất lượng ảnh, không bóp xuống dưới 65 để giữ chữ nét
@@ -4575,13 +4604,27 @@ class HostMixin:
         elif ev_type == 'quality_mode':
             mode = event.get('mode', 'quality')
             self.client_quality_mode = mode
+            if isinstance(client_state, dict):
+                client_state['quality_mode'] = mode
+                client_state.pop('dyn_quality', None)
+                client_state.pop('dyn_scale', None)
+                client_state.pop('dyn_sleep_time', None)
+                client_state.pop('prev_sent_img', None)
+                client_state.pop('start_time', None)
+                client_state['force_update'] = True
+                if 'wake_event' in client_state:
+                    client_state['wake_event'].set()
             # Reset dynamic state để áp dụng ngay chế độ mới
-            for addr, cs in self.active_clients.items():
+            for addr, cs in list(self.active_clients.items()):
+                cs['quality_mode'] = mode
                 cs.pop('dyn_quality', None)
                 cs.pop('dyn_scale', None)
                 cs.pop('dyn_sleep_time', None)
+                cs.pop('prev_sent_img', None)
                 cs.pop('start_time', None)
                 cs['force_update'] = True
+                if 'wake_event' in cs:
+                    cs['wake_event'].set()
             print(f"[Host] Client quality mode set to: {mode}")
             
         elif ev_type == 'ping':
