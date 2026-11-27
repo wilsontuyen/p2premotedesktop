@@ -10,6 +10,10 @@ __pycache__/
 build/
 dist/
 dist_nuitka/
+dist_nuitka_host/
+dist_nuitka_host_service/
+dist_xp_host/
+build_xp_tmp/
 dist_service/
 dist_standalone/
 *.egg-info/
@@ -43,6 +47,10 @@ signaling_log.txt
 test_clipboard_copy.txt
 *.txt
 !requirements.txt
+!xp_host/requirements_xp.txt
+Logs/
+xp_prefs.json
+.venv_xp32/
 
 # Project-specific zip files & executables
 *.zip

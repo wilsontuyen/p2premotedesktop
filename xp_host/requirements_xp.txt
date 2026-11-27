@@ -1,0 +1,6 @@
+# Thư viện tối thiểu cho môi trường build Windows XP (Python 3.8 x86 32-bit XP-Backport hoặc Python 3.4.4 x86)
+# Tuyệt đối KHÔNG cài opencv-python, numpy, cryptography, pygame-ce hay dxcam trong venv XP!
+Pillow==8.4.0; python_version < '3.9'
+Pillow; python_version >= '3.9'
+pycryptodomex==3.19.1; python_version < '3.9'
+pycryptodomex; python_version >= '3.9'
