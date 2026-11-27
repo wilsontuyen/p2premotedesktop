@@ -28,6 +28,20 @@ class DataTransferClient {
     
     // For file upload (PC -> Android)
     private var currentFileOutputStream: java.io.FileOutputStream? = null
+    private var currentUploadingFile: java.io.File? = null
+
+    private fun abortIncompleteUpload() {
+        val fos = currentFileOutputStream
+        val partFile = currentUploadingFile
+        currentFileOutputStream = null
+        currentUploadingFile = null
+        if (fos != null) {
+            try { fos.close() } catch (_: Exception) {}
+            if (partFile != null && partFile.exists()) {
+                try { partFile.delete() } catch (_: Exception) {}
+            }
+        }
+    }
     
     private var lastMouseX: Float = 0f
     private var lastMouseY: Float = 0f
@@ -52,6 +66,7 @@ class DataTransferClient {
     }
 
     fun closeSockets() {
+        abortIncompleteUpload()
         try {
             socket?.let { s ->
                 if (!s.isClosed) {
@@ -932,12 +947,17 @@ class DataTransferClient {
                 "file_start" -> {
                     val targetDir = json.optString("target_dir", "/sdcard/Download")
                     val name = json.optString("name")
+                    abortIncompleteUpload()
                     try {
                         val dir = java.io.File(targetDir)
                         if (!dir.exists()) dir.mkdirs()
                         val file = java.io.File(dir, name)
+                        currentUploadingFile = file
                         currentFileOutputStream = java.io.FileOutputStream(file)
-                    } catch (e: Exception) { Log.e(TAG, "file_start error", e) }
+                    } catch (e: Exception) {
+                        currentUploadingFile = null
+                        Log.e(TAG, "file_start error", e)
+                    }
                 }
                 "file_chunk" -> {
                     val b64 = json.optString("data")
@@ -952,7 +972,11 @@ class DataTransferClient {
                     try {
                         currentFileOutputStream?.close()
                         currentFileOutputStream = null
+                        currentUploadingFile = null
                     } catch (e: Exception) {}
+                }
+                "file_cancel" -> {
+                    abortIncompleteUpload()
                 }
                 "check_domain", "clipboard_text" -> { /* Ignore for now but keep connection alive */ }
             }

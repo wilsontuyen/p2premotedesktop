@@ -24,7 +24,7 @@ from core.clipboard_agent import ClipboardSyncManager, clipboard_sync_manager, r
 
 from core.i18n import _
 from utils.logger import log_debug, log_activity
-from network.socket_utils import send_msg, recv_msg, ensure_session_socket_blocking
+from network.socket_utils import send_msg, recv_msg, ensure_session_socket_blocking, force_close_socket
 from utils.input_simulator import send_input_keyboard_event, send_input_mouse_click, send_input_mouse_move, send_input_mouse_scroll
 from utils.keyboard_map import pygame_key_canonical_name
 
@@ -1565,6 +1565,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
 
         if not outer_running or sock is None:
             uninstall_keyboard_hook()
+            if sock:
+                try:
+                    force_close_socket(sock)
+                except Exception:
+                    pass
+                sock = None
             try:
                 pygame.display.quit()
             except Exception:
@@ -1582,6 +1588,35 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
         with client_host_cursor_lock:
             client_host_cursor_data["visible"] = False
             client_host_cursor_data["seq"] = 0
+
+        import tkinter as tk
+        hidden_root = tk.Tk()
+        hidden_root.withdraw()
+        try:
+            hidden_root.attributes("-alpha", 0.0)
+            hidden_root.wm_attributes("-toolwindow", True)
+        except Exception:
+            pass
+        try:
+            from gui.window_icon import hide_tk_from_taskbar, set_dialog_app_icon
+            hide_tk_from_taskbar(hidden_root)
+            set_dialog_app_icon(hidden_root)
+        except Exception:
+            pass
+
+        _fm_send_refs = {"async": None, "sync": None}
+
+        def _fm_send_async(event_dict):
+            fn = _fm_send_refs.get("async")
+            if fn is None:
+                return False
+            return fn(event_dict)
+
+        def _fm_send_sync(event_dict):
+            fn = _fm_send_refs.get("sync")
+            if fn is None:
+                return False
+            return fn(event_dict)
 
         while outer_running:
             exit_due_to_disconnect = True
@@ -1603,21 +1638,7 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     df.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Client viewer started: computer_name={computer_name}, is_domain={is_domain}, partner_id={partner_id}\n")
             except:
                 pass
-                
-            import tkinter as tk
-            hidden_root = tk.Tk()
-            hidden_root.withdraw()
-            try:
-                hidden_root.attributes("-alpha", 0.0)
-                hidden_root.wm_attributes("-toolwindow", True)
-            except Exception:
-                pass
-            try:
-                from gui.window_icon import hide_tk_from_taskbar, set_dialog_app_icon
-                hide_tk_from_taskbar(hidden_root)
-                set_dialog_app_icon(hidden_root)
-            except Exception:
-                pass
+
             ensure_session_socket_blocking(sock)
             if clipboard_sync_manager:
                 clipboard_sync_manager.is_client = True
@@ -1691,9 +1712,20 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                     
             def send_event_sync(event_dict):
                 try:
-                    send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass)
+                    return bool(send_msg(sock, json.dumps(event_dict).encode('utf-8'), partner_pass))
                 except Exception:
-                    pass
+                    return False
+
+            _fm_send_refs["async"] = send_event
+            _fm_send_refs["sync"] = send_event_sync
+            try:
+                import utils.file_manager as _fm_mod
+                _cur_hwnd = pygame.display.get_wm_info().get("window")
+                if _cur_hwnd:
+                    hwnd = _cur_hwnd
+                _fm_mod.notify_host_reconnected(client_host_computer_name_override or computer_name, host_hwnd=hwnd)
+            except Exception:
+                pass
                     
             # Install keyboard hook to intercept Windows keys and Ctrl+Esc
             if hwnd:
@@ -2011,6 +2043,12 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         window_w, window_h = event.w, event.h
                         screen = pygame.display.set_mode((window_w, window_h), pygame.RESIZABLE)
                         window_w, window_h = screen.get_size()
+                        try:
+                            hwnd = pygame.display.get_wm_info().get("window") or hwnd
+                            import utils.file_manager as _fm_rsz
+                            _fm_rsz.notify_viewer_resized(hwnd)
+                        except Exception:
+                            pass
                         send_event({"type": "resize_viewer", "w": window_w, "h": window_h})
                         
                     elif event.type == pygame.MOUSEMOTION:
@@ -2063,28 +2101,23 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                         if show_toolbar and file_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 import utils.file_manager as fm
-                                if hasattr(fm, 'fm_top') and fm.fm_top:
-                                    try:
-                                        if fm.fm_top.winfo_exists():
-                                            def restore_fm():
-                                                try:
-                                                    fm.fm_top.deiconify()
-                                                    fm.fm_top.attributes("-alpha", 1.0)
-                                                except Exception:
-                                                    pass
-                                                try:
-                                                    fm.fm_top.lift()
-                                                    fm.fm_top.focus_force()
-                                                except Exception:
-                                                    pass
-                                            fm.fm_top.after(0, restore_fm)
-                                            continue
-                                    except: pass
+                                if fm.is_transfer_window_open():
+                                    fm.request_restore_transfer_window()
+                                    continue
 
                                 print("[Client] Transfer File Button Clicked.")
                                 hwnd = pygame.display.get_wm_info().get("window")
                                 comp_to_use = client_host_computer_name_override if client_host_computer_name_override else computer_name
-                                threading.Thread(target=fm.open_transfer_window, args=(comp_to_use, is_android, send_event, hwnd, window_w, window_h), kwargs={"send_event_sync": send_event_sync}, daemon=True).start()
+                                fm.open_transfer_window(
+                                    comp_to_use,
+                                    is_android,
+                                    _fm_send_async,
+                                    hwnd,
+                                    window_w,
+                                    window_h,
+                                    send_event_sync=_fm_send_sync,
+                                    parent_root=hidden_root,
+                                )
                             continue
                         if show_toolbar and power_btn_rect.collidepoint(event.pos):
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -2796,6 +2829,24 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 outer_running = False
 
             uninstall_keyboard_hook()
+            _fm_send_refs["async"] = None
+            _fm_send_refs["sync"] = None
+            try:
+                import utils.file_manager as _fm_disc_mod
+                _fm_disc_mod.notify_host_disconnected()
+            except Exception:
+                pass
+            if clipboard_sync_manager and sock:
+                try:
+                    clipboard_sync_manager.remove_socket(sock)
+                except Exception:
+                    pass
+            if sock:
+                try:
+                    force_close_socket(sock)
+                except Exception:
+                    pass
+                sock = None
             
             state = globals().get('viewer_record_state', {'is_recording': False, 'writer': None})
             if state['writer']:
@@ -2849,6 +2900,10 @@ def run_client_viewer_loop(sock, host_w, host_h, computer_name="", is_domain=Fal
                 status_msg_text = _("Đang thử kết nối lại (lần {x}/10)...").format(x=1)
                 
                 while countdown > 0 and outer_running:
+                    try:
+                        hidden_root.update()
+                    except Exception:
+                        pass
                     for event in pygame.event.get():
                         if event.type == pygame.QUIT:
                             countdown = 0

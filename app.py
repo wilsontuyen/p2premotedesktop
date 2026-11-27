@@ -2505,7 +2505,8 @@ Comment=Remote Desktop P2P AutoStart
         import webbrowser
         
         # Clean up dead viewer processes
-        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        from core.network_manager import _is_process_alive
+        self.active_viewers = [v for v in self.active_viewers if _is_process_alive(v.get("process"))]
         
         phone_val = ""
         comp_name = ""
@@ -2618,7 +2619,8 @@ Comment=Remote Desktop P2P AutoStart
 
     def open_phone_dialog(self):
         # Get phone number
-        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        from core.network_manager import _is_process_alive
+        self.active_viewers = [v for v in self.active_viewers if _is_process_alive(v.get("process"))]
         
         phone_val = ""
         comp_name = ""

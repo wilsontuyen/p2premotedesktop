@@ -27,8 +27,16 @@ from network.socket_utils import send_msg, recv_msg, APP_KEY
 from core.config import LAN_APP_SIGNATURE, BOUND_PORT
 
 
+_LOCAL_IPV4_CACHE = None
+_LOCAL_IPV4_CACHE_TIME = 0.0
+
+
 def get_all_local_ipv4():
-    """Lấy danh sách tất cả IPv4 của máy cục bộ để loại trừ không quét chính mình."""
+    """Lấy danh sách tất cả IPv4 của máy cục bộ để loại trừ không quét chính mình (có cache ngắn 5s tránh nghẽn UI)."""
+    global _LOCAL_IPV4_CACHE, _LOCAL_IPV4_CACHE_TIME
+    now = time.monotonic()
+    if _LOCAL_IPV4_CACHE is not None and (now - _LOCAL_IPV4_CACHE_TIME) < 5.0:
+        return set(_LOCAL_IPV4_CACHE)
     local_ips = set()
     try:
         if psutil:
@@ -45,6 +53,8 @@ def get_all_local_ipv4():
     except Exception:
         pass
     local_ips.add("127.0.0.1")
+    _LOCAL_IPV4_CACHE = frozenset(local_ips)
+    _LOCAL_IPV4_CACHE_TIME = now
     return local_ips
 
 
@@ -574,7 +584,7 @@ def normalize_name_tokens(s):
     return filtered, ''.join(filtered)
 
 
-def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
+def match_saved_computer(comp_name=None, hwid=None, saved_id=None, saved_list=None):
     """Tìm máy tính trong danh sách đã lưu:
     1. Trùng HWID/ID chính xác (100% an toàn theo đúng yêu cầu).
     2. Trùng tên máy tính chính xác (case-insensitive).
@@ -582,11 +592,14 @@ def match_saved_computer(comp_name=None, hwid=None, saved_id=None):
     4. Trùng khớp token tên ghép cốt lõi có ý nghĩa (ví dụ: HATHUONG2024 <-> THUONG DN, VANKETOAN <-> VAN OFFICE).
     TUYỆT ĐỐI không dùng chuỗi con (substring) đơn thuần để tránh nhận diện nhầm (ví dụ: BINHDINH002 thành BINH LAPTOP).
     """
-    try:
-        from pclist import SavedListMixin
-        saved = SavedListMixin().load_saved_computers()
-    except Exception:
-        return None
+    if saved_list is not None:
+        saved = saved_list
+    else:
+        try:
+            from pclist import SavedListMixin
+            saved = SavedListMixin().load_saved_computers()
+        except Exception:
+            return None
 
     if not saved:
         return None
@@ -1963,14 +1976,25 @@ def probe_peer_direct(peer_info, timeout=0.85, cancel_event=None):
             return None, "error"
         ip_net_label = "LAN" if is_in_physical_lan_subnet(ip) else "VPN"
         is_vpn_ip = (ip_net_label == "VPN")
+        req_timeout = float(timeout or 0.85)
         if is_vpn_ip:
             is_primary_vpn = (ip == first_vpn_ip)
-            eff_timeout = max(float(timeout or 0.85), 1.5) if is_primary_vpn else 0.9
-            eff_recv = 1.5
-            eff_retries = 1 if is_primary_vpn else 0
+            if req_timeout < 0.3:
+                eff_timeout = req_timeout
+                eff_recv = max(req_timeout, 0.5)
+                eff_retries = 0
+            elif req_timeout <= 0.65:
+                # Chế độ kiểm tra nhanh danh sách UI: phản hồi ngay cho máy Online mà không kẹt 3.2s mỗi máy Offline
+                eff_timeout = max(req_timeout, 0.72) if is_primary_vpn else max(req_timeout, 0.50)
+                eff_recv = 1.0
+                eff_retries = 0
+            else:
+                eff_timeout = max(req_timeout, 1.5) if is_primary_vpn else 0.9
+                eff_recv = 1.5
+                eff_retries = 1 if is_primary_vpn else 0
         else:
-            eff_timeout = timeout
-            eff_recv = max(float(timeout or 0.85), 1.5)
+            eff_timeout = req_timeout
+            eff_recv = max(req_timeout, 1.0 if req_timeout <= 0.65 else 1.5)
             eff_retries = 0
         res, err_reason = probe_single_host(
             ip,

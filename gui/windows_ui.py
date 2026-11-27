@@ -185,8 +185,15 @@ class ProgressDialog(tk.Toplevel):
                 except Exception:
                     pass
                 tk_hwnd = int(self.frame(), 16)
+                t_child = ctypes.windll.user32.GetWindowThreadProcessId(tk_hwnd, None)
+                t_parent = ctypes.windll.user32.GetWindowThreadProcessId(int(self.host_hwnd), None)
+                if not (t_child and t_child == t_parent):
+                    raise RuntimeError("Cross-thread SetParent prevented")
+                p_style = ctypes.windll.user32.GetWindowLongW(int(self.host_hwnd), -16)
+                if not (p_style & 0x02000000):
+                    ctypes.windll.user32.SetWindowLongW(int(self.host_hwnd), -16, p_style | 0x02000000)
                 style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                style = (style | 0x40000000) & ~0x80000000
+                style = (style | 0x40000000 | 0x04000000) & ~0x80000000  # WS_CHILD | WS_CLIPSIBLINGS, not WS_POPUP
                 ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
                 ctypes.windll.user32.SetParent(tk_hwnd, int(self.host_hwnd))
                 
@@ -217,6 +224,12 @@ class ProgressDialog(tk.Toplevel):
         if not self._embed:
             self.attributes("-topmost", True)
         self.lift()
+        if self._embed and sys.platform == "win32":
+            self.raise_above_siblings()
+            try:
+                self.after(25, self.raise_above_siblings)
+            except Exception:
+                pass
         try:
             self.attributes("-alpha", 1.0)
         except Exception:
@@ -387,6 +400,21 @@ class ProgressDialog(tk.Toplevel):
                 pass
         try:
             self.destroy()
+        except Exception:
+            pass
+
+    def raise_above_siblings(self):
+        """Giữ hộp thoại 'Chuyển qua' / 'Nhận về' luôn nổi lên trên File Manager bên trong cửa sổ Host."""
+        if not getattr(self, "_embed", False) or sys.platform != "win32":
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            import ctypes
+            tk_hwnd = self._hwnd()
+            if tk_hwnd:
+                # HWND_TOP (0), SWP_NOSIZE (0x0001) | SWP_NOMOVE (0x0002) | SWP_NOACTIVATE (0x0010)
+                ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
         except Exception:
             pass
 
@@ -664,6 +692,8 @@ class ProgressDialog(tk.Toplevel):
                         eta=time_str,
                     )
                 )
+                if getattr(self, "_embed", False):
+                    self.raise_above_siblings()
             except Exception:
                 pass
         try:

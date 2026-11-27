@@ -571,6 +571,7 @@ _KNOWN_WIN_EXIT_CODES = {
     0xC0000017: ("STATUS_NO_MEMORY", "Tràn bộ nhớ RAM (Out of Memory)"),
     0xE06D7363: ("MSVC_CPP_EXCEPTION", "Ngoại lệ Microsoft Visual C++ (C++ Exception chưa được bắt từ thư viện native)"),
     0x80000003: ("STATUS_BREAKPOINT", "Điểm dừng Debug / Assert ở tầng C/DLL"),
+    0xCFFFFFFF: ("STATUS_APPLICATION_HANG", "Cửa sổ giao diện bị treo không phản hồi (Application Hang / Not Responding) và bị Windows đóng"),
     0x40010004: ("DBG_TERMINATE_PROCESS", "Tiến trình bị đóng cưỡng bức từ bên ngoài (Task Manager / Debugger)"),
     0x40000015: ("STATUS_FATAL_APP_EXIT", "Fatal App Exit (abort() hoặc lỗi nghiêm trọng từ C Runtime)"),
 }

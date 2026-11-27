@@ -1135,7 +1135,13 @@ def query_explorer_folder_path(allow_open_clipboard=False):
         return res
 
     explorer_windows = []
-    if shell is not None:
+    in_sync_send = False
+    if sys.platform == "win32":
+        try:
+            in_sync_send = bool(ctypes.windll.user32.InSendMessage())
+        except Exception:
+            in_sync_send = False
+    if shell is not None and not in_sync_send:
         try:
             for window in shell.Windows():
                 try:

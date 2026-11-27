@@ -8,6 +8,32 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from gui.components import ProgressDialog
 
+def _safe_winfo_exists(w):
+    if w is None:
+        return False
+    try:
+        return bool(w.winfo_exists())
+    except Exception:
+        return False
+
+
+def _pump_modal_wait(parent, is_done_fn):
+    """Chờ hộp thoại con đóng trên cùng Main Thread mà vẫn bơm event Pygame để tránh cửa sổ Viewer bị Not Responding."""
+    while not is_done_fn():
+        if _fm_abort_event.is_set() or not _safe_winfo_exists(parent):
+            break
+        try:
+            parent.update()
+        except Exception:
+            break
+        try:
+            if pygame.display.get_init():
+                pygame.event.pump()
+        except Exception:
+            pass
+        time.sleep(0.015)
+
+
 def inline_ask_string(parent, title, prompt, initialvalue=""):
     import tkinter as tk
     from tkinter import ttk
@@ -74,9 +100,13 @@ def inline_ask_string(parent, title, prompt, initialvalue=""):
     
     dlg.grab_set()
     parent.update_idletasks()
-    
-    parent.wait_variable(var)
-    dlg.destroy()
+    _pump_modal_wait(parent, lambda: bool(var.get()))
+    try:
+        dlg.grab_release()
+    except Exception:
+        pass
+    if _safe_winfo_exists(dlg):
+        dlg.destroy()
     return result[0]
 
 
@@ -147,8 +177,13 @@ def inline_messagebox(parent, title, message, m_type="info"):
         
     dlg.grab_set()
     parent.update_idletasks()
-    parent.wait_variable(var)
-    dlg.destroy()
+    _pump_modal_wait(parent, lambda: bool(var.get()))
+    try:
+        dlg.grab_release()
+    except Exception:
+        pass
+    if _safe_winfo_exists(dlg):
+        dlg.destroy()
     return result[0]
 
 class CustomMessageBox:
@@ -185,25 +220,167 @@ class CustomMessageBox:
         return inline_messagebox(parent, title, message, "askyesno")
 
 
-def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080, send_event_sync=None):
+_fm_open_flag = False
+_fm_ext_queue = None
+_fm_abort_event = threading.Event()
+
+
+def is_transfer_window_open():
+    return bool(_fm_open_flag)
+
+
+def request_restore_transfer_window():
+    q = _fm_ext_queue
+    if q is not None:
+        try:
+            q.put({"type": "restore_window"})
+        except Exception:
+            pass
+
+
+def notify_host_disconnected():
+    _fm_abort_event.set()
+    q = _fm_ext_queue
+    if q is not None:
+        try:
+            q.put({"type": "host_disconnected"})
+        except Exception:
+            pass
+
+
+def notify_host_reconnected(computer_name="", host_hwnd=None):
+    _fm_abort_event.clear()
+    q = _fm_ext_queue
+    if q is not None:
+        try:
+            q.put({"type": "host_reconnected", "computer_name": computer_name, "host_hwnd": host_hwnd})
+        except Exception:
+            pass
+
+
+def notify_viewer_resized(host_hwnd=None):
+    q = _fm_ext_queue
+    if q is not None:
+        try:
+            q.put({"type": "viewer_resized", "host_hwnd": host_hwnd})
+        except Exception:
+            pass
+
+
+def _virtual_screen_bounds(win):
+    if os.name == "nt":
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            vx = u32.GetSystemMetrics(76)
+            vy = u32.GetSystemMetrics(77)
+            vw = u32.GetSystemMetrics(78)
+            vh = u32.GetSystemMetrics(79)
+            if vw > 0 and vh > 0:
+                return (vx, vy, vx + vw, vy + vh)
+        except Exception:
+            pass
+    return (0, 0, win.winfo_screenwidth(), win.winfo_screenheight())
+
+
+def _embed_into_host_hwnd(win, target_hwnd, pref_w=900, pref_h=600):
+    """Nhúng cửa sổ Tkinter nằm gọn bên trong cửa sổ Host Viewer (cùng 1 Main Thread nên tuyệt đối không deadlock SetParent)."""
+    if target_hwnd and os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            h_parent = int(target_hwnd)
+            if u32.IsWindow(h_parent):
+                win.update_idletasks()
+                tk_hwnd = int(win.frame(), 16)
+                t_child = u32.GetWindowThreadProcessId(tk_hwnd, None)
+                t_parent = u32.GetWindowThreadProcessId(h_parent, None)
+                if tk_hwnd and t_child and t_child == t_parent:
+                    try:
+                        u32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
+                        u32.SetParent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                        u32.SetWindowPos.argtypes = [
+                            ctypes.c_void_p, ctypes.c_void_p,
+                            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+                        ]
+                    except Exception:
+                        pass
+                    # Bật WS_CLIPCHILDREN trên cửa sổ Pygame để frame 60fps không vẽ đè nhấp nháy cửa sổ con
+                    p_style = u32.GetWindowLongW(h_parent, -16)
+                    if not (p_style & 0x02000000):
+                        u32.SetWindowLongW(h_parent, -16, p_style | 0x02000000)
+
+                    rect = wintypes.RECT()
+                    u32.GetClientRect(h_parent, ctypes.byref(rect))
+                    py_w = max(1, rect.right - rect.left)
+                    py_h = max(1, rect.bottom - rect.top)
+                    w = min(int(pref_w), max(320, py_w)) if py_w >= 320 else py_w
+                    h = min(int(pref_h), max(240, py_h)) if py_h >= 240 else py_h
+                    x = max(0, (py_w - w) // 2)
+                    y = max(0, (py_h - h) // 2)
+
+                    style = u32.GetWindowLongW(tk_hwnd, -16)
+                    style = (style | 0x40000000 | 0x04000000) & ~0x80000000  # WS_CHILD | WS_CLIPSIBLINGS, bỏ WS_POPUP
+                    u32.SetWindowLongW(tk_hwnd, -16, style)
+                    if u32.GetParent(tk_hwnd) != h_parent:
+                        u32.SetParent(tk_hwnd, h_parent)
+                    win.geometry(f"{int(w)}x{int(h)}")
+                    win.update_idletasks()
+                    # hWndInsertAfter = 0 (HWND_TOP), SWP_FRAMECHANGED (0x0020) | SWP_SHOWWINDOW (0x0040)
+                    u32.SetWindowPos(tk_hwnd, 0, int(x), int(y), int(w), int(h), 0x0020 | 0x0040)
+                    try:
+                        win.attributes("-alpha", 1.0)
+                    except Exception:
+                        pass
+                    return True
+        except Exception:
+            pass
+
+    # Fallback nếu chạy độc lập không có HWND hoặc khác hệ điều hành (hỗ trợ đa màn hình Virtual Screen)
+    vx1, vy1, vx2, vy2 = _virtual_screen_bounds(win)
+    x = vx1 + max(0, (vx2 - vx1 - pref_w) // 2)
+    y = vy1 + max(0, (vy2 - vy1 - pref_h) // 2)
+    if target_hwnd and os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rc = wintypes.RECT()
+            if ctypes.windll.user32.GetWindowRect(int(target_hwnd), ctypes.byref(rc)):
+                vw = rc.right - rc.left
+                vh = rc.bottom - rc.top
+                if vw > 50 and vh > 50 and rc.left > -10000 and rc.top > -10000:
+                    x = rc.left + (vw - pref_w) // 2
+                    y = rc.top + (vh - pref_h) // 2
+        except Exception:
+            pass
+    x = max(vx1 + 10, min(x, max(vx1 + 10, vx2 - pref_w - 10)))
+    y = max(vy1 + 20, min(y, max(vy1 + 20, vy2 - pref_h - 50)))
+    win.geometry(f"{int(pref_w)}x{int(pref_h)}+{int(x)}+{int(y)}")
+    return False
+
+
+def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, host_w=1920, host_h=1080, send_event_sync=None, parent_root=None):
+    global _fm_open_flag, _fm_ext_queue
     try:
         import tkinter as tk
         from tkinter import ttk, filedialog, messagebox
         messagebox = CustomMessageBox
         import threading, os, time, base64
-
         import sys
-        hwnd = host_hwnd
-        if not hwnd:
-            try: hwnd = pygame.display.get_wm_info().get("window")
-            except: pass
-            
-        top = tk.Tk()
-            
+
+        _fm_abort_event.clear()
+        embed_hwnd_box = [host_hwnd]
+        is_fm_hidden = [False]
+        owns_root = parent_root is None
+        top = tk.Tk() if owns_root else tk.Toplevel(parent_root)
+
         globals()['fm_top'] = top
         active_upload_ack_events = []
         active_upload_dialog = []
-        
+        active_upload_states = []
+        silent_delete_pending = [0]
+
         if sys.platform == "win32":
             top.attributes('-alpha', 0.0)
         else:
@@ -216,26 +393,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         host_title = f" - {computer_name}" if computer_name else ""
         top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=host_title))
-        embed_hwnd = hwnd if (hwnd and sys.platform == "win32") else None
-        embed_pos = [None, None, 900, 600]
-        if embed_hwnd:
-            import ctypes
-            from ctypes import wintypes
-            rect = wintypes.RECT()
-            ctypes.windll.user32.GetClientRect(embed_hwnd, ctypes.byref(rect))
-            py_w = rect.right - rect.left
-            py_h = rect.bottom - rect.top
-            x = max(0, (py_w - 900) // 2)
-            y = max(0, (py_h - 600) // 2)
-            embed_pos[:] = [x, y, 900, 600]
-            top.geometry("900x600")
-        else:
-            top.update_idletasks()
-            sw = top.winfo_screenwidth()
-            sh = top.winfo_screenheight()
-            top.geometry(f"900x600+{(sw - 900) // 2}+{(sh - 600) // 2}")
-
-        top.attributes('-topmost', True)
+        top.geometry("900x600")
         top.configure(bg="#E5E5E5")
 
         left_frame = tk.Frame(top, bg="#E5E5E5")
@@ -652,47 +810,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                     else:
                                         np_win.withdraw()
                                     np_win.title(_("Soạn thảo (Local) - {name}").format(name=name))
-                                    np_win.geometry("800x600")
-                                    
-                                    import sys
-                                    _np_hwnd = None
-                                    try: 
-                                        import pygame
-                                        _np_hwnd = pygame.display.get_wm_info().get("window")
-                                    except: pass
-                                    
-                                    if _np_hwnd and sys.platform == "win32":
-                                        import ctypes
-                                        from ctypes import wintypes
-                                        np_win.update_idletasks()
-                                        tk_hwnd = int(np_win.frame(), 16)
-                                        try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-                                        except: pass
-                                        style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                                        style = (style | 0x40000000) & ~0x80000000
-                                        ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                                        ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
-                                        rect = wintypes.RECT()
-                                        ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
-                                        py_w = rect.right - rect.left
-                                        py_h = rect.bottom - rect.top
-                                        x = max(0, (py_w - 800) // 2)
-                                        y = max(0, (py_h - 600) // 2)
-                                        np_win.geometry("800x600")
-                                        np_win.update_idletasks()
-                                        ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
-                                    else:
+                                    if not _embed_into_host_hwnd(np_win, embed_hwnd_box[0], 800, 600):
                                         np_win.transient(top)
-                                        np_win.attributes('-topmost', True)
-                                        np_win.update_idletasks()
-                                        w, h = 800, 600
-                                        px, py = top.winfo_rootx(), top.winfo_rooty()
-                                        pw, ph = top.winfo_width(), top.winfo_height()
-                                        np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
-                                    if sys.platform == "win32":
-                                        np_win.attributes('-alpha', 1.0)
-                                    else:
-                                        np_win.deiconify()
+                                        if sys.platform == "win32":
+                                            np_win.attributes('-alpha', 1.0)
+                                        else:
+                                            np_win.deiconify()
                                     np_win.lift()
                                     np_win.focus_force()
                                     text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
@@ -842,7 +965,11 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             elif evt_type in ("delete_item_result", "rename_item_result", "create_folder_result", "open_file_result"):
                 success = event.get("success")
                 error = event.get("error")
-                if not success:
+                if evt_type == "delete_item_result" and silent_delete_pending[0] > 0:
+                    silent_delete_pending[0] = max(0, silent_delete_pending[0] - 1)
+                    if success:
+                        request_remote_dir(remote_entry.get())
+                elif not success:
                     messagebox.showerror(_("Lỗi"), error or _("Thao tác thất bại"), parent=top)
                 else:
                     request_remote_dir(remote_entry.get())
@@ -863,47 +990,12 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         else:
                             np_win.withdraw()
                         np_win.title(_("Soạn thảo (Remote) - {name}").format(name=name))
-                        np_win.geometry("800x600")
-                        
-                        import sys
-                        _np_hwnd = None
-                        try: 
-                            import pygame
-                            _np_hwnd = pygame.display.get_wm_info().get("window")
-                        except: pass
-                        
-                        if _np_hwnd and sys.platform == "win32":
-                            import ctypes
-                            from ctypes import wintypes
-                            np_win.update_idletasks()
-                            tk_hwnd = int(np_win.frame(), 16)
-                            try: ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-                            except: pass
-                            style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                            style = (style | 0x40000000) & ~0x80000000
-                            ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                            ctypes.windll.user32.SetParent(tk_hwnd, _np_hwnd)
-                            rect = wintypes.RECT()
-                            ctypes.windll.user32.GetClientRect(_np_hwnd, ctypes.byref(rect))
-                            py_w = rect.right - rect.left
-                            py_h = rect.bottom - rect.top
-                            x = max(0, (py_w - 800) // 2)
-                            y = max(0, (py_h - 600) // 2)
-                            np_win.geometry("800x600")
-                            np_win.update_idletasks()
-                            ctypes.windll.user32.SetWindowPos(tk_hwnd, 0, x, y, 800, 600, 0x0004)
-                        else:
+                        if not _embed_into_host_hwnd(np_win, embed_hwnd_box[0], 800, 600):
                             np_win.transient(top)
-                            np_win.attributes('-topmost', True)
-                            np_win.update_idletasks()
-                            w, h = 800, 600
-                            px, py = top.winfo_rootx(), top.winfo_rooty()
-                            pw, ph = top.winfo_width(), top.winfo_height()
-                            np_win.geometry(f"800x600+{px + (pw-w)//2}+{py + (ph-h)//2}")
-                        if sys.platform == "win32":
-                            np_win.attributes('-alpha', 1.0)
-                        else:
-                            np_win.deiconify()
+                            if sys.platform == "win32":
+                                np_win.attributes('-alpha', 1.0)
+                            else:
+                                np_win.deiconify()
                         np_win.lift()
                         np_win.focus_force()
                         text_area = tk.Text(np_win, wrap="word", font=("Consolas", 11))
@@ -953,14 +1045,126 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
 
         import queue
         fm_event_queue = queue.Queue()
+        _fm_ext_queue = fm_event_queue
+        _fm_open_flag = True
+
+        def _hide_fm_window():
+            is_fm_hidden[0] = True
+            try:
+                if sys.platform == "win32" and embed_hwnd_box[0]:
+                    import ctypes
+                    tk_hwnd = int(top.frame(), 16)
+                    if tk_hwnd:
+                        ctypes.windll.user32.ShowWindow(tk_hwnd, 0)  # SW_HIDE (giữ nguyên WS_CHILD & SetParent)
+                    if ctypes.windll.user32.IsWindow(int(embed_hwnd_box[0])):
+                        ctypes.windll.user32.SetFocus(int(embed_hwnd_box[0]))
+                else:
+                    top.withdraw()
+            except Exception:
+                try:
+                    top.withdraw()
+                except Exception:
+                    pass
+
+        def _raise_active_transfer_dialogs():
+            for d_up in list(active_upload_dialog):
+                try:
+                    if _safe_winfo_exists(d_up) and hasattr(d_up, "raise_above_siblings"):
+                        d_up.raise_above_siblings()
+                except Exception:
+                    pass
+            try:
+                from core.clipboard_agent import clipboard_sync_manager as _cm_top
+                d_dl = getattr(_cm_top, "active_dialog", None) if _cm_top else None
+                if d_dl is not None and getattr(_cm_top, "active_batch", False) and _safe_winfo_exists(d_dl):
+                    if hasattr(d_dl, "raise_above_siblings"):
+                        d_dl.raise_above_siblings()
+            except Exception:
+                pass
+
+        for _ev_seq in ("<ButtonPress>", "<ButtonRelease>", "<FocusIn>", "<Configure>"):
+            top.bind(_ev_seq, lambda e: top.after(1, _raise_active_transfer_dialogs) if _safe_winfo_exists(top) else None, add="+")
+
+        def _bring_fm_to_front():
+            is_fm_hidden[0] = False
+            try:
+                if not _embed_into_host_hwnd(top, embed_hwnd_box[0], 900, 600):
+                    top.deiconify()
+                    if sys.platform == "win32":
+                        top.attributes("-alpha", 1.0)
+                top.lift()
+                top.focus_force()
+                _raise_active_transfer_dialogs()
+            except Exception:
+                pass
+
         def process_fm_queue():
             try:
                 while True:
                     evt = fm_event_queue.get_nowait()
                     try:
-                        if evt.get("type") == "trigger_local_refresh":
+                        etype = evt.get("type")
+                        if etype == "trigger_local_refresh":
                             refresh_local()
-                        elif evt.get("type") == "run_ui":
+                        elif etype == "restore_window":
+                            _bring_fm_to_front()
+                        elif etype == "viewer_resized":
+                            if evt.get("host_hwnd"):
+                                embed_hwnd_box[0] = evt.get("host_hwnd")
+                            if not is_fm_hidden[0] and _safe_winfo_exists(top):
+                                _embed_into_host_hwnd(top, embed_hwnd_box[0], 900, 600)
+                        elif etype == "host_disconnected":
+                            for st_obj in list(active_upload_states):
+                                st_obj.is_cancelled = True
+                            for ev in list(active_upload_ack_events):
+                                ev.set()
+                            for d_up in list(active_upload_dialog):
+                                try:
+                                    if d_up and d_up.winfo_exists():
+                                        d_up.destroy()
+                                except Exception:
+                                    pass
+                            active_upload_dialog.clear()
+                            try:
+                                from core.clipboard_agent import clipboard_sync_manager as _cm_disc
+                                if _cm_disc and getattr(_cm_disc, "active_dialog", None):
+                                    d_dl = _cm_disc.active_dialog
+                                    _cm_disc.active_dialog = None
+                                    _cm_disc.active_batch = False
+                                    _cm_disc._allow_file_xfer = False
+                                    if d_dl.winfo_exists():
+                                        d_dl.destroy()
+                            except Exception:
+                                pass
+                            _hide_fm_window()
+                        elif etype == "host_reconnected":
+                            if evt.get("host_hwnd"):
+                                embed_hwnd_box[0] = evt.get("host_hwnd")
+                            new_cname = evt.get("computer_name") or ""
+                            if new_cname and _safe_winfo_exists(top):
+                                h_t = f" - {new_cname}"
+                                top.title(_("P2P Remote Desktop - Trình Quản Lý Tệp (File Manager){host_title}").format(host_title=h_t))
+                        elif etype == "upload_progress_local":
+                            dlg_ref = evt.get("dlg")
+                            if dlg_ref is not None and dlg_ref.winfo_exists():
+                                dlg_ref.update_progress(evt.get("sent", 0))
+                        elif etype == "download_progress_local":
+                            try:
+                                from core.clipboard_agent import clipboard_sync_manager as _cm_dl
+                                d_dl = getattr(_cm_dl, "active_dialog", None) if _cm_dl else None
+                                if d_dl is not None and getattr(_cm_dl, "active_batch", False) and d_dl.winfo_exists():
+                                    d_dl.update_progress(evt.get("sent", 0))
+                            except Exception:
+                                pass
+                        elif etype == "close_dlg":
+                            dlg_ref = evt.get("dlg")
+                            if dlg_ref is not None:
+                                try:
+                                    if dlg_ref.winfo_exists():
+                                        dlg_ref.destroy()
+                                except Exception:
+                                    pass
+                        elif etype == "run_ui":
                             fn = evt.get("fn")
                             delay_ms = int(evt.get("delay_ms") or 0)
                             if callable(fn):
@@ -968,8 +1172,8 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                     top.after(delay_ms, lambda f=fn: f() if top.winfo_exists() else None)
                                 else:
                                     fn()
-                        elif evt.get("type") == "upload_progress_update":
-                            if active_upload_dialog:
+                        elif etype == "upload_progress_update":
+                            if active_upload_dialog and active_upload_dialog[0].winfo_exists():
                                 active_upload_dialog[0].update_progress(evt.get("received", 0))
                         else:
                             on_remote_dir_result(evt)
@@ -978,10 +1182,32 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         print(f"Error in process_fm_queue: {e}\n{traceback.format_exc()}\n")
             except queue.Empty:
                 pass
-            if top.winfo_exists():
-                top.after(100, process_fm_queue)
+            if _safe_winfo_exists(top):
+                _fm_after_id[0] = top.after(60, process_fm_queue)
 
-        top.after(100, process_fm_queue)
+        _fm_after_id = [None]
+
+        def _on_top_destroy(event=None):
+            global _fm_open_flag, _fm_ext_queue
+            if event is not None and getattr(event, "widget", None) is not top:
+                return
+            _fm_open_flag = False
+            _fm_abort_event.set()
+            for st_obj in list(active_upload_states):
+                st_obj.is_cancelled = True
+            if _fm_after_id[0] is not None:
+                try:
+                    top.after_cancel(_fm_after_id[0])
+                except Exception:
+                    pass
+                _fm_after_id[0] = None
+            if _fm_ext_queue is fm_event_queue:
+                _fm_ext_queue = None
+            if globals().get("fm_top") is top:
+                globals()["fm_top"] = None
+
+        top.bind("<Destroy>", _on_top_destroy, add="+")
+        _fm_after_id[0] = top.after(60, process_fm_queue)
         import core.viewer
         core.viewer.file_manager_callback = lambda e: fm_event_queue.put(e)
 
@@ -1370,7 +1596,13 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 dlg.bind("<Escape>", lambda e: (make_decision("cancel"), "break")[1])
                 btn_ow.focus_force()
 
-                parent.wait_window(dlg)
+                _pump_modal_wait(parent, lambda: not _safe_winfo_exists(dlg))
+                if _safe_winfo_exists(dlg):
+                    try:
+                        dlg.grab_release()
+                    except Exception:
+                        pass
+                    dlg.destroy()
                 if decision[0] == "cancel": return None
                 elif decision[0] == "overwrite_all":
                     overwrite_all = True
@@ -1405,6 +1637,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                 remote_items[txt] = {"is_dir": is_dir, "size": sz}
 
             conflicts = []
+            overwrite_remote_names = set()
             for s in sel:
                 name = local_tree.item(s, "text")
                 if name in remote_items:
@@ -1418,6 +1651,18 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     else:
                         sz = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
 
+                    dst_is_dir = bool(remote_items[name]["is_dir"])
+                    try:
+                        dst_raw_sz = int(float(remote_items[name]["size"] or 0))
+                    except Exception:
+                        dst_raw_sz = 0
+
+                    # Nếu bên Host tồn tại file 0 byte rỗng (do lần chuyển trước dừng dở dang) trong khi file nguồn > 0 byte,
+                    # tự động xóa đè file 0 byte bị lỗi mà không kẹt hay hỏi thừa.
+                    if (not is_dir) and (not dst_is_dir) and dst_raw_sz == 0 and sz > 0:
+                        overwrite_remote_names.add(name)
+                        continue
+
                     try:
                         import datetime
                         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1429,7 +1674,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         "name": name,
                         "src_size": sz, "src_is_dir": is_dir, "src_path": fpath, "src_mtime": mtime,
                         "src_file_count": src_file_count, "src_folder_count": src_folder_count,
-                        "dst_size": remote_items[name]["size"], "dst_is_dir": remote_items[name]["is_dir"],
+                        "dst_size": remote_items[name]["size"], "dst_is_dir": dst_is_dir,
                         "dst_path": dpath, "dst_mtime": _("Không xác định (Remote)"),
                         "dst_file_count": None, "dst_folder_count": None
                     })
@@ -1437,6 +1682,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             if conflicts:
                 decisions = resolve_conflicts(conflicts, top, is_upload=True)
                 if decisions is None: return
+                for c_name, dec_val in decisions.items():
+                    if dec_val == "overwrite":
+                        overwrite_remote_names.add(c_name)
             else:
                 decisions = {}
 
@@ -1479,24 +1727,39 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             if len(items_to_upload) > 1:
                 display_name += _(" và {count} mục khác").format(count=len(items_to_upload)-1)
 
+            # Xóa cờ _fm_send_abort còn tồn đọng từ lần Hủy trước hoặc từ ClipboardSyncManager
+            # (nguyên nhân khiến hộp thoại "Chuyển qua" vừa hiện lên đã tự tắt ngay ở chunk đầu tiên)
+            try:
+                from core.clipboard_agent import clipboard_sync_manager as _cm_init
+                if _cm_init and getattr(_cm_init, "_fm_send_abort", None) is not None:
+                    _cm_init._fm_send_abort.clear()
+            except Exception:
+                pass
+
             class UploadState:
                 is_cancelled = False
             state = UploadState()
+            active_upload_states.append(state)
 
             def _cancel_upload():
                 state.is_cancelled = True
-                try:
-                    from core.clipboard_agent import clipboard_sync_manager as cm
-                    if cm:
-                        cm.cancel_active_transfer(remote_triggered=False)
-                except Exception:
-                    pass
 
-            dialog = ProgressDialog(top, "Chuyển qua", display_name, total_size, on_cancel=_cancel_upload, host_hwnd=hwnd, embed=True, dest_dir=target_dir)
+            cur_embed_hwnd = embed_hwnd_box[0]
+            dialog = ProgressDialog(
+                top,
+                _("Chuyển qua"),
+                display_name,
+                total_size,
+                on_cancel=_cancel_upload,
+                host_hwnd=cur_embed_hwnd,
+                embed=bool(cur_embed_hwnd),
+                dest_dir=target_dir,
+            )
             dialog.update_progress(0)
             
             active_upload_dialog.clear()
             active_upload_dialog.append(dialog)
+            _raise_active_transfer_dialogs()
 
             upload_ack_event = threading.Event()
             active_upload_ack_events.append(upload_ack_event)
@@ -1510,11 +1773,14 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     lan = bool(clipboard_sync_manager and is_lan_socket(getattr(clipboard_sync_manager, "sock", None)))
                 except Exception:
                     pass
+                incomplete_remote_path = None
                 try:
                     sent_total = 0
-                    batch_start_time = time.time()
+                    last_prog_ts = 0.0
                     for path, n, sz, is_empty_dir in items:
-                        if st.is_cancelled: break
+                        if st.is_cancelled or _fm_abort_event.is_set():
+                            st.is_cancelled = True
+                            break
 
                         if is_empty_dir:
                             final_target_dir = t_dir
@@ -1529,7 +1795,9 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                 if parent_path.endswith("/"): parent_path = parent_path[:-1]
                                 folder_name = parts[0]
 
-                            send_fn({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name})
+                            if send_fn({"type": "request_create_folder", "parent_path": parent_path, "folder_name": folder_name}) is False:
+                                st.is_cancelled = True
+                                break
                             time.sleep(0.1)
                             continue
 
@@ -1544,35 +1812,49 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         if sub_dir:
                             final_target_dir += sub_dir
 
-                        send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir})
+                        remote_full_path = (final_target_dir.rstrip("/") + "/" + file_name) if final_target_dir != "/" else ("/" + file_name)
+                        # Xóa trước file cũ / file 0 byte bị lỗi trên Android để tránh lỗi Scoped Storage khi mở FileOutputStream ghi đè
+                        if is_android and (n in overwrite_remote_names or file_name in overwrite_remote_names):
+                            silent_delete_pending[0] += 1
+                            send_fn({"type": "request_delete_item", "path": remote_full_path})
+                            time.sleep(0.08)
+
+                        incomplete_remote_path = remote_full_path
+                        if send_fn({"type": "file_start", "name": file_name, "size": sz, "target_dir": final_target_dir}) is False:
+                            st.is_cancelled = True
+                            break
                         if not lan:
-                            time.sleep(0.5)
+                            if _fm_abort_event.wait(0.35):
+                                st.is_cancelled = True
+                                break
+                            if st.is_cancelled:
+                                break
                         chunk_size = 64 * 1024
 
                         with open(path, "rb") as f:
                             while True:
-                                if st.is_cancelled: break
-                                try:
-                                    from core.clipboard_agent import clipboard_sync_manager as _cm
-                                    ev = getattr(_cm, "_fm_send_abort", None)
-                                    if ev is not None and ev.is_set():
-                                        break
-                                except Exception:
-                                    pass
+                                if st.is_cancelled or _fm_abort_event.is_set():
+                                    st.is_cancelled = True
+                                    break
 
                                 chunk = f.read(chunk_size)
                                 if not chunk: break
 
                                 t_send_start = time.time()
-                                send_fn({
+                                if send_fn({
                                     "type": "file_chunk",
                                     "name": file_name,
                                     "data": base64.b64encode(chunk).decode('utf-8')
-                                })
+                                }) is False:
+                                    st.is_cancelled = True
+                                    break
                                 send_duration = time.time() - t_send_start
 
                                 sent_total += len(chunk)
-                                dlg.update_progress(sent_total)
+                                now_p = time.monotonic()
+                                if (now_p - last_prog_ts) >= 0.05 or sent_total >= total_size:
+                                    last_prog_ts = now_p
+                                    fm_event_queue.put({"type": "upload_progress_local", "dlg": dlg, "sent": sent_total})
 
                                 if lan:
                                     continue
@@ -1581,27 +1863,61 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                                     wait_time = 2.0
                                 sleep_end = time.time() + wait_time
                                 while time.time() < sleep_end:
-                                    if st.is_cancelled:
+                                    if st.is_cancelled or _fm_abort_event.is_set():
+                                        st.is_cancelled = True
                                         break
                                     time.sleep(0.05)
 
-                        if not st.is_cancelled:
-                            send_fn({"type": "file_end"})
-                            time.sleep(0.1) 
+                        if not st.is_cancelled and not _fm_abort_event.is_set():
+                            if send_fn({"type": "file_end"}) is False:
+                                st.is_cancelled = True
+                                break
+                            incomplete_remote_path = None
+                            time.sleep(0.1)
+                        else:
+                            break
 
-                    if not st.is_cancelled:
+                    if not st.is_cancelled and not _fm_abort_event.is_set():
                         # Gửi batch_end để báo host đã gửi xong
                         send_fn({"type": "batch_end"})
-                        # Đóng cửa sổ tiến trình ngay lập tức
-                        dlg.safe_destroy()
+                        fm_event_queue.put({"type": "close_dlg", "dlg": dlg})
 
-                    def delayed_refresh():
-                        time.sleep(1)
-                        fm_event_queue.put({"type": "run_ui", "fn": lambda td=t_dir: request_remote_dir(td)})
-                    threading.Thread(target=delayed_refresh, daemon=True).start()
+                        def delayed_refresh():
+                            if not _fm_abort_event.wait(0.8):
+                                fm_event_queue.put({"type": "run_ui", "fn": lambda td=t_dir: request_remote_dir(td)})
+                        threading.Thread(target=delayed_refresh, daemon=True).start()
+                    else:
+                        # Đóng stream và xóa ngay file dở dang / 0 byte trên Host khi người dùng bấm Hủy giữa chừng
+                        if incomplete_remote_path and not _fm_abort_event.is_set():
+                            try:
+                                send_fn({"type": "file_end"})
+                                time.sleep(0.05)
+                                silent_delete_pending[0] += 1
+                                send_fn({"type": "request_delete_item", "path": incomplete_remote_path})
+                            except Exception:
+                                pass
+                            incomplete_remote_path = None
+
+                            def delayed_cleanup_refresh():
+                                if not _fm_abort_event.wait(0.4):
+                                    fm_event_queue.put({"type": "run_ui", "fn": lambda td=t_dir: request_remote_dir(td)})
+                            threading.Thread(target=delayed_cleanup_refresh, daemon=True).start()
+                        fm_event_queue.put({"type": "close_dlg", "dlg": dlg})
                 except Exception as e:
                     print(f"Upload error: {e}")
-                    dlg.safe_destroy()
+                    if incomplete_remote_path and not _fm_abort_event.is_set():
+                        try:
+                            send_fn({"type": "file_end"})
+                            silent_delete_pending[0] += 1
+                            send_fn({"type": "request_delete_item", "path": incomplete_remote_path})
+                        except Exception:
+                            pass
+                    fm_event_queue.put({"type": "close_dlg", "dlg": dlg})
+                finally:
+                    try:
+                        active_upload_states.remove(st)
+                    except ValueError:
+                        pass
 
             threading.Thread(target=upload_batch_thread, args=(items_to_upload, target_dir, dialog, state, upload_ack_event), daemon=True).start()
 
@@ -1708,7 +2024,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                     def _fm_update_dialog(sent_bytes, job_id=None):
                         if getattr(cm, "active_batch", False) and getattr(cm, "active_dialog", None):
                             try:
-                                cm.active_dialog.update_progress(sent_bytes)
+                                fm_event_queue.put({"type": "download_progress_local", "sent": sent_bytes})
                             except Exception:
                                 pass
                         if orig_update_dialog:
@@ -1754,9 +2070,20 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
                         cm.active_dialog = None
                     cm.cancel_active_transfer(remote_triggered=False)
 
-                dialog = ProgressDialog(top, "Nhận về", display_name, total_size, on_cancel=_cancel, host_hwnd=hwnd, embed=True, dest_dir=target_dir)
+                cur_embed_hwnd = embed_hwnd_box[0]
+                dialog = ProgressDialog(
+                    top,
+                    _("Nhận về"),
+                    display_name,
+                    total_size,
+                    on_cancel=_cancel,
+                    host_hwnd=cur_embed_hwnd,
+                    embed=bool(cur_embed_hwnd),
+                    dest_dir=target_dir,
+                )
                 dialog.update_progress(0)
                 cm.active_dialog = dialog
+                _raise_active_transfer_dialogs()
 
             write_transfer_log("DOWNLOAD", display_names[0] + (" (batch)" if len(display_names) > 1 else ""), total_size, target_dir)
             req = {"type": "request_download_batch", "paths": files_to_download, "target_dir_local": target_dir}
@@ -1769,7 +2096,7 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
             try:
                 if top.grab_current() not in (None, top):
                     return None
-                top.withdraw()
+                _hide_fm_window()
             except: pass
             return "break"
 
@@ -1780,43 +2107,13 @@ def open_transfer_window(computer_name, is_android, send_event, host_hwnd=None, 
         refresh_local()
         request_remote_dir(remote_entry.get())
 
-        def _reveal_fm():
-            top.update_idletasks()
-            if sys.platform == "win32":
-                try:
-                    import ctypes
-                    tk_hwnd = int(top.frame(), 16)
-                    if embed_hwnd:
-                        try:
-                            ctypes.windll.user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32]
-                        except Exception:
-                            pass
-                        style = ctypes.windll.user32.GetWindowLongW(tk_hwnd, -16)
-                        style = (style | 0x40000000) & ~0x80000000  # WS_CHILD, not WS_POPUP
-                        ctypes.windll.user32.SetWindowLongW(tk_hwnd, -16, style)
-                        ctypes.windll.user32.SetParent(tk_hwnd, int(embed_hwnd))
-                        x, y, w, h = embed_pos
-                        ctypes.windll.user32.SetWindowPos(
-                            tk_hwnd, 0, int(x), int(y), int(w), int(h), 0x0004 | 0x0040
-                        )
-                    top.update_idletasks()
-                    top.attributes("-alpha", 1.0)
-                except Exception:
-                    try:
-                        top.attributes("-alpha", 1.0)
-                    except Exception:
-                        pass
-            else:
-                top.deiconify()
-            try:
-                top.lift()
-                top.focus_force()
-            except Exception:
-                pass
-
-        _reveal_fm()
+        _bring_fm_to_front()
         local_entry.focus()
-        top.mainloop()
+        if owns_root:
+            try:
+                top.mainloop()
+            finally:
+                _on_top_destroy()
     except Exception as ex:
         import traceback
         err = traceback.format_exc()

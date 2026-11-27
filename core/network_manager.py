@@ -65,6 +65,54 @@ def _handshake_is_android(res):
     return False
 
 
+def _is_process_alive(proc):
+    """Kiểm tra tiến trình còn chạy an toàn, tránh ValueError khi process object đã bị close()."""
+    if proc is None:
+        return False
+    try:
+        return bool(proc.is_alive())
+    except (ValueError, OSError, AssertionError):
+        return False
+    except Exception:
+        return False
+
+
+def _safe_queue_put(q, item):
+    """Đẩy dữ liệu vào multiprocessing.Queue an toàn nếu queue chưa bị đóng."""
+    if q is None:
+        return
+    try:
+        q.put(item)
+    except Exception:
+        pass
+
+
+def _can_close_process_handle(proc):
+    """Chỉ đóng handle Process khi tiến trình đã dừng và không còn monitor/connect thread nào giữ tham chiếu."""
+    if proc is None or getattr(proc, "_closed_handle", False):
+        return False
+    if _is_process_alive(proc):
+        return False
+    if getattr(proc, "_monitor_started", False) and not getattr(proc, "_monitor_done", False):
+        return False
+    if getattr(proc, "_active_connect_count", 0) > 0:
+        return False
+    return True
+
+
+def _safe_close_process_handle(proc):
+    """Đóng Process handle an toàn đúng một lần."""
+    if not _can_close_process_handle(proc):
+        return
+    try:
+        proc.close()
+        proc._closed_handle = True
+    except ValueError:
+        proc._closed_handle = True
+    except Exception:
+        pass
+
+
 def client_android_speed_test(sock, password, status_cb=None):
     """Mở khóa startFrameSender trên host Android.
 
@@ -608,9 +656,23 @@ class NetworkMixin:
                         or (old_src != peer_info.get("source_ip"))
                     )
                     self.lan_peers[peer_key] = peer_info
+                    cache_map = getattr(self, "_lan_online_status_cache", None)
+                    if cache_map is None:
+                        cache_map = {}
+                        self._lan_online_status_cache = cache_map
+                    if matched_k and matched_k != peer_key:
+                        cache_map.pop(matched_k, None)
+                    cache_map[peer_key] = (True, time.time())
                     
                 if should_save:
                     self.save_lan_peers()
+                try:
+                    dlg_ref = getattr(self, "lan_computers_dialog", None)
+                    if dlg_ref is not None and dlg_ref.winfo_exists() and hasattr(dlg_ref, "_set_peer_online_external"):
+                        pi_snap = dict(peer_info)
+                        self.after(0, lambda pk=peer_key, pi=pi_snap: dlg_ref._set_peer_online_external(pk, True, pi) if dlg_ref.winfo_exists() else None)
+                except Exception:
+                    pass
                     
                 if is_new:
                     fmt_id = f"{peer_key[:3]} {peer_key[3:6]} {peer_key[6:9]} {peer_key[9:]}" if len(peer_key) == 12 else peer_key
@@ -859,6 +921,7 @@ class NetworkMixin:
         canvas.bind("<FocusOut>", lambda e: list_outer.config(highlightbackground=self.divider_color) if e.widget is canvas else None)
 
         canvas_win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        configure_suspended = [False]
 
         def _sync_canvas_layout(target_frame=None, reset_top=False):
             if not dialog.winfo_exists():
@@ -878,6 +941,11 @@ class NetworkMixin:
             except Exception:
                 pass
 
+        def _on_frame_configure(target_frame):
+            if configure_suspended[0]:
+                return
+            _sync_canvas_layout(target_frame, reset_top=False)
+
         def _on_canvas_configure(event):
             canvas.itemconfig(canvas_win_id, width=event.width)
             tf = active_frame_box[0]
@@ -888,7 +956,7 @@ class NetworkMixin:
                 if req_h <= event.height:
                     canvas.yview_moveto(0.0)
 
-        scroll_frame.bind("<Configure>", lambda e, f=scroll_frame: _sync_canvas_layout(f, reset_top=False))
+        scroll_frame.bind("<Configure>", lambda e, f=scroll_frame: _on_frame_configure(f))
         canvas.bind("<Configure>", _on_canvas_configure)
         canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -907,11 +975,37 @@ class NetworkMixin:
         # Status label (sẽ được pack neo dưới đáy trước list_outer cùng btn_frame)
         status_label = tk.Label(dialog, text="", font=("Segoe UI", 8, "italic"), fg=self.text_gray, bg=self.bg_color)
 
+        if not hasattr(self, "_lan_online_status_cache") or not isinstance(self._lan_online_status_cache, dict):
+            self._lan_online_status_cache = {}
+
+        def _remember_lan_online(h_key, is_on_val):
+            if not h_key:
+                return
+            self._lan_online_status_cache[h_key] = (bool(is_on_val), time.time())
+
+        def _seed_online_status_from_cache(target_status_dict):
+            now_ep = time.time()
+            cache_ref = getattr(self, "_lan_online_status_cache", {}) or {}
+            for ck, cval in list(cache_ref.items()):
+                if isinstance(cval, tuple) and len(cval) == 2:
+                    c_on, c_ts = cval
+                    if (now_ep - float(c_ts or 0)) <= 60.0:
+                        target_status_dict[ck] = bool(c_on)
+            with self.lan_peers_lock:
+                for pk, pv in self.lan_peers.items():
+                    if isinstance(pv, dict) and pv.get("_live_authoritative"):
+                        ls_ep = get_last_seen_epoch(pv.get("last_seen", 0))
+                        if ls_ep > 0 and (now_ep - ls_ep) <= 25.0:
+                            target_status_dict[pk] = True
+                            cache_ref[pk] = (True, now_ep)
+
         # Quản lý luồng quét & trạng thái trực tuyến
+        initial_online_status = {}
+        _seed_online_status_from_cache(initial_online_status)
         scan_state = {
             "is_scanning": False,
             "cancel_event": threading.Event(),
-            "online_status": {},  # hwid -> bool (True=Online, False=Offline, None=Checking)
+            "online_status": initial_online_status,  # hwid -> bool (True=Online, False=Offline, None=Checking)
             "probe_gen": 0,
             "probe_cancel_event": threading.Event(),
             "dialog_closed": threading.Event(),
@@ -1287,6 +1381,7 @@ class NetworkMixin:
                     for dk in keys_to_del:
                         self.lan_peers.pop(dk, None)
                         scan_state.setdefault("online_status", {}).pop(dk, None)
+                        self._lan_online_status_cache.pop(dk, None)
                 self.save_lan_peers(allow_shrink=True)
                 refresh_list()
                 if hasattr(dialog, "_sync_lan_selection"):
@@ -1312,11 +1407,17 @@ class NetworkMixin:
                     w.bind("<ButtonPress>", self.hide, add="+")
                     w.bind("<Destroy>", self.hide, add="+")
 
+            def _resolve_text(self):
+                try:
+                    return self.text() if callable(self.text) else self.text
+                except Exception:
+                    return ""
+
             def update_text(self, new_text):
                 self.text = new_text
                 try:
                     if self.tw and self.lbl_widget and self.lbl_widget.winfo_exists():
-                        self.lbl_widget.config(text=new_text)
+                        self.lbl_widget.config(text=self._resolve_text())
                 except Exception:
                     pass
 
@@ -1356,7 +1457,7 @@ class NetworkMixin:
                     inner.pack(padx=1, pady=1)
                     
                     self.lbl_widget = tk.Label(
-                        inner, text=self.text, font=("Segoe UI", 8),
+                        inner, text=self._resolve_text(), font=("Segoe UI", 8),
                         fg=self.fg, bg=self.bg, justify=tk.LEFT, anchor="w"
                     )
                     self.lbl_widget.pack()
@@ -1498,13 +1599,16 @@ class NetworkMixin:
                         except Exception:
                             pass
                         scan_state.setdefault("online_status", {}).pop(existing_key, None)
+                        self._lan_online_status_cache.pop(existing_key, None)
                     self.lan_peers[target_key] = p
                     release_ip_from_other_peers(self.lan_peers, target_key, p, p.get("source_ip"))
                     scan_state.setdefault("online_status", {})[target_key] = True
+                    _remember_lan_online(target_key, True)
                 else:
                     self.lan_peers[p["hwid"]] = p
                     release_ip_from_other_peers(self.lan_peers, p["hwid"], p, p.get("source_ip"))
                     scan_state.setdefault("online_status", {})[p["hwid"]] = True
+                    _remember_lan_online(p["hwid"], True)
 
             # Không cập nhật giao diện trong lúc đang quét để tránh giật nháy màn hình liên tục.
             # Giao diện danh sách máy sẽ được cập nhật đúng 1 lần khi toàn bộ quá trình quét kết thúc.
@@ -1699,8 +1803,7 @@ class NetworkMixin:
             save_lan_dialog_prefs()
             _update_hide_offline_btn_ui()
             if reorder_lan_list_ref[0] is not None:
-                reorder_lan_list_ref[0]()
-                _sync_canvas_layout(reset_top=True)
+                reorder_lan_list_ref[0](reset_top=True)
             else:
                 refresh_list()
 
@@ -1746,7 +1849,7 @@ class NetworkMixin:
             old_scroll_frame = active_frame_box[0]
 
             def _finish_swap():
-                new_scroll_frame.bind("<Configure>", lambda e, f=new_scroll_frame: _sync_canvas_layout(f, reset_top=False))
+                new_scroll_frame.bind("<Configure>", lambda e, f=new_scroll_frame: _on_frame_configure(f))
                 canvas.itemconfig(canvas_win_id, window=new_scroll_frame)
                 active_frame_box[0] = new_scroll_frame
                 if old_scroll_frame and old_scroll_frame.winfo_exists():
@@ -1759,6 +1862,9 @@ class NetworkMixin:
                         canvas.yview_moveto(0.0)
                 except Exception:
                     pass
+
+            _seed_online_status_from_cache(scan_state.setdefault("online_status", {}))
+            saved_comps_snapshot = self.load_saved_computers() if hasattr(self, "load_saved_computers") else []
 
             with self.lan_peers_lock:
                 self.lan_peers = deduplicate_lan_peers(self.lan_peers)
@@ -1894,7 +2000,12 @@ class NetworkMixin:
                 else:
                     status_str = _("Đang kiểm tra kết nối...")
 
-                matched_c = match_saved_computer(h_info.get("computer_name"), h_info.get("hwid"), h_info.get("saved_id"))
+                matched_c = match_saved_computer(
+                    h_info.get("computer_name"),
+                    h_info.get("hwid"),
+                    h_info.get("saved_id"),
+                    saved_list=saved_comps_snapshot,
+                )
                 sp = (matched_c.get("password", "") if matched_c else "") or _peer_lan_password(h_info) or h_info.get("saved_password", "")
                 pw_status = _("🔑 Đã lưu mật khẩu") if sp else _("⚠ Chưa lưu mật khẩu (Sẽ hỏi khi kết nối)")
 
@@ -2031,10 +2142,167 @@ class NetworkMixin:
             except Exception:
                 my_ips_set = set()
 
+            def _sync_menu_wol(m, h_info, is_on):
+                try:
+                    end_idx = m.index(tk.END)
+                    if end_idx is not None:
+                        for idx in range(end_idx, -1, -1):
+                            if m.type(idx) == "command" and "WOL" in m.entrycget(idx, "label"):
+                                m.delete(idx)
+                                break
+                except Exception:
+                    pass
+                if not is_on and h_info.get("macs"):
+                    m.insert_command(
+                        2,
+                        label=_("⚡ Bật nguồn (WOL)"),
+                        command=lambda mac=h_info.get("macs", ""), inf=h_info: self.wake_on_lan(
+                            mac, extra_ips=[inf.get("local_ip"), inf.get("source_ip")],
+                            computer_name=inf.get("computer_name", ""),
+                            peer_id=inf.get("hwid") or inf.get("saved_id") or "",
+                            parent_win=dialog
+                        )
+                    )
+
+            def _ensure_peer_row_built(hwid):
+                ui_it = row_ui_map.get(hwid)
+                if not ui_it:
+                    return None
+                existing_row = ui_it.get("row")
+                if existing_row is not None and existing_row.winfo_exists():
+                    return existing_row
+                if not new_scroll_frame.winfo_exists():
+                    return None
+
+                info = ui_it["info"]
+                fmt_id = ui_it["fmt_id"]
+                peer_online = ui_it.get("peer_online")
+                normalized_net = ui_it.get("comp_group") or _resolve_peer_group(hwid, info)
+                ui_it["comp_group"] = normalized_net
+
+                row = tk.Frame(new_scroll_frame, bg=self.card_color, bd=0)
+
+                dot_color = "#2ECC71" if peer_online is True else ("#FF4D4D" if peer_online is False else "#8A8A9A")
+                lbl_dot = tk.Label(row, text="●", font=("Segoe UI", 9), fg=dot_color, bg=self.card_color)
+                lbl_dot.pack(side=tk.LEFT, padx=(8, 4))
+
+                if normalized_net == "VPN":
+                    badge_text, badge_bg, badge_fg = "VPN", "#1B334D", "#56CCF2"
+                else:
+                    badge_text, badge_bg, badge_fg = "LAN", "#145A32", "#D4EFDF"
+
+                lbl_badge = tk.Label(row, text=badge_text, font=("Segoe UI", 7, "bold"), bg=badge_bg, fg=badge_fg, padx=4, pady=1)
+                lbl_badge.pack(side=tk.LEFT, padx=(0, 8))
+
+                right_box = tk.Frame(row, bg=self.card_color)
+                right_box.pack(side=tk.RIGHT, padx=(0, 10), pady=4)
+
+                wol_container = tk.Frame(right_box, bg=self.card_color)
+                wol_container.pack(side=tk.RIGHT, padx=(6, 0))
+
+                has_saved_pw = bool(ui_it.get("has_saved_pw") or info.get("saved_password"))
+                k_bg = "#145A32" if has_saved_pw else "#4A5568"
+                k_fg = "#2ECC71" if has_saved_pw else "#D1D5DB"
+                k_tip = _("Mật khẩu: đã lưu") if has_saved_pw else _("Mật khẩu: chưa lưu")
+
+                lbl_key = tk.Label(
+                    right_box, text="🔑", font=("Segoe UI", 9, "bold"),
+                    bg=k_bg, fg=k_fg, padx=6, pady=2, cursor="hand2"
+                )
+                lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
+
+                btn = _build_wol_button(wol_container, info, is_online=peer_online, ref_widget=lbl_key)
+                btn.pack()
+                key_tooltip_obj = RowTooltip(lbl_key, k_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
+                lbl_key.bind("<Button-1>", lambda e, h=hwid, i=info: open_change_lan_password_dialog(h, i))
+
+                lbl_id = tk.Label(right_box, text="ID: " + str(fmt_id), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
+                lbl_id.pack(side=tk.RIGHT, padx=(8, 0))
+
+                lbl_name = tk.Label(row, text=info.get("computer_name", "Unknown"), font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
+                lbl_name.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4)
+
+                tooltip_fn = lambda inf=info, u_ref=ui_it, f_id=fmt_id: _make_tooltip_text(inf, u_ref.get("peer_online"), f_id)
+
+                def _get_or_build_row_menu():
+                    m_existing = ui_it.get("menu")
+                    if m_existing is not None and m_existing.winfo_exists():
+                        return m_existing
+                    m_new = tk.Menu(row, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
+                    m_new.add_command(label=_("🚀 Kết nối"), command=lambda h=hwid, i=info: connect_to_peer(h, i))
+                    m_new.add_command(label=_("🔑 Thay đổi mật khẩu & MAC"), command=lambda h=hwid, i=info: open_change_lan_password_dialog(h, i))
+                    _sync_menu_wol(m_new, info, ui_it.get("peer_online"))
+                    m_new.add_separator()
+                    m_new.add_command(label=_("🗑 Xóa"), command=lambda h=hwid, i=info: delete_lan_peer(h, i))
+                    ui_it["menu"] = m_new
+                    row._context_menu = m_new
+                    return m_new
+
+                def show_context(event, r_w=row):
+                    dialog._kb_selected = ("comp", getattr(r_w, "comp_id", hwid))
+                    canvas.focus_set()
+                    if hasattr(dialog, "_sync_lan_selection"):
+                        dialog._sync_lan_selection(ensure_visible=False)
+                    m = _get_or_build_row_menu()
+                    try:
+                        m.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        m.grab_release()
+
+                lbl_key.bind("<Button-3>", show_context)
+                lbl_key.bind("<ButtonRelease-3>", show_context)
+
+                tooltip_targets = [lbl_name, lbl_id]
+                tooltip_obj = RowTooltip(tooltip_targets, tooltip_fn)
+
+                bind_targets = [row, lbl_name, lbl_id, lbl_badge, lbl_dot, right_box]
+
+                row.comp_id = hwid
+                row.comp_name = info.get("computer_name", "Unknown")
+                row.comp_group = normalized_net
+                row.comp_info = info
+                row._context_menu = None
+
+                ui_it.update({
+                    "row": row,
+                    "dot": lbl_dot,
+                    "badge": lbl_badge,
+                    "wol_container": wol_container,
+                    "lbl_key": lbl_key,
+                    "key_tooltip": key_tooltip_obj,
+                    "tooltip": tooltip_obj,
+                    "sync_menu_wol": _sync_menu_wol,
+                })
+
+                def on_row_click(e, h=hwid, i=info):
+                    dialog._kb_selected = ("comp", h)
+                    canvas.focus_set()
+                    if hasattr(dialog, "_sync_lan_selection"):
+                        dialog._sync_lan_selection(ensure_visible=False)
+                    connect_to_peer(h, i)
+
+                try:
+                    from gui.components import apply_row_online_state
+                    apply_row_online_state(row, peer_online, self.card_color, (self.text_white, self.text_gray))
+                except Exception:
+                    pass
+
+                for w in bind_targets:
+                    w.bind("<Button-1>", on_row_click)
+                    w.bind("<Double-1>", on_row_click)
+                    w.bind("<ButtonRelease-3>", show_context)
+                    w.bind("<Button-3>", show_context)
+                    w.bind("<ButtonRelease-2>", show_context)
+                    w.bind("<Button-2>", show_context)
+                    try:
+                        w.config(cursor="hand2")
+                    except Exception:
+                        pass
+                return row
+
             for hwid, info in sorted_items:
                 if _is_self_peer(hwid, info):
                     continue
-                row = tk.Frame(new_scroll_frame, bg=self.card_color, bd=0)
 
                 clean_hwid_key = ''.join(ch for ch in str(hwid) if ch.isdigit())
                 clean_info_hwid = ''.join(ch for ch in str(info.get("hwid") or "") if ch.isdigit())
@@ -2044,7 +2312,12 @@ class NetworkMixin:
 
                 # Đối chiếu CHÍNH XÁC với danh sách máy tính chính ở thư mục app (không khớp mờ tên làm lấy nhầm mật khẩu máy khác)
                 from utils.vpn_discovery import _is_exact_saved_match
-                matched = _find_exact_saved_comp(info.get("computer_name"), actual_hwid or hwid, info.get("saved_id"))
+                matched = _find_exact_saved_comp(
+                    info.get("computer_name"),
+                    actual_hwid or hwid,
+                    info.get("saved_id"),
+                    comps_list=saved_comps_snapshot,
+                )
                 saved_pw = _peer_lan_password(info) or (matched.get("password", "") if matched else "")
                 saved_mac = matched.get("mac", "") if matched else ""
                 if saved_mac and not info.get("macs"):
@@ -2087,158 +2360,26 @@ class NetworkMixin:
 
                 # Trạng thái trực tuyến (None = đang kiểm tra, True = online, False = offline)
                 peer_online = _get_peer_online_state(hwid, info)
-
-                dot_color = "#2ECC71" if peer_online is True else ("#FF4D4D" if peer_online is False else "#8A8A9A")
-                lbl_dot = tk.Label(row, text="●", font=("Segoe UI", 9), fg=dot_color, bg=self.card_color)
-                lbl_dot.pack(side=tk.LEFT, padx=(8, 4))
-
-                # Network Badge & Group ("LAN" hoặc "VPN")
                 normalized_net = _resolve_peer_group(hwid, info)
-                if normalized_net == "VPN":
-                    badge_text = "VPN"
-                    badge_bg = "#1B334D"
-                    badge_fg = "#56CCF2"
-                else:
-                    badge_text = "LAN"
-                    badge_bg = "#145A32"
-                    badge_fg = "#D4EFDF"
-
-                lbl_badge = tk.Label(row, text=badge_text, font=("Segoe UI", 7, "bold"), bg=badge_bg, fg=badge_fg, padx=4, pady=1)
-                lbl_badge.pack(side=tk.LEFT, padx=(0, 8))
-
-                # === CÁC PHẦN TỬ BÊN PHẢI (PACK RIGHT TRƯỚC) ===
-                right_box = tk.Frame(row, bg=self.card_color)
-                right_box.pack(side=tk.RIGHT, padx=(0, 10), pady=4)
-
-                # 1. Container cho nút Bật nguồn WOL (chỉ hiển thị khi máy XÁC NHẬN NGOẠI TUYẾN và có địa chỉ MAC)
-                wol_container = tk.Frame(right_box, bg=self.card_color)
-                wol_container.pack(side=tk.RIGHT, padx=(6, 0))
-
-                # 2. Biểu tượng 🔑 (Đã lưu: nền xanh lá, Chưa lưu: nền xám)
                 has_saved_pw = bool(saved_pw or info.get("saved_password"))
-                k_bg = "#145A32" if has_saved_pw else "#4A5568"
-                k_fg = "#2ECC71" if has_saved_pw else "#D1D5DB"
-                k_tip = _("Mật khẩu: đã lưu") if has_saved_pw else _("Mật khẩu: chưa lưu")
 
-                lbl_key = tk.Label(
-                    right_box, text="🔑", font=("Segoe UI", 9, "bold"),
-                    bg=k_bg, fg=k_fg, padx=6, pady=2, cursor="hand2"
-                )
-                lbl_key.pack(side=tk.RIGHT, padx=(8, 0))
-
-                btn = _build_wol_button(wol_container, info, is_online=peer_online, ref_widget=lbl_key)
-                btn.pack()
-                key_tooltip_obj = RowTooltip(lbl_key, k_tip, bg="#FFFFFF", fg="#000000", border_color="#B0B7C3")
-                lbl_key.bind("<Button-1>", lambda e, h=hwid, i=info: open_change_lan_password_dialog(h, i))
-
-                # 3. ID máy tính canh gần sát về bên phải, ngay cạnh biểu tượng 🔑
-                lbl_id = tk.Label(right_box, text="ID: " + str(fmt_id), font=("Segoe UI", 9), fg=self.text_gray, bg=self.card_color)
-                lbl_id.pack(side=tk.RIGHT, padx=(8, 0))
-
-                # === PHẦN TỬ BÊN TRÁI: TÊN MÁY TÍNH (chiếm toàn bộ khoảng trống còn lại) ===
-                lbl_name = tk.Label(row, text=info.get("computer_name", "Unknown"), font=("Segoe UI", 10, "bold"), fg=self.text_white, bg=self.card_color, anchor=tk.W)
-                lbl_name.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4)
-
-                tooltip_text = _make_tooltip_text(info, peer_online, fmt_id)
-
-                # Menu chuột phải cho từng máy tính (giống như bên Danh sách máy tính đã lưu)
-                row_menu = tk.Menu(row, tearoff=0, bg=self.entry_bg, fg=self.text_white, bd=0, activebackground=self.btn_hover)
-                row_menu.add_command(label=_("🚀 Kết nối"), command=lambda h=hwid, i=info: connect_to_peer(h, i))
-                row_menu.add_command(label=_("🔑 Thay đổi mật khẩu & MAC"), command=lambda h=hwid, i=info: open_change_lan_password_dialog(h, i))
-
-                def _sync_menu_wol(m, h_info, is_on):
-                    try:
-                        end_idx = m.index(tk.END)
-                        if end_idx is not None:
-                            for idx in range(end_idx, -1, -1):
-                                if m.type(idx) == "command" and "WOL" in m.entrycget(idx, "label"):
-                                    m.delete(idx)
-                                    break
-                    except Exception:
-                        pass
-                    if not is_on and h_info.get("macs"):
-                        m.insert_command(
-                            2,
-                            label=_("⚡ Bật nguồn (WOL)"),
-                            command=lambda mac=h_info.get("macs", ""), inf=h_info: self.wake_on_lan(
-                                mac, extra_ips=[inf.get("local_ip"), inf.get("source_ip")],
-                                computer_name=inf.get("computer_name", ""),
-                                peer_id=inf.get("hwid") or inf.get("saved_id") or "",
-                                parent_win=dialog
-                            )
-                        )
-
-                _sync_menu_wol(row_menu, info, peer_online)
-                row_menu.add_separator()
-                row_menu.add_command(label=_("🗑 Xóa"), command=lambda h=hwid, i=info: delete_lan_peer(h, i))
-
-                def show_context(event, m=row_menu, r_w=row):
-                    dialog._kb_selected = ("comp", getattr(r_w, "comp_id", hwid))
-                    canvas.focus_set()
-                    if hasattr(dialog, "_sync_lan_selection"):
-                        dialog._sync_lan_selection(ensure_visible=False)
-                    try:
-                        m.tk_popup(event.x_root, event.y_root)
-                    finally:
-                        m.grab_release()
-
-                lbl_key.bind("<Button-3>", show_context)
-                lbl_key.bind("<ButtonRelease-3>", show_context)
-
-                # Chỉ hiển thị tooltip thông tin máy khi chuột trỏ vào Tên máy hoặc ID (tránh che hoặc xung đột với tooltip Mật khẩu, WOL)
-                tooltip_targets = [lbl_name, lbl_id]
-                tooltip_obj = RowTooltip(tooltip_targets, tooltip_text)
-
-                # Gắn sự kiện click và menu chuột phải cho toàn hàng (bỏ nút Kết nối, nhấp chuột trực tiếp để kết nối)
-                bind_targets = [row, lbl_name, lbl_id, lbl_badge, lbl_dot, right_box]
-
-                row.comp_id = hwid
-                row.comp_name = info.get("computer_name", "Unknown")
-                row.comp_group = normalized_net
-                row.comp_info = info
-                row._context_menu = row_menu
-
+                # Khởi tạo lười (lazy widget creation): chỉ tạo Tk widget cho máy thực sự được hiển thị lên màn hình
                 row_ui_map[hwid] = {
-                    "row": row,
-                    "dot": lbl_dot,
-                    "badge": lbl_badge,
-                    "wol_container": wol_container,
-                    "lbl_key": lbl_key,
-                    "key_tooltip": key_tooltip_obj,
+                    "row": None,
+                    "dot": None,
+                    "badge": None,
+                    "wol_container": None,
+                    "lbl_key": None,
+                    "key_tooltip": None,
                     "info": info,
-                    "tooltip": tooltip_obj,
-                    "menu": row_menu,
+                    "tooltip": None,
+                    "menu": None,
                     "sync_menu_wol": _sync_menu_wol,
                     "fmt_id": fmt_id,
                     "peer_online": peer_online,
                     "comp_group": normalized_net,
+                    "has_saved_pw": has_saved_pw,
                 }
-
-                def on_row_click(e, h=hwid, i=info, r_w=row):
-                    dialog._kb_selected = ("comp", h)
-                    canvas.focus_set()
-                    if hasattr(dialog, "_sync_lan_selection"):
-                        dialog._sync_lan_selection(ensure_visible=False)
-                    connect_to_peer(h, i)
-
-                # Dòng máy OFFLINE được làm tối hơn để phân biệt trực quan
-                try:
-                    from gui.components import apply_row_online_state
-                    apply_row_online_state(row, peer_online, self.card_color, (self.text_white, self.text_gray))
-                except Exception:
-                    pass
-
-                for w in bind_targets:
-                    w.bind("<Button-1>", on_row_click)
-                    w.bind("<Double-1>", on_row_click)
-                    w.bind("<ButtonRelease-3>", show_context)
-                    w.bind("<Button-3>", show_context)
-                    w.bind("<ButtonRelease-2>", show_context)
-                    w.bind("<Button-2>", show_context)
-                    try:
-                        w.config(cursor="hand2")
-                    except Exception:
-                        pass
 
             if any_peer_synced:
                 self.save_lan_peers()
@@ -2252,19 +2393,24 @@ class NetworkMixin:
                 justify=tk.CENTER
             )
 
-            def reorder_lan_list(anchor_group=None):
+            last_pack_meta = [None]
+
+            def reorder_lan_list(anchor_group=None, reset_top=False, sync_layout=True):
                 if not dialog.winfo_exists() or not new_scroll_frame.winfo_exists():
                     return
+                if reorder_timer[0] is not None:
+                    try:
+                        dialog.after_cancel(reorder_timer[0])
+                    except Exception:
+                        pass
+                    reorder_timer[0] = None
                 try:
                     old_req_h = new_scroll_frame.winfo_reqheight()
                     old_canv_h = canvas.winfo_height()
-                    prev_top_px = (canvas.yview()[0] * old_req_h) if (old_req_h > old_canv_h > 1) else 0.0
+                    prev_top_px = (canvas.yview()[0] * old_req_h) if (not reset_top and old_req_h > old_canv_h > 1) else 0.0
                 except Exception:
                     prev_top_px = None
                 try:
-                    for ch in new_scroll_frame.winfo_children():
-                        ch.pack_forget()
-
                     hide_off = hide_offline_var.get()
                     st_map = scan_state.get("online_status", {})
                     grouped_rows = {"LAN": [], "VPN": []}
@@ -2273,16 +2419,16 @@ class NetworkMixin:
                     hidden_offline_count = 0
 
                     for h_id, ui_it in row_ui_map.items():
-                        r = ui_it.get("row")
-                        if not r or not r.winfo_exists():
-                            continue
-                        grp = ui_it.get("comp_group") or getattr(r, "comp_group", "LAN")
+                        grp = ui_it.get("comp_group") or "LAN"
                         if grp not in grouped_rows:
                             grp = "VPN"
                         total_in_group[grp] = total_in_group.get(grp, 0) + 1
                         val = st_map[h_id] if h_id in st_map else ui_it.get("peer_online")
                         if hide_off and val is not True:
                             hidden_offline_count += 1
+                            continue
+                        r = _ensure_peer_row_built(h_id)
+                        if not r or not r.winfo_exists():
                             continue
                         visible_count += 1
                         grouped_rows[grp].append((h_id, r, ui_it))
@@ -2308,20 +2454,18 @@ class NetworkMixin:
                             return 1
                         return 2
 
+                    desired_items = []
+                    cur_open_bg, cur_open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
                     first_grp = True
                     for grp in ("LAN", "VPN"):
                         grp_items = grouped_rows.get(grp, [])
                         if not grp_items and total_in_group.get(grp, 0) == 0:
                             continue
-                        if not grp_items and hide_off and grp not in self.lan_collapsed_groups:
-                            # Vẫn giữ tiêu đề nhóm nếu nhóm có máy để người dùng có thể thu/bung nhóm quét lại
-                            pass
                         hdr = group_headers.get(grp)
                         if hdr and hdr.winfo_exists():
                             is_exp = grp not in self.lan_collapsed_groups
                             icon = "▼" if is_exp else "▶"
                             hdr.config(text=f"{icon} {grp}")
-                            cur_open_bg, cur_open_fg = resolve_open_group_colors(self, self.card_color, self.btn_color)
                             apply_group_header_style(
                                 hdr,
                                 is_exp,
@@ -2332,7 +2476,7 @@ class NetworkMixin:
                                 accent_color=self.btn_color,
                             )
                             top_pad = 8 if first_grp else 14
-                            hdr.pack(fill=tk.X, padx=5, pady=(top_pad, 4))
+                            desired_items.append((hdr, {"fill": tk.X, "padx": 5, "pady": (top_pad, 4)}))
                             first_grp = False
 
                         if grp not in self.lan_collapsed_groups and grp_items:
@@ -2343,7 +2487,7 @@ class NetworkMixin:
                                 )
                             )
                             for _h_id, r, _ui_it in grp_items:
-                                r.pack(fill=tk.X, padx=5, pady=2)
+                                desired_items.append((r, {"fill": tk.X, "padx": 5, "pady": 2}))
 
                     if visible_count == 0 and len(row_ui_map) > 0 and hide_off:
                         if scan_state.get("is_probing", False):
@@ -2352,18 +2496,32 @@ class NetworkMixin:
                             empty_offline_lbl.config(
                                 text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
                             )
-                        empty_offline_lbl.pack(pady=24, padx=20)
+                        desired_items.append((empty_offline_lbl, {"pady": 24, "padx": 20}))
 
-                    _sync_canvas_layout(new_scroll_frame, reset_top=False)
-                    if prev_top_px is not None:
+                    desired_meta = [(w, tuple(sorted(kw.items()))) for w, kw in desired_items]
+                    layout_changed = (desired_meta != last_pack_meta[0])
+                    if layout_changed:
+                        configure_suspended[0] = True
                         try:
-                            new_req_h = max(1, new_scroll_frame.winfo_reqheight())
-                            new_canv_h = max(1, canvas.winfo_height())
-                            if new_req_h > new_canv_h > 1:
-                                clamped_px = max(0.0, min(float(new_req_h - new_canv_h), float(prev_top_px)))
-                                canvas.yview_moveto(clamped_px / float(new_req_h))
-                        except Exception:
-                            pass
+                            for ch in new_scroll_frame.pack_slaves():
+                                ch.pack_forget()
+                            for w, kw in desired_items:
+                                w.pack(**kw)
+                            last_pack_meta[0] = desired_meta
+                        finally:
+                            configure_suspended[0] = False
+
+                    if sync_layout and (layout_changed or reset_top):
+                        _sync_canvas_layout(new_scroll_frame, reset_top=reset_top)
+                        if not reset_top and prev_top_px is not None:
+                            try:
+                                new_req_h = max(1, new_scroll_frame.winfo_reqheight())
+                                new_canv_h = max(1, canvas.winfo_height())
+                                if new_req_h > new_canv_h > 1:
+                                    clamped_px = max(0.0, min(float(new_req_h - new_canv_h), float(prev_top_px)))
+                                    canvas.yview_moveto(clamped_px / float(new_req_h))
+                            except Exception:
+                                pass
                     if anchor_group is not None and anchor_group in group_headers:
                         from gui.components import ensure_expanded_group_visible, ensure_canvas_widget_visible
                         hdr_a = group_headers[anchor_group]
@@ -2375,7 +2533,7 @@ class NetworkMixin:
                     if hasattr(dialog, "_sync_lan_selection"):
                         dialog._sync_lan_selection(ensure_visible=False)
                 except Exception:
-                    pass
+                    configure_suspended[0] = False
 
             reorder_lan_list_ref[0] = reorder_lan_list
 
@@ -2389,9 +2547,9 @@ class NetworkMixin:
                         pass
                 reorder_timer[0] = dialog.after(delay_ms, reorder_lan_list)
 
-            # Sắp xếp và phân nhóm ("LAN", "VPN") trước khi hiển thị
+            # Sắp xếp và phân nhóm ("LAN", "VPN") trước khi hiển thị (vẽ 1 lần qua _finish_swap)
             scan_state["is_probing"] = bool(filtered_peers)
-            reorder_lan_list()
+            reorder_lan_list(sync_layout=False)
 
             # Hoàn tất hiển thị giao diện mới mượt mà (double-buffering)
             _finish_swap()
@@ -2403,12 +2561,12 @@ class NetworkMixin:
             scan_state["probe_gen"] = scan_state.get("probe_gen", 0) + 1
             cur_probe_gen = scan_state["probe_gen"]
 
-            def _apply_peer_online_status_ui(h_id, is_on, u_data=None):
+            def _apply_peer_online_status_ui(h_id, is_on, u_data=None, defer_reorder=False):
                 if not dialog.winfo_exists():
-                    return
+                    return False
                 ui_item = row_ui_map.get(h_id)
                 if not ui_item:
-                    return
+                    return False
 
                 prev_online = ui_item.get("peer_online")
                 status_changed = (prev_online != is_on)
@@ -2450,20 +2608,9 @@ class NetworkMixin:
                     if meta_changed:
                         tip = ui_item.get("tooltip")
                         if tip:
-                            tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
-                    return
-
-                # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
-                d = ui_item.get("dot")
-                new_dot_fg = "#2ECC71" if is_on else "#FF4D4D"
-                if d and d.winfo_exists() and d.cget("fg") != new_dot_fg:
-                    d.config(fg=new_dot_fg)
-
-                try:
-                    from gui.components import apply_row_online_state
-                    apply_row_online_state(ui_item.get("row"), is_on, self.card_color, (self.text_white, self.text_gray))
-                except Exception:
-                    pass
+                            f_id_cur = ui_item.get("fmt_id", h_id)
+                            tip.update_text(lambda i_snap=inf, on_snap=is_on, fid_snap=f_id_cur: _make_tooltip_text(i_snap, on_snap, fid_snap))
+                    return False
 
                 # Đồng bộ trạng thái sang Danh sách máy tính đã lưu (nếu máy có mặt ở cả 2 danh sách)
                 try:
@@ -2473,15 +2620,40 @@ class NetworkMixin:
                 except Exception:
                     pass
 
+                # Nếu dòng này đang ẩn (chưa tạo Tk widget), không tốn chi phí cập nhật widget vô ích
+                r_existing = ui_item.get("row")
+                if r_existing is None or not r_existing.winfo_exists():
+                    if not defer_reorder:
+                        schedule_reorder_lan()
+                    return True
+
+                # 1. Cập nhật màu đèn LED (Xanh = Online, Đỏ = Offline)
+                d = ui_item.get("dot")
+                new_dot_fg = "#2ECC71" if is_on else "#FF4D4D"
+                if d and d.winfo_exists() and d.cget("fg") != new_dot_fg:
+                    d.config(fg=new_dot_fg)
+
+                try:
+                    from gui.components import apply_row_online_state
+                    apply_row_online_state(r_existing, is_on, self.card_color, (self.text_white, self.text_gray))
+                except Exception:
+                    pass
+
                 tip = ui_item.get("tooltip")
                 if tip:
-                    tip.update_text(_make_tooltip_text(inf, is_on, ui_item.get("fmt_id", h_id)))
+                    f_id_cur = ui_item.get("fmt_id", h_id)
+                    tip.update_text(lambda i_snap=inf, on_snap=is_on, fid_snap=f_id_cur: _make_tooltip_text(i_snap, on_snap, fid_snap))
 
                 # Cập nhật biểu tượng 🔑 (mật khẩu)
                 k_lbl = ui_item.get("lbl_key")
                 k_tip = ui_item.get("key_tooltip")
                 if k_lbl and k_lbl.winfo_exists():
-                    matched_c = _find_exact_saved_comp(inf.get("computer_name"), inf.get("hwid"), inf.get("saved_id"))
+                    matched_c = _find_exact_saved_comp(
+                        inf.get("computer_name"),
+                        inf.get("hwid"),
+                        inf.get("saved_id"),
+                        comps_list=saved_comps_snapshot,
+                    )
                     sp = _peer_lan_password(inf) or (matched_c.get("password", "") if matched_c else "") or inf.get("saved_password", "")
                     h_pw = bool(sp)
                     k_lbl.config(
@@ -2505,8 +2677,10 @@ class NetworkMixin:
                 if m_ctx and sync_fn and m_ctx.winfo_exists():
                     sync_fn(m_ctx, inf, is_on)
 
-                # 5. Sắp xếp lại danh sách trong mỗi nhóm khi có máy thay đổi trạng thái Online / Offline
-                schedule_reorder_lan()
+                # 5. Sắp xếp lại danh sách trong mỗi nhóm (nếu không ở chế độ batch gom 1 lần)
+                if not defer_reorder:
+                    schedule_reorder_lan()
+                return True
 
             def _probe_all_peers_bg(peers_to_check, gen):
                 from concurrent.futures import ThreadPoolExecutor
@@ -2522,6 +2696,42 @@ class NetworkMixin:
                 any_changed = [False]
                 _bg_pacer_lock = threading.Lock()
                 next_bg_slot = [time.monotonic()]
+                pending_lock = threading.Lock()
+                pending_updates = []
+                early_online_timer = [None]
+                early_online_scheduled = [False]
+
+                def _flush_pending_to_ui(is_final=False):
+                    if dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
+                        return
+                    with pending_lock:
+                        if not pending_updates and not is_final:
+                            return
+                        batch = list(pending_updates)
+                        pending_updates.clear()
+
+                    def _apply_batch(updates=batch, final_pass=is_final):
+                        if not dialog.winfo_exists() or scan_state.get("probe_gen") != gen:
+                            return
+                        need_redraw = False
+                        configure_suspended[0] = True
+                        try:
+                            for h_val, on_val, u_val in updates:
+                                if _apply_peer_online_status_ui(h_val, on_val, u_val, defer_reorder=True):
+                                    need_redraw = True
+                        finally:
+                            configure_suspended[0] = False
+                        if need_redraw:
+                            reorder_lan_list()
+                        elif final_pass and empty_offline_lbl.winfo_exists() and empty_offline_lbl.winfo_ismapped():
+                            empty_offline_lbl.config(
+                                text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
+                            )
+
+                    try:
+                        self.after(0, _apply_batch)
+                    except Exception:
+                        pass
 
                 def _check_one(item_entry):
                     h, inf = item_entry
@@ -2532,9 +2742,9 @@ class NetworkMixin:
                         if h in self.lan_peers and isinstance(self.lan_peers[h], dict):
                             inf = dict(self.lan_peers[h])
 
-                    # Bộ điều nhịp lệch pha: tránh nhiều luồng quét ngầm cùng bắn SYN vào RRAS tại 1 mili-giây
+                    # Bộ điều nhịp lệch pha siêu nhẹ: không chặn hàng đợi mà vẫn tránh dồn gói tại cùng 1 mili-giây
                     is_vpn_peer = _resolve_peer_group(h, inf) == "VPN"
-                    gap = 0.08 if is_vpn_peer else 0.015
+                    gap = 0.008 if is_vpn_peer else 0.002
                     with _bg_pacer_lock:
                         now_m = time.monotonic()
                         slot_m = max(now_m, next_bg_slot[0])
@@ -2546,7 +2756,7 @@ class NetworkMixin:
                     if probe_cancel.is_set() or dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
                         return
 
-                    is_on, u_data = probe_peer_direct(inf, timeout=0.85, cancel_event=probe_cancel)
+                    is_on, u_data = probe_peer_direct(inf, timeout=0.45, cancel_event=probe_cancel)
                     if probe_cancel.is_set() or dlg_closed.is_set() or scan_state.get("probe_gen") != gen:
                         return
                     # Chỉ chấp nhận cập nhật nếu u_data thực sự là cùng 1 máy tính với bản ghi h (tránh ghi đè khi DHCP đổi IP)
@@ -2556,6 +2766,7 @@ class NetworkMixin:
                     prev_st = st_dict.get(h)
                     ui_prev = row_ui_map.get(h, {}).get("peer_online")
                     st_dict[h] = is_on
+                    _remember_lan_online(h, is_on)
                     group_or_ip_changed = False
                     ui_grp = row_ui_map.get(h, {}).get("comp_group")
                     merged_copy = None
@@ -2580,11 +2791,21 @@ class NetworkMixin:
                     elif ui_grp is not None and ui_grp != _resolve_peer_group(h, inf):
                         u_data = dict(inf)
                         group_or_ip_changed = True
-                    # Chỉ đẩy cập nhật lên giao diện khi trạng thái thực sự thay đổi (Online <-> Offline, từ chưa rõ sang xác định, hoặc đổi nhóm/IP)
+                    # Gom kết quả: nếu có máy Online mới phản hồi sớm (vài chục ms) trong khi còn hàng chục máy Offline
+                    # đang chờ timeout, thực hiện đúng 1 đợt hiển thị sớm (~220ms) cho toàn bộ máy Online để không phải chờ máy Offline.
                     if prev_st != is_on or ui_prev != is_on or group_or_ip_changed:
                         any_changed[0] = True
-                        if not dlg_closed.is_set() and scan_state.get("probe_gen") == gen:
-                            self.after(0, lambda h_val=h, on_val=is_on, u_val=u_data: _apply_peer_online_status_ui(h_val, on_val, u_val))
+                        should_arm_early = False
+                        with pending_lock:
+                            pending_updates.append((h, is_on, u_data))
+                            if is_on and ui_prev is not True and not early_online_scheduled[0]:
+                                early_online_scheduled[0] = True
+                                should_arm_early = True
+                        if should_arm_early:
+                            t_early = threading.Timer(0.22, lambda: _flush_pending_to_ui(is_final=False))
+                            t_early.daemon = True
+                            early_online_timer[0] = t_early
+                            t_early.start()
 
                 def _worker():
                     try:
@@ -2592,17 +2813,18 @@ class NetworkMixin:
                         items = list(peers_to_check.items())
                         if not items:
                             return
-                        # Ưu tiên kiểm tra các máy đang Online và có last_seen mới nhất trước
+                        # Ưu tiên kiểm tra: 1) máy từng Online, 2) máy mạng LAN vật lý (<10ms), 3) last_seen mới nhất
                         items.sort(
                             key=lambda kv: (
                                 0 if online_map.get(kv[0]) is True else 1,
+                                0 if _resolve_peer_group(kv[0], kv[1]) == "LAN" else 1,
                                 -get_last_seen_epoch(kv[1].get("last_seen", 0)),
                             )
                         )
-                        # Tái sử dụng 1 ThreadPool cố định cho quét LAN/VPN tránh tạo/hủy 15 thread mỗi 8s gây phân mảnh bộ nhớ ảo 32-bit
+                        # Dùng ThreadPool 28 worker để 40-50 máy kiểm tra song song hoàn tất trong ~0.8-1.1s thay vì 15s
                         pool = getattr(self, "_lan_probe_executor", None)
-                        if pool is None:
-                            pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="LANProbe")
+                        if pool is None or getattr(pool, "_max_workers", 0) < 28:
+                            pool = ThreadPoolExecutor(max_workers=28, thread_name_prefix="LANProbe")
                             self._lan_probe_executor = pool
                         futs = [pool.submit(_check_one, it) for it in items]
                         for fut in futs:
@@ -2613,19 +2835,16 @@ class NetworkMixin:
                         if any_changed[0] and not probe_cancel.is_set():
                             self.save_lan_peers()
                     finally:
+                        t_ref = early_online_timer[0]
+                        if t_ref is not None:
+                            try:
+                                t_ref.cancel()
+                            except Exception:
+                                pass
                         if scan_state.get("probe_gen") == gen:
                             scan_state["is_probing"] = False
                             if not dlg_closed.is_set():
-                                def _on_probe_done():
-                                    if not dialog.winfo_exists():
-                                        return
-                                    # Chỉ cập nhật nhãn thông báo trống nếu đang bật Ẩn máy Offline và không có máy nào Online;
-                                    # không gọi reorder_lan_list() khi không có máy nào thay đổi trạng thái
-                                    if empty_offline_lbl.winfo_exists() and empty_offline_lbl.winfo_ismapped():
-                                        empty_offline_lbl.config(
-                                            text=_("Không có máy tính nào đang trực tuyến (Online).\nBấm nút 'Ẩn máy Offline' bên dưới để hiển thị {n} máy đang Offline.").format(n=len(row_ui_map))
-                                        )
-                                self.after(0, _on_probe_done)
+                                _flush_pending_to_ui(is_final=True)
 
                 threading.Thread(target=_worker, daemon=True).start()
 
@@ -2697,6 +2916,7 @@ class NetworkMixin:
                             break
                 if matched_h is not None:
                     scan_state.setdefault("online_status", {})[matched_h] = is_on_val
+                    _remember_lan_online(matched_h, is_on_val)
                     _apply_peer_online_status_ui(matched_h, is_on_val, u_val)
 
             dialog._set_peer_online_external = _set_peer_online_external
@@ -2715,6 +2935,7 @@ class NetworkMixin:
             with self.lan_peers_lock:
                 self.lan_peers.clear()
             scan_state.setdefault("online_status", {}).clear()
+            self._lan_online_status_cache.clear()
             self.save_lan_peers(allow_shrink=True)
             refresh_list()
             progress_label.config(text=_("Đã xóa sạch danh sách máy đã quét!"))
@@ -2722,7 +2943,9 @@ class NetworkMixin:
 
         def do_scan_once():
             """Thực hiện làm mới danh sách máy và kiểm tra lại trạng thái trực tuyến đúng 1 lần duy nhất."""
-            scan_state.setdefault("online_status", {}).clear()
+            if not hide_offline_var.get():
+                scan_state.setdefault("online_status", {}).clear()
+                self._lan_online_status_cache.clear()
             # 1. Phát 1 beacon LAN
             try:
                 comp_name = platform.node()
@@ -3172,7 +3395,7 @@ class NetworkMixin:
         if not targets:
             return False
 
-        self.active_viewers = [v for v in getattr(self, "active_viewers", []) if v["process"].is_alive()]
+        self.active_viewers = [v for v in getattr(self, "active_viewers", []) if _is_process_alive(v.get("process"))]
         for v in self.active_viewers:
             v_pid = str(v.get("partner_id") or "").strip()
             if not v_pid:
@@ -4071,7 +4294,7 @@ class NetworkMixin:
             return
 
         # Dọn dẹp tiến trình viewer đã thoát
-        self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+        self.active_viewers = [v for v in self.active_viewers if _is_process_alive(v.get("process"))]
         
         # Kiểm tra xem đã có cửa sổ nào đang kết nối tới partner_id này chưa
         for v in self.active_viewers:
@@ -4156,14 +4379,12 @@ class NetworkMixin:
         if partner_id == getattr(self, "my_id_clean", ""):
             self.after(0, lambda: self.show_custom_info(_("Thông báo"), _("Bạn không thể kết nối tới chính bạn :-)")))
             self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if reconnect_queue:
-                try: reconnect_queue.put("FAILED|" + _("Bạn không thể kết nối tới chính bạn :-)"))
-                except: pass
+            _safe_queue_put(reconnect_queue, "FAILED|" + _("Bạn không thể kết nối tới chính bạn :-)"))
             return
 
         # Nếu được gọi trực tiếp mà chưa có reconnect_queue (fallback):
         if reconnect_queue is None:
-            self.active_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
+            self.active_viewers = [v for v in self.active_viewers if _is_process_alive(v.get("process"))]
             for v in self.active_viewers:
                 if v.get("partner_id") == partner_id:
                     print(f"[Client] Already connected to {partner_id}. Sending blink signal.")
@@ -4212,650 +4433,713 @@ class NetworkMixin:
                 "partner_id": partner_id
             })
 
-        def notify_status(msg):
-            # Nếu đang ở chế độ reconnect hoặc chu kỳ retry, không gửi các trạng thái chi tiết nội bộ
-            # vào reconnect_queue (để tránh đè mất dòng chữ "Đang thử kết nối lại (lần {x}/10)...")
-            is_retry_status = ("Đang thử kết nối lại" in msg or _("Đang thử kết nối lại") in msg or "lần " in msg)
-            if is_reconnect or retry_count > 0:
-                if is_retry_status and reconnect_queue:
-                    try: reconnect_queue.put(f"STATUS|{msg}")
-                    except: pass
-                return
+        if viewer_proc is not None:
+            try:
+                viewer_proc._active_connect_count = getattr(viewer_proc, "_active_connect_count", 0) + 1
+            except Exception:
+                pass
 
-            if reconnect_queue:
-                try: reconnect_queue.put(f"STATUS|{msg}")
-                except: pass
+        try:
+            def notify_status(msg):
+                # Nếu đang ở chế độ reconnect hoặc chu kỳ retry, không gửi các trạng thái chi tiết nội bộ
+                # vào reconnect_queue (để tránh đè mất dòng chữ "Đang thử kết nối lại (lần {x}/10)...")
+                is_retry_status = ("Đang thử kết nối lại" in msg or _("Đang thử kết nối lại") in msg or "lần " in msg)
+                if is_reconnect or retry_count > 0:
+                    if is_retry_status:
+                        _safe_queue_put(reconnect_queue, f"STATUS|{msg}")
+                    return
 
-        def is_cancelled():
-            if viewer_proc and not viewer_proc.is_alive():
-                print(f"[Client] Viewer process closed by user, cancelling connect to {partner_id}")
-                return True
-            return False
+                _safe_queue_put(reconnect_queue, f"STATUS|{msg}")
 
-        sock = None
-        connected = False
-        handshake_done = False
-        cached_res_payload = None
-        conn_mode_info = None
-        force_relay = getattr(self, '_current_force_relay', False)
-        specific_host = getattr(self, 'current_signaling_host', None)
+            def is_cancelled():
+                if viewer_proc is None:
+                    return False
+                if getattr(viewer_proc, "_cancelled", False) or not _is_process_alive(viewer_proc):
+                    print(f"[Client] Viewer process closed by user, cancelling connect to {partner_id}")
+                    return True
+                return False
 
-        is_reconnect = bool(reconnect_reason or retry_count > 0)
-        current_attempt = min(10, retry_count + 1)
-        retry_banner = _("Đang thử kết nối lại (lần {x}/10)...").format(x=current_attempt)
-        if is_reconnect:
-            notify_status(retry_banner)
+            def sleep_or_cancel(seconds):
+                deadline = time.monotonic() + seconds
+                while time.monotonic() < deadline:
+                    if is_cancelled():
+                        return True
+                    time.sleep(min(0.25, max(0.01, deadline - time.monotonic())))
+                return is_cancelled()
 
-        # ====== BƯỚC 0: Thử kết nối lại siêu tốc bằng thông số phiên gần nhất (Fast-Path Reconnect) ======
-        # Nếu trước đó đã kết nối thành công (LAN / Direct WAN / Relay), ưu tiên thử ngay thông số cũ
-        # để bỏ qua thời gian quét mạng và đục lỗ không cần thiết.
-        p_key = str(partner_id).replace(" ", "")
-        cached_conn = getattr(self, 'last_connected_peers', {}).get(p_key)
-        if is_reconnect and cached_conn and retry_count < 5 and not is_cancelled():
-            c_mode = cached_conn.get("mode")
-            if c_mode == "lan" and not force_relay:
-                c_ip = cached_conn.get("ip")
-                c_port = cached_conn.get("port", 12345)
-                ports_to_try = [c_port]
-                for p_port in [12345, 12346, 12347, 12348]:
-                    if p_port not in ports_to_try:
-                        ports_to_try.append(p_port)
-                print(f"[FastReconnect] Ưu tiên thử kết nối nhanh LAN gần nhất: {c_ip}:{ports_to_try}")
-                for p_port in ports_to_try:
-                    if connected or is_cancelled(): break
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1.0)
-                        s.connect((c_ip, p_port))
-                        s.settimeout(2.0)
-                        socket_passwords[s] = partner_pass
-                        import platform
-                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
-                        send_msg(s, hs_data, partner_pass)
-                        tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
-                        if tmp_res_msg:
-                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
-                            if tmp_res.get("status") in ("ok", "error"):
+            while True:
+                sock = None
+                connected = False
+                handshake_done = False
+                cached_res_payload = None
+                conn_mode_info = None
+                force_relay = getattr(self, '_current_force_relay', False)
+                specific_host = getattr(self, 'current_signaling_host', None)
+
+                is_reconnect = bool(reconnect_reason or retry_count > 0)
+                current_attempt = min(10, retry_count + 1)
+                retry_banner = _("Đang thử kết nối lại (lần {x}/10)...").format(x=current_attempt)
+                if is_reconnect:
+                    notify_status(retry_banner)
+
+                # ====== BƯỚC 0: Thử kết nối lại siêu tốc bằng thông số phiên gần nhất (Fast-Path Reconnect) ======
+                # Nếu trước đó đã kết nối thành công (LAN / Direct WAN / Relay), ưu tiên thử ngay thông số cũ
+                # để bỏ qua thời gian quét mạng và đục lỗ không cần thiết.
+                p_key = str(partner_id).replace(" ", "")
+                cached_conn = getattr(self, 'last_connected_peers', {}).get(p_key)
+                if is_reconnect and cached_conn and retry_count < 5 and not is_cancelled():
+                    c_mode = cached_conn.get("mode")
+                    if c_mode == "lan" and not force_relay:
+                        c_ip = cached_conn.get("ip")
+                        c_port = cached_conn.get("port", 12345)
+                        ports_to_try = [c_port]
+                        for p_port in [12345, 12346, 12347, 12348]:
+                            if p_port not in ports_to_try:
+                                ports_to_try.append(p_port)
+                        print(f"[FastReconnect] Ưu tiên thử kết nối nhanh LAN gần nhất: {c_ip}:{ports_to_try}")
+                        for p_port in ports_to_try:
+                            if connected or is_cancelled(): break
+                            try:
+                                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                s.settimeout(1.0)
+                                s.connect((c_ip, p_port))
+                                s.settimeout(2.0)
+                                socket_passwords[s] = partner_pass
+                                import platform
+                                hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+                                send_msg(s, hs_data, partner_pass)
+                                tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
+                                if tmp_res_msg:
+                                    tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                                    if tmp_res.get("status") in ("ok", "error"):
+                                        s.settimeout(None)
+                                        sock = s
+                                        connected = True
+                                        handshake_done = True
+                                        cached_res_payload = tmp_res
+                                        conn_mode_info = {"mode": "lan", "ip": c_ip, "port": p_port}
+                                        print(f"[FastReconnect] Thành công kết nối lại LAN trực tiếp: {c_ip}:{p_port}")
+                                        break
+                                if not connected:
+                                    force_close_socket(s)
+                            except Exception:
+                                try: s.close()
+                                except: pass
+
+                    elif c_mode == "direct" and not force_relay:
+                        c_ip = cached_conn.get("ip")
+                        c_port = cached_conn.get("port")
+                        if c_ip and c_port:
+                            print(f"[FastReconnect] Ưu tiên thử kết nối nhanh Direct WAN gần nhất: {c_ip}:{c_port}")
+                            try:
+                                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                s.settimeout(1.5)
+                                s.connect((c_ip, c_port))
                                 s.settimeout(None)
                                 sock = s
                                 connected = True
-                                handshake_done = True
-                                cached_res_payload = tmp_res
-                                conn_mode_info = {"mode": "lan", "ip": c_ip, "port": p_port}
-                                print(f"[FastReconnect] Thành công kết nối lại LAN trực tiếp: {c_ip}:{p_port}")
+                                conn_mode_info = {"mode": "direct", "ip": c_ip, "port": c_port}
+                                print(f"[FastReconnect] Thành công kết nối lại Direct WAN: {c_ip}:{c_port}")
+                            except Exception:
+                                force_close_socket(s)
+
+                    elif c_mode == "relay":
+                        r_host = cached_conn.get("relay_host") or specific_host or (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else None)
+                        if r_host:
+                            print(f"[FastReconnect] Phiên trước dùng Relay -> Nhảy thẳng tới kết nối Relay ({r_host})...")
+                            try:
+                                relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
+                                relay_req = json.dumps({
+                                    "action": "relay_request",
+                                    "target": partner_id,
+                                    "session_id": relay_session_id,
+                                    "relay_host": r_host
+                                }) + '\n'
+                                with self.signaling_lock:
+                                    if getattr(self, 'primary_signaling_socket', None):
+                                        send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
+                                    else:
+                                        raise Exception("Chưa kết nối tới Signaling Server!")
+
+                                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                s.settimeout(4.0)
+                                r_name, r_port = core.config.parse_signaling_host_entry(r_host, core.config.SIGNALING_SERVER_PORT)
+                                if r_name == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
+                                    r_port = int(self.current_signaling_port)
+                                s.connect((r_name, r_port))
+                                s.settimeout(None)
+                                header = f"RELAY_CLIENT:{relay_session_id}\n"
+                                s.sendall(header.encode('utf-8'))
+                                time.sleep(1.0)
+                                sock = s
+                                connected = True
+                                conn_mode_info = {"mode": "relay", "relay_host": r_host}
+                                print(f"[FastReconnect] Thành công kết nối lại qua Relay: {r_host}")
+                            except Exception as e:
+                                print(f"[FastReconnect] Thử Relay nhanh thất bại ({e}), tiếp tục quy trình dò tìm đầy đủ...")
+                                connected = False
+
+                # ====== BƯỚC 1: Quét mạng LAN để tìm ID ======
+                lan_target = None
+                if not connected and not force_relay and hasattr(self, 'lan_peers'):
+                    scan_rounds = 1 if is_reconnect else 5
+                    for attempt in range(scan_rounds):
+                        if is_cancelled(): return
+                        if is_reconnect:
+                            notify_status(retry_banner)
+                        else:
+                            notify_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
+                        current_time = time.time()
+                        with self.lan_peers_lock:
+                            if partner_id in self.lan_peers:
+                                p_peer = self.lan_peers[partner_id]
+                                is_vpn = bool(p_peer.get("network_type"))
+                                max_age = 180 if is_vpn else 15
+                                if current_time - get_last_seen_epoch(p_peer.get("last_seen", 0)) < max_age:
+                                    lan_target = p_peer
+                        if lan_target:
+                            print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN/VPN!")
+                            break
+                        time.sleep(0.3 if is_reconnect else 0.5)
+
+                if not connected and lan_target:
+                    if is_cancelled(): return
+                    if not is_reconnect and retry_count == 0:
+                        notify_status(_("Đang thử kết nối LAN trực tiếp..."))
+                    local_ip = lan_target.get("local_ip", "")
+                    local_port = lan_target.get("port", 12345)
+                    ips_to_try = []
+                    src_ip = str(lan_target.get("source_ip") or "").strip()
+                    if src_ip and not src_ip.startswith("127."):
+                        ips_to_try.append(src_ip)
+                    for ip_part in local_ip.split(','):
+                        ip_c = ip_part.strip()
+                        if ip_c and not ip_c.startswith("127.") and ip_c not in ips_to_try:
+                            ips_to_try.append(ip_c)
+                    ports_to_try = [local_port]
+                    for p_port in [12345, 12346, 12347, 12348]:
+                        if p_port not in ports_to_try:
+                            ports_to_try.append(p_port)
+                    
+                    for try_ip in ips_to_try:
+                        if connected or is_cancelled(): break
+                        for p_port in ports_to_try:
+                            if connected or is_cancelled(): break
+                            s = None
+                            try:
+                                s, _route_desc = connect_tcp_any_route(try_ip, p_port, timeout=1.5)
+                                if not s:
+                                    continue
+                                s.settimeout(2.5)
+                                # Handshake
+                                socket_passwords[s] = partner_pass
+                                import platform
+                                hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
+                                send_msg(s, hs_data, partner_pass)
+                                tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
+                                if tmp_res_msg:
+                                    tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
+                                    if tmp_res.get("status") in ("ok", "error"):
+                                        s.settimeout(None)
+                                        sock = s
+                                        connected = True
+                                        handshake_done = True
+                                        cached_res_payload = tmp_res
+                                        conn_mode_info = {"mode": "lan", "ip": try_ip, "port": p_port}
+                                        print(f"[Client] Connected & Handshaked via LAN Direct ({_route_desc}): {try_ip}:{p_port}")
+                                        break
+                                if not connected:
+                                    force_close_socket(s)
+                            except Exception:
+                                try: s.close()
+                                except: pass
+
+                # ====== BƯỚC 2: Hỏi Signaling Server (nếu LAN thất bại hoặc không tìm thấy) ======
+                public_ip, port = None, None
+                specific_host = getattr(self, 'current_signaling_host', None)
+                
+                if not connected:
+                    if is_cancelled(): return
+                    if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
+                        notify_status(_("Chưa kết nối Máy chủ Tín hiệu!"))
+                        _safe_queue_put(reconnect_queue, "FAILED|" + _("Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng."))
+                        self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                        return
+
+                    sockets_to_try = []
+                    with self.signaling_lock:
+                        if getattr(self, 'primary_signaling_socket', None):
+                            sockets_to_try.append(self.primary_signaling_socket)
+                        for s in getattr(self, 'signaling_sockets', {}).values():
+                            if s not in sockets_to_try:
+                                sockets_to_try.append(s)
+                                
+                    if not is_reconnect:
+                        notify_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
+                    
+                    from utils.hwid import signaling_lookup_ids
+                    signaling_success = False
+                    lookup_ids = signaling_lookup_ids(partner_id)
+                    for target_id in lookup_ids:
+                        if is_cancelled(): return
+                        req = json.dumps({
+                            "action": "connect_request",
+                            "target": target_id,
+                            "port": BOUND_PORT,
+                            "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
+                            "local_port": BOUND_PORT
+                        }) + '\n'
+                        wait_timeout = (2.5 if is_reconnect else 6.0) if target_id == lookup_ids[0] else 1.5
+                        for s in sockets_to_try:
+                            self.pending_connection_info = None
+                            try:
+                                with self.signaling_lock:
+                                    send_msg(s, req.encode('utf-8'), APP_KEY)
+                            except Exception:
+                                continue
+                                
+                            remain = wait_timeout
+                            while remain > 0 and self.pending_connection_info is None:
+                                if is_cancelled(): return
+                                time.sleep(0.2)
+                                remain -= 0.2
+                                
+                            if self.pending_connection_info and self.pending_connection_info != "error":
+                                signaling_success = True
                                 break
-                        if not connected:
-                            force_close_socket(s)
-                    except Exception:
-                        try: s.close()
-                        except: pass
+                        if signaling_success:
+                            break
+                            
+                    if not signaling_success:
+                        if reconnect_queue and retry_count + 1 < 10:
+                            if is_cancelled():
+                                return
+                            next_attempt = retry_count + 2
+                            notify_status(_("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt))
+                            if sleep_or_cancel(4.0):
+                                return
+                            retry_count += 1
+                            reconnect_reason = reconnect_reason or "drop"
+                            continue
+                        notify_status(_("Không thể tìm thấy hoặc đối tác đang Offline."))
+                        _safe_queue_put(reconnect_queue, "FAILED|" + _("Không thể tìm thấy hoặc đối tác đang Offline."))
+                        self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                        return
+                        
+                    if len(self.pending_connection_info) >= 4:
+                        public_ip, port_str, _dummy1, _dummy2 = self.pending_connection_info[:4]
+                    else:
+                        public_ip, port_str, _dummy1 = self.pending_connection_info
+                        
+                    port = int(port_str) if port_str else 0
 
-            elif c_mode == "direct" and not force_relay:
-                c_ip = cached_conn.get("ip")
-                c_port = cached_conn.get("port")
-                if c_ip and c_port:
-                    print(f"[FastReconnect] Ưu tiên thử kết nối nhanh Direct WAN gần nhất: {c_ip}:{c_port}")
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1.5)
-                        s.connect((c_ip, c_port))
-                        s.settimeout(None)
-                        sock = s
-                        connected = True
-                        conn_mode_info = {"mode": "direct", "ip": c_ip, "port": c_port}
-                        print(f"[FastReconnect] Thành công kết nối lại Direct WAN: {c_ip}:{c_port}")
-                    except Exception:
-                        force_close_socket(s)
+                # ====== BƯỚC 3: Đục lỗ Tường lửa (TCP Hole Punching) 10 lần ======
+                if not connected and not force_relay and public_ip and port:
+                    if is_cancelled(): return
+                    skip_hole_punch = False
+                    if hasattr(self, 'current_ip') and self.current_ip == public_ip:
+                        print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
+                        skip_hole_punch = True
+                    
+                    if not skip_hole_punch:
+                        notify_status(_("Đang đục lỗ Tường lửa tới {ip}:{port}...").format(ip=public_ip, port=port))
+                        
+                        if getattr(self, 'server_socket', None):
+                            try: self.server_socket.close()
+                            except: pass
+                        
+                        for attempt in range(10):
+                            if is_cancelled():
+                                break
+                            notify_status(_("Đang đục lỗ Tường lửa lần {n}/10...").format(n=attempt + 1))
+                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            try: s.bind(('0.0.0.0', BOUND_PORT))
+                            except: pass
+                            s.settimeout(0.5)
+                            try:
+                                s.connect((public_ip, port))
+                                s.settimeout(None)
+                                connected = True
+                                sock = s
+                                conn_mode_info = {"mode": "direct", "ip": public_ip, "port": port}
+                                print(f"[Client] Hole punch successful!")
+                                break
+                            except Exception:
+                                force_close_socket(s)
+                                time.sleep(0.1)
+                                
+                        # Phục hồi server_socket
+                        try:
+                            try:
+                                if hasattr(socket, 'AF_INET6'):
+                                    self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                                    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                    if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
+                                        try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                                        except: pass
+                                    self.server_socket.bind(("", BOUND_PORT))
+                                else:
+                                    raise Exception("No IPv6")
+                            except Exception:
+                                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                self.server_socket.bind(('0.0.0.0', BOUND_PORT))
+                            self.server_socket.listen(5)
+                        except Exception:
+                            pass
 
-            elif c_mode == "relay":
-                r_host = cached_conn.get("relay_host") or specific_host or (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else None)
-                if r_host:
-                    print(f"[FastReconnect] Phiên trước dùng Relay -> Nhảy thẳng tới kết nối Relay ({r_host})...")
+                # ====== BƯỚC 4: Server Trung Chuyển (Relay) Fallback ======
+                if not connected:
+                    if is_cancelled(): return
+                    display_host = specific_host or 'Relay'
+                    notify_status(_("Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
                     try:
                         relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
                         relay_req = json.dumps({
                             "action": "relay_request",
                             "target": partner_id,
                             "session_id": relay_session_id,
-                            "relay_host": r_host
+                            "relay_host": specific_host
                         }) + '\n'
                         with self.signaling_lock:
                             if getattr(self, 'primary_signaling_socket', None):
                                 send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
                             else:
                                 raise Exception("Chưa kết nối tới Signaling Server!")
-
+                        
+                        raw_relay_target = specific_host if specific_host else (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else "")
+                        host_to_connect, relay_port = core.config.parse_signaling_host_entry(raw_relay_target, core.config.SIGNALING_SERVER_PORT)
+                        if host_to_connect == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
+                            relay_port = int(self.current_signaling_port)
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(4.0)
-                        r_name, r_port = core.config.parse_signaling_host_entry(r_host, core.config.SIGNALING_SERVER_PORT)
-                        if r_name == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
-                            r_port = int(self.current_signaling_port)
-                        s.connect((r_name, r_port))
+                        s.settimeout(5.0)
+                        s.connect((host_to_connect, relay_port))
                         s.settimeout(None)
                         header = f"RELAY_CLIENT:{relay_session_id}\n"
                         s.sendall(header.encode('utf-8'))
-                        time.sleep(1.0)
+                        
+                        time.sleep(1.5)
                         sock = s
                         connected = True
-                        conn_mode_info = {"mode": "relay", "relay_host": r_host}
-                        print(f"[FastReconnect] Thành công kết nối lại qua Relay: {r_host}")
-                    except Exception as e:
-                        print(f"[FastReconnect] Thử Relay nhanh thất bại ({e}), tiếp tục quy trình dò tìm đầy đủ...")
+                        conn_mode_info = {"mode": "relay", "relay_host": host_to_connect}
+                        notify_status(_("Đã kết nối qua Relay Server! Đang bắt tay..."))
+                    except Exception:
                         connected = False
 
-        # ====== BƯỚC 1: Quét mạng LAN để tìm ID ======
-        lan_target = None
-        if not connected and not force_relay and hasattr(self, 'lan_peers'):
-            scan_rounds = 1 if is_reconnect else 5
-            for attempt in range(scan_rounds):
-                if is_cancelled(): return
-                if is_reconnect:
-                    notify_status(retry_banner)
-                else:
-                    notify_status(_("Đang tìm máy trong mạng LAN (lần {n}/5)...").format(n=attempt + 1))
-                current_time = time.time()
-                with self.lan_peers_lock:
-                    if partner_id in self.lan_peers:
-                        p_peer = self.lan_peers[partner_id]
-                        is_vpn = bool(p_peer.get("network_type"))
-                        max_age = 180 if is_vpn else 15
-                        if current_time - get_last_seen_epoch(p_peer.get("last_seen", 0)) < max_age:
-                            lan_target = p_peer
-                if lan_target:
-                    print(f"[LAN Discovery] Tìm thấy đối tác {partner_id} trong mạng LAN/VPN!")
-                    break
-                time.sleep(0.3 if is_reconnect else 0.5)
-
-        if not connected and lan_target:
-            if is_cancelled(): return
-            if not is_reconnect and retry_count == 0:
-                notify_status(_("Đang thử kết nối LAN trực tiếp..."))
-            local_ip = lan_target.get("local_ip", "")
-            local_port = lan_target.get("port", 12345)
-            ips_to_try = []
-            src_ip = str(lan_target.get("source_ip") or "").strip()
-            if src_ip and not src_ip.startswith("127."):
-                ips_to_try.append(src_ip)
-            for ip_part in local_ip.split(','):
-                ip_c = ip_part.strip()
-                if ip_c and not ip_c.startswith("127.") and ip_c not in ips_to_try:
-                    ips_to_try.append(ip_c)
-            ports_to_try = [local_port]
-            for p_port in [12345, 12346, 12347, 12348]:
-                if p_port not in ports_to_try:
-                    ports_to_try.append(p_port)
-            
-            for try_ip in ips_to_try:
-                if connected or is_cancelled(): break
-                for p_port in ports_to_try:
-                    if connected or is_cancelled(): break
-                    s = None
-                    try:
-                        s, _route_desc = connect_tcp_any_route(try_ip, p_port, timeout=1.5)
-                        if not s:
-                            continue
-                        s.settimeout(2.5)
-                        # Handshake
-                        socket_passwords[s] = partner_pass
-                        import platform
-                        hs_data = json.dumps({"password": partner_pass, "client_id": self.my_id_clean, "computer_name": platform.node()}).encode('utf-8')
-                        send_msg(s, hs_data, partner_pass)
-                        tmp_res_msg = recv_msg(s, [partner_pass, APP_KEY])
-                        if tmp_res_msg:
-                            tmp_res = json.loads(tmp_res_msg.decode('utf-8'))
-                            if tmp_res.get("status") in ("ok", "error"):
-                                s.settimeout(None)
-                                sock = s
-                                connected = True
-                                handshake_done = True
-                                cached_res_payload = tmp_res
-                                conn_mode_info = {"mode": "lan", "ip": try_ip, "port": p_port}
-                                print(f"[Client] Connected & Handshaked via LAN Direct ({_route_desc}): {try_ip}:{p_port}")
-                                break
-                        if not connected:
-                            force_close_socket(s)
-                    except Exception as e:
-                        try: s.close()
-                        except: pass
-
-        # ====== BƯỚC 2: Hỏi Signaling Server (nếu LAN thất bại hoặc không tìm thấy) ======
-        public_ip, port = None, None
-        specific_host = getattr(self, 'current_signaling_host', None)
-        
-        if not connected:
-            if is_cancelled(): return
-            if not hasattr(self, 'signaling_sockets') or not self.signaling_sockets:
-                notify_status(_("Chưa kết nối Máy chủ Tín hiệu!"))
-                if reconnect_queue:
-                    reconnect_queue.put("FAILED|" + _("Chưa kết nối đến Máy chủ Tín hiệu. Vui lòng kiểm tra lại mạng."))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                return
-
-            sockets_to_try = []
-            with self.signaling_lock:
-                if getattr(self, 'primary_signaling_socket', None):
-                    sockets_to_try.append(self.primary_signaling_socket)
-                for s in getattr(self, 'signaling_sockets', {}).values():
-                    if s not in sockets_to_try:
-                        sockets_to_try.append(s)
-                        
-            if not is_reconnect:
-                notify_status(_("Đang tìm địa chỉ đối tác trên server danh bạ..."))
-            
-            from utils.hwid import signaling_lookup_ids
-            signaling_success = False
-            lookup_ids = signaling_lookup_ids(partner_id)
-            for target_id in lookup_ids:
-                if is_cancelled(): return
-                req = json.dumps({
-                    "action": "connect_request",
-                    "target": target_id,
-                    "port": BOUND_PORT,
-                    "local_ip": getattr(self, 'local_ip', "127.0.0.1"),
-                    "local_port": BOUND_PORT
-                }) + '\n'
-                wait_timeout = (2.5 if is_reconnect else 6.0) if target_id == lookup_ids[0] else 1.5
-                for s in sockets_to_try:
-                    self.pending_connection_info = None
-                    try:
-                        with self.signaling_lock:
-                            send_msg(s, req.encode('utf-8'), APP_KEY)
-                    except Exception:
+                if not connected:
+                    if reconnect_queue and retry_count + 1 < 10:
+                        if is_cancelled():
+                            return
+                        next_attempt = retry_count + 2
+                        notify_status(_("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt))
+                        if sleep_or_cancel(4.0):
+                            return
+                        retry_count += 1
+                        reconnect_reason = reconnect_reason or "drop"
                         continue
-                        
-                    remain = wait_timeout
-                    while remain > 0 and self.pending_connection_info is None:
-                        if is_cancelled(): return
-                        time.sleep(0.2)
-                        remain -= 0.2
-                        
-                    if self.pending_connection_info and self.pending_connection_info != "error":
-                        signaling_success = True
-                        break
-                if signaling_success:
-                    break
-                    
-            if not signaling_success:
-                if reconnect_queue and retry_count + 1 < 10:
-                    next_attempt = retry_count + 2
-                    status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
-                    notify_status(status_msg)
-                    time.sleep(4)
-                    self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
-                    return
-                notify_status(_("Không thể tìm thấy hoặc đối tác đang Offline."))
-                if reconnect_queue:
-                    reconnect_queue.put("FAILED|" + _("Không thể tìm thấy hoặc đối tác đang Offline."))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                return
-                
-            if len(self.pending_connection_info) >= 4:
-                public_ip, port_str, _dummy1, _dummy2 = self.pending_connection_info[:4]
-            else:
-                public_ip, port_str, _dummy1 = self.pending_connection_info
-                
-            port = int(port_str) if port_str else 0
-
-        # ====== BƯỚC 3: Đục lỗ Tường lửa (TCP Hole Punching) 10 lần ======
-        if not connected and not force_relay and public_ip and port:
-            if is_cancelled(): return
-            skip_hole_punch = False
-            if hasattr(self, 'current_ip') and self.current_ip == public_ip:
-                print("[Client] Skipping Hole Punching because both peers share the same Public IP (same router).")
-                skip_hole_punch = True
-            
-            if not skip_hole_punch:
-                notify_status(_("Đang đục lỗ Tường lửa tới {ip}:{port}...").format(ip=public_ip, port=port))
-                
-                if getattr(self, 'server_socket', None):
-                    try: self.server_socket.close()
-                    except: pass
-                
-                for attempt in range(10):
-                    if is_cancelled():
-                        break
-                    notify_status(_("Đang đục lỗ Tường lửa lần {n}/10...").format(n=attempt + 1))
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    try: s.bind(('0.0.0.0', BOUND_PORT))
-                    except: pass
-                    s.settimeout(0.5)
-                    try:
-                        s.connect((public_ip, port))
-                        s.settimeout(None)
-                        connected = True
-                        sock = s
-                        conn_mode_info = {"mode": "direct", "ip": public_ip, "port": port}
-                        print(f"[Client] Hole punch successful!")
-                        break
-                    except Exception:
-                        force_close_socket(s)
-                        time.sleep(0.1)
-                        
-                # Phục hồi server_socket
-                try:
-                    try:
-                        if hasattr(socket, 'AF_INET6'):
-                            self.server_socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-                            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                            if hasattr(socket, 'IPPROTO_IPV6') and hasattr(socket, 'IPV6_V6ONLY'):
-                                try: self.server_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-                                except: pass
-                            self.server_socket.bind(("", BOUND_PORT))
-                        else:
-                            raise Exception("No IPv6")
-                    except Exception:
-                        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        self.server_socket.bind(('0.0.0.0', BOUND_PORT))
-                    self.server_socket.listen(5)
-                except Exception as e:
-                    pass
-
-        # ====== BƯỚC 4: Server Trung Chuyển (Relay) Fallback ======
-        if not connected:
-            if is_cancelled(): return
-            display_host = specific_host or 'Relay'
-            notify_status(_("Đục lỗ thất bại. Đang thử kết nối qua Server Trung Chuyển ({host})...").format(host=display_host))
-            try:
-                relay_session_id = f"relay_{self.my_id_clean}_{partner_id}"
-                relay_req = json.dumps({
-                    "action": "relay_request",
-                    "target": partner_id,
-                    "session_id": relay_session_id,
-                    "relay_host": specific_host
-                }) + '\n'
-                with self.signaling_lock:
-                    if getattr(self, 'primary_signaling_socket', None):
-                        send_msg(self.primary_signaling_socket, relay_req.encode('utf-8'), APP_KEY)
-                    else:
-                        raise Exception("Chưa kết nối tới Signaling Server!")
-                
-                raw_relay_target = specific_host if specific_host else (core.config.SIGNALING_SERVER_HOSTS[0] if core.config.SIGNALING_SERVER_HOSTS else "")
-                host_to_connect, relay_port = core.config.parse_signaling_host_entry(raw_relay_target, core.config.SIGNALING_SERVER_PORT)
-                if host_to_connect == getattr(self, "current_signaling_host", None) and getattr(self, "current_signaling_port", None):
-                    relay_port = int(self.current_signaling_port)
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(5.0)
-                s.connect((host_to_connect, relay_port))
-                s.settimeout(None)
-                header = f"RELAY_CLIENT:{relay_session_id}\n"
-                s.sendall(header.encode('utf-8'))
-                
-                time.sleep(1.5)
-                sock = s
-                connected = True
-                conn_mode_info = {"mode": "relay", "relay_host": host_to_connect}
-                notify_status(_("Đã kết nối qua Relay Server! Đang bắt tay..."))
-            except Exception as e:
-                connected = False
-
-        if not connected:
-            if reconnect_queue and retry_count + 1 < 10:
-                next_attempt = retry_count + 2
-                status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
-                notify_status(status_msg)
-                time.sleep(4)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
-                return
-            notify_status(_("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
-            if reconnect_queue:
-                reconnect_queue.put("FAILED|" + _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if sock: force_close_socket(sock)
-            return
-
-        # ======================================================================
-        # Hoàn tất kết nối và handshake
-        # ======================================================================
-        try:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except Exception as e:
-            print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
-        if is_lan_socket(sock):
-            tune_socket_for_lan_bulk(sock)
-        sock.settimeout(15.0)
-            
-        try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            if sys.platform == "win32":
-                ka = (1, 10000, 2000) if is_lan_socket(sock) else (1, 1000, 1000)
-                sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
-                sock.ioctl(sio_keepalive, ka)
-        except Exception as e:
-            print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
-            
-        try:
-            if not handshake_done:
-                if is_cancelled():
-                    force_close_socket(sock)
-                    return
-                notify_status(_("Đang bắt tay xác thực với đối tác..."))
-                socket_passwords[sock] = partner_pass
-                import platform
-                handshake = json.dumps({
-                    "password": partner_pass,
-                    "client_id": self.my_id_clean,
-                    "computer_name": platform.node()
-                }).encode('utf-8')
-                send_msg(sock, handshake, partner_pass)
-                
-                res_msg = recv_msg(sock, [partner_pass, APP_KEY])
-                if not res_msg:
-                    notify_status(_("Đối tác ngắt kết nối đột ngột!"))
-                    if reconnect_queue:
-                        reconnect_queue.put("FAILED|" + _("Đối tác ngắt kết nối đột ngột!"))
+                    notify_status(_("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
+                    _safe_queue_put(reconnect_queue, "FAILED|" + _("Không thể kết nối (LAN, Đục lỗ, Relay đều thất bại)."))
                     self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                    force_close_socket(sock)
+                    if sock: force_close_socket(sock)
                     return
-                    
-                res = json.loads(res_msg.decode('utf-8'))
-            else:
-                res = cached_res_payload
-                
-            if res.get("status") == "ok":
-                if not hasattr(self, 'last_connected_peers'):
-                    self.last_connected_peers = {}
-                p_key = str(partner_id).replace(" ", "")
-                if 'conn_mode_info' in locals() and conn_mode_info:
-                    self.last_connected_peers[p_key] = conn_mode_info
-                    print(f"[Client] Đã lưu thông số kết nối gần nhất cho {p_key}: {conn_mode_info}")
 
-                host_w = res.get("width")
-                host_h = res.get("height")
-                computer_name = res.get("computer_name", "")
-                
-                if computer_name_override:
-                    original_name = computer_name
-                    computer_name = f"{computer_name_override} | {original_name}" if original_name else computer_name_override
-                elif hasattr(self, 'load_saved_computers'):
-                    try:
-                        saved_comps = self.load_saved_computers()
-                        for c in saved_comps:
-                            if c.get("id", "").replace(" ", "") == partner_id:
-                                if c.get("name"):
-                                    original_name = computer_name
-                                    computer_name = f"{c.get('name')} | {original_name}" if original_name else c.get("name")
-                                break
-                    except Exception:
-                        pass
-                        
-                zalo_phone = res.get("zalo_phone", "")
-                os_release = res.get("os_release", "")
-                is_domain = res.get("is_domain", False)
-                is_android = _handshake_is_android(res)
-                if is_android and not os_release:
-                    os_release = "android"
-                
-                host_macs = str(res.get("macs") or "").strip()
-                if host_macs:
-                    self.sync_received_host_mac(partner_id, computer_name, host_macs)
-
-                probe_status_cb = None if (is_reconnect or retry_count > 0) else notify_status
-                if is_android:
-                    net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, probe_status_cb)
-                else:
-                    net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, probe_status_cb)
-                if net_class == "high":
-                    net_class_viet = _("Tốt (High-speed)")
-                elif net_class == "low":
-                    net_class_viet = _("Yếu (Low-speed)")
-                else:
-                    net_class_viet = _("Trung bình (Medium)")
-                status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
-                print(f"[Client] {status_text}")
-                if not is_reconnect and retry_count == 0:
-                    notify_status(status_text)
-                
-                conn_mode = "lan" if is_lan_socket(sock) else (conn_mode_info.get("mode", "direct") if conn_mode_info else "direct")
-                net_info = {
-                    "ping": round(float(avg_ping), 1),
-                    "latency": round(float(avg_ping), 1),
-                    "bandwidth": round(float(bandwidth), 2),
-                    "avg_speed": round(float(bandwidth), 2),
-                    "net_class": net_class,
-                    "mode": conn_mode
-                }
-                if reconnect_queue:
-                    try:
-                        reconnect_queue.put(f"NET_INFO|{json.dumps(net_info)}")
-                    except Exception:
-                        pass
+                # ======================================================================
+                # Hoàn tất kết nối và handshake
+                # ======================================================================
                 try:
-                    sock.settimeout(None)
-                    sock.setblocking(True)
-                except Exception:
-                    pass
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except Exception as e:
+                    print(f"[TCP_NODELAY] Lỗi thiết lập TCP_NODELAY trên Client: {e}")
+                if is_lan_socket(sock):
+                    tune_socket_for_lan_bulk(sock)
+                sock.settimeout(15.0)
                     
-                if not is_reconnect and retry_count == 0:
-                    notify_status(_("Kết nối thành công! Đang chuyển sang màn hình Host..."))
-                if reconnect_queue:
-                    try:
-                        if viewer_pid and sys.platform == "win32":
-                            sock_data = sock.share(viewer_pid)
-                            reconnect_queue.put(("CONNECTED", ("SHARED_SOCK", sock_data), host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
+                try:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    if sys.platform == "win32":
+                        ka = (1, 10000, 2000) if is_lan_socket(sock) else (1, 1000, 1000)
+                        sio_keepalive = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+                        sock.ioctl(sio_keepalive, ka)
+                except Exception as e:
+                    print(f"[KeepAlive] Lỗi cấu hình Keep-Alive trên Client: {e}")
+
+                handshake_error = None
+                try:
+                    if not handshake_done:
+                        if is_cancelled():
+                            force_close_socket(sock)
+                            return
+                        notify_status(_("Đang bắt tay xác thực với đối tác..."))
+                        socket_passwords[sock] = partner_pass
+                        import platform
+                        handshake = json.dumps({
+                            "password": partner_pass,
+                            "client_id": self.my_id_clean,
+                            "computer_name": platform.node()
+                        }).encode('utf-8')
+                        send_msg(sock, handshake, partner_pass)
+                        
+                        res_msg = recv_msg(sock, [partner_pass, APP_KEY])
+                        if not res_msg:
+                            notify_status(_("Đối tác ngắt kết nối đột ngột!"))
+                            _safe_queue_put(reconnect_queue, "FAILED|" + _("Đối tác ngắt kết nối đột ngột!"))
+                            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                            force_close_socket(sock)
+                            return
                             
-                            def delayed_reconnect_close():
-                                try:
-                                    import psutil
-                                    ps_proc = psutil.Process(viewer_pid)
-                                    ps_proc.wait()
-                                except:
-                                    import time
-                                    time.sleep(10.0)
-                                socket_passwords.pop(sock, None)
-                                try: sock.close()
-                                except: pass
-                            import threading
-                            threading.Thread(target=delayed_reconnect_close, daemon=True).start()
-                            
+                        res = json.loads(res_msg.decode('utf-8'))
+                    else:
+                        res = cached_res_payload
+                        
+                    if res.get("status") == "ok":
+                        if not hasattr(self, 'last_connected_peers'):
+                            self.last_connected_peers = {}
+                        p_key = str(partner_id).replace(" ", "")
+                        if 'conn_mode_info' in locals() and conn_mode_info:
+                            self.last_connected_peers[p_key] = conn_mode_info
+                            print(f"[Client] Đã lưu thông số kết nối gần nhất cho {p_key}: {conn_mode_info}")
+
+                        host_w = res.get("width")
+                        host_h = res.get("height")
+                        computer_name = res.get("computer_name", "")
+                        
+                        if computer_name_override:
+                            original_name = computer_name
+                            computer_name = f"{computer_name_override} | {original_name}" if original_name else computer_name_override
+                        elif hasattr(self, 'load_saved_computers'):
+                            try:
+                                saved_comps = self.load_saved_computers()
+                                for c in saved_comps:
+                                    if c.get("id", "").replace(" ", "") == partner_id:
+                                        if c.get("name"):
+                                            original_name = computer_name
+                                            computer_name = f"{c.get('name')} | {original_name}" if original_name else c.get("name")
+                                        break
+                            except Exception:
+                                pass
+                                
+                        zalo_phone = res.get("zalo_phone", "")
+                        os_release = res.get("os_release", "")
+                        is_domain = res.get("is_domain", False)
+                        is_android = _handshake_is_android(res)
+                        if is_android and not os_release:
+                            os_release = "android"
+                        
+                        host_macs = str(res.get("macs") or "").strip()
+                        if host_macs:
+                            self.sync_received_host_mac(partner_id, computer_name, host_macs)
+
+                        probe_status_cb = None if (is_reconnect or retry_count > 0) else notify_status
+                        if is_android:
+                            net_class, avg_ping, bandwidth = client_android_speed_test(sock, partner_pass, probe_status_cb)
                         else:
-                            reconnect_queue.put(("CONNECTED", sock, host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
-                    except Exception as e:
-                        print(f"Failed to put socket in reconnect queue: {e}")
-                        reconnect_queue.put("FAILED|" + str(e))
+                            net_class, avg_ping, bandwidth = client_quick_link_probe(sock, partner_pass, probe_status_cb)
+                        if net_class == "high":
+                            net_class_viet = _("Tốt (High-speed)")
+                        elif net_class == "low":
+                            net_class_viet = _("Yếu (Low-speed)")
+                        else:
+                            net_class_viet = _("Trung bình (Medium)")
+                        status_text = _("Đo tốc độ: Ping {ping:.1f}ms, Băng thông {bw:.2f} Mbps. Chất lượng: {quality}.").format(ping=avg_ping, bw=bandwidth, quality=net_class_viet)
+                        print(f"[Client] {status_text}")
+                        if not is_reconnect and retry_count == 0:
+                            notify_status(status_text)
+                        
+                        conn_mode = "lan" if is_lan_socket(sock) else (conn_mode_info.get("mode", "direct") if conn_mode_info else "direct")
+                        net_info = {
+                            "ping": round(float(avg_ping), 1),
+                            "latency": round(float(avg_ping), 1),
+                            "bandwidth": round(float(bandwidth), 2),
+                            "avg_speed": round(float(bandwidth), 2),
+                            "net_class": net_class,
+                            "mode": conn_mode
+                        }
+                        if reconnect_queue:
+                            _safe_queue_put(reconnect_queue, f"NET_INFO|{json.dumps(net_info)}")
+                        try:
+                            sock.settimeout(None)
+                            sock.setblocking(True)
+                        except Exception:
+                            pass
+                            
+                        if not is_reconnect and retry_count == 0:
+                            notify_status(_("Kết nối thành công! Đang chuyển sang màn hình Host..."))
+                        if reconnect_queue:
+                            try:
+                                if viewer_pid and sys.platform == "win32":
+                                    sock_data = sock.share(viewer_pid)
+                                    reconnect_queue.put(("CONNECTED", ("SHARED_SOCK", sock_data), host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
+                                    
+                                    def delayed_reconnect_close():
+                                        try:
+                                            import psutil
+                                            ps_proc = psutil.Process(viewer_pid)
+                                            ps_proc.wait()
+                                        except:
+                                            import time
+                                            time.sleep(10.0)
+                                        socket_passwords.pop(sock, None)
+                                        try: sock.close()
+                                        except: pass
+                                    threading.Thread(target=delayed_reconnect_close, daemon=True).start()
+                                    
+                                else:
+                                    reconnect_queue.put(("CONNECTED", sock, host_w, host_h, is_domain, is_android, os_release, zalo_phone, computer_name, res.get("monitor_count"), res.get("monitors"), net_info))
+                            except Exception as e:
+                                print(f"Failed to put socket in reconnect queue: {e}")
+                                _safe_queue_put(reconnect_queue, "FAILED|" + str(e))
+                                force_close_socket(sock)
+                                socket_passwords.pop(sock, None)
+                                return
+                        else:
+                            self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android, os_release, res.get("monitor_count"), res.get("monitors"))
+
+                        # Cập nhật trạng thái App chính
+                        self.after(0, lambda: self.update_status(_("Đã kết nối"), is_success=True))
+                        self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+
+                        # Kích hoạt giám sát reconnect cho phiên làm việc
+                        if viewer_proc and partner_id and partner_pass and not getattr(viewer_proc, '_monitor_started', False):
+                            self._start_viewer_reconnect_monitor(
+                                viewer_proc, partner_id, partner_pass, reconnect_queue,
+                                getattr(viewer_proc, '_cmd_queue', None),
+                                computer_name=computer_name,
+                                reconnect_name_override=computer_name,
+                            )
+                        return
+
+                    else:
+                        msg = res.get("message", _("Sai mật khẩu!"))
+                        notify_status(_("Bị từ chối kết nối: ") + msg)
+                        _safe_queue_put(reconnect_queue, "FAILED|" + _("Kết nối bị từ chối:\n{msg}").format(msg=msg))
+                        self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
                         force_close_socket(sock)
                         socket_passwords.pop(sock, None)
                         return
-                else:
-                    self.after(0, self.launch_pygame_viewer, sock, host_w, host_h, computer_name, zalo_phone, is_domain, partner_id, partner_pass, is_android, os_release, res.get("monitor_count"), res.get("monitors"))
+                except Exception as e:
+                    handshake_error = e
 
-                # Cập nhật trạng thái App chính
-                self.after(0, lambda: self.update_status(_("Đã kết nối"), is_success=True))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                # Xử lý retry ngoài khối except để tránh lồng stack frame & chained exceptions
+                if handshake_error is not None:
+                    if sock:
+                        force_close_socket(sock)
+                        socket_passwords.pop(sock, None)
+                        sock = None
+                    if reconnect_queue and retry_count + 1 < 10:
+                        if is_cancelled():
+                            return
+                        next_attempt = retry_count + 2
+                        notify_status(_("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt))
+                        if sleep_or_cancel(4.0):
+                            return
+                        retry_count += 1
+                        reconnect_reason = reconnect_reason or "drop"
+                        continue
 
-                # Kích hoạt giám sát reconnect cho phiên làm việc
-                if viewer_proc and partner_id and partner_pass and not getattr(viewer_proc, '_monitor_started', False):
-                    viewer_proc._monitor_started = True
-                    c_queue = getattr(viewer_proc, '_cmd_queue', None)
-                    def monitor_reconnect(process, pid, ppass, req_queue, cmd_q=None):
-                        print(f"[Client Monitor] Started reconnect monitor for {pid}...")
-                        while process.is_alive():
-                            try:
-                                msg = None
-                                if cmd_q:
-                                    try:
-                                        msg = cmd_q.get(timeout=0.3)
-                                    except Exception:
-                                        pass
-                                if not msg and req_queue:
-                                    try:
-                                        raw_msg = req_queue.get_nowait()
-                                        if isinstance(raw_msg, str) and (raw_msg.startswith("RECONNECT_REQUEST") or raw_msg == "CANCEL_CONNECT"):
-                                            msg = raw_msg
-                                        else:
-                                            req_queue.put(raw_msg)
-                                            time.sleep(0.1)
-                                    except Exception:
-                                        pass
-                                if not msg:
-                                    continue
+                    err_str = str(handshake_error)
+                    if "10054" in err_str:
+                        err_str = "Kết nối bị ngắt đột ngột bởi máy đích hoặc Relay Server (WinError 10054)."
+                    notify_status(_("Lỗi xác thực handshake:\n{err}").format(err=err_str))
+                    _safe_queue_put(reconnect_queue, "FAILED|" + _("Lỗi xác thực handshake:\n{err}").format(err=err_str))
+                    self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
+                    return
+        finally:
+            if viewer_proc is not None:
+                try:
+                    viewer_proc._active_connect_count = max(0, getattr(viewer_proc, "_active_connect_count", 1) - 1)
+                    if getattr(viewer_proc, "_monitor_done", False):
+                        _safe_close_process_handle(viewer_proc)
+                except Exception:
+                    pass
 
-                                if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
-                                    reason = "login" if "|LOGIN" in msg else "drop"
-                                    print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason}")
-                                    if reason != "login":
-                                        self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
-                                    threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason, computer_name, process), daemon=True).start()
-                                elif msg == "CANCEL_CONNECT":
-                                    print(f"[Client Monitor] Reconnect monitor cancelled for {pid}")
-                                    break
-                            except Exception as e:
-                                pass
-                        print(f"[Client Monitor] Pygame viewer process exited with code: {process.exitcode}")
-                        if process.exitcode not in (0, 99, None):
-                            try:
-                                from utils.logger import log_system_crash, read_log_tail
-                                log_system_crash(
-                                    title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {process.pid}, Đối tác: {pid})",
-                                    role="ClientMonitor -> Viewer",
-                                    pid=process.pid,
-                                    exit_code=process.exitcode,
-                                    details={"Partner ID": pid, "Computer Name": computer_name},
-                                    extra_logs={
-                                        "viewer.log": read_log_tail("viewer.log", max_lines=15),
-                                        "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
-                                        "client_crash.log": read_log_tail("client_crash.log", max_lines=15),
-                                    },
-                                )
-                            except Exception:
-                                pass
-                        self._cleanup_viewer_session(process, reconnect_queue=req_queue, cmd_queue=cmd_q)
-                        alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
-                        if not alive_viewers:
-                            self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
-                    threading.Thread(target=monitor_reconnect, args=(viewer_proc, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
+    def _start_viewer_reconnect_monitor(self, process, partner_id, partner_pass, req_queue, cmd_q=None, computer_name="", reconnect_name_override=""):
+        """Khởi động luồng nền giám sát RECONNECT_REQUEST / CANCEL_CONNECT và dọn dẹp phiên Viewer."""
+        if process is None or getattr(process, "_monitor_started", False):
+            return
+        process._monitor_started = True
+        try:
+            proc_pid = process.pid
+        except Exception:
+            proc_pid = None
 
-            else:
-                msg = res.get("message", _("Sai mật khẩu!"))
-                notify_status(_("Bị từ chối kết nối: ") + msg)
-                if reconnect_queue:
-                    reconnect_queue.put("FAILED|" + _("Kết nối bị từ chối:\n{msg}").format(msg=msg))
-                self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-                force_close_socket(sock)
-                socket_passwords.pop(sock, None)
-        except Exception as e:
-            if reconnect_queue and retry_count + 1 < 10:
-                next_attempt = retry_count + 2
-                status_msg = _("Đang thử kết nối lại (lần {x}/10)...").format(x=next_attempt)
-                notify_status(status_msg)
-                if sock:
-                    force_close_socket(sock)
-                    socket_passwords.pop(sock, None)
-                time.sleep(4)
-                self.connect_to_partner(partner_id, partner_pass, reconnect_queue, retry_count + 1, viewer_pid, reconnect_reason or "drop", computer_name_override, viewer_proc)
-                return
+        def monitor_reconnect():
+            print(f"[Client Monitor] Started reconnect monitor for {partner_id}...")
+            while _is_process_alive(process) and not getattr(process, "_cancelled", False):
+                try:
+                    msg = None
+                    if cmd_q:
+                        try:
+                            msg = cmd_q.get(timeout=0.3)
+                        except Exception:
+                            pass
+                    if not msg and req_queue:
+                        try:
+                            raw_msg = req_queue.get_nowait()
+                            if isinstance(raw_msg, str) and (raw_msg.startswith("RECONNECT_REQUEST") or raw_msg == "CANCEL_CONNECT"):
+                                msg = raw_msg
+                            else:
+                                _safe_queue_put(req_queue, raw_msg)
+                                time.sleep(0.1)
+                        except Exception:
+                            pass
+                    if not msg:
+                        continue
 
-            err_str = str(e)
-            if "10054" in err_str:
-                err_str = "Kết nối bị ngắt đột ngột bởi máy đích hoặc Relay Server (WinError 10054)."
-            notify_status(_("Lỗi xác thực handshake:\n{err}").format(err=err_str))
-            if reconnect_queue:
-                reconnect_queue.put("FAILED|" + _("Lỗi xác thực handshake:\n{err}").format(err=err_str))
-            self.after(0, lambda: self.connect_btn.config(state=tk.NORMAL))
-            if sock:
-                force_close_socket(sock)
-                socket_passwords.pop(sock, None)
+                    if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
+                        reason = "login" if "|LOGIN" in msg else "drop"
+                        print(f"[Client Monitor] Pygame requested reconnect for {partner_id}... reason={reason}")
+                        if reason != "login":
+                            self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
+                        threading.Thread(
+                            target=self.connect_to_partner,
+                            args=(partner_id, partner_pass, req_queue, 0, proc_pid, reason, reconnect_name_override, process),
+                            daemon=True,
+                        ).start()
+                    elif msg == "CANCEL_CONNECT":
+                        print(f"[Client Monitor] Reconnect monitor cancelled for {partner_id}")
+                        try:
+                            process._cancelled = True
+                        except Exception:
+                            pass
+                        break
+                except Exception:
+                    pass
+
+            exit_code = None
+            try:
+                exit_code = process.exitcode
+            except Exception:
+                pass
+            print(f"[Client Monitor] Pygame viewer process exited with code: {exit_code}")
+            if exit_code not in (0, 99, None):
+                try:
+                    from utils.logger import log_system_crash, read_log_tail
+                    log_system_crash(
+                        title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {proc_pid}, Đối tác: {partner_id})",
+                        role="ClientMonitor -> Viewer",
+                        pid=proc_pid,
+                        exit_code=exit_code,
+                        details={"Partner ID": partner_id, "Computer Name": computer_name},
+                        extra_logs={
+                            "viewer.log": read_log_tail("viewer.log", max_lines=15),
+                            "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
+                            "client_crash.log": read_log_tail("client_crash.log", max_lines=15),
+                        },
+                    )
+                except Exception:
+                    pass
+            try:
+                process._cancelled = True
+                process._monitor_done = True
+            except Exception:
+                pass
+            self._cleanup_viewer_session(process, reconnect_queue=req_queue, cmd_queue=cmd_q)
+            alive_viewers = [v for v in getattr(self, "active_viewers", []) if _is_process_alive(v.get("process"))]
+            if not alive_viewers:
+                self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
+
+        threading.Thread(target=monitor_reconnect, daemon=True).start()
 
     def _cleanup_viewer_session(self, proc=None, sock=None, reconnect_queue=None, cmd_queue=None):
         """Giải phóng triệt để Pipe/Queue, Handle tiến trình con, socket_passwords và danh sách active_viewers sau khi đóng Viewer."""
@@ -4882,31 +5166,22 @@ class NetworkMixin:
                 vp = v.get("process")
                 if vp is None or vp is proc:
                     continue
-                try:
-                    if vp.is_alive():
-                        kept.append(v)
-                    else:
-                        dead_procs.append(vp)
-                except Exception:
-                    continue
+                if _is_process_alive(vp):
+                    kept.append(v)
+                else:
+                    dead_procs.append(vp)
             self.active_viewers = kept
             for dp in dead_procs:
-                try:
-                    dp.close()
-                except Exception:
-                    pass
+                _safe_close_process_handle(dp)
         except Exception:
             pass
         if proc is not None:
             try:
+                proc._cancelled = True
                 proc._cmd_queue = None
             except Exception:
                 pass
-            try:
-                if not proc.is_alive():
-                    proc.close()
-            except Exception:
-                pass
+            _safe_close_process_handle(proc)
 
     def launch_pygame_viewer(self, sock, host_w, host_h, computer_name="", zalo_phone="", is_domain=False, partner_id="", partner_pass="", is_android=False, os_release="", monitor_count=None, monitors=None, net_info=None):
         if self._is_host_only_app() or run_client_viewer_loop is None:
@@ -4954,67 +5229,12 @@ class NetworkMixin:
             threading.Thread(target=wait_and_close, daemon=True).start()
             
             if has_monitor:
-                p._monitor_started = True
-                c_queue = getattr(p, '_cmd_queue', None)
-                def monitor_reconnect(process, pid, ppass, req_queue, cmd_q=None):
-                    print(f"[Client Monitor] Started reconnect monitor for {pid}...")
-                    while process.is_alive():
-                        try:
-                            msg = None
-                            if cmd_q:
-                                try:
-                                    msg = cmd_q.get(timeout=0.3)
-                                except Exception:
-                                    pass
-                            if not msg and req_queue:
-                                try:
-                                    raw_msg = req_queue.get_nowait()
-                                    if isinstance(raw_msg, str) and (raw_msg.startswith("RECONNECT_REQUEST") or raw_msg == "CANCEL_CONNECT"):
-                                        msg = raw_msg
-                                    else:
-                                        req_queue.put(raw_msg)
-                                        time.sleep(0.1)
-                                except Exception:
-                                    pass
-                            if not msg:
-                                continue
-
-                            if isinstance(msg, str) and msg.startswith("RECONNECT_REQUEST"):
-                                reason = "login" if "|LOGIN" in msg else "drop"
-                                print(f"[Client Monitor] Pygame requested reconnect for {pid}... reason={reason}")
-                                if reason != "login":
-                                    self.after(0, lambda: self.update_status(_("Đang tự động kết nối lại...")))
-                                threading.Thread(target=self.connect_to_partner, args=(pid, ppass, req_queue, 0, process.pid, reason, "", process), daemon=True).start()
-                            elif msg == "CANCEL_CONNECT":
-                                print(f"[Client Monitor] Reconnect monitor cancelled for {pid}")
-                                break
-                        except Exception as e:
-                            pass
-                    exit_code = process.exitcode
-                    print(f"[Client Monitor] Pygame viewer process exited with code: {exit_code}")
-                    if exit_code not in (0, 99, None):
-                        try:
-                            from utils.logger import log_system_crash, read_log_tail
-                            log_system_crash(
-                                title=f"Cửa sổ điều khiển (Viewer) thoát bất thường (PID {process.pid}, Đối tác: {pid})",
-                                role="ClientMonitor -> Viewer",
-                                pid=process.pid,
-                                exit_code=exit_code,
-                                details={"Partner ID": pid, "Computer Name": computer_name},
-                                extra_logs={
-                                    "viewer.log": read_log_tail("viewer.log", max_lines=15),
-                                    "native_fault.log": read_log_tail("native_fault.log", max_lines=15),
-                                    "client_crash.log": read_log_tail("client_crash.log", max_lines=15),
-                                },
-                            )
-                        except Exception:
-                            pass
-                    self._cleanup_viewer_session(process, reconnect_queue=req_queue, cmd_queue=cmd_q)
-                    alive_viewers = [v for v in self.active_viewers if v["process"].is_alive()]
-                    if not alive_viewers:
-                        self.after(0, lambda: self.update_status(_("Sẵn sàng kết nối")))
-                    
-                threading.Thread(target=monitor_reconnect, args=(p, partner_id, partner_pass, reconnect_queue, c_queue), daemon=True).start()
+                self._start_viewer_reconnect_monitor(
+                    p, partner_id, partner_pass, reconnect_queue,
+                    getattr(p, '_cmd_queue', None),
+                    computer_name=computer_name,
+                    reconnect_name_override="",
+                )
             
             self.connect_btn.config(state=tk.NORMAL)
             self.update_status(_("Đã mở một cửa sổ điều khiển mới (Sẵn sàng kết nối)"))
