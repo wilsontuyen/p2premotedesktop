@@ -130,16 +130,25 @@ def bundle_xp_runtime_dlls(app_out):
     # 2. Universal CRT x86 chuẩn Windows XP SP3 (.xp_toolchain/ucrt_xp_x86 từ ucrt_3.8.0.msi):
     # TUYỆT ĐỐI KHÔNG lấy từ Windows Kits 10.0.19041+ vì bản 19041+ đổi chuỗi forwarder thành
     # 'kernel32.dll.VirtualProtect' gây lỗi Entry Point Not Found trên ntdll.dll của Windows XP!
+    # Sao chép vào cả app_out và app_out/lib để dù tiến trình khởi chạy từ services.exe (CWD=System32)
+    # và Python gọi LoadLibraryExW(..., LOAD_WITH_ALTERED_SEARCH_PATH) cho lib/PIL/_imaging.pyd thì
+    # bộ nạp DLL của Windows XP vẫn luôn tìm thấy toàn bộ api-ms-win-crt-*.dll ngay trong lib/ (Inno Setup
+    # SolidCompression=yes khử trùng lặp hoàn toàn nên không làm tăng dung lượng bộ cài đặt).
     ucrt_xp_dir = os.path.join(TOOLCHAIN_DIR, "ucrt_xp_x86")
     if not os.path.isdir(ucrt_xp_dir) or not os.path.isfile(os.path.join(ucrt_xp_dir, "ucrtbase.dll")):
         raise RuntimeError(f"Thiếu thư mục UCRT chuẩn Windows XP tại: {ucrt_xp_dir}")
+    lib_out = os.path.join(app_out, "lib")
+    os.makedirs(lib_out, exist_ok=True)
+    vcr_root = os.path.join(app_out, "vcruntime140.dll")
+    if os.path.isfile(vcr_root):
+        shutil.copy2(vcr_root, os.path.join(lib_out, "vcruntime140.dll"))
     for fn in os.listdir(ucrt_xp_dir):
         if fn.lower().endswith(".dll"):
             sp = os.path.join(ucrt_xp_dir, fn)
-            dp = os.path.join(app_out, fn)
-            shutil.copy2(sp, dp)
+            shutil.copy2(sp, os.path.join(app_out, fn))
+            shutil.copy2(sp, os.path.join(lib_out, fn))
             copied += 1
-    print(f"  Đã đóng gói bổ sung {copied} thành phần Runtime (XP UCRT x86 + Tcl/Tk 8.6 + VCRuntime).")
+    print(f"  Đã đóng gói bổ sung {copied} thành phần Runtime (XP UCRT x86 + Tcl/Tk 8.6 + VCRuntime vào cả root & lib/).")
 
 
 def audit_xp_pe_compatibility(app_out):
@@ -210,10 +219,88 @@ def scrub_personal_data(target_folder):
                     pass
 
 
+def build_xp_uncompressed_ico(src_img_path, dst_ico_path, sizes=(16, 24, 32, 48, 64)):
+    """
+    Tạo tệp .ico chuẩn Windows XP (Uncompressed 32-bit BGRA DIB + 1-bit AND Mask, 0% PNG chunk).
+    Windows XP (NT 5.1) không đọc được các frame nén PNG bên trong app_icon.ico của Vista+,
+    khiến Tkinter và Tray rơi về icon lông chim xanh mặc định của Tcl/Tk.
+    """
+    from PIL import Image
+
+    im = Image.open(src_img_path).convert("RGBA")
+    resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", getattr(Image, "ANTIALIAS", 1))
+
+    entries_meta = []
+    blobs = []
+    for sz in sizes:
+        frame = im.resize((sz, sz), resample)
+        rgba = frame.tobytes("raw", "RGBA")
+        xor_rows = []
+        and_rows = []
+        and_stride = ((sz + 31) // 32) * 4
+
+        # Dữ liệu DIB trong .ico lưu ngược từ dòng đáy (sz-1) lên dòng đỉnh (0)
+        for y in range(sz - 1, -1, -1):
+            row_off = y * sz * 4
+            xor_row = bytearray(sz * 4)
+            and_row = bytearray(and_stride)
+            for x in range(sz):
+                px = row_off + x * 4
+                r = rgba[px]
+                g = rgba[px + 1]
+                b = rgba[px + 2]
+                a = rgba[px + 3]
+                dx = x * 4
+                xor_row[dx] = b
+                xor_row[dx + 1] = g
+                xor_row[dx + 2] = r
+                xor_row[dx + 3] = a
+                if a < 96:
+                    and_row[x >> 3] |= (0x80 >> (x & 7))
+            xor_rows.append(bytes(xor_row))
+            and_rows.append(bytes(and_row))
+
+        xor_bytes = b"".join(xor_rows)
+        and_bytes = b"".join(and_rows)
+        bmi_hdr = struct.pack(
+            "<IIIHHIIIIII",
+            40,                       # biSize
+            sz,                       # biWidth
+            sz * 2,                   # biHeight = 2 * height (XOR + AND)
+            1,                        # biPlanes
+            32,                       # biBitCount
+            0,                        # biCompression = BI_RGB (uncompressed)
+            len(xor_bytes) + len(and_bytes),
+            0, 0, 0, 0,
+        )
+        dib_blob = bmi_hdr + xor_bytes + and_bytes
+        entries_meta.append((sz, len(dib_blob)))
+        blobs.append(dib_blob)
+
+    os.makedirs(os.path.dirname(os.path.abspath(dst_ico_path)), exist_ok=True)
+    with open(dst_ico_path, "wb") as f:
+        f.write(struct.pack("<HHH", 0, 1, len(blobs)))
+        data_offset = 6 + 16 * len(blobs)
+        for sz, blob_len in entries_meta:
+            b_dim = sz if sz < 256 else 0
+            f.write(struct.pack("<BBBBHHII", b_dim, b_dim, 0, 0, 1, 32, blob_len, data_offset))
+            data_offset += blob_len
+        for blob in blobs:
+            f.write(blob)
+    return dst_ico_path
+
+
 def run_cx_freeze_build():
     from cx_Freeze import Executable, setup
 
-    icon_file = os.path.join(ROOT_DIR, "app_icon.ico")
+    master_png = os.path.join(ROOT_DIR, "app_icon.png")
+    master_ico = os.path.join(ROOT_DIR, "app_icon.ico")
+    xp_ico_file = os.path.join(XP_DIR, "app_icon_xp.ico")
+    src_for_ico = master_png if os.path.isfile(master_png) else master_ico
+    if os.path.isfile(src_for_ico):
+        build_xp_uncompressed_ico(src_for_ico, xp_ico_file)
+
+    icon_file = xp_ico_file if os.path.isfile(xp_ico_file) else master_ico
     entry_script = os.path.join(XP_DIR, "app_xp.py")
 
     if ROOT_DIR not in sys.path:
@@ -222,6 +309,7 @@ def run_cx_freeze_build():
     include_files = []
     if os.path.isfile(icon_file):
         include_files.append((icon_file, "app_icon.ico"))
+        include_files.append((icon_file, "app_icon_xp.ico"))
     for disc in ("disclaimer_vi.txt", "disclaimer_en.txt"):
         dp = os.path.join(ROOT_DIR, disc)
         if os.path.isfile(dp):
@@ -336,10 +424,30 @@ def main():
                     patched += 1
     print(f"  Đã chuẩn hóa Subsystem 5.01 cho {patched} tệp nhị phân.")
 
-    print("[5/6] Kiểm toán bảng Import Win32 XP & làm sạch dữ liệu cá nhân...")
+    print("[5/6] Kiểm toán bảng Import Win32 XP, tự kiểm thử nạp PIL/GDI+ từ System32 & làm sạch dữ liệu cá nhân...")
     scrub_personal_data(APP_OUT_DIR)
     if not audit_xp_pe_compatibility(APP_OUT_DIR):
         sys.exit(2)
+
+    # Mô phỏng services.exe trên máy Windows XP sạch (CWD = System32, PATH tối thiểu không chứa thư mục app)
+    frozen_exe = os.path.join(APP_OUT_DIR, "RemoteDesktopXPHost.exe")
+    sys_root = os.environ.get("SystemRoot", r"C:\Windows")
+    sys32_dir = os.path.join(sys_root, "SysWOW64")
+    if not os.path.isdir(sys32_dir):
+        sys32_dir = os.path.join(sys_root, "System32")
+    clean_env = {
+        "SystemRoot": sys_root,
+        "WINDIR": sys_root,
+        "PATH": os.path.join(sys_root, "System32") + os.pathsep + sys_root,
+        "TEMP": os.environ.get("TEMP", APP_OUT_DIR),
+        "TMP": os.environ.get("TMP", APP_OUT_DIR),
+    }
+    st_res = subprocess.run([frozen_exe, "--selftest-capture"], cwd=sys32_dir, env=clean_env)
+    if st_res.returncode != 0:
+        print(f"[LỖI] Kiểm thử nạp Pillow & GDI+ từ CWD=System32 thất bại (exit code={st_res.returncode})!")
+        sys.exit(4)
+    print("  XÁC NHẬN SELF-TEST OK: RemoteDesktopXPHost.exe nạp thành công PIL._imaging & GDI+ JPEG khi chạy từ System32!")
+    scrub_personal_data(APP_OUT_DIR)
 
     if not compile_xp_installer():
         sys.exit(3)

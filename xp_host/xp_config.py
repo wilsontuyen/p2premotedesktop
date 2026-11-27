@@ -148,13 +148,35 @@ def save_signaling_config(hosts_list, port, base_dir=None):
     return cleaned, int(port or DEFAULT_SIGNALING_PORT)
 
 
+_SYS_RNG = random.SystemRandom()
+
+
 def generate_session_password(mode="4digits"):
     if mode == "5digits":
-        return "".join(random.choice(string.digits) for _ in range(5))
+        return str(_SYS_RNG.randint(10000, 99999))
     if mode == "8alnum":
         alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
-        return "".join(random.choice(alphabet) for _ in range(8))
-    return "".join(random.choice(string.digits) for _ in range(4))
+        return "".join(_SYS_RNG.choice(alphabet) for _ in range(8))
+    return str(_SYS_RNG.randint(1000, 9999))
+
+
+def rotate_session_password(mode="4digits", base_dir=None):
+    """Sinh mới mật khẩu phiên cho mỗi lần khởi chạy mới (đảm bảo khác mật khẩu phiên liền trước)."""
+    p = os.path.join(get_data_dir(base_dir), "session_pass.txt")
+    old_val = ""
+    if os.path.isfile(p):
+        try:
+            with open(p, "r", encoding="utf-8-sig") as f:
+                old_val = (f.read() or "").strip()
+        except Exception:
+            old_val = ""
+    pw = generate_session_password(mode)
+    for _ in range(10):
+        if pw != old_val:
+            break
+        pw = generate_session_password(mode)
+    save_session_password(pw, base_dir)
+    return pw
 
 
 def load_or_create_session_password(mode="4digits", base_dir=None):

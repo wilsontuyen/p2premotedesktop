@@ -147,7 +147,10 @@ class XPNetworkCoordinator:
 
         self._listen_sock = None
         self._sig_lock = threading.Lock()
+        self._sig_ctrl_lock = threading.Lock()
         self._sig_sock = None
+        self._connecting_sig_sock = None
+        self._sig_cancel_ev = threading.Event()
         self._sig_gen = 0
         self._stop_ev = threading.Event()
 
@@ -158,6 +161,10 @@ class XPNetworkCoordinator:
                 self.on_status_change(text)
             except Exception:
                 pass
+
+    def _log_connection_event(self, is_connected, host, port):
+        state_txt = "CONNECTED" if is_connected else "DISCONNECTED"
+        xp_log(f"[Signaling] {state_txt} {host}:{port}", log_name="connection.log", base_dir=self.base_dir)
 
     def start(self):
         if self.running:
@@ -175,7 +182,14 @@ class XPNetworkCoordinator:
     def stop(self):
         self.running = False
         self._stop_ev.set()
-        self._sig_gen += 1
+        with self._sig_ctrl_lock:
+            self._sig_gen += 1
+            if self._sig_cancel_ev is not None:
+                self._sig_cancel_ev.set()
+            conn_sock = self._connecting_sig_sock
+            self._connecting_sig_sock = None
+        if conn_sock:
+            force_close_socket(conn_sock)
         with self._sig_lock:
             if self._sig_sock:
                 force_close_socket(self._sig_sock)
@@ -254,40 +268,66 @@ class XPNetworkCoordinator:
                 pass
             self._stop_ev.wait(LAN_BEACON_INTERVAL)
 
-    # ---------- Signaling & Relay Lifecycle ----------
+    # ---------- Signaling & Relay Lifecycle (Multi-Server Failover & Auto-Retry) ----------
+    def _is_sig_aborted(self, my_gen, cancel_ev):
+        return (not self.running) or self._stop_ev.is_set() or cancel_ev.is_set() or (self._sig_gen != my_gen)
+
     def restart_signaling(self):
-        self._sig_gen += 1
-        my_gen = self._sig_gen
+        """Hủy tức thời tiến trình retry / kết nối cũ và khởi động lại kết nối từ đầu danh sách máy chủ mới."""
+        with self._sig_ctrl_lock:
+            self._sig_gen += 1
+            my_gen = self._sig_gen
+            if self._sig_cancel_ev is not None:
+                self._sig_cancel_ev.set()
+            cancel_ev = threading.Event()
+            self._sig_cancel_ev = cancel_ev
+            conn_sock = self._connecting_sig_sock
+            self._connecting_sig_sock = None
+        if conn_sock:
+            force_close_socket(conn_sock)
         with self._sig_lock:
             if self._sig_sock:
                 force_close_socket(self._sig_sock)
                 self._sig_sock = None
+        self.signaling_online = False
+        self.signaling_server_active = ""
         threading.Thread(
             target=self._signaling_loop,
-            args=(my_gen,),
+            args=(my_gen, cancel_ev),
             daemon=True,
             name=f"XPSignaling_{my_gen}",
         ).start()
 
-    def _connect_one_signaling(self, srv_host, srv_port, reg_id):
+    def _connect_one_signaling(self, srv_host, srv_port, reg_id, my_gen, cancel_ev):
+        if self._is_sig_aborted(my_gen, cancel_ev):
+            return None, []
         sock = None
         try:
+            self.local_ip = get_local_ip()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            set_xp_keepalive(sock, 25000, 8000)
-            sock.settimeout(6.0)
+            self._connecting_sig_sock = sock
+            set_xp_keepalive(sock, 30000, 10000)
+            sock.settimeout(4.0)
             sock.connect((srv_host, int(srv_port)))
+
+            if self._is_sig_aborted(my_gen, cancel_ev):
+                force_close_socket(sock)
+                return None, []
 
             if not send_msg(sock, json.dumps({"action": "register", "hwid": reg_id}).encode("utf-8"), APP_KEY):
                 raise ConnectionError("Failed to send register")
             if not send_msg(sock, json.dumps({"action": "ping"}).encode("utf-8"), APP_KEY):
                 raise ConnectionError("Failed to send ping")
 
-            deadline = time.time() + 4.5
+            deadline = time.time() + 4.0
             early = []
             verified = False
             while time.time() < deadline:
-                r, _, _ = select.select([sock], [], [], 0.25)
+                if self._is_sig_aborted(my_gen, cancel_ev):
+                    force_close_socket(sock)
+                    return None, []
+                r, _, _ = select.select([sock], [], [], 0.2)
                 if not r:
                     continue
                 raw = recv_msg(sock, APP_KEY, max_size=65536)
@@ -315,13 +355,23 @@ class XPNetworkCoordinator:
             if sock:
                 force_close_socket(sock)
             return None, []
+        finally:
+            if self._connecting_sig_sock is sock:
+                self._connecting_sig_sock = None
 
-    def _signaling_loop(self, my_gen):
-        # Nếu tiến trình này không giữ được cổng 12345 (ví dụ GUI mở thêm khi Service đã giữ 12345),
-        # đăng ký kèm hậu tố _{port} giống cơ chế signaling_server.py để không cướp ID chính của Service!
+    def _signaling_loop(self, my_gen, cancel_ev):
+        """
+        Vòng đời kết nối Signaling đồng bộ với bản Windows 10/11:
+          1. Thử kết nối tuần tự từng máy chủ trong danh sách (cách nhau dấu phẩy).
+          2. Nếu một máy chủ đang kết nối bị rớt mạng và danh sách có nhiều máy chủ,
+             xoay vòng ưu tiên thử sang máy chủ dự phòng kế tiếp ngay lập tức.
+          3. Giữa mỗi máy chủ lỗi chờ ngẫu nhiên 1-5s; khi đi hết danh sách mà chưa kết nối được,
+             đếm ngược trực tiếp trên thanh trạng thái 10-20s trước khi thử lại từ đầu.
+        """
         reg_id = self.hwid if self.bound_port == 12345 else f"{self.hwid}_{self.bound_port}"
+        last_failed_target = None
 
-        while self.running and not self._stop_ev.is_set() and self._sig_gen == my_gen:
+        while not self._is_sig_aborted(my_gen, cancel_ev):
             hosts_raw, def_port = load_signaling_config(self.base_dir)
             targets = []
             for entry in hosts_raw:
@@ -329,36 +379,67 @@ class XPNetworkCoordinator:
                 if h and (h, p) not in targets:
                     targets.append((h, p))
 
+            if not targets:
+                if cancel_ev.wait(5.0):
+                    return
+                continue
+
+            # Nếu vừa rớt kết nối khỏi 1 máy chủ và có máy chủ dự phòng khác -> xoay sang máy chủ kế tiếp trước
+            if last_failed_target in targets and len(targets) > 1:
+                idx = targets.index(last_failed_target)
+                targets = targets[idx + 1 :] + targets[: idx + 1]
+                last_failed_target = None
+
             connected = None
             active_host = ""
             active_port = def_port
             early_msgs = []
 
             for sh, sp in targets:
-                if not self.running or self._sig_gen != my_gen:
+                if self._is_sig_aborted(my_gen, cancel_ev):
                     return
-                sock, early = self._connect_one_signaling(sh, sp, reg_id)
+                self._emit_status(f"Đang thử kết nối tới signaling server: {sh}...")
+                sock, early = self._connect_one_signaling(sh, sp, reg_id, my_gen, cancel_ev)
+                if self._is_sig_aborted(my_gen, cancel_ev):
+                    if sock:
+                        force_close_socket(sock)
+                    return
                 if sock is not None:
                     connected = sock
                     active_host = sh
                     active_port = sp
                     early_msgs = early
                     break
-                if self._stop_ev.wait(random.uniform(1.0, 3.0)):
+
+                # Chờ ngẫu nhiên 1 - 5s trước khi thử máy chủ kế tiếp để tránh lụt đường truyền
+                if cancel_ev.wait(random.uniform(1.0, 5.0)):
                     return
 
             if connected is None:
                 self.signaling_online = False
-                self._emit_status(f"Chế độ LAN sẵn sàng (Đang thử kết nối lại Signaling...)")
-                if self._stop_ev.wait(random.uniform(8.0, 15.0)):
-                    return
+                pause_secs = random.randint(10, 20)
+                for remaining in range(pause_secs, 0, -1):
+                    if self._is_sig_aborted(my_gen, cancel_ev):
+                        return
+                    if callable(self.on_status_change):
+                        try:
+                            self.on_status_change(f"Thử kết nối lại trong vòng {remaining} giây...")
+                        except Exception:
+                            pass
+                    if cancel_ev.wait(1.0):
+                        return
                 continue
 
             with self._sig_lock:
+                if self._is_sig_aborted(my_gen, cancel_ev):
+                    force_close_socket(connected)
+                    return
                 self._sig_sock = connected
+
             self.signaling_online = True
             self.signaling_server_active = f"{active_host}:{active_port}"
-            self._emit_status(f"Trực tuyến sẵn sàng kết nối (ID: {self.hwid_display})")
+            self._log_connection_event(True, active_host, active_port)
+            self._emit_status(f"Kết nối Signaling thành công ({active_host})! Sẵn sàng kết nối.")
 
             for em in early_msgs:
                 self._handle_signaling_msg(em, connected, active_host, active_port)
@@ -366,12 +447,14 @@ class XPNetworkCoordinator:
             last_ping = time.time()
             last_pong = time.time()
             try:
-                while self.running and not self._stop_ev.is_set() and self._sig_gen == my_gen:
+                while not self._is_sig_aborted(my_gen, cancel_ev):
                     r, _, _ = select.select([connected], [], [], 1.0)
                     if r:
                         msg_bytes = recv_msg(connected, APP_KEY, max_size=65536)
-                        if msg_bytes is None or msg_bytes == b"":
+                        if msg_bytes is None:
                             break
+                        if msg_bytes == b"":
+                            continue
                         txt = msg_bytes.decode("utf-8", errors="ignore")
                         for line in txt.splitlines():
                             line = line.strip()
@@ -383,19 +466,24 @@ class XPNetworkCoordinator:
                     now = time.time()
                     if now - last_ping >= 20.0:
                         if not send_msg(connected, json.dumps({"action": "ping"}).encode("utf-8"), APP_KEY):
+                            xp_log(f"[Signaling] Ping send failed for {active_host}:{active_port}", base_dir=self.base_dir)
                             break
                         last_ping = now
-                    if now - last_pong >= 55.0:
-                        xp_log("[Signaling] Heartbeat timeout, reconnecting...", base_dir=self.base_dir)
+                    if now - last_pong >= 50.0:
+                        xp_log(f"[Signaling] Heartbeat timeout for {active_host}:{active_port}", base_dir=self.base_dir)
                         break
             except Exception as e:
-                xp_log(f"[Signaling] Monitor error: {e}", base_dir=self.base_dir)
+                xp_log(f"[Signaling] Monitor error on {active_host}:{active_port}: {e}", base_dir=self.base_dir)
             finally:
                 self.signaling_online = False
+                self.signaling_server_active = ""
                 with self._sig_lock:
                     if self._sig_sock is connected:
                         self._sig_sock = None
                 force_close_socket(connected)
+                if self.running and not self._stop_ev.is_set() and self._sig_gen == my_gen:
+                    self._log_connection_event(False, active_host, active_port)
+                    last_failed_target = (active_host, active_port)
 
     def _handle_signaling_msg(self, line, sig_sock, srv_host, srv_port):
         try:

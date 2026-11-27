@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 
-from .xp_config import get_base_dir, xp_log
+from .xp_config import get_base_dir, load_ui_prefs, rotate_session_password, xp_log
 from .xp_host_engine import XPHostEngine
 from .xp_signaling import XPNetworkCoordinator
 
@@ -380,6 +380,10 @@ def uninstall_xp_service():
 def run_headless_daemon(stop_event=None):
     """Chạy nền trực tiếp (dùng cho cả ServiceMain lẫn chế độ --headless)."""
     bdir = get_base_dir()
+    # Mỗi lần dịch vụ khởi động mới (bật máy / khởi động lại Service): sinh mật khẩu phiên mới
+    prefs = load_ui_prefs(bdir)
+    rotate_session_password(prefs.get("pass_mode", "4digits"), bdir)
+
     stop_ev = stop_event or threading.Event()
     ipc_holder = {}
 
