@@ -374,6 +374,16 @@ def run_cx_freeze_build():
 
 def compile_xp_installer():
     iss_path = os.path.join(XP_DIR, "installer_xp_host.iss")
+    islu_path = os.path.join(XP_DIR, "Vietnamese_xp.islu")
+    # BẮT BUỘC đảm bảo UTF-8 BOM (EF BB BF) cho cả .iss và .islu vì Inno Setup 5.6.1 Unicode
+    # sẽ đọc nhầm thành ANSI (Windows-1252 -> lỗi font 'Tiáº¿ng Viá»‡t') nếu thiếu 3 byte BOM đầu file!
+    for ufile in (iss_path, islu_path):
+        if os.path.isfile(ufile):
+            with open(ufile, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+            with open(ufile, "w", encoding="utf-8-sig", newline="\r\n") as f:
+                f.write(content)
+
     iscc_candidates = [
         ISCC5_EXE,
         r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",

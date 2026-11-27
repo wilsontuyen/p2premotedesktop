@@ -1,4 +1,4 @@
-; *** Inno Setup 5.6.1 Unicode Vietnamese messages (XP compatible) ***
+﻿; *** Inno Setup 5.6.1 Unicode Vietnamese messages (XP compatible) ***
 [LangOptions]
 LanguageName=Tiếng Việt
 LanguageID=$042A
