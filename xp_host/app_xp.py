@@ -21,6 +21,18 @@ import sys
 import threading
 import time
 
+# Khi đóng gói bằng cx_Freeze chạy trên máy Windows XP sạch, trỏ sẵn TCL_LIBRARY / TK_LIBRARY
+# vào thư mục đi kèm ứng dụng để Tkinter luôn tìm thấy init.tcl & tk.tcl.
+if getattr(sys, "frozen", False):
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    for _tcl_root in (_exe_dir, os.path.join(_exe_dir, "lib"), os.path.join(_exe_dir, "tcl")):
+        _tcl_cand = os.path.join(_tcl_root, "tcl8.6")
+        _tk_cand = os.path.join(_tcl_root, "tk8.6")
+        if os.path.isdir(_tcl_cand) and "TCL_LIBRARY" not in os.environ:
+            os.environ["TCL_LIBRARY"] = _tcl_cand
+        if os.path.isdir(_tk_cand) and "TK_LIBRARY" not in os.environ:
+            os.environ["TK_LIBRARY"] = _tk_cand
+
 # Cho phép chạy trực tiếp `python xp_host/app_xp.py` hoặc `python -m xp_host.app_xp`
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -266,7 +278,7 @@ def run_xp_gui(start_minimized=False):
     sess_pw = load_or_create_session_password(prefs.get("pass_mode", "4digits"), bdir)
 
     root = tk.Tk()
-    root.title("Easy Remote Desktop Host (Windows XP Edition)")
+    root.title("Easy Remote Desktop Host AI version")
     root.geometry("410x330")
     root.resizable(False, False)
 

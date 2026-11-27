@@ -51,6 +51,7 @@ test_clipboard_copy.txt
 Logs/
 xp_prefs.json
 .venv_xp32/
+.xp_toolchain/
 
 # Project-specific zip files & executables
 *.zip
