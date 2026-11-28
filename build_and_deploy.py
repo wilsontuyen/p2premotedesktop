@@ -505,8 +505,32 @@ def run_cmd_args(args, cwd=workspace_dir):
     return True
 
 
+def ensure_redist_files():
+    """Tự động tải các gói bổ trợ (Windows 7 KB3063858 + VC++ Redistributable) nếu thiếu."""
+    redist_dir = os.path.join(workspace_dir, "redist")
+    os.makedirs(redist_dir, exist_ok=True)
+    urls = [
+        ("Windows6.1-KB3063858-x86.msu", "https://download.microsoft.com/download/C/9/6/C96CD606-3E05-4E1C-B201-51211AE80B1E/Windows6.1-KB3063858-x86.msu"),
+        ("Windows6.1-KB3063858-x64.msu", "https://download.microsoft.com/download/0/8/E/08E0386B-F6AF-4651-8D1B-C0A95D2731F0/Windows6.1-KB3063858-x64.msu"),
+        ("vc_redist.x86.exe", "https://aka.ms/vs/17/release/vc_redist.x86.exe"),
+    ]
+    for filename, url in urls:
+        dest = os.path.join(redist_dir, filename)
+        if not os.path.exists(dest) or os.path.getsize(dest) < 10000:
+            log(f"Downloading required redistributable: {filename}...")
+            try:
+                import urllib.request
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
+                    f.write(resp.read())
+                log(f"Downloaded {filename} ({os.path.getsize(dest)} bytes)")
+            except Exception as e:
+                log(f"WARNING: Could not auto-download {filename}: {e}")
+
+
 def compile_inno_installer(iss_file, installer_name):
     """Biên dịch Inno Setup kèm ký Authenticode cho cả Setup.tmp (%TEMP%), unins000.exe và file cài đặt cuối."""
+    ensure_redist_files()
     iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
     if not os.path.exists(iscc_path):
         iscc_path = r"C:\Program Files\Inno Setup 6\ISCC.exe"

@@ -41,6 +41,18 @@ Name: "vietnamese"; MessagesFile: "Vietnamese.isl"; LicenseFile: "disclaimer_vi.
 [CustomMessages]
 english.RunProgram=Start Easy Remote Desktop Host
 vietnamese.RunProgram=Chạy Easy Remote Desktop Host
+english.InstallingKB=Installing Windows 7 Security Update (KB3063858)...
+vietnamese.InstallingKB=Đang cài đặt bản cập nhật bảo mật Windows 7 (KB3063858)...
+english.InstallingVCRedist=Installing Microsoft Visual C++ Runtime...
+vietnamese.InstallingVCRedist=Đang cài đặt Microsoft Visual C++ Runtime...
+english.FinishedRestartCustom=Setup has finished installing Easy Remote Desktop Host. To ensure all background services, network drivers, and system components work properly, a computer restart is recommended.%n%nWould you like to restart your computer now?
+vietnamese.FinishedRestartCustom=Đã hoàn tất cài đặt Easy Remote Desktop Host. Để đảm bảo dịch vụ chạy ngầm, driver mạng và các thành phần hệ thống hoạt động ổn định nhất, khuyến nghị bạn nên khởi động lại máy tính.%n%nBạn có muốn khởi động lại ngay bây giờ không?
+english.RestartLaterWarning=Notice: You chose to restart later. Please restart your computer before use to ensure all background services run stably.
+vietnamese.RestartLaterWarning=Lưu ý: Bạn đã chọn khởi động lại sau. Vui lòng khởi động lại máy tính trước khi sử dụng để các dịch vụ chạy ngầm và tính năng điều khiển từ xa hoạt động ổn định nhất.
+
+[Messages]
+FinishedRestartLabel={cm:FinishedRestartCustom}
+FinishedRestartMessage={cm:FinishedRestartCustom}
 
 [Dirs]
 Name: "{app}"; Permissions: users-modify
@@ -48,6 +60,10 @@ Name: "{app}\Data"; Permissions: users-modify
 Name: "{app}\Logs"; Permissions: users-modify
 
 [Files]
+; Windows 7 & Visual C++ Prerequisite redistributables (only extracted when needed)
+Source: "redist\Windows6.1-KB3063858-x86.msu"; DestDir: "{tmp}"; Check: IsWin7_32_NeedKB; Flags: deleteafterinstall
+Source: "redist\Windows6.1-KB3063858-x64.msu"; DestDir: "{tmp}"; Check: IsWin7_64_NeedKB; Flags: deleteafterinstall
+Source: "redist\vc_redist.x86.exe"; DestDir: "{tmp}"; Check: NeedsVCRedist; Flags: deleteafterinstall
 Source: "dist_nuitka_host\app.dist\*"; DestDir: "{app}"; Excludes: "Data\*,saved_computers.xml,lan_peers.json,config.json,app.ini,window_config.json,custom_ip_range.json,session_pass.txt,host_hwid.txt,fm_config.json,install.bat,uninstall.bat,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "disclaimer_vi.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "disclaimer_en.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -58,13 +74,121 @@ Name: "{group}\Uninstall Easy Remote Desktop Host"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Easy Remote Desktop Host"; Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\RemoteDesktopHostService.exe"; Parameters: "--install-service"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
-Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{sys}\wusa.exe"; Parameters: """{tmp}\Windows6.1-KB3063858-x86.msu"" /quiet /norestart"; Check: IsWin7_32_NeedKB; AfterInstall: MarkKBPatchInstalled; StatusMsg: "{cm:InstallingKB}"; Flags: runhidden waituntilterminated
+Filename: "{sys}\wusa.exe"; Parameters: """{tmp}\Windows6.1-KB3063858-x64.msu"" /quiet /norestart"; Check: IsWin7_64_NeedKB; AfterInstall: MarkKBPatchInstalled; StatusMsg: "{cm:InstallingKB}"; Flags: runhidden waituntilterminated
+Filename: "{tmp}\vc_redist.x86.exe"; Parameters: "/install /quiet /norestart"; Check: NeedsVCRedist; AfterInstall: MarkVCRedistInstalled; StatusMsg: "{cm:InstallingVCRedist}"; Flags: waituntilterminated
+Filename: "{app}\RemoteDesktopHostService.exe"; Parameters: "--install-service"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Check: CanRunAppNow
+Filename: "{app}\RemoteDesktopHost.exe"; WorkingDir: "{app}"; Description: "{cm:RunProgram}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanRunAppNow
 
 [UninstallRun]
 Filename: "{app}\RemoteDesktopHostService.exe"; Parameters: "--uninstall-service"; WorkingDir: "{app}"; RunOnceId: "UninstallERDHostService"; Flags: runhidden waituntilterminated
 
 [Code]
+var
+  GRedistInstalled: Boolean;
+
+function GetModuleHandleW(lpModuleName: String): THandle;
+  external 'GetModuleHandleW@kernel32.dll stdcall';
+function GetProcAddress(hModule: THandle; lpProcName: AnsiString): LongWord;
+  external 'GetProcAddress@kernel32.dll stdcall';
+
+function IsWindows7: Boolean;
+var
+  Version: TWindowsVersion;
+begin
+  GetWindowsVersionEx(Version);
+  // Windows 7 and Windows Server 2008 R2 are NT 6.1
+  Result := (Version.Major = 6) and (Version.Minor = 1);
+end;
+
+function NeedsKernel32Patch: Boolean;
+var
+  hKernel: THandle;
+begin
+  Result := False;
+  if IsWindows7 then
+  begin
+    hKernel := GetModuleHandleW('kernel32.dll');
+    if hKernel <> 0 then
+    begin
+      // KB2533623 / KB3063858 adds SetDefaultDllDirectories to kernel32.dll
+      if GetProcAddress(hKernel, 'SetDefaultDllDirectories') = 0 then
+        Result := True;
+    end;
+  end;
+end;
+
+function IsWin7_32_NeedKB: Boolean;
+begin
+  Result := NeedsKernel32Patch and (not IsWin64);
+end;
+
+function IsWin7_64_NeedKB: Boolean;
+begin
+  Result := NeedsKernel32Patch and IsWin64;
+end;
+
+function NeedsVCRedist: Boolean;
+var
+  Installed: Cardinal;
+  BVersion: String;
+begin
+  Result := True;
+  // 1. Check standard 32-bit registry view
+  if RegQueryDWordValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Installed', Installed) then
+  begin
+    if Installed = 1 then
+    begin
+      if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Version', BVersion) then
+      begin
+        if CompareStr(BVersion, 'v14.20') >= 0 then
+          Result := False;
+      end
+      else
+        Result := False;
+    end;
+  end;
+  // 2. Check 64-bit WOW6432Node fallback if on 64-bit Windows
+  if Result and IsWin64 then
+  begin
+    if RegQueryDWordValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Installed', Installed) then
+    begin
+      if Installed = 1 then
+      begin
+        if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Version', BVersion) then
+        begin
+          if CompareStr(BVersion, 'v14.20') >= 0 then
+            Result := False;
+        end
+        else
+          Result := False;
+      end;
+    end;
+  end;
+end;
+
+procedure MarkKBPatchInstalled();
+begin
+  GRedistInstalled := True;
+end;
+
+procedure MarkVCRedistInstalled();
+begin
+  GRedistInstalled := True;
+end;
+
+function CanRunAppNow: Boolean;
+begin
+  // Only suppress immediate start if system updates or VC++ runtime were just installed
+  Result := not GRedistInstalled;
+end;
+
+function NeedRestart(): Boolean;
+begin
+  // Chỉ yêu cầu khởi động lại máy tính khi có cài các gói update hệ thống (KB3063858) hoặc VC++ Redistributable
+  Result := GRedistInstalled;
+end;
+
 type
   TServiceStatus = record
     dwServiceType: DWORD;
@@ -301,6 +425,11 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopExistingHostServiceAndProcesses();
+  // Nhận diện trước nếu máy cần cài đặt gói update Windows (KB) hoặc Visual C++ runtime
+  if IsWin7_32_NeedKB or IsWin7_64_NeedKB or NeedsVCRedist then
+    GRedistInstalled := True
+  else
+    GRedistInstalled := False;
   Result := '';
 end;
 
@@ -308,4 +437,25 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     StopExistingHostServiceAndProcesses();
+  if CurStep = ssPostInstall then
+  begin
+    if GRedistInstalled then
+    begin
+      RegWriteStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce', 'InstallERDHostService', ExpandConstant('"{app}\RemoteDesktopHostService.exe" --install-service'));
+    end;
+  end;
+  if CurStep = ssDone then
+  begin
+    if GRedistInstalled then
+    begin
+      try
+        if (WizardForm.YesRadio <> nil) and (not WizardForm.YesRadio.Checked) then
+        begin
+          // Người dùng chọn khởi động lại sau -> Hiện hộp thoại nhắc nhở
+          MsgBox(CustomMessage('RestartLaterWarning'), mbInformation, MB_OK);
+        end;
+      except
+      end;
+    end;
+  end;
 end;

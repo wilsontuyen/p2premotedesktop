@@ -63,6 +63,9 @@ xp_prefs.json
 # Agent folder
 .agents/
 
+# Redistributables for installer
+redist/
+
 # Test folder
 /test/
 test/
